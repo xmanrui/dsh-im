@@ -14,8 +14,8 @@ export const name = 'im-settings';
 export const inject = ['slots', 'connection'];
 
 const CHANNELS = Object.freeze([
-  { id: 'weixin', label: '微信', description: '扫码绑定' },
-  { id: 'feishu', label: '飞书', description: '扫码接入' },
+  { id: 'weixin', label: '微信' },
+  { id: 'feishu', label: '飞书' },
 ]);
 
 function WeixinLogo() {
@@ -64,9 +64,7 @@ export function IMSettingsTab({ feishuRpcCall, weixinRpcCall }) {
         h(ChannelLogo, { channel: channel.id }),
         h('span', { className: 'dim-channelCopy' },
           h('strong', null, channel.label),
-          h('small', null, channel.description),
-        ),
-        h('span', { className: 'dim-chevron', 'aria-hidden': 'true' }, '›')))),
+        )))),
       h('div', { className: 'dim-divider', 'aria-hidden': 'true' }),
       h('main', {
         className: 'dim-panel',

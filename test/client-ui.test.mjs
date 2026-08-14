@@ -21,5 +21,6 @@ test('IM settings renders two logo channel tabs without enable switches', () => 
   assert.equal((markup.match(/role="tab"/g) ?? []).length, 2);
   assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.doesNotMatch(markup, /role="switch"|type="checkbox"/);
+  assert.doesNotMatch(markup, /dim-chevron|扫码绑定<\/small>|扫码接入<\/small>/);
   assert.doesNotMatch(markup, />INSTANT MESSAGING<|>Channel<|>微信设置</);
 });
