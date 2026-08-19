@@ -85,7 +85,7 @@ async function selectedWorkspacePath(value) {
   }
 }
 
-async function workspacePathSnapshot(harness) {
+export async function workspacePathSnapshot(harness) {
   const listed = await harness.listWorkspaces();
   const currentValue = typeof harness?.currentWorkspace === 'function'
     ? harness.currentWorkspace()
@@ -148,7 +148,7 @@ async function runWorkspaceListCommand(match, harness) {
   }
 }
 
-async function resolveSessionListWorkspace(selector, harness) {
+export async function resolveSessionListWorkspace(selector, harness) {
   if (!selector) {
     if (typeof harness?.currentWorkspace !== 'function') {
       return { error: '当前机器人没有可用的工作区。' };

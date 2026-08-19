@@ -1093,7 +1093,6 @@ test('all nine channel bridge families advertise and fan out workspace command r
   const bridgeFiles = [
     '../src/channels/shared/text-harness-bridge.mjs',
     '../src/channels/weixin/weixin-bridge.mjs',
-    '../src/channels/feishu/bridge.mjs',
     '../src/channels/dingtalk/dingtalk-bridge.mjs',
     '../src/channels/wecom/wecom-bridge.mjs',
     '../src/channels/qq/qq-bridge.mjs',
@@ -1104,6 +1103,14 @@ test('all nine channel bridge families advertise and fan out workspace command r
     assert.match(source, /\/sessionlist \[工作区序号或绝对路径\]  列出会话 ID 和标题/);
     assert.match(source, /workspaceCommand\.messages \?\? \[workspaceCommand\.message\]/);
   }
+
+  // The Feishu bridge advertises its workspace commands through the
+  // interactive-card help module and still fans out shared replies.
+  const feishuSource = await readFile(new URL('../src/channels/feishu/bridge.mjs', import.meta.url), 'utf8');
+  assert.match(feishuSource, /workspaceCommand\.messages \?\? \[workspaceCommand\.message\]/);
+  assert.match(feishuSource, /menuHelpText/);
+  const feishuCards = await readFile(new URL('../src/channels/feishu/feishu-cards.mjs', import.meta.url), 'utf8');
+  assert.match(feishuCards, /\/workspace 绝对路径  切换工作区/);
 });
 
 test('a stale bot scope cannot finish listing workspaces after same-id rebinding', async (t) => {

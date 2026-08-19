@@ -204,7 +204,6 @@ test('all nine channel bridges advertise /session and pass their current convers
   const bridgeFamilies = [
     ['../src/channels/shared/text-harness-bridge.mjs', 'conversationKey'],
     ['../src/channels/weixin/weixin-bridge.mjs', 'key'],
-    ['../src/channels/feishu/bridge.mjs', 'key'],
     ['../src/channels/dingtalk/dingtalk-bridge.mjs', 'key'],
     ['../src/channels/wecom/wecom-bridge.mjs', 'key'],
     ['../src/channels/qq/qq-bridge.mjs', 'key'],
@@ -217,6 +216,16 @@ test('all nine channel bridges advertise /session and pass their current convers
       `${file} must pass ${key} to the shared command`,
     );
   }
+
+  // The Feishu bridge advertises through its interactive-card help module.
+  const feishuSource = await readFile(new URL('../src/channels/feishu/bridge.mjs', import.meta.url), 'utf8');
+  assert.match(feishuSource, /menuHelpText/);
+  assert.ok(
+    feishuSource.includes('runWorkspaceCommand(text, this.#harness, key)'),
+    'the Feishu bridge must pass its conversation key to the shared command',
+  );
+  const feishuCards = await readFile(new URL('../src/channels/feishu/feishu-cards.mjs', import.meta.url), 'utf8');
+  assert.match(feishuCards, /\/session ID 或序号  绑定已有会话/);
 
   for (const file of [
     '../src/channels/discord/discord-bridge.mjs',

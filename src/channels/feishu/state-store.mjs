@@ -1,7 +1,17 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-const EMPTY_STATE = Object.freeze({ version: 1, sessions: {}, seenMessageIds: [] });
+const EMPTY_STATE = Object.freeze({ version: 1, sessions: {}, seenMessageIds: [], watches: {} });
+
+/** One watch entry: the watched session plus its chat delivery target. */
+export const MAX_WATCHES_PER_KEY = 20;
+
+function validWatchEntry(value) {
+  return value
+    && typeof value === 'object'
+    && typeof value.sessionId === 'string' && value.sessionId.length > 0
+    && typeof value.title === 'string';
+}
 
 export class StateStore {
   #path;
@@ -19,6 +29,7 @@ export class StateStore {
         version: 1,
         sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
         seenMessageIds: Array.isArray(parsed.seenMessageIds) ? parsed.seenMessageIds.slice(-1000) : [],
+        watches: parsed.watches && typeof parsed.watches === 'object' ? parsed.watches : {},
       };
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
@@ -56,6 +67,61 @@ export class StateStore {
     if (this.#state.seenMessageIds.length > 1000) {
       this.#state.seenMessageIds.splice(0, this.#state.seenMessageIds.length - 1000);
     }
+    await this.#persist();
+  }
+
+  // ── Completion watches ──────────────────────────────────────────────────
+
+  /** The watch entries of one conversation key. */
+  watchesFor(key) {
+    const items = this.#state.watches[key]?.items;
+    return Array.isArray(items) ? items.filter(validWatchEntry) : [];
+  }
+
+  /** All (key, chatId, entry) triples watching a given session. */
+  watchKeysFor(sessionId) {
+    const found = [];
+    for (const [key, record] of Object.entries(this.#state.watches)) {
+      if (!record || typeof record !== 'object' || !Array.isArray(record.items)) continue;
+      for (const entry of record.items) {
+        if (validWatchEntry(entry) && entry.sessionId === sessionId) {
+          found.push({ key, chatId: typeof record.chatId === 'string' ? record.chatId : null, entry });
+        }
+      }
+    }
+    return found;
+  }
+
+  /** All conversation keys whose bound session is `sessionId`. */
+  sessionKeysFor(sessionId) {
+    return Object.entries(this.#state.sessions)
+      .filter(([, bound]) => bound === sessionId)
+      .map(([key]) => key);
+  }
+
+  /** Add (or refresh) one watch under a conversation key. */
+  async setWatch(key, chatId, entry) {
+    if (!validWatchEntry(entry)) throw new TypeError('invalid watch entry');
+    const record = this.#state.watches[key] ?? { chatId, items: [] };
+    record.chatId = chatId;
+    const items = record.items.filter((item) => validWatchEntry(item) && item.sessionId !== entry.sessionId);
+    items.push({ sessionId: entry.sessionId, title: entry.title, workspace: entry.workspace });
+    record.items = items.slice(-MAX_WATCHES_PER_KEY);
+    this.#state.watches[key] = record;
+    await this.#persist();
+  }
+
+  /** Remove one watched session under a conversation key. */
+  async clearWatch(key, sessionId) {
+    const record = this.#state.watches[key];
+    if (!record || !Array.isArray(record.items)) return;
+    record.items = record.items.filter((item) => item?.sessionId !== sessionId);
+    if (record.items.length === 0) delete this.#state.watches[key];
+    await this.#persist();
+  }
+
+  async clearWatches(key) {
+    delete this.#state.watches[key];
     await this.#persist();
   }
 

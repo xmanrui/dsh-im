@@ -102,7 +102,7 @@ export class DshFeishuController {
       addons: {
         preset: false,
         scopes: { tenant: [...REQUIRED_TENANT_SCOPES] },
-        events: { items: { tenant: ['im.message.receive_v1'] } },
+        events: { items: { tenant: ['im.message.receive_v1', 'card.action.trigger'] } },
       },
     });
     return this.status();

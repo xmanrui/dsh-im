@@ -79,7 +79,7 @@ test('QR success stores the secret off-config and becomes immediately chat-ready
   await flush();
   assert.equal(fx.getSdkOptions().createOnly, true);
   assert.equal(fx.getSdkOptions().addons.preset, false);
-  assert.deepEqual(fx.getSdkOptions().addons.events.items.tenant, ['im.message.receive_v1']);
+  assert.deepEqual(fx.getSdkOptions().addons.events.items.tenant, ['im.message.receive_v1', 'card.action.trigger']);
   assert.ok(fx.getSdkOptions().addons.scopes.tenant.includes('im:message.p2p_msg:readonly'));
   assert.ok(fx.getSdkOptions().addons.scopes.tenant.includes('im:message:readonly'));
   assert.ok(fx.getSdkOptions().addons.scopes.tenant.includes('im:message:send_as_bot'));

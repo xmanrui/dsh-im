@@ -916,6 +916,80 @@ export class HarnessClient {
     });
   }
 
+  /**
+   * Watch the global Harness event mux (all sessions) until `signal`
+   * aborts, reconnecting on drop. The Desktop host serves the mux as a
+   * WebSocket downlink whose frames are `server-request` envelopes
+   * (plain GET answers 426). Dispatches only `session/event` frames
+   * through `onSessionEvent({ sessionId, event })`. The per-ask
+   * interaction watcher above filters to one session; this surface
+   * exists for cross-session notifications (e.g. completion pushes).
+   */
+  watchHarnessEvents({ signal, onSessionEvent }) {
+    if (typeof onSessionEvent !== 'function') {
+      return Promise.reject(new TypeError('watchHarnessEvents requires onSessionEvent'));
+    }
+    const url = new URL('/api/events.mux', this.#baseUrl);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    let stopped = false;
+    const connect = () => {
+      if (stopped || signal.aborted) return Promise.resolve();
+      return new Promise((resolve) => {
+        const socket = this.#createWebSocket(url.toString());
+        const settle = () => {
+          socket.removeEventListener('open', handleOpen);
+          socket.removeEventListener('message', handleMessage);
+          socket.removeEventListener('close', handleClose);
+          socket.removeEventListener('error', handleError);
+          signal.removeEventListener('abort', handleAbort);
+          resolve();
+        };
+        const handleOpen = () => undefined;
+        const handleMessage = (event) => {
+          try {
+            if (typeof event.data !== 'string') return;
+            const envelope = JSON.parse(event.data);
+            const payload = envelope?.payload;
+            if (envelope?.type !== 'server-request' || !payload || typeof payload !== 'object') return;
+            if (payload.type !== 'session/event') return;
+            if (typeof payload.sessionId !== 'string' || !payload.event || typeof payload.event !== 'object') return;
+            onSessionEvent({ sessionId: payload.sessionId, event: payload.event });
+          } catch (error) {
+            console.warn(`[${this.#logPrefix}] ignored a malformed global mux frame:`, error.message);
+          }
+        };
+        const handleClose = () => {
+          settle();
+          if (!stopped && !signal.aborted) {
+            setTimeout(() => { void connect(); }, 2000);
+          }
+        };
+        const handleError = () => {
+          try {
+            socket.close();
+          } catch {
+            // The close event drives reconnection; nothing to do here.
+          }
+        };
+        const handleAbort = () => {
+          stopped = true;
+          try {
+            socket.close();
+          } catch {
+            // Already closed.
+          }
+        };
+        socket.addEventListener('open', handleOpen);
+        socket.addEventListener('message', handleMessage);
+        socket.addEventListener('close', handleClose, { once: true });
+        socket.addEventListener('error', handleError, { once: true });
+        signal.addEventListener('abort', handleAbort, { once: true });
+        if (signal.aborted) handleAbort();
+      });
+    };
+    return connect();
+  }
+
   stopManagedProcess() {
     if (this.#managedProcess?.exitCode === null) this.#managedProcess.kill('SIGTERM');
   }

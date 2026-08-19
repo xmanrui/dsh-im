@@ -178,6 +178,13 @@ export class FeishuRuntime {
         },
         'im.message.reaction.created_v1': () => ({}),
         'im.message.reaction.deleted_v1': () => ({}),
+        // Interactive-card button callbacks (only delivered when the app
+        // subscribes card.action.trigger; the number-reply fallback covers
+        // apps that do not).
+        'card.action.trigger': (event) => {
+          this.#bridge.onCardAction(event);
+          return {};
+        },
       });
 
       let settleReady;
