@@ -433,7 +433,7 @@ export class DingtalkHarnessBridge {
         if (error?.code === 'turn-stopped' || this.#signal?.aborted) return;
         this.#status.lastError = t('钉钉命令处理失败。');
         this.#logger.error?.('[dsh-dingtalk] failed to process a command', safeErrorDiagnostic(error));
-        return this.#send(sessionWebhook, t(CARD_ERROR_TEXT)).catch(() => undefined);
+        return this.#send(sessionWebhook, t(CARD_ERROR_TEXT), this.#atUsersFor(message)).catch(() => undefined);
       }).finally(() => {
         this.#acceptedMessageIds.delete(messageId);
         this.#commandTasks.delete(task);
@@ -455,7 +455,7 @@ export class DingtalkHarnessBridge {
         : null,
       isQuestionPending: () => this.#pendingInteractions.has(key),
       send: sessionWebhook
-        ? (reply) => this.#send(sessionWebhook, reply)
+        ? (reply) => this.#send(sessionWebhook, reply, this.#atUsersFor(message))
         : async () => undefined,
     });
     if (approvalReply) {
@@ -588,7 +588,7 @@ export class DingtalkHarnessBridge {
       ]);
     }
     for (const reply of result?.messages ?? [result?.message]) {
-      if (reply) await this.#send(sessionWebhook, reply);
+      if (reply) await this.#send(sessionWebhook, reply, this.#atUsersFor(message));
     }
     this.#status.lastError = null;
   }
@@ -633,23 +633,23 @@ export class DingtalkHarnessBridge {
     let cardStarted = false;
     try {
       if (!text && !hasImages && !hasFiles) {
-        await this.#send(sessionWebhook, t('目前支持文字、图片和文件消息。'));
+        await this.#send(sessionWebhook, t('目前支持文字、图片和文件消息。'), this.#atUsersFor(message));
         return;
       }
 
       const command = text.toLowerCase();
       if (isPlainText && !hasImages && !hasFiles && command === '/help') {
-        await this.#send(sessionWebhook, helpText());
+        await this.#send(sessionWebhook, helpText(), this.#atUsersFor(message));
         return;
       }
       if (isPlainText && !hasImages && !hasFiles && command === '/status') {
         await this.#harness.ensureRunning({ signal: this.#signal });
-        await this.#send(sessionWebhook, t('钉钉机器人与 DeepSeek Harness 连接正常。'));
+        await this.#send(sessionWebhook, t('钉钉机器人与 DeepSeek Harness 连接正常。'), this.#atUsersFor(message));
         return;
       }
       if (isPlainText && !hasImages && !hasFiles && command === '/new') {
         await this.#state.clearSession(key);
-        await this.#send(sessionWebhook, t('已开启新会话。请发送你的问题。'));
+        await this.#send(sessionWebhook, t('已开启新会话。请发送你的问题。'), this.#atUsersFor(message));
         return;
       }
       const workspaceCommand = isPlainText && !hasImages && !hasFiles
@@ -657,7 +657,7 @@ export class DingtalkHarnessBridge {
         : null;
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
-          await this.#send(sessionWebhook, reply);
+          await this.#send(sessionWebhook, reply, this.#atUsersFor(message));
         }
         return;
       }
@@ -671,7 +671,7 @@ export class DingtalkHarnessBridge {
           )
         : null;
       if (compactCommand) {
-        await this.#send(sessionWebhook, compactCommand.message);
+        await this.#send(sessionWebhook, compactCommand.message, this.#atUsersFor(message));
         return;
       }
 
@@ -691,11 +691,18 @@ export class DingtalkHarnessBridge {
         });
         cardStarted = await cardStream.start(t(CARD_INITIAL_TEXT));
       }
+      // 消息元数据注入：把钉钉回调的【完整原始消息对象】序列化为独立文本块，作为
+      // session.prompt content 的第一块（多 text 块是官方支持的标准载荷），第二块为
+      // 用户正文原文。agent 因此能读到 senderStaffId / senderNick / conversationId /
+      // conversationType / atUsers / sessionWebhook 等回调全部字段（“几十个字段”）。
+      const messageJson = JSON.stringify(message, null, 2);
       const { answer, artifacts = [] } = await askInWorkspaceSession({
         harness: this.#harness,
         state: this.#state,
         key,
-        ...(hasImages ? { content } : { text }),
+        ...(hasImages
+          ? { content: [{ type: 'text', text: messageJson }, { type: 'text', text: content }] }
+          : { text: [{ type: 'text', text: messageJson }, { type: 'text', text }] }),
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: {
@@ -732,7 +739,7 @@ export class DingtalkHarnessBridge {
           textReceipt = createDeliveryReceipt({
             deliveryId: messageId,
             presentation: 'dingtalk-text',
-            providerMessageIds: await this.#send(sessionWebhook, answerText),
+            providerMessageIds: await this.#send(sessionWebhook, answerText, this.#atUsersFor(message)),
           });
         }
       } catch (error) {
@@ -766,7 +773,7 @@ export class DingtalkHarnessBridge {
           ?? dingtalkImageErrorUserMessage(error)
           ?? t(CARD_ERROR_TEXT);
         const streamed = cardStarted && await cardStream.finish(errorText);
-        if (!streamed) await this.#send(sessionWebhook, errorText);
+        if (!streamed) await this.#send(sessionWebhook, errorText, this.#atUsersFor(message));
       } catch {
         this.#logger.error?.('[dsh-dingtalk] failed to send the safe error reply');
       }
@@ -809,7 +816,7 @@ export class DingtalkHarnessBridge {
     const text = message?.msgtype === 'text' ? nonEmptyString(message?.text?.content) : null;
     if (!text) {
       try {
-        await this.#send(sessionWebhook, t('请用文字回答当前问题。'));
+        await this.#send(sessionWebhook, t('请用文字回答当前问题。'), this.#atUsersFor(message));
       } catch {
         this.#logger.error?.('[dsh-dingtalk] failed to reject a non-text interaction reply');
       }
@@ -820,7 +827,7 @@ export class DingtalkHarnessBridge {
     if (!pending || pending !== expected || pending.submitting) {
       if (claimed && (!pending || pending !== expected)) {
         try {
-          await this.#send(sessionWebhook, t(INTERACTION_RESOLVED_TEXT));
+          await this.#send(sessionWebhook, t(INTERACTION_RESOLVED_TEXT), this.#atUsersFor(message));
         } catch {
           this.#logger.error?.('[dsh-dingtalk] failed to send an expired interaction notice');
         }
@@ -879,7 +886,7 @@ export class DingtalkHarnessBridge {
       if (error?.code === 'interaction-not-pending') {
         this.#clearPendingInteraction(key, pending.interactionId);
         try {
-          await this.#send(sessionWebhook, t(INTERACTION_RESOLVED_TEXT));
+          await this.#send(sessionWebhook, t(INTERACTION_RESOLVED_TEXT), this.#atUsersFor(message));
         } catch {
           this.#logger.error?.('[dsh-dingtalk] failed to send an expired interaction notice');
         }
@@ -891,7 +898,7 @@ export class DingtalkHarnessBridge {
       this.#status.lastError = t('回答提交失败。');
       this.#logger.error?.('[dsh-dingtalk] failed to answer a Harness interaction');
       try {
-        await this.#send(sessionWebhook, t('回答提交失败，请重新发送当前问题的答案。'));
+        await this.#send(sessionWebhook, t('回答提交失败，请重新发送当前问题的答案。'), this.#atUsersFor(message));
       } catch {
         this.#logger.error?.('[dsh-dingtalk] failed to send an interaction retry notice');
       }
@@ -908,7 +915,7 @@ export class DingtalkHarnessBridge {
       key,
       actor,
       requiresMention,
-      send: (text) => this.#send(sessionWebhook, text),
+      send: (text) => this.#send(sessionWebhook, text, this.#atUsersForActor(actor, requiresMention)),
     })) return;
 
     // Approval requests return above; the existing question state machine stays unchanged.
@@ -937,7 +944,7 @@ export class DingtalkHarnessBridge {
         },
       });
       try {
-        await this.#send(sessionWebhook, t('检测到这个 Session 中遗留的待回答问题，已安全取消并继续处理你刚才的消息。'));
+        await this.#send(sessionWebhook, t('检测到这个 Session 中遗留的待回答问题，已安全取消并继续处理你刚才的消息。'), this.#atUsersForActor(actor, requiresMention));
       } catch {
         this.#logger.error?.('[dsh-dingtalk] failed to send an interaction recovery notice');
       }
@@ -1005,6 +1012,7 @@ export class DingtalkHarnessBridge {
         pending.questions.length,
         { requiresMention: pending.requiresMention },
       ),
+      this.#atUsersForActor(pending.actor, pending.requiresMention),
     );
     pending.needsPresentation = false;
   }
@@ -1023,7 +1031,7 @@ export class DingtalkHarnessBridge {
       return;
     }
     try {
-      await this.#send(sessionWebhook, t(INTERACTION_RESOLVED_TEXT));
+      await this.#send(sessionWebhook, t(INTERACTION_RESOLVED_TEXT), this.#atUsersFor(message));
     } catch {
       this.#logger.error?.('[dsh-dingtalk] failed to send an expired interaction notice');
     }
@@ -1067,18 +1075,55 @@ export class DingtalkHarnessBridge {
     }
   }
 
-  async #send(sessionWebhook, text) {
+  // 群聊回复时真@发起人（企业内部机器人 userid=staffId）；单聊/魔法棒无需 @。
+  // 为什么：用户 @机器人 提问后，机器人回复若不真@本人，用户收不到红点提醒；
+  // 群内多人在线时，必须把回复明确指给发起者。@ 目标用 senderStaffId（= userid）。
+  #atUsersFor(message) {
+    const sender = senderStaffId(message);
+    return String(message?.conversationType) === '2' && sender
+      ? { atUserIds: [sender] }
+      : undefined;
+  }
+
+  // 交互/审批场景：按发起人与会话类型决定是否真@。
+  // 为什么单独一个：这类回复的指涉对象是“被询问的发起人/被审批人”，不是本条消息的
+  // 发送者；requiresMention 表示当前会话是否为群聊（群聊必须真@才能通知到人，单聊天然直达）。
+  #atUsersForActor(actor, requiresMention) {
+    return requiresMention && nonEmptyString(actor)
+      ? { atUserIds: [actor] }
+      : undefined;
+  }
+
+  // 所有文本回复出口统一走 #send。at 为可选 @ 目标（如 { atUserIds: [...] }）。
+  // 降级策略（fail-open）：钉钉服务端对带 at 消息体的兼容性未获官方正式确认，
+  // 若被拒则去掉 at 重发一次，保证群回复永不中断；仅当本轮确实带了 at 才降级。
+  async #send(sessionWebhook, text, at) {
     const providerMessageIds = [];
     for (const chunk of splitDingtalkText(text, this.#maxMessageChars)) {
       this.#signal?.throwIfAborted();
-      const result = await this.#api.sendText({
-        clientId: this.#clientId,
-        clientSecret: this.#clientSecret,
-        sessionWebhook,
-        text: chunk,
-        signal: this.#signal,
-      });
-      providerMessageIds.push(...providerMessageIdsFor(result));
+      try {
+        const result = await this.#api.sendText({
+          clientId: this.#clientId,
+          clientSecret: this.#clientSecret,
+          sessionWebhook,
+          text: chunk,
+          at,
+          signal: this.#signal,
+        });
+        providerMessageIds.push(...providerMessageIdsFor(result));
+      } catch (error) {
+        // 若服务端拒绝带 at 的消息体（兼容性未定），降级为普通文本回复，保证群回复不中断。
+        if (!at) throw error;
+        this.#logger.warn?.('[dsh-dingtalk] reply with @ was rejected, falling back to plain text');
+        const result = await this.#api.sendText({
+          clientId: this.#clientId,
+          clientSecret: this.#clientSecret,
+          sessionWebhook,
+          text: chunk,
+          signal: this.#signal,
+        });
+        providerMessageIds.push(...providerMessageIdsFor(result));
+      }
     }
     return providerMessageIds;
   }

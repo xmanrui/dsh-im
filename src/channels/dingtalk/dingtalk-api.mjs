@@ -912,13 +912,23 @@ export function createDingtalkApi({
 
     failAiCard: failCard,
 
-    async sendText({ clientId, clientSecret, sessionWebhook, text, signal }) {
+    async sendText({ clientId, clientSecret, sessionWebhook, text, at, signal }) {
       const content = nonEmptyString(text);
       if (!content) throw new TypeError('text is required');
       const webhook = normalizeDingtalkSessionWebhook(sessionWebhook);
       const token = await accessToken({ clientId, clientSecret, signal });
+      // 为什么带 at：钉钉新版群消息 API（robot/groupMessages/send）不支持 @ 群成员，
+      // 群内“真@通知”（红点提醒）只能走回复消息模式的 sessionWebhook webhook 协议，
+      // 在请求体携带 `at` 字段（atUserIds / atMobiles / isAtAll）实现。
+      // 这里对调用方传入的 @ 目标做有效性校验：任一目标有效才拼入消息体，空 at 直接丢弃。
+      const replyAt = at && typeof at === 'object'
+        && ((Array.isArray(at.atUserIds) && at.atUserIds.length > 0)
+          || (Array.isArray(at.atMobiles) && at.atMobiles.length > 0)
+          || at.isAtAll === true)
+        ? { at }
+        : {};
       const response = await requestJson(fetchImpl, webhook, {
-        body: { msgtype: 'text', text: { content } },
+        body: { msgtype: 'text', text: { content }, ...replyAt },
         headers: { 'x-acs-dingtalk-access-token': token },
         signal,
         action: '消息回复',
