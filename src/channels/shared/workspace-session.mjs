@@ -1,4 +1,5 @@
 import { withSessionBindingLock } from './session-binding-lock.mjs';
+import { initialSessionTitle } from './session-title.mjs';
 
 export const WORKSPACE_SESSION_STALE = 'workspace-session-stale';
 
@@ -6,7 +7,7 @@ function workspaceSession(harness, sessionId) {
   if (typeof harness.workspaceSession === 'function') {
     return harness.workspaceSession(sessionId);
   }
-  return Object.freeze({
+  const session = {
     sessionId,
     sessionExists: (...args) => harness.sessionExists(sessionId, ...args),
     models: (...args) => harness.getSessionModels(sessionId, ...args),
@@ -16,7 +17,11 @@ function workspaceSession(harness, sessionId) {
     stopActiveTurn: (...args) => harness.stopActiveTurn(sessionId, ...args),
     steerActiveTurn: (...args) => harness.steerActiveTurn(sessionId, ...args),
     ask: (...args) => harness.ask(sessionId, ...args),
-  });
+  };
+  if (typeof harness.renameSession === 'function') {
+    session.renameTitle = (...args) => harness.renameSession(sessionId, ...args);
+  }
+  return Object.freeze(session);
 }
 
 async function sessionExists(session, options) {
@@ -42,10 +47,21 @@ export async function askInWorkspaceSession({
   key,
   text,
   content,
+  contextEnhanced = false,
   createOptions,
   existsOptions,
   askOptions,
 }) {
+  const initialTitle = contextEnhanced
+    ? initialSessionTitle({
+        text,
+        content,
+        files: typeof askOptions === 'object' ? askOptions?.files : undefined,
+      })
+    : null;
+  const renameSignal = createOptions?.signal
+    ?? (typeof askOptions === 'object' ? askOptions?.signal : undefined);
+  const renameOptions = renameSignal ? { signal: renameSignal } : undefined;
   while (true) {
     try {
       const binding = await withSessionBindingLock(state, key, async () => {
@@ -55,6 +71,16 @@ export async function askInWorkspaceSession({
           sessionId = await createSession(harness, createOptions);
           if (await state.setSession(key, sessionId) === false) return null;
           session = workspaceSession(harness, sessionId);
+          if (initialTitle && typeof session.renameTitle === 'function') {
+            try {
+              await session.renameTitle(initialTitle, renameOptions);
+            } catch (error) {
+              if (error?.code === WORKSPACE_SESSION_STALE || renameOptions?.signal?.aborted) {
+                throw error;
+              }
+              console.warn('[dsh-im] unable to set the initial Session title:', error?.message ?? error);
+            }
+          }
         }
         return { sessionId, session };
       });

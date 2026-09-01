@@ -840,12 +840,15 @@ export class QqHarnessBridge {
         ? await promptContentForMessage(promptMessage, { signal: this.#signal })
         : undefined;
       const snapshot = this.#acceptedMessageIds.get(messageId);
+      let contextEnhanced = false;
       if (snapshot) {
-        content = enhanceContextContent(content ?? text, snapshot, () => ({
+        const originalContent = content ?? text;
+        content = enhanceContextContent(originalContent, snapshot, () => ({
           channel: 'qq',
           senderId: sender,
           senderName: message.kind === 'group' ? message.senderName : undefined,
         }));
+        contextEnhanced = content !== originalContent;
       }
       // QQ stream_messages can acknowledge a final frame without rendering it in
       // some C2C clients. Standard Markdown delivery is the reliable reply path.
@@ -860,7 +863,9 @@ export class QqHarnessBridge {
           harness: this.#harness,
           state: this.#state,
           key,
-          ...(content !== undefined ? { content } : { text }),
+          text,
+          content,
+          contextEnhanced,
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },
           askOptions: {

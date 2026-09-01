@@ -705,11 +705,14 @@ export class WeixinHarnessBridge {
           ? await promptContentForMessage(promptMessage, { signal: this.#signal })
           : undefined;
         const snapshot = this.#acceptedMessageIds.get(messageId);
+        let contextEnhanced = false;
         if (snapshot) {
-          content = enhanceContextContent(content ?? text, snapshot, () => ({
+          const originalContent = content ?? text;
+          content = enhanceContextContent(originalContent, snapshot, () => ({
             channel: 'weixin',
             senderId: sender,
           }));
+          contextEnhanced = content !== originalContent;
         }
         await this.#state.markSeen(messageId);
         promptRecorded = true;
@@ -717,7 +720,9 @@ export class WeixinHarnessBridge {
           harness: this.#harness,
           state: this.#state,
           key,
-          ...(content !== undefined ? { content } : { text }),
+          text,
+          content,
+          contextEnhanced,
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },
           askOptions: {

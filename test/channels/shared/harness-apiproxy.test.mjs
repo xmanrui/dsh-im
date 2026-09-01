@@ -112,7 +112,7 @@ test('in-process RPC preserves IDs, payloads, namespace receivers and errors', a
   const calls = [];
   const apiProxy = {};
   const methods = ['host.describe', 'workspace.list', 'workspace.create', 'session.list',
-    'session.create', 'session.history', 'session.prompt', 'session.cancel',
+    'session.create', 'session.history', 'session.prompt', 'session.rename', 'session.cancel',
     'session.models', 'session.selectModel', 'llm.models'];
   for (const method of methods) {
     const [domain, action] = method.split('.');
@@ -189,6 +189,29 @@ test('explicit baseUrl still selects the existing HTTP transport', async () => {
   });
   assert.equal(await client.health(), true);
   assert.equal(requests, 1);
+});
+
+test('Session rename uses the public Harness RPC and validates local input', async () => {
+  const calls = [];
+  const success = (rpcId, value) => ({ rpcId, result: { ok: true, value } });
+  const client = localClient({
+    host: { describe: ({ rpcId }) => success(rpcId, {}) },
+    sessions: {
+      rename: ({ rpcId, payload }) => {
+        calls.push(payload);
+        return success(rpcId, { title: payload.title, seq: 3 });
+      },
+    },
+  });
+
+  assert.deepEqual(await client.renameSession('session', '查询订单'), {
+    title: '查询订单',
+    seq: 3,
+  });
+  assert.deepEqual(calls, [{ sessionId: 'session', title: '查询订单' }]);
+  await assert.rejects(client.renameSession('', 'title'), TypeError);
+  await assert.rejects(client.renameSession('session', '  '), TypeError);
+  assert.equal(calls.length, 1);
 });
 
 test('history reading uses only the existing read RPC in both Host connection modes', async () => {

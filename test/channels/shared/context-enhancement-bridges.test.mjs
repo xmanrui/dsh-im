@@ -88,6 +88,10 @@ function fixture(channel, { contextEnhancement, onAsk } = {}) {
   const harness = {
     ensureRunning: async () => { calls.push(['ensureRunning']); },
     createSession: async () => { calls.push(['createSession']); return 'session-existing'; },
+    renameSession: async (sessionId, title) => {
+      calls.push(['renameSession', sessionId, title]);
+      return { title, seq: 0 };
+    },
     sessionExists: async (id) => { calls.push(['sessionExists', id]); return true; },
     hasActiveTurn: async () => false,
     isSessionRunning: async () => false,
@@ -281,6 +285,7 @@ for (const channel of CHANNELS) {
         await baseline.bridge.accept(baseline.event(1, undefined, { kind, media, poisonName: true }));
         assert.equal(baseline.prompts.length, 1);
         assert.equal(baseline.sourceReads, 0);
+        assert.equal(baseline.calls.some(([operation]) => operation === 'renameSession'), false);
         for (const contextEnhancement of variants) {
           const current = fixture(channel, { contextEnhancement });
           await current.bridge.accept(current.event(1, undefined, { kind, media, poisonName: true }));
@@ -308,6 +313,10 @@ for (const channel of CHANNELS) {
       assert.deepEqual(sourceOf(current.prompts[0]), expected);
       assert.ok(current.prompts[0].endsWith('\n\nhello'));
       assert.doesNotMatch(current.prompts[0], /source_guidance|private-token|private-secret/);
+      assert.deepEqual(
+        current.calls.filter(([operation]) => operation === 'renameSession'),
+        [['renameSession', 'session-existing', 'hello']],
+      );
       // Explicit null represents a provider event that does not include a nickname.
       await current.bridge.accept(current.event(2, 'missing name', { kind, name: null }));
       assert.equal(Object.hasOwn(sourceOf(current.prompts[1]), 'senderName'), false);
@@ -355,7 +364,18 @@ for (const channel of CHANNELS) {
         assert.ok(enhanced.endsWith(`\n\n${original}`));
       }
       assert.deepEqual(enabled.calls.filter(([op]) => op === 'file'), plain.calls.filter(([op]) => op === 'file'));
-      assert.deepEqual(withoutPrompt(enabled.calls), withoutPrompt(plain.calls), 'enhancement adds no provider or Harness requests');
+      const expectedTitle = media === 'file' && ['feishu', 'dingtalk'].includes(channel)
+        ? 'report.txt'
+        : 'caption';
+      assert.deepEqual(
+        enabled.calls.filter(([op]) => op === 'renameSession'),
+        [['renameSession', 'session-existing', expectedTitle]],
+      );
+      assert.deepEqual(
+        withoutPrompt(enabled.calls.filter(([op]) => op !== 'renameSession')),
+        withoutPrompt(plain.calls),
+        'enhancement only adds the initial title request',
+      );
     }
   });
 
@@ -446,7 +466,10 @@ for (const channel of CHANNELS) {
       await current.bridge.accept(current.event(1, 'hello'));
       if (config.direct.fields.length) assert.deepEqual(sourceOf(current.prompts[0]), { channel });
       else if (config.direct.guidance) assert.equal(current.prompts[0], '<dsh_im_source_guidance>\ncustom\n</dsh_im_source_guidance>\n\nhello');
-      else assert.equal(current.prompts[0], 'hello');
+      else {
+        assert.equal(current.prompts[0], 'hello');
+        assert.equal(current.calls.some(([operation]) => operation === 'renameSession'), false);
+      }
     }
   });
 

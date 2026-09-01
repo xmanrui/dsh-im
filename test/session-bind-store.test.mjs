@@ -175,6 +175,7 @@ test('the next message continues the bound Session without creating a new one', 
   const state = memoryState({ conversation: 'session-old' });
   const asked = [];
   let createCalls = 0;
+  let renameCalls = 0;
   const scope = createBotWorkspaceScope({
     async adoptWorkspaceSession(sessionId) {
       return { sessionId, workspace: alternateWorkspace };
@@ -184,6 +185,7 @@ test('the next message continues the bound Session without creating a new one', 
       createCalls += 1;
       return 'session-created-unexpectedly';
     },
+    async renameSession() { renameCalls += 1; },
     async ask(sessionId, text) {
       asked.push({ sessionId, text });
       return 'continued answer';
@@ -201,9 +203,48 @@ test('the next message continues the bound Session without creating a new one', 
   assert.deepEqual(reply, { sessionId: 'session-target', answer: 'continued answer' });
   assert.deepEqual(asked, [{ sessionId: 'session-target', text: 'continue here' }]);
   assert.equal(createCalls, 0);
+  assert.equal(renameCalls, 0);
 });
 
-test('a first prompt and model switch share one binding without holding the lock during ask', async () => {
+test('a newly created enhanced Session is renamed from the first prompt before ask', async (t) => {
+  const { path, defaultWorkspace } = await fixture(t);
+  const workspaces = await new BotWorkspaceStore(path, { defaultWorkspace }).load();
+  await workspaces.ensure('bot_title');
+  const state = memoryState();
+  const calls = [];
+  const scope = createBotWorkspaceScope({
+    async createSession() {
+      calls.push(['create']);
+      return 'session-titled';
+    },
+    async renameSession(sessionId, title) {
+      calls.push(['rename', sessionId, title]);
+      return { title, seq: 0 };
+    },
+    async ask(sessionId, prompt) {
+      calls.push(['ask', sessionId, prompt]);
+      return 'answer';
+    },
+  }, { botId: 'bot_title', workspaces, state });
+
+  const result = await askInWorkspaceSession({
+    harness: scope.harness,
+    state: scope.state,
+    key: 'conversation',
+    text: '请检查今天的订单',
+    content: '<dsh_im_source>{"channel":"qq"}</dsh_im_source>\n\n请检查今天的订单',
+    contextEnhanced: true,
+  });
+
+  assert.deepEqual(result, { sessionId: 'session-titled', answer: 'answer' });
+  assert.deepEqual(calls, [
+    ['create'],
+    ['rename', 'session-titled', '请检查今天的订单'],
+    ['ask', 'session-titled', '<dsh_im_source>{"channel":"qq"}</dsh_im_source>\n\n请检查今天的订单'],
+  ]);
+});
+
+test('an ordinary first prompt keeps DSH title handling while model switch shares its binding', async () => {
   const state = memoryState();
   const askStarted = deferred();
   const releaseAsk = deferred();
@@ -226,6 +267,9 @@ test('a first prompt and model switch share one binding without holding the lock
     workspaceSession(sessionId) {
       return {
         async sessionExists() { return true; },
+        async renameTitle(title) {
+          calls.push(['renameTitle', sessionId, title]);
+        },
         async ask(text) {
           calls.push(['ask', sessionId, text]);
           askStarted.resolve();

@@ -1349,6 +1349,11 @@ export function createBotWorkspaceScope(
             readHistory(...args) {
               return invokeCurrentSession('readSessionHistory', args, 'history read');
             },
+            ...(typeof target.renameSession === 'function' ? {
+              renameTitle(...args) {
+                return invokeStartedSessionMutation('renameSession', args, 'title rename');
+              },
+            } : {}),
             selectModel(...args) {
               return invokeCurrentSession('selectSessionModel', args, 'model selection');
             },

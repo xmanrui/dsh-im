@@ -673,13 +673,16 @@ export class TextHarnessBridge {
         ? await promptContentForMessage(message, { signal: this.#signal })
         : undefined;
       const snapshot = this.#acceptedMessageIds.get(messageId);
+      let contextEnhanced = false;
       if (snapshot) {
-        content = enhanceContextContent(content ?? text, snapshot, () => ({
+        const originalContent = content ?? text;
+        content = enhanceContextContent(originalContent, snapshot, () => ({
           channel: this.#descriptor.key,
           senderId,
           senderName: message.contextSource?.()?.senderName,
           conversationTitle: message.contextSource?.()?.conversationTitle,
         }));
+        contextEnhanced = content !== originalContent;
       }
       const { answer, artifacts = [] } = await askInWorkspaceSession({
         harness: this.#harness,
@@ -687,6 +690,7 @@ export class TextHarnessBridge {
         key: conversationKey,
         text,
         content,
+        contextEnhanced,
         createOptions: this.#signal ? { signal: this.#signal } : undefined,
         existsOptions: this.#signal ? { signal: this.#signal } : undefined,
         askOptions: {

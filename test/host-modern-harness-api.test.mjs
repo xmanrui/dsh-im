@@ -85,6 +85,9 @@ test('modern adapter maps the narrow legacy API without changing HarnessClient',
         };
       }
       if (endpoint === 'session/prompt') return { accepted: true };
+      if (endpoint === 'session/rename') {
+        return { title: request.args.request.title, seq: 9 };
+      }
       if (endpoint === 'session/cancel') return { accepted: true };
       if (endpoint === 'session/selectModel') return { selected: request.args.request };
       throw new Error(`unexpected invoke ${endpoint}`);
@@ -157,6 +160,16 @@ test('modern adapter maps the narrow legacy API without changing HarnessClient',
   const promptCall = calls.find((call) => call.namespace === 'session' && call.method === 'prompt');
   assert.equal(promptCall.args.request.requestId, 'prompt-correlation');
   assert.equal(Object.hasOwn(promptCall.args.request, 'rpcId'), false);
+
+  const renamed = await first.apiProxy.sessions.rename({
+    rpcId: 'rename-correlation',
+    payload: { sessionId: 'session', title: '订单查询' },
+  });
+  assert.deepEqual(renamed.result.value, { title: '订单查询', seq: 9 });
+  const renameCall = calls.find((call) => call.namespace === 'session' && call.method === 'rename');
+  assert.deepEqual(renameCall.args, {
+    request: { sessionId: 'session', title: '订单查询' },
+  });
 });
 
 test('modern adapter preserves Typert business failures as Harness RPC errors', async () => {

@@ -3293,11 +3293,14 @@ export class FeishuHarnessBridge {
       ? await promptContentForMessage(message, { signal: this.#signal })
       : undefined;
     const snapshot = this.#acceptedMessageIds.get(messageId);
+    let contextEnhanced = false;
     if (snapshot) {
-      content = enhanceContextContent(content ?? text, snapshot, () => ({
+      const originalContent = content ?? text;
+      content = enhanceContextContent(originalContent, snapshot, () => ({
         channel: 'feishu',
         senderId: senderOpenId(event),
       }));
+      contextEnhanced = content !== originalContent;
     }
     if (!this.#channel?.stream) {
       const { answer, artifacts = [] } = await askInWorkspaceSession({
@@ -3306,6 +3309,7 @@ export class FeishuHarnessBridge {
         key,
         text,
         content,
+        contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: this.#interactionAskOptions(event, key, message.files),
@@ -3375,6 +3379,7 @@ export class FeishuHarnessBridge {
             key,
             text,
             content,
+            contextEnhanced,
             createOptions: { signal: this.#signal },
             existsOptions: { signal: this.#signal },
             askOptions,
@@ -3438,6 +3443,7 @@ export class FeishuHarnessBridge {
         key,
         text,
         content,
+        contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: this.#interactionAskOptions(event, key, message.files),

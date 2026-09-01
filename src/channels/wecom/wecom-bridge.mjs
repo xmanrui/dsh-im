@@ -1007,11 +1007,14 @@ export class WecomHarnessBridge {
         ? await promptContentForMessage(message, { signal: this.#signal })
         : undefined;
       const snapshot = this.#acceptedMessageIds.get(messageId);
+      let contextEnhanced = false;
       if (snapshot) {
-        content = enhanceContextContent(content ?? text, snapshot, () => ({
+        const originalContent = content ?? text;
+        content = enhanceContextContent(originalContent, snapshot, () => ({
           channel: 'wecom',
           senderId,
         }));
+        contextEnhanced = content !== originalContent;
       }
       await this.#state.markSeen(messageId);
       promptRecorded = true;
@@ -1021,6 +1024,7 @@ export class WecomHarnessBridge {
         key,
         text,
         content,
+        contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: {

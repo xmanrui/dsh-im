@@ -996,13 +996,16 @@ export class DingtalkHarnessBridge {
         ? await promptContentForMessage(promptMessage, { signal: this.#signal })
         : undefined;
       const snapshot = this.#acceptedMessageIds.get(messageId);
+      let contextEnhanced = false;
       if (snapshot) {
-        content = enhanceContextContent(content ?? text, snapshot, () => ({
+        const originalContent = content ?? text;
+        content = enhanceContextContent(originalContent, snapshot, () => ({
           channel: 'dingtalk',
           senderId: sender,
           senderName: message.senderNick,
           conversationTitle: message.conversationTitle,
         }));
+        contextEnhanced = content !== originalContent;
       }
       if (typeof this.#api.createAiCard === 'function'
         && typeof this.#api.updateAiCard === 'function'
@@ -1021,7 +1024,9 @@ export class DingtalkHarnessBridge {
         harness: this.#harness,
         state: this.#state,
         key,
-        ...(content !== undefined ? { content } : { text }),
+        text,
+        content,
+        contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: {

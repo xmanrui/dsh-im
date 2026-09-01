@@ -10,6 +10,23 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 - 九个 IM 渠道新增机器人级“默认模型”配置：每个机器人可在设置卡片中选择自己的默认模型（可含推理等级），或通过 `/model default <序号或 Provider/模型ID> [推理等级ID]` 设置、`/model default clear` 恢复跟随 Host 默认。该选择在机器人创建新 Harness 会话时立即应用，已有会话不受影响；配置的模型不可用时新会话创建会明确报错而不是静默改用其他模型。
   All nine IM channels now support a per-bot default model: each bot can pick its own default model (with an optional reasoning effort) on its settings card, or set it with `/model default <index or provider/model-id> [reasoning effort ID]` and restore the Host default with `/model default clear`. The selection is applied the moment the bot creates a new Harness Session, while existing Sessions are untouched; if the configured model becomes unavailable, new-Session creation fails with a clear message instead of silently switching models.
+## [4.5.0] - 2026-09-01
+
+### Added / 新增
+
+- `/workspace` 现在支持使用 `/workspacelist` 中的工作区序号切换，并在执行命令时按最新列表解析；原有绝对路径用法保持不变。
+  `/workspace` now accepts a workspace number from `/workspacelist`, resolved against the latest list when the command runs; the existing absolute-path form remains supported.
+
+- 上下文增强新增可选的 `conversationTitle` 来源字段；渠道入站事件提供会话标题时可将其写入 `<dsh_im_source>`，无需额外的平台 API 请求。
+  Context enhancement now offers an optional `conversationTitle` source field. When an inbound channel event provides a conversation title, it can be included in `<dsh_im_source>` without an additional platform API request.
+
+### Fixed / 修复
+
+- 新建 Harness Session 的标题现在始终基于未经上下文增强的首条用户消息：启用增强时会移除注入块后安全设置标题，未启用增强时继续保留 Harness 的原生自动标题；标题会清理控制字符并按 UTF-8 字节安全截断。
+  New Harness Session titles now consistently reflect the unenhanced first user message. With enhancement enabled, dsh-im safely sets a title without injected context blocks; without enhancement, the Harness-native automatic title is preserved. Titles are sanitized and truncated safely by UTF-8 byte length.
+
+- 飞书流式回复在同一轮出现 Harness 问题或审批交互时，会先结束当前卡片并在交互完成后创建新卡片，使最终回答显示在交互卡片之后；卡片轮换失败时保持可用的降级投递。
+  When a Feishu streaming turn presents an in-turn Harness question or approval, dsh-im now finalizes the current card and starts a new one after the interaction so the final answer appears below the interaction card, with usable fallback delivery if card rotation fails.
 
 ## [4.4.0] - 2026-09-01
 
@@ -554,7 +571,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.4.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.5.0...HEAD
+[4.5.0]: https://github.com/xmanrui/dsh-im/compare/v4.4.0...v4.5.0
 [4.4.0]: https://github.com/xmanrui/dsh-im/compare/v4.3.0...v4.4.0
 [4.3.0]: https://github.com/xmanrui/dsh-im/compare/v4.2.1...v4.3.0
 [4.2.1]: https://github.com/xmanrui/dsh-im/compare/v4.2.0...v4.2.1

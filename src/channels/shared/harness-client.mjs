@@ -911,6 +911,12 @@ export class HarnessClient {
     return created.sessionId;
   }
 
+  async renameSession(sessionId, title, options = {}) {
+    if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
+    if (typeof title !== 'string' || !title.trim()) throw new TypeError('session title is required');
+    return this.rpc('session.rename', { sessionId, title }, 30_000, options);
+  }
+
   async executeCommand(sessionId, line, options = {}) {
     if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
     if (typeof line !== 'string' || !line) throw new TypeError('command line is required');
