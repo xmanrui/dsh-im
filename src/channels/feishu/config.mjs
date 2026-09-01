@@ -62,6 +62,11 @@ export function loadConfig() {
     dshBin: process.env.DSH_BIN?.trim() || 'dsh',
     healthPort: Number.parseInt(process.env.BRIDGE_HEALTH_PORT ?? '3091', 10),
     statePath: resolve(process.env.BRIDGE_STATE_PATH ?? './data/state.json'),
+    // Directory holding auth_request.py state files (<auth_id>.json).
+    // Empty/absent disables authorization-card handling entirely.
+    authDir: process.env.FEISHU_AUTH_DIR?.trim()
+      ? resolve(process.env.FEISHU_AUTH_DIR.trim())
+      : null,
     replyTimeoutMs: Number.parseInt(process.env.HARNESS_REPLY_TIMEOUT_MS ?? '600000', 10),
     allowedSenderOpenIds: requiredCsvSet(
       'FEISHU_ALLOWED_OPEN_IDS',

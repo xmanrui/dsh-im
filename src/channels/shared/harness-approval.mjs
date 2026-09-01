@@ -187,7 +187,7 @@ export class HarnessApprovalQueue {
             if (!presentedWhenClaimed || !pending.presented) {
               if (!pending.presented) await this.#present(pending);
               if (pending.inactive || pending.resolving) return;
-              await send(t(APPROVAL_PROMPT));
+              if (!pending.present) await send(t(APPROVAL_PROMPT));
               return;
             }
             if (pending.submitting) {
@@ -195,7 +195,7 @@ export class HarnessApprovalQueue {
               return;
             }
             if (!decision) {
-              await send(t(APPROVAL_PROMPT));
+              if (!pending.present) await send(t(APPROVAL_PROMPT));
               return;
             }
             await this.#submit(pending, decision);
@@ -238,6 +238,8 @@ export class HarnessApprovalQueue {
     }
 
     const send = context?.send;
+    const present = context?.present;
+    const notify = context?.notify;
     const key = cleanText(context?.key);
     const actor = cleanText(context?.actor);
     if (!key || !actor || typeof send !== 'function') {
@@ -267,6 +269,8 @@ export class HarnessApprovalQueue {
       actor,
       requiresMention: context.requiresMention === true,
       send,
+      present,
+      notify,
       text,
       presented: false,
       presentationTask: null,
@@ -310,7 +314,11 @@ export class HarnessApprovalQueue {
       }
       if (shouldNotify && delivered) {
         pending.resolutionNotified = true;
-        await send(approvalOutcomeText(resolution.outcome)).catch(() => undefined);
+        if (pending.notify) {
+          await pending.notify(pending, resolution.outcome).catch(() => undefined);
+        } else {
+          await send(approvalOutcomeText(resolution.outcome)).catch(() => undefined);
+        }
       }
     });
     return true;
@@ -330,7 +338,11 @@ export class HarnessApprovalQueue {
         pending.closedOutcome = 'rejected';
         if ((pending.presented || pending.deliveryCompleted) && !pending.resolutionNotified) {
           pending.resolutionNotified = true;
-          await pending.send(approvalOutcomeText('rejected')).catch(() => undefined);
+          if (pending.notify) {
+            await pending.notify(pending, 'rejected').catch(() => undefined);
+          } else {
+            await pending.send(approvalOutcomeText('rejected')).catch(() => undefined);
+          }
         }
       } catch (error) {
         if (error?.code === 'interaction-not-pending') {
@@ -346,6 +358,23 @@ export class HarnessApprovalQueue {
     }));
   }
 
+  /**
+   * Resolve a pending approval from a card callback. The card callback
+   * already called interaction.respond() so this only handles the queue
+   * lifecycle — removing the pending item and promoting the next one.
+   */
+  resolveByCard(approvalId, outcome) {
+    const pending = this.#byId.get(approvalId);
+    if (!pending) return false;
+    // The card callback already responded — mark resolved so the
+    // subsequent handleResolved doesn't double-notify.
+    pending.resolutionNotified = true;
+    const next = this.#remove(pending);
+    // Fire-and-forget: promote the next pending approval.
+    this.#transition(next, async () => {}).catch(() => undefined);
+    return true;
+  }
+
   async #present(pending) {
     if (this.#routes.get(pending.key)?.items[0] !== pending
       || pending.inactive || pending.resolving || pending.presented) return;
@@ -353,7 +382,9 @@ export class HarnessApprovalQueue {
     if (this.#routes.get(pending.key)?.items[0] !== pending
       || pending.inactive || pending.resolving || pending.presented) return;
     if (pending.presentationTask) return pending.presentationTask;
-    const task = Promise.resolve().then(() => pending.send(pending.text));
+    const task = pending.present
+      ? Promise.resolve().then(() => pending.present(pending))
+      : Promise.resolve().then(() => pending.send(pending.text));
     pending.presentationTask = task;
     try {
       await task;
@@ -362,7 +393,11 @@ export class HarnessApprovalQueue {
         pending.presented = true;
       } else if (pending.closedOutcome && !pending.resolutionNotified) {
         pending.resolutionNotified = true;
-        await pending.send(approvalOutcomeText(pending.closedOutcome)).catch(() => undefined);
+        if (pending.notify) {
+          await pending.notify(pending, pending.closedOutcome).catch(() => undefined);
+        } else {
+          await pending.send(approvalOutcomeText(pending.closedOutcome)).catch(() => undefined);
+        }
       }
     } finally {
       if (pending.presentationTask === task) pending.presentationTask = null;
@@ -392,10 +427,16 @@ export class HarnessApprovalQueue {
     }
 
     const send = pending.send;
+    const notify = pending.notify;
     const next = this.#remove(pending);
     await this.#transition(next, async () => {
       if (!pending.resolutionNotified) {
-        await send(approvalOutcomeText(outcome)).catch(() => undefined);
+        pending.resolutionNotified = true;
+        if (notify) {
+          await notify(pending, outcome).catch(() => undefined);
+        } else {
+          await send(approvalOutcomeText(outcome)).catch(() => undefined);
+        }
       }
     });
   }

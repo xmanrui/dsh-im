@@ -413,7 +413,9 @@ export class HarnessReplyTracker {
   #openTurn = null;
   #targetTurn = null;
   #stepText = new Map();
+  #stepReasoning = new Map();
   #latestText = '';
+  #latestReasoning = '';
   #finished = false;
   #reason = null;
   #toolNames = new Map();
@@ -500,6 +502,25 @@ export class HarnessReplyTracker {
         if (text && text !== this.#latestText) {
           this.#latestText = text;
           pushUpdate({ type: 'text', text });
+        }
+        continue;
+      }
+
+      if (event.type === 'assistant/chunk' && event.data?.chunk?.type === 'reasoning-delta') {
+        const step = event.data?.step ?? 0;
+        const index = event.data.chunk.index ?? 0;
+        const key = `${step}:${index}`;
+        this.#stepReasoning.set(key, (this.#stepReasoning.get(key) ?? '') + event.data.chunk.text);
+        const prefix = `${step}:`;
+        const reasoning = [...this.#stepReasoning.entries()]
+          .filter(([partKey]) => partKey.startsWith(prefix))
+          .sort(([left], [right]) => Number(left.split(':')[1]) - Number(right.split(':')[1]))
+          .map(([, part]) => part)
+          .join('\n')
+          .trim();
+        if (reasoning && reasoning !== this.#latestReasoning) {
+          this.#latestReasoning = reasoning;
+          pushUpdate({ type: 'text', text: reasoning });
         }
         continue;
       }

@@ -49,6 +49,7 @@ function normalizeBot(value, { legacy = false } = {}) {
     deletionPending: value.deletionPending === true,
     connectedAt: cleanString(value.connectedAt),
     createdAt: cleanString(value.createdAt) ?? cleanString(value.connectedAt),
+    authDir: cleanString(value.authDir),
   });
 }
 

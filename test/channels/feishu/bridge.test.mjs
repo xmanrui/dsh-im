@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import { mkdirSync, realpathSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FeishuHarnessBridge } from '../../../src/channels/feishu/bridge.mjs';
@@ -6547,4 +6547,82 @@ test('menu stop and steer reply friendly when no session is bound', async () => 
   await bridge.waitForIdle();
   assert.equal(calls.steer.length, 0);
   assert.match(JSON.parse(sent.at(-1).content).text, /没有绑定会话/);
+});
+
+test('Feishu authorization cards resolve the pending state file and patch the card', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-im-auth-'));
+  try {
+    const authId = 'auth_test_001';
+    const authStatePath = join(dir, `${authId}.json`);
+    await writeFile(authStatePath, JSON.stringify({
+      status: 'pending',
+      desc: '测试授权',
+      requested_at: new Date().toISOString(),
+    }, null, 2), 'utf8');
+    const patches = [];
+    const bridge = new FeishuHarnessBridge({
+      client: cardClient(
+        async () => {},
+        async (request) => patches.push(request),
+      ),
+      channel: {},
+      harness: {},
+      state: stateFixture().state,
+      status: bridgeStatus(),
+      allowedSenderOpenIds: new Set(['ou_owner']),
+      authDir: dir,
+    });
+    // Authorization-card buttons carry { auth_id, decision, grant } with no `action`.
+    await bridge.onCardAction({
+      operator: { open_id: 'ou_owner' },
+      action: { value: { auth_id: authId, decision: 'approve', grant: 'once' } },
+      context: { open_message_id: 'om_auth_card', open_chat_id: 'oc_test' },
+    });
+    const resolved = JSON.parse(await readFile(authStatePath, 'utf8'));
+    assert.equal(resolved.status, 'approved');
+    assert.equal(resolved.grant, 'once');
+    assert.equal(patches.length, 1);
+    assert.equal(patches[0].path.message_id, 'om_auth_card');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('Feishu authorization card deny writes denied and unknown auth_id is ignored', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-im-auth-'));
+  try {
+    const authId = 'auth_test_002';
+    const authStatePath = join(dir, `${authId}.json`);
+    await writeFile(authStatePath, JSON.stringify({ status: 'pending' }, null, 2), 'utf8');
+    const patches = [];
+    const bridge = new FeishuHarnessBridge({
+      client: cardClient(
+        async () => {},
+        async (request) => patches.push(request),
+      ),
+      channel: {},
+      harness: {},
+      state: stateFixture().state,
+      status: bridgeStatus(),
+      allowedSenderOpenIds: new Set(['ou_owner']),
+      authDir: dir,
+    });
+    await bridge.onCardAction({
+      operator: { open_id: 'ou_owner' },
+      action: { value: { auth_id: authId, decision: 'deny' } },
+      context: { open_message_id: 'om_auth_card_2' },
+    });
+    const resolved = JSON.parse(await readFile(authStatePath, 'utf8'));
+    assert.equal(resolved.status, 'denied');
+    assert.equal(resolved.grant, 'deny');
+    // Unknown auth_id: no crash, no patch.
+    await bridge.onCardAction({
+      operator: { open_id: 'ou_owner' },
+      action: { value: { auth_id: 'auth_ghost', decision: 'approve' } },
+      context: { open_message_id: 'om_auth_card_3' },
+    });
+    assert.equal(patches.length, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
