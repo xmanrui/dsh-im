@@ -213,6 +213,34 @@ export default {
   '推理等级已切换为：\n{effort}\n\n当前模型：{model}\n后续消息将使用该推理等级。':
     'Reasoning effort switched to:\n{effort}\n\nCurrent model: {model}\nSubsequent messages will use this reasoning effort.',
 
+  // model-command.mjs — /model default (per-bot default model)
+  '用法：\n/model default  查看当前设置\n/model default <序号或 provider/model> [推理等级ID]  设置新会话默认模型\n/model default clear  恢复跟随 Host 默认':
+    'Usage:\n/model default  Show current settings\n/model default <index or provider/model> [reasoning effort ID]  Set the default model for new Sessions\n/model default clear  Restore following the Host default',
+  '当前机器人用于新会话的默认模型：': 'Default model this bot uses for new Sessions:',
+  '当前机器人用于新会话的默认模型已设置为：':
+    'The default model this bot uses for new Sessions is now set to:',
+  '跟随 Host 默认（当前：{model}）': 'Following Host default (currently: {model})',
+  '跟随 Host 默认': 'Following Host default',
+  '设置默认模型：/model default <序号或 provider/model>':
+    'To set the default model: /model default <index or provider/model>',
+  '恢复跟随 Host 默认：/model default clear': 'Restore following the Host default: /model default clear',
+  '默认模型配置无效，请发送 /models 查看可用模型。':
+    'Invalid default model configuration; please send /models to view available models.',
+  '默认模型不存在或当前不可用，请发送 /models 查看可用模型。':
+    'The default model does not exist or is currently unavailable; please send /models to view available models.',
+  '若模型已恢复，可直接重试；或发送 /model default clear 恢复跟随 Host 默认。':
+    'If the model has recovered, simply retry; or send /model default clear to restore following the Host default.',
+  '当前机器人不支持默认模型设置。': 'This bot does not support default model settings.',
+  '暂时无法获取默认模型设置，请稍后重试。':
+    'Unable to get the default model settings right now; please try again later.',
+
+  // default-model.mjs + bot-workspace-store.mjs
+  '默认模型配置无效。': 'Invalid default model configuration.',
+  '默认模型不存在或当前不可用：{model}':
+    'The default model does not exist or is currently unavailable: {model}',
+  '机器人默认模型 {model} 当前不可用，无法创建新会话。请在设置中更换默认模型，或发送 /model default clear 恢复跟随 Host 默认。':
+    "The bot's default model {model} is currently unavailable, so a new Session cannot be created. Choose a different default model in Settings, or send /model default clear to restore following the Host default.",
+
   // compact-command.mjs
   '用法：/compact（不带参数）': 'Usage: /compact (no arguments)',
   '暂无可压缩的历史记录。': 'No compactable history yet.',

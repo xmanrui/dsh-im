@@ -22,6 +22,12 @@ import {
   AgentPresetEditor,
   EMPTY_AGENT_PRESET_CATALOG,
 } from "../../agent-preset.js";
+import {
+  DefaultModelEditor,
+  EMPTY_MODEL_CATALOG,
+  ModelCatalogContext,
+  normalizeModelCatalog,
+} from "../../default-model.js";
 import { useWorkspaceSnapshotFence } from "../../workspace-snapshot-fence.js";
 import {
   BotSettingsButton,
@@ -555,7 +561,10 @@ export function BotCard({
   onRepairCallback,
   onWorkspaceSave,
   onAgentPresetSave,
+  onDefaultModelSave,
   onContextEnhancementSave,
+  catalogError,
+  onRefreshModelCatalog,
   onGroupResponseModeSave,
   onGroupMessagePermissionAuthorize,
   onRequestRemove,
@@ -621,6 +630,13 @@ export function BotCard({
         agentPreset: connection.agentPreset,
         disabled: Boolean(busy),
         onSave: onAgentPresetSave,
+      }),
+      h(DefaultModelEditor, {
+        defaultModel: connection.defaultModel,
+        disabled: Boolean(busy),
+        onSave: onDefaultModelSave,
+        catalogError,
+        onRefreshCatalog: onRefreshModelCatalog,
       }),
       h(ContextEnhancementEditor, {
         config: connection.contextEnhancement,
@@ -724,7 +740,10 @@ function BotList(props) {
           onRepairCallback: () => props.onRepairCallback(bot),
           onWorkspaceSave: (workspace) => props.onWorkspaceSave(bot, workspace),
           onAgentPresetSave: (agentPreset) => props.onAgentPresetSave(bot, agentPreset),
+          onDefaultModelSave: (model) => props.onDefaultModelSave(bot, model),
           onContextEnhancementSave: (config) => props.onContextEnhancementSave(bot, config),
+          catalogError: props.catalogError,
+          onRefreshModelCatalog: props.onRefreshModelCatalog,
           onGroupResponseModeSave: (groupResponseMode) => props.onGroupResponseModeSave(bot, groupResponseMode),
           onGroupMessagePermissionAuthorize: () => props.onGroupMessagePermissionAuthorize(bot),
           onRequestRemove: () => props.onRequestRemove(bot),
@@ -793,6 +812,8 @@ export function FeishuSettingsTab({ rpcCall }) {
     statusError: null,
     agentPresetCatalog: EMPTY_AGENT_PRESET_CATALOG,
   });
+  const [modelCatalog, setModelCatalog] = React.useState(EMPTY_MODEL_CATALOG);
+  const [modelCatalogError, setModelCatalogError] = React.useState(null);
   const [pageBusy, setPageBusy] = React.useState(false);
   const [provisionBusy, setProvisionBusy] = React.useState(false);
   const [credentialOpen, setCredentialOpen] = React.useState(false);
@@ -866,6 +887,30 @@ export function FeishuSettingsTab({ rpcCall }) {
     void loadStatus({ signal: controller.signal, restoreProvisioning: true });
     return () => controller.abort();
   }, [loadStatus]);
+
+  const loadModelCatalog = React.useCallback(async ({ signal } = {}) => {
+    if (!mountedRef.current || signal?.aborted) return undefined;
+    try {
+      const catalog = normalizeModelCatalog(
+        await invoke(FEISHU_ENDPOINTS.modelCatalog, {}, signal),
+      );
+      if (!mountedRef.current || signal?.aborted) return undefined;
+      setModelCatalog(catalog);
+      setModelCatalogError(null);
+    } catch (error) {
+      if (error?.name === "AbortError" || signal?.aborted || !mountedRef.current) return undefined;
+      setModelCatalog(EMPTY_MODEL_CATALOG);
+      setModelCatalogError(presentError(error).message);
+      return undefined;
+    }
+    return undefined;
+  }, [invoke]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void loadModelCatalog({ signal: controller.signal });
+    return () => controller.abort();
+  }, [loadModelCatalog]);
 
   // One list request refreshes every bot. This continues while a new bot is
   // being provisioned so existing connections never disappear from the UI.
@@ -1492,6 +1537,8 @@ export function FeishuSettingsTab({ rpcCall }) {
 
   return h(AgentPresetCatalogContext.Provider, {
     value: model.agentPresetCatalog ?? EMPTY_AGENT_PRESET_CATALOG,
+  }, h(ModelCatalogContext.Provider, {
+    value: modelCatalog ?? EMPTY_MODEL_CATALOG,
   }, h("section", { className: "bxf-page dim-channelPage", "aria-label": "飞书机器人设置" },
     h(Heading, {
       totals: model.totals,
@@ -1541,9 +1588,14 @@ export function FeishuSettingsTab({ rpcCall }) {
                   onAgentPresetSave: (connection, agentPreset) => saveBotSetting(
                     connection, "preset", FEISHU_ENDPOINTS.setAgentPreset, { agentPreset },
                   ),
+                  onDefaultModelSave: (connection, model) => saveBotSetting(
+                    connection, "default-model", FEISHU_ENDPOINTS.setDefaultModel, { model },
+                  ),
                   onContextEnhancementSave: (connection, config) => saveBotSetting(
                     connection, "context-enhancement", FEISHU_ENDPOINTS.setContextEnhancement, { config },
                   ),
+                  catalogError: modelCatalogError,
+                  onRefreshModelCatalog: () => void loadModelCatalog(),
                   onGroupResponseModeSave: saveGroupResponseMode,
                   onGroupMessagePermissionAuthorize: authorizeGroupMessages,
                   onRequestRemove: requestRemove,
@@ -1554,5 +1606,5 @@ export function FeishuSettingsTab({ rpcCall }) {
                 })
               : null,
           ),
-  ));
+  )));
 }

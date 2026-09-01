@@ -7,6 +7,7 @@
  */
 
 import { normalizeAgentPresetCatalog, normalizeAgentPresetId } from "../../agent-preset.js";
+import { normalizeDefaultModelSelection } from "../../default-model.js";
 import { normalizeLastMessageError } from "../../last-message-error.js";
 import { normalizeAccessPolicy } from "../../../../src/channels/shared/access-policy.mjs";
 import { normalizeContextEnhancementConfig } from "../../../../src/channels/shared/context-enhancement.mjs";
@@ -26,6 +27,8 @@ export const FEISHU_ENDPOINTS = Object.freeze({
   deleteBot: "bot.delete",
   setWorkspace: "bot.workspace.set",
   setAgentPreset: "bot.preset.set",
+  setDefaultModel: "bot.model.set",
+  modelCatalog: "bot.model.catalog",
   setContextEnhancement: "bot.context-enhancement.set",
   setAccessPolicy: "bot.access-policy.set",
   setGroupResponseMode: "bot.group-response-mode.set",
@@ -207,6 +210,7 @@ export function normalizeBotConnection(value, fallbackBotId) {
     configured: value.configured !== false,
     workspace: optionalString(value.workspace)?.slice(0, 4_096) ?? "",
     agentPreset: normalizeAgentPresetId(value.agentPreset),
+    defaultModel: normalizeDefaultModelSelection(value.defaultModel),
     contextEnhancement: normalizeContextEnhancementConfig(value.contextEnhancement),
     ...(Object.hasOwn(value, "accessPolicy")
       ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }

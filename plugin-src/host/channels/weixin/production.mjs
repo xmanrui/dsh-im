@@ -18,6 +18,7 @@ import {
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
+import { cachedModelCatalog } from '../../../../src/channels/shared/default-model.mjs';
 import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
 import { createConnectionSupervisor } from './connection-supervisor.mjs';
 import { createHarnessCommandExecutor } from '../../harness-command-executor.mjs';
@@ -54,6 +55,7 @@ export async function createProductionController(ctx, config = {}, internals = {
     ? ctx.logger('dsh-weixin')
     : (ctx.logger ?? console);
   const agentPresetCatalog = () => listAgentPresetCatalog(ctx);
+  const modelCatalog = cachedModelCatalog(() => harness.listModels());
   const paths = pluginPaths(config);
   const configStore = await new ConfigStore(paths.config).load();
   const defaultWorkspace = resolve(config.workspace ?? process.cwd());
@@ -148,6 +150,7 @@ export async function createProductionController(ctx, config = {}, internals = {
     workspaces,
     stateFor,
     agentPresetCatalog,
+    modelCatalog,
   });
   const supervisor = createSupervisor({
     controller,

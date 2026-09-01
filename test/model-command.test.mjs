@@ -161,6 +161,137 @@ function fixture({
   return { calls, harness, state, boundId: () => boundId };
 }
 
+function defaultModelFixture({
+  current = null,
+  catalog = CATALOG,
+  catalogError = null,
+} = {}) {
+  const calls = [];
+  let stored = current;
+  const harness = {
+    async listModels(options) {
+      calls.push(['listModels', options]);
+      if (catalogError) throw catalogError;
+      return catalog;
+    },
+    async defaultModelSettings(options) {
+      calls.push(['defaultModelSettings', options]);
+      return { defaultModel: stored };
+    },
+    async updateDefaultModel(value, options) {
+      calls.push(['updateDefaultModel', value, options]);
+      stored = value;
+      return { defaultModel: stored };
+    },
+  };
+  const state = { sessionFor: () => null };
+  return { calls, harness, state, stored: () => stored };
+}
+
+test('/model default reports the current bot default and the host default', async () => {
+  const { harness, state } = defaultModelFixture({
+    current: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+  });
+  const result = await runModelCommand('/model default', harness, state, 'direct:one');
+  assert.match(result.message, /当前机器人用于新会话的默认模型：/);
+  assert.match(result.message, /deepseek-official\/deepseek-v4-pro/);
+  assert.match(result.message, /\/model default clear/);
+});
+
+test('/model default without a selection follows the host default', async () => {
+  const { harness, state } = defaultModelFixture({
+    catalog: {
+      ...CATALOG,
+      current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    },
+  });
+  const result = await runModelCommand('/model default', harness, state, 'direct:one');
+  assert.match(result.message, /跟随 Host 默认（当前：deepseek-official\/deepseek-v4-flash）/);
+});
+
+test('/model default resolves sequence numbers against the live catalog', async () => {
+  const { calls, harness, state, stored } = defaultModelFixture();
+  const result = await runModelCommand('/model default 2', harness, state, 'direct:one');
+  assert.deepEqual(stored(), { provider: 'deepseek-official', model: 'deepseek-v4-pro' });
+  assert.match(result.message, /已设置为：/);
+  assert.match(result.message, /请先发送 \/new/);
+  assert.deepEqual(calls.map(([name]) => name), ['listModels', 'updateDefaultModel']);
+});
+
+test('/model default accepts provider/model ids with a reasoning effort', async () => {
+  const { harness, state, stored } = defaultModelFixture({
+    catalog: REASONING_CATALOG,
+  });
+  const result = await runModelCommand(
+    '/model default deepseek-official/deepseek-v4-flash high',
+    harness,
+    state,
+    'direct:one',
+  );
+  assert.deepEqual(stored(), {
+    provider: 'deepseek-official',
+    model: 'deepseek-v4-flash',
+    reasoningEffort: 'high',
+  });
+  assert.match(result.message, /deepseek-v4-flash · reasoningEffort=high/);
+});
+
+test('/model default clear and --default restore the host default', async () => {
+  for (const command of ['/model default clear', '/model default --default']) {
+    const { harness, state, stored } = defaultModelFixture({
+      current: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    });
+    const result = await runModelCommand(command, harness, state, 'direct:one');
+    assert.equal(stored(), null);
+    assert.match(result.message, /跟随 Host 默认/);
+  }
+});
+
+test('/model default rejects unknown models, bad numbers, and unknown efforts', async () => {
+  const { harness, state } = defaultModelFixture();
+  assert.match(
+    (await runModelCommand('/model default missing/model', harness, state, 'direct:one')).message,
+    /没有找到模型：missing\/model/,
+  );
+  assert.match(
+    (await runModelCommand('/model default 99', harness, state, 'direct:one')).message,
+    /模型序号无效/,
+  );
+  assert.match(
+    (await runModelCommand(
+      '/model default deepseek-official/deepseek-v4-flash nosuch',
+      defaultModelFixture({ catalog: REASONING_CATALOG }).harness,
+      defaultModelFixture({ catalog: REASONING_CATALOG }).state,
+      'direct:one',
+    )).message,
+    /不支持推理等级|可用推理等级/,
+  );
+});
+
+test('/model default surfaces harness and catalog failures', async () => {
+  const unsupported = defaultModelFixture();
+  unsupported.harness.defaultModelSettings = undefined;
+  assert.match(
+    (await runModelCommand('/model default', unsupported.harness, unsupported.state, 'direct:one')).message,
+    /不支持默认模型设置/,
+  );
+
+  const unavailable = defaultModelFixture();
+  const failure = new Error('默认模型不存在或当前不可用：x/y');
+  failure.code = 'default-model-unavailable';
+  unavailable.harness.updateDefaultModel = async () => { throw failure; };
+  assert.match(
+    (await runModelCommand('/model default clear', unavailable.harness, unavailable.state, 'direct:one')).message,
+    /默认模型不存在或当前不可用/,
+  );
+
+  const down = defaultModelFixture({ catalogError: new Error('rpc down') });
+  assert.match(
+    (await runModelCommand('/model default 1', down.harness, down.state, 'direct:one')).message,
+    /暂时无法获取模型列表/,
+  );
+});
+
 test('isModelCommand recognizes model and reasoning command prefixes', () => {
   for (const command of [
     '/models', ' /MODELS ', '/models ignored', '/model', '/MoDeL openai/gpt-5',

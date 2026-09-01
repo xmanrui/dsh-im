@@ -10,6 +10,12 @@ import {
   AgentPresetEditor,
   EMPTY_AGENT_PRESET_CATALOG,
 } from '../../agent-preset.js';
+import {
+  DefaultModelEditor,
+  EMPTY_MODEL_CATALOG,
+  ModelCatalogContext,
+  normalizeModelCatalog,
+} from '../../default-model.js';
 import { useWorkspaceSnapshotFence } from '../../workspace-snapshot-fence.js';
 import {
   BotSettingsButton,
@@ -75,7 +81,7 @@ export function createTokenChannelSettings(definition) {
     accountSettingsEndpoint = null,
   } = definition;
 
-  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onAgentPresetSave, onContextEnhancementSave, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove }) {
+  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onAgentPresetSave, onDefaultModelSave, onContextEnhancementSave, onAccountSettingsSave, catalogError, onRefreshModelCatalog, onRequestRemove, onConfirmRemove, onCancelRemove }) {
     const state = busy === 'reconnect' ? 'connecting' : account.state;
     const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
     const stateLabel = account.connected ? '运行正常' : state === 'connecting' ? '正在连接' : '连接未就绪';
@@ -114,6 +120,13 @@ export function createTokenChannelSettings(definition) {
           agentPreset: account.agentPreset,
           disabled: Boolean(busy),
           onSave: onAgentPresetSave,
+        }),
+        h(DefaultModelEditor, {
+          defaultModel: account.defaultModel,
+          disabled: Boolean(busy),
+          onSave: onDefaultModelSave,
+          catalogError,
+          onRefreshCatalog: onRefreshModelCatalog,
         }),
         h(ContextEnhancementEditor, {
           config: account.contextEnhancement,
@@ -162,6 +175,8 @@ export function createTokenChannelSettings(definition) {
       phase: 'loading', bots: [], totals: { configured: 0, connected: 0 }, error: null,
       agentPresetCatalog: EMPTY_AGENT_PRESET_CATALOG,
     });
+    const [modelCatalog, setModelCatalog] = React.useState(EMPTY_MODEL_CATALOG);
+    const [modelCatalogError, setModelCatalogError] = React.useState(null);
     const [credentialOpen, setCredentialOpen] = React.useState(false);
     const [credentialError, setCredentialError] = React.useState(null);
     const [busy, setBusy] = React.useState(false);
@@ -216,6 +231,25 @@ export function createTokenChannelSettings(definition) {
       void loadStatus({ signal: controller.signal });
       return () => controller.abort();
     }, [loadStatus]);
+
+    const loadModelCatalog = React.useCallback(async ({ signal } = {}) => {
+      try {
+        const catalog = normalizeModelCatalog(await invoke(endpoints.modelCatalog, {}, signal));
+        if (!mounted.current || signal?.aborted) return;
+        setModelCatalog(catalog);
+        setModelCatalogError(null);
+      } catch (error) {
+        if (error?.name === 'AbortError' || signal?.aborted || !mounted.current) return;
+        setModelCatalog(EMPTY_MODEL_CATALOG);
+        setModelCatalogError(api.presentError(error)?.message ?? '暂时无法获取模型列表。');
+      }
+    }, [invoke]);
+
+    React.useEffect(() => {
+      const controller = new AbortController();
+      void loadModelCatalog({ signal: controller.signal });
+      return () => controller.abort();
+    }, [loadModelCatalog]);
 
     React.useEffect(() => {
       if (model.phase !== 'ready') return undefined;
@@ -324,6 +358,14 @@ export function createTokenChannelSettings(definition) {
                 endpoints.setAgentPreset,
                 { botId: account.botId, agentPreset },
               ),
+              onDefaultModelSave: (defaultModel) => botAction(
+                account,
+                'default-model',
+                endpoints.setDefaultModel,
+                { botId: account.botId, model: defaultModel },
+              ),
+              catalogError: modelCatalogError,
+              onRefreshModelCatalog: () => loadModelCatalog(),
               onContextEnhancementSave: (config) => botAction(
                 account,
                 'context-enhancement',
@@ -352,6 +394,8 @@ export function createTokenChannelSettings(definition) {
 
     return h(AgentPresetCatalogContext.Provider, {
       value: model.agentPresetCatalog ?? EMPTY_AGENT_PRESET_CATALOG,
+    }, h(ModelCatalogContext.Provider, {
+      value: modelCatalog ?? EMPTY_MODEL_CATALOG,
     }, h('section', {
       className: `ddt-page ${pageClass} dim-channelPage`,
       'aria-label': `${channel} 设置`,
@@ -418,7 +462,7 @@ export function createTokenChannelSettings(definition) {
                       'aria-hidden': 'true',
                     }, h(LogoGlyph, { size: 64 }))))
               : null,
-            botList)));
+            botList))));
   }
 
   return { SettingsTab, AccountCard };

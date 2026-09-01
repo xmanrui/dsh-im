@@ -133,6 +133,7 @@ dsh web
 | --- | --- |
 | 机器人工作区 | 每个机器人独立保存工作区。新机器人默认使用 Host 当时的工作目录；之后可在机器人卡片中修改。 |
 | Agent Preset | 每个机器人可在设置页卡片中选择 Agent Preset。未选择时跟随 Host 的 `agent-presets.default`；渠道级 `config.agentPreset` 只作为该渠道之后新接入机器人的默认值。切换不会修改或清空已有会话；若当前聊天已有会话，需先发送 `/new`，再发送一条普通消息，才会按新选择创建会话。 |
+| 默认模型 | 每个机器人可在设置页卡片中选择自己的默认模型（含推理等级）。未选择时跟随 Harness 全局默认；新会话创建时立即应用该选择，已有会话不受影响。若配置的模型后来不可用，新会话创建会明确报错而不是静默改用其他模型，按提示更换或发送 `/model default clear` 即可恢复。 |
 | 上下文增强 | 从机器人卡片打开设置，分别决定群聊、私聊是否增强；两个开关默认均关闭，旧机器人升级后也不会自动开启。 |
 
 ### 主动投递
@@ -190,6 +191,9 @@ dsh plugin --profile web add -w --save-exact @xmanrui/dsh-im@3.1.0 --registry=ht
 | `/models` | 按序号列出当前配置的全部可用模型。 |
 | `/model` | 查看当前聊天绑定会话正在使用的模型和推理等级。 |
 | `/model <序号或 Provider/模型ID> [推理等级ID]` | 切换当前会话模型，并可同时指定目标模型支持的推理等级。 |
+| `/model default` | 查看当前机器人用于新会话的默认模型设置。 |
+| `/model default <序号或 Provider/模型ID> [推理等级ID]` | 设置当前机器人的新会话默认模型。 |
+| `/model default clear` | 清除当前机器人的默认模型，恢复跟随 Host 默认。 |
 | `/reasoninglist`、`/reasonings` | 等价命令；列出当前模型支持的推理等级。 |
 | `/reasoning` | 查看当前会话的模型和推理等级。 |
 | `/reasoning <序号或等级ID>` | 切换当前模型的推理等级。 |
@@ -213,7 +217,7 @@ dsh plugin --profile web add -w --save-exact @xmanrui/dsh-im@3.1.0 --registry=ht
 | 交互式提问 | 回复选项序号、选项文字或自定义文字；多选时用逗号分隔。 |
 | 远程审批 | 回复 `批准` / `拒绝` / `同意` / `不同意` / `yes` / `no`。 |
 
-示例：先发送 `/models`，再发送 `/model 2` 切换到列表中的第 2 个模型；先发送 `/reasoninglist`，再发送 `/reasoning 2` 切换到当前模型的第 2 个推理等级；先发送 `/presetlist`，再发送 `/preset 2` 为当前机器人选择第 2 个 Agent Preset。其他命令示例：`/help`、`/new`、`/status`、`/version`、`/model deepseek-official/deepseek-v4-pro max`、`/reasoning --default`、`/preset marketing-jeep`、`/preset --default`、`/steer 只检查配置文件`、`/stop`、`/compact`、`/workspace /Users/alice/projects/my-app`、`/sessionlist 2`、`/sessionlist /Users/alice/projects/my-app`、`/session session-id`、`/history` 或 `/history 5`
+示例：先发送 `/models`，再发送 `/model 2` 切换到列表中的第 2 个模型；先发送 `/reasoninglist`，再发送 `/reasoning 2` 切换到当前模型的第 2 个推理等级；先发送 `/presetlist`，再发送 `/preset 2` 为当前机器人选择第 2 个 Agent Preset。其他命令示例：`/help`、`/new`、`/status`、`/version`、`/model deepseek-official/deepseek-v4-pro max`、`/model default`、`/model default 2`、`/model default deepseek-official/deepseek-v4-pro max`、`/model default clear`、`/reasoning --default`、`/preset marketing-jeep`、`/preset --default`、`/steer 只检查配置文件`、`/stop`、`/compact`、`/workspace /Users/alice/projects/my-app`、`/sessionlist 2`、`/sessionlist /Users/alice/projects/my-app`、`/session session-id`、`/history` 或 `/history 5`
 
 Slack 桌面端若未注册同名的原生 Slash Command，会拦截直接以 `/` 开头的消息。此时请加一个前导空格发送，例如 ` /presetlist`、` /preset 2`、` /history` 或 ` /history 10`；插件命令层会去除首尾空白，执行效果与无空格命令相同。
 
@@ -233,6 +237,7 @@ Slack 桌面端若未注册同名的原生 Slash Command，会拦截直接以 `/
 - `/preset` 不带参数时查看当前机器人的“新会话设置”，不是查看或修改当前 Session。带参数时接受最近一次 `/presetlist` 在当前聊天中显示的序号或完整 ID；纯数字 ID 使用 `/preset id:<ID>`。选择序号时会先按该次列表解析 ID，再用 Host 最新目录复验，目录已经变化时会要求重新列出。
 - `/preset --default` 清除当前机器人的显式覆盖值，让以后新建的 Session 在创建时跟随 Host 当前默认；显式选择一个恰好等于 Host 默认的 ID 则会固定该 ID。目录暂时不可读时仍可恢复为跟随 Host 默认。
 - Agent Preset 修改是机器人级配置，会影响该机器人所有聊天以后创建的新 Session，但不会修改、停止、解绑或重建已有 Session，也不会自动执行 `/new`。若当前聊天已有会话，继续发送消息仍使用原 Session；发送 `/new` 后的下一条普通消息才会按新设置创建 Session。任务正在运行或等待交互时也可查询或修改 Preset，因为命令不会触碰当前 Session。
+- `/model default` 是机器人级配置，语义与 Agent Preset 一致：只影响该机器人之后新建的 Session，已有会话不变。设置时按 `/models` 的序号或完整 `Provider/模型ID` 解析，并可附加推理等级 ID；`clear`（或 `--default`）恢复跟随 Host 默认。设置页机器人卡片中的“默认模型”下拉框与其完全等价。若已配置的默认模型后来被移除或暂时不可用，该机器人创建新会话会明确失败并提示原因，不会静默回退到其他模型；恢复模型、更换默认模型或执行 `/model default clear` 后即可继续。
 - `/stop` 和 `/steer` 只控制当前聊天自己发起的运行任务，即使多个聊天绑定同一个 Session，也不会有意控制其他聊天的任务。`/stop` 不删除会话或历史，并保留尚未开始的排队消息；重复发送是安全的。
 - `/steer` 只接受文字，可包含多行；它不会创建新会话或第二个任务。没有运行任务时请直接发送普通消息；等待审批或问题回答时请先处理交互，或使用 `/stop`。
 - `/batch`、`/send` 和 `/cancel` 仅在与机器人的私聊中可用。发送 `/batch` 后，接下来的纯文字消息会暂存，最多 10 条；第 10 条仍会收录并提示提交，之后的消息不会收录，也不会自动提交。发送 `/send` 后，机器人会按原顺序将整批内容作为一次输入处理；发送 `/cancel` 会直接丢弃当前批次。图片、文件和其他命令不会被收录。机器人重启会丢失尚未提交的批次。未进入批量输入模式时，普通聊天流程不变。

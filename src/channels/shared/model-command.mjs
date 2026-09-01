@@ -1,5 +1,9 @@
 import { splitWorkspaceCommandMessage } from './workspace-command.mjs';
 import { t } from './i18n.mjs';
+import {
+  defaultModelSelectionText,
+  normalizeDefaultModelSelection,
+} from './default-model.mjs';
 import { WORKSPACE_SESSION_STALE } from './workspace-session.mjs';
 import { withSessionBindingLock } from './session-binding-lock.mjs';
 
@@ -8,7 +12,14 @@ const MODELS_COMMAND = /^\/models(?=$|\s)/i;
 const REASONING_COMMAND = /^\/reasoning(?=$|\s)/i;
 const REASONINGS_COMMAND = /^\/reasonings(?=$|\s)/i;
 const REASONING_LIST_COMMAND = /^\/reasoninglist(?=$|\s)/i;
+const MODEL_DEFAULT_COMMAND = /^\/model[ \t]+default(?=$|\s)/iu;
 const MODEL_USAGE = '用法：/model <序号或 provider/model> [推理等级ID]';
+const DEFAULT_MODEL_USAGE = [
+  '用法：',
+  '/model default  查看当前设置',
+  '/model default <序号或 provider/model> [推理等级ID]  设置新会话默认模型',
+  '/model default clear  恢复跟随 Host 默认',
+].join('\n');
 const MODELS_USAGE = '用法：/models（不带参数）';
 const REASONING_USAGE = '用法：/reasoning [序号、等级ID或 --default]';
 const REASONING_LIST_USAGE = '用法：/reasoninglist 或 /reasonings（不带参数）';
@@ -364,6 +375,64 @@ function formatReasoningCatalog(catalog) {
   return lines.join('\n');
 }
 
+function defaultModelSettingsOf(harness, options) {
+  if (typeof harness?.defaultModelSettings !== 'function') {
+    const error = new Error('Harness does not support default model settings');
+    error.code = 'default-model-unsupported';
+    throw error;
+  }
+  return harness.defaultModelSettings(options);
+}
+
+async function updateDefaultModelOn(harness, selection, options) {
+  if (typeof harness?.updateDefaultModel !== 'function') {
+    const error = new Error('Harness does not support default model settings');
+    error.code = 'default-model-unsupported';
+    throw error;
+  }
+  const value = await harness.updateDefaultModel(selection, options);
+  if (!value || typeof value !== 'object') {
+    throw new TypeError('Harness returned invalid default model settings');
+  }
+  return normalizeDefaultModelSelection(value.defaultModel);
+}
+
+function hostCurrentModelText(catalog) {
+  return catalog?.current
+    ? modelId(catalog.current.provider, catalog.current.model)
+    : null;
+}
+
+function defaultModelDescription(selection, catalog) {
+  if (!selection) {
+    const current = hostCurrentModelText(catalog);
+    return current
+      ? t('跟随 Host 默认（当前：{model}）', { model: current })
+      : t('跟随 Host 默认');
+  }
+  return safeDisplayText(defaultModelSelectionText(selection));
+}
+
+function formatDefaultModelCurrent(settings, catalog) {
+  return [
+    t('当前机器人用于新会话的默认模型：'),
+    defaultModelDescription(settings.defaultModel, catalog),
+    '',
+    t('已有会话不会受此设置影响。'),
+    t('设置默认模型：/model default <序号或 provider/model>'),
+    t('恢复跟随 Host 默认：/model default clear'),
+  ].join('\n');
+}
+
+function formatDefaultModelUpdated(selection, catalog) {
+  return [
+    t('当前机器人用于新会话的默认模型已设置为：'),
+    defaultModelDescription(selection, catalog),
+    '',
+    t('已有会话不变。若当前聊天已有会话，请先发送 /new，再发送普通消息，才会使用新设置创建会话。'),
+  ].join('\n');
+}
+
 function noSessionMessage() {
   return [
     t('当前聊天还没有会话。'),
@@ -389,6 +458,22 @@ function modelErrorMessage(error, action) {
   const code = errorCode(error);
   if (code === 'agent-busy') {
     return t('当前任务正在运行，请等待完成或先发送 /stop。');
+  }
+  if (code === 'default-model-invalid') {
+    return t('默认模型配置无效，请发送 /models 查看可用模型。');
+  }
+  if (code === 'default-model-unavailable') {
+    return [
+      t('默认模型不存在或当前不可用，请发送 /models 查看可用模型。'),
+      '',
+      t('若模型已恢复，可直接重试；或发送 /model default clear 恢复跟随 Host 默认。'),
+    ].join('\n');
+  }
+  if (code === 'default-model-unsupported') {
+    return t('当前机器人不支持默认模型设置。');
+  }
+  if (code === 'model-catalog-unavailable') {
+    return t('暂时无法获取模型列表，请稍后重试。');
   }
   if (code === 'session-not-found') {
     return t('当前聊天绑定的会话已不存在，请重试。');
@@ -433,6 +518,7 @@ function modelErrorMessage(error, action) {
   if (action === 'list') return t('暂时无法获取模型列表，请稍后重试。');
   if (action === 'reasoning-list') return t('暂时无法获取推理等级，请稍后重试。');
   if (action === 'reasoning-select') return t('推理等级切换失败，请稍后重试。');
+  if (action === 'current') return t('暂时无法获取默认模型设置，请稍后重试。');
   return t('模型切换失败，请稍后重试。');
 }
 
@@ -626,6 +712,77 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
       });
     } catch (error) {
       return commandResult(modelErrorMessage(error, 'reasoning-select'));
+    }
+  }
+
+  if (MODEL_DEFAULT_COMMAND.test(command)) {
+    const defaultMatch = /^\/model[ \t]+default(?:[ \t]+([^\s]+)(?:[ \t]+([^\s]+))?)?[ \t]*$/iu.exec(command);
+    if (!defaultMatch) return commandResult(t(DEFAULT_MODEL_USAGE));
+    const requested = defaultMatch[1];
+    const requestedEffort = defaultMatch[2];
+    if (!requested) {
+      try {
+        const [settings, catalog] = await Promise.all([
+          defaultModelSettingsOf(harness, requestOptions),
+          listCatalog(harness, requestOptions).catch(() => null),
+        ]);
+        const selection = normalizeDefaultModelSelection(settings.defaultModel);
+        return commandResult(formatDefaultModelCurrent(
+          { defaultModel: selection },
+          catalog,
+        ));
+      } catch (error) {
+        return commandResult(modelErrorMessage(error, 'current'));
+      }
+    }
+    try {
+      return await withSessionBindingLock(state, key, async () => {
+        if (['clear', '--clear', '--default'].includes(requested.toLowerCase())) {
+          const cleared = await updateDefaultModelOn(harness, null, requestOptions);
+          return commandResult(formatDefaultModelUpdated(cleared, null));
+        }
+        const numberRequest = positiveNumberRequest(requested);
+        if (numberRequest?.index === null) {
+          return commandResult(invalidModelNumberMessage(requested));
+        }
+        if (!numberRequest
+          && (!requested.includes('/') || requested.startsWith('/') || requested.endsWith('/'))) {
+          return commandResult(t(DEFAULT_MODEL_USAGE));
+        }
+        let catalog;
+        try {
+          catalog = await listCatalog(harness, requestOptions);
+        } catch (error) {
+          return commandResult(modelErrorMessage(error, 'list'));
+        }
+        const selection = numberRequest
+          ? modelAt(catalog, numberRequest.index)
+          : matchingModel(catalog, requested);
+        if (!selection) {
+          if (numberRequest) return commandResult(invalidModelNumberMessage(requested));
+          return commandResult([
+            t('没有找到模型：{model}', { model: safeDisplayText(requested) }),
+            '',
+            t('请发送 /models 查看可用模型。'),
+          ].join('\n'));
+        }
+        const targetModel = modelForSelection(catalog, selection);
+        if (requestedEffort !== undefined) {
+          const effort = reasoningEffortById(targetModel, requestedEffort);
+          if (!effort) {
+            return commandResult(unsupportedReasoningMessage(
+              selection,
+              requestedEffort,
+              targetModel,
+            ));
+          }
+          selection.reasoningEffort = effort.id;
+        }
+        const applied = await updateDefaultModelOn(harness, selection, requestOptions);
+        return commandResult(formatDefaultModelUpdated(applied, catalog));
+      });
+    } catch (error) {
+      return commandResult(modelErrorMessage(error, 'select'));
     }
   }
 

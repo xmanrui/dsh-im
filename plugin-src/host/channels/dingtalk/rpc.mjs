@@ -5,6 +5,12 @@ import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { publicWorkspaceError, SET_WORKSPACE_ENDPOINT, validWorkspacePayload } from '../shared/workspace-rpc.mjs';
 import { SET_AGENT_PRESET_ENDPOINT, validAgentPresetPayload } from '../shared/agent-preset-rpc.mjs';
 import {
+  MODEL_CATALOG_ENDPOINT,
+  publicDefaultModelError,
+  SET_DEFAULT_MODEL_ENDPOINT,
+  validDefaultModelPayload,
+} from '../shared/default-model-rpc.mjs';
+import {
   connectionTestTargetUnavailable,
   publicConnectionTestResult,
 } from '../../../../src/channels/shared/connection-test.mjs';
@@ -20,6 +26,8 @@ export const DINGTALK_ENDPOINTS = Object.freeze({
   deleteBot: 'bot.delete',
   setWorkspace: SET_WORKSPACE_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
+  setDefaultModel: SET_DEFAULT_MODEL_ENDPOINT,
+  modelCatalog: MODEL_CATALOG_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   approveSender: 'bot.sender.approve',
@@ -97,6 +105,13 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === DINGTALK_ENDPOINTS.setAgentPreset) {
     return validAgentPresetPayload(payload)
       ? null : '请选择 Agent Preset。';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.setDefaultModel) {
+    return validDefaultModelPayload(payload)
+      ? null : '请提交有效的默认模型设置。';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.modelCatalog) {
+    return exactKeys(payload, []) ? null : 'bot.model.catalog does not accept fields.';
   }
   if (endpoint === DINGTALK_ENDPOINTS.setContextEnhancement) {
     return validContextEnhancementPayload(payload)
@@ -279,6 +294,15 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
           await controller.updateAgentPreset(payload.botId, payload.agentPreset),
           cachedEncode,
         );
+      } else if (endpoint === DINGTALK_ENDPOINTS.setDefaultModel) {
+        if (typeof controller.updateDefaultModel !== 'function') throw new Error('Default model update is unavailable');
+        value = await publicStatus(
+          await controller.updateDefaultModel(payload.botId, payload.model),
+          cachedEncode,
+        );
+      } else if (endpoint === DINGTALK_ENDPOINTS.modelCatalog) {
+        if (typeof controller.listModelCatalog !== 'function') throw new Error('Model catalog is unavailable');
+        value = sanitizePublic(await controller.listModelCatalog());
       } else if (endpoint === DINGTALK_ENDPOINTS.approveSender) {
         value = await publicStatus(
           await controller.approveSender(payload.botId, payload.requestId),
@@ -292,7 +316,7 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
       }
       return signal?.aborted ? cancelled() : { ok: true, value };
     } catch (error) {
-      const workspaceError = publicWorkspaceError(error);
+      const workspaceError = publicWorkspaceError(error) ?? publicDefaultModelError(error);
       return signal?.aborted ? cancelled() : workspaceError
         ? { ok: false, error: workspaceError }
         : internalFailure();

@@ -18,6 +18,7 @@ import {
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
+import { cachedModelCatalog } from '../../../../src/channels/shared/default-model.mjs';
 import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
 import { createTokenConnectionSupervisor } from '../shared/connection-supervisor.mjs';
 import { createHarnessCommandExecutor } from '../../harness-command-executor.mjs';
@@ -51,6 +52,7 @@ export async function createProductionController(ctx, config = {}, internals = {
   const logger = typeof ctx.logger === 'function'
     ? ctx.logger('dsh-im:whatsapp') : (ctx.logger ?? console);
   const agentPresetCatalog = () => listAgentPresetCatalog(ctx);
+  const modelCatalog = cachedModelCatalog(() => harness.listModels());
   const ConfigStore = internals.ConfigStore ?? WhatsappConfigStore;
   const StateStore = internals.StateStore ?? WhatsappStateStore;
   const Harness = internals.HarnessClient ?? WhatsappHarnessClient;
@@ -155,6 +157,7 @@ export async function createProductionController(ctx, config = {}, internals = {
     workspaces,
     stateFor,
     agentPresetCatalog,
+    modelCatalog,
   });
   const supervisor = createSupervisor({
     channel: 'whatsapp',

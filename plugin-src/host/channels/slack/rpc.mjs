@@ -11,6 +11,12 @@ import {
   SET_AGENT_PRESET_ENDPOINT,
   validAgentPresetPayload,
 } from '../shared/agent-preset-rpc.mjs';
+import {
+  MODEL_CATALOG_ENDPOINT,
+  publicDefaultModelError,
+  SET_DEFAULT_MODEL_ENDPOINT,
+  validDefaultModelPayload,
+} from '../shared/default-model-rpc.mjs';
 
 export const SLACK_RPC_CHANNEL = '/slack';
 export const SLACK_ENDPOINTS = Object.freeze({
@@ -20,6 +26,8 @@ export const SLACK_ENDPOINTS = Object.freeze({
   deleteBot: 'bot.delete',
   setWorkspace: SET_WORKSPACE_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
+  setDefaultModel: SET_DEFAULT_MODEL_ENDPOINT,
+  modelCatalog: MODEL_CATALOG_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
 });
@@ -79,6 +87,13 @@ function payloadFailure(endpoint, payload) {
     return validAgentPresetPayload(payload)
       ? null : '请选择 Agent Preset。';
   }
+  if (endpoint === SLACK_ENDPOINTS.setDefaultModel) {
+    return validDefaultModelPayload(payload)
+      ? null : '请提交有效的默认模型设置。';
+  }
+  if (endpoint === SLACK_ENDPOINTS.modelCatalog) {
+    return exactKeys(payload, []) ? null : 'bot.model.catalog does not accept fields.';
+  }
   if (endpoint === SLACK_ENDPOINTS.setContextEnhancement) {
     return validContextEnhancementPayload(payload)
       ? null : '请提交有效的上下文增强设置。';
@@ -103,6 +118,8 @@ function sanitizePublic(value) {
 function operationError(error) {
   const workspaceError = publicWorkspaceError(error);
   if (workspaceError) return workspaceError;
+  const defaultModelError = publicDefaultModelError(error);
+  if (defaultModelError) return defaultModelError;
   if (error?.code === 'slack-invalid-bot-token') {
     return { code: 'invalid-bot-token', message: 'Slack Bot Token 无效，请确认使用以 xoxb- 开头的令牌。' };
   }
@@ -177,6 +194,14 @@ export function createSlackRpcHandler(controller) {
       else if (endpoint === SLACK_ENDPOINTS.setAgentPreset) {
         if (typeof controller.updateAgentPreset !== 'function') throw new Error('Agent preset update is unavailable');
         value = await controller.updateAgentPreset(payload.botId, payload.agentPreset);
+      }
+      else if (endpoint === SLACK_ENDPOINTS.setDefaultModel) {
+        if (typeof controller.updateDefaultModel !== 'function') throw new Error('Default model update is unavailable');
+        value = await controller.updateDefaultModel(payload.botId, payload.model);
+      }
+      else if (endpoint === SLACK_ENDPOINTS.modelCatalog) {
+        if (typeof controller.listModelCatalog !== 'function') throw new Error('Model catalog is unavailable');
+        value = await controller.listModelCatalog();
       }
       else value = await controller.deleteBot(payload.botId);
       return signal?.aborted

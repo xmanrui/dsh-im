@@ -6,6 +6,12 @@ import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { publicWorkspaceError, SET_WORKSPACE_ENDPOINT, validWorkspacePayload } from '../shared/workspace-rpc.mjs';
 import { SET_AGENT_PRESET_ENDPOINT, validAgentPresetPayload } from '../shared/agent-preset-rpc.mjs';
+import {
+  MODEL_CATALOG_ENDPOINT,
+  publicDefaultModelError,
+  SET_DEFAULT_MODEL_ENDPOINT,
+  validDefaultModelPayload,
+} from '../shared/default-model-rpc.mjs';
 
 export const WHATSAPP_RPC_CHANNEL = '/whatsapp';
 export const WHATSAPP_ENDPOINTS = Object.freeze({
@@ -18,6 +24,8 @@ export const WHATSAPP_ENDPOINTS = Object.freeze({
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setWorkspace: SET_WORKSPACE_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
+  setDefaultModel: SET_DEFAULT_MODEL_ENDPOINT,
+  modelCatalog: MODEL_CATALOG_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
 });
 export const WHATSAPP_RPC_ENDPOINTS = Object.freeze(Object.values(WHATSAPP_ENDPOINTS));
@@ -65,6 +73,13 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === WHATSAPP_ENDPOINTS.setAgentPreset) {
     return validAgentPresetPayload(payload)
       ? null : '请选择 Agent Preset。';
+  }
+  if (endpoint === WHATSAPP_ENDPOINTS.setDefaultModel) {
+    return validDefaultModelPayload(payload)
+      ? null : '请提交有效的默认模型设置。';
+  }
+  if (endpoint === WHATSAPP_ENDPOINTS.modelCatalog) {
+    return exactKeys(payload, []) ? null : 'bot.model.catalog does not accept fields.';
   }
   if (endpoint === WHATSAPP_ENDPOINTS.setContextEnhancement) {
     return validContextEnhancementPayload(payload)
@@ -183,6 +198,15 @@ export function createWhatsappRpcHandler(controller, { encodeQr = qrDataUrl } = 
           await controller.updateAgentPreset(payload.botId, payload.agentPreset),
           cachedEncode,
         );
+      } else if (endpoint === WHATSAPP_ENDPOINTS.setDefaultModel) {
+        if (typeof controller.updateDefaultModel !== 'function') throw new Error('Default model update is unavailable');
+        value = await publicStatus(
+          await controller.updateDefaultModel(payload.botId, payload.model),
+          cachedEncode,
+        );
+      } else if (endpoint === WHATSAPP_ENDPOINTS.modelCatalog) {
+        if (typeof controller.listModelCatalog !== 'function') throw new Error('Model catalog is unavailable');
+        value = sanitizePublic(await controller.listModelCatalog());
       } else if (endpoint === WHATSAPP_ENDPOINTS.setAccessPolicy) {
         if (typeof controller.updateAccessPolicy !== 'function') throw new Error('Access policy update is unavailable');
         value = await controller.updateAccessPolicy(
@@ -197,7 +221,7 @@ export function createWhatsappRpcHandler(controller, { encodeQr = qrDataUrl } = 
         ? { ok: false, error: { code: 'cancelled', message: 'The request was cancelled.' } }
         : { ok: true, value };
     } catch (error) {
-      const workspaceError = publicWorkspaceError(error);
+      const workspaceError = publicWorkspaceError(error) ?? publicDefaultModelError(error);
       return signal?.aborted
         ? { ok: false, error: { code: 'cancelled', message: 'The request was cancelled.' } }
         : { ok: false, error: workspaceError

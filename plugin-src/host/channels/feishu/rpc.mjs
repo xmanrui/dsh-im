@@ -9,6 +9,12 @@ import { normalizeAccessPolicy } from '../../../../src/channels/shared/access-po
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { publicWorkspaceError, validWorkspacePayload } from '../shared/workspace-rpc.mjs';
 import { validAgentPresetPayload } from '../shared/agent-preset-rpc.mjs';
+import {
+  MODEL_CATALOG_ENDPOINT,
+  publicDefaultModelError,
+  SET_DEFAULT_MODEL_ENDPOINT,
+  validDefaultModelPayload,
+} from '../shared/default-model-rpc.mjs';
 import { validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
 import { normalizeContextEnhancementConfig } from '../../../../src/channels/shared/context-enhancement.mjs';
@@ -24,6 +30,8 @@ import {
 export const FEISHU_ENDPOINTS = Object.freeze({
   ...FEISHU_CLIENT_ENDPOINTS,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
+  setDefaultModel: SET_DEFAULT_MODEL_ENDPOINT,
+  modelCatalog: MODEL_CATALOG_ENDPOINT,
 });
 export { FEISHU_RPC_CHANNEL };
 export const FEISHU_MULTI_ENDPOINTS = Object.freeze({
@@ -425,6 +433,13 @@ function validPayload(endpoint, payload) {
     return validAgentPresetPayload(payload)
       ? null : '请选择 Agent Preset。';
   }
+  if (endpoint === FEISHU_ENDPOINTS.setDefaultModel) {
+    return validDefaultModelPayload(payload)
+      ? null : '请提交有效的默认模型设置。';
+  }
+  if (endpoint === FEISHU_ENDPOINTS.modelCatalog) {
+    return hasOnlyKeys(payload, new Set()) ? null : 'bot.model.catalog does not accept fields.';
+  }
   if (endpoint === FEISHU_ENDPOINTS.setContextEnhancement) {
     return validContextEnhancementPayload(payload)
       ? null : '请提交有效的上下文增强设置。';
@@ -702,6 +717,15 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
           await controller.updateAgentPreset(payload.botId, payload.agentPreset),
           { encodeQr: cachedEncodeQr },
         );
+      } else if (endpoint === FEISHU_ENDPOINTS.setDefaultModel) {
+        if (typeof controller.updateDefaultModel !== 'function') throw new Error('Default model update is unavailable');
+        value = await toPublicFeishuStatus(
+          await controller.updateDefaultModel(payload.botId, payload.model),
+          { encodeQr: cachedEncodeQr },
+        );
+      } else if (endpoint === FEISHU_ENDPOINTS.modelCatalog) {
+        if (typeof controller.listModelCatalog !== 'function') throw new Error('Model catalog is unavailable');
+        value = await controller.listModelCatalog();
       } else if (endpoint === FEISHU_ENDPOINTS.setGroupResponseMode) {
         if (typeof controller.updateGroupResponseMode !== 'function') {
           throw new Error('Group response mode update is unavailable');
@@ -717,7 +741,7 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
       if (signal?.aborted) return cancelled();
       return { ok: true, value };
     } catch (error) {
-      const workspaceError = publicWorkspaceError(error);
+      const workspaceError = publicWorkspaceError(error) ?? publicDefaultModelError(error);
       return signal?.aborted ? cancelled() : workspaceError
         ? { ok: false, error: { ...workspaceError, details: {} } }
         : internalFailure();

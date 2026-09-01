@@ -13,6 +13,7 @@ import {
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
+import { cachedModelCatalog } from '../../../../src/channels/shared/default-model.mjs';
 import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
 import { createTokenConnectionSupervisor } from '../shared/connection-supervisor.mjs';
 import { pluginPaths } from '../shared/production.mjs';
@@ -37,6 +38,7 @@ export async function createProductionController(ctx, config = {}, internals = {
   const logger = typeof ctx.logger === 'function'
     ? ctx.logger('dsh-im:slack') : (ctx.logger ?? console);
   const agentPresetCatalog = () => listAgentPresetCatalog(ctx);
+  const modelCatalog = cachedModelCatalog(() => harness.listModels());
   const paths = pluginPaths(config, 'slack');
   const configStore = await new ResolvedConfigStore(paths.config).load();
   const defaultWorkspace = resolve(config.workspace ?? process.cwd());
@@ -130,6 +132,7 @@ export async function createProductionController(ctx, config = {}, internals = {
     workspaces,
     stateFor,
     agentPresetCatalog,
+    modelCatalog,
   });
   const supervisor = createSupervisor({
     channel: 'slack',

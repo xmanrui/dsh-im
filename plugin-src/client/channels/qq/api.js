@@ -1,4 +1,9 @@
 import { normalizeAgentPresetCatalog, normalizeAgentPresetId, SET_AGENT_PRESET_ENDPOINT } from '../../agent-preset.js';
+import {
+  MODEL_CATALOG_ENDPOINT,
+  normalizeDefaultModelSelection,
+  SET_DEFAULT_MODEL_ENDPOINT,
+} from '../../default-model.js';
 import { normalizeLastMessageError } from '../../last-message-error.js';
 import { normalizeAccessPolicy } from '../../../../src/channels/shared/access-policy.mjs';
 import { normalizeContextEnhancementConfig } from '../../../../src/channels/shared/context-enhancement.mjs';
@@ -15,6 +20,8 @@ export const QQ_ENDPOINTS = Object.freeze({
   deleteBot: 'bot.delete',
   setWorkspace: 'bot.workspace.set',
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
+  setDefaultModel: SET_DEFAULT_MODEL_ENDPOINT,
+  modelCatalog: MODEL_CATALOG_ENDPOINT,
   setContextEnhancement: 'bot.context-enhancement.set',
   setAccessPolicy: 'bot.access-policy.set',
 });
@@ -91,6 +98,7 @@ function normalizeBot(value) {
     state: connected ? 'connected' : state,
     workspace: text(value.workspace, '', 4_096),
     agentPreset: normalizeAgentPresetId(value.agentPreset),
+    defaultModel: normalizeDefaultModelSelection(value.defaultModel),
     contextEnhancement: normalizeContextEnhancementConfig(value.contextEnhancement),
     ...(Object.hasOwn(value, 'accessPolicy')
       ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }

@@ -332,6 +332,13 @@ const EN = Object.freeze({
   '查看 Agent Preset 说明': 'View Agent Preset help',
   '跟随 Host 默认': 'Follow the Host default',
   '（已不可用）': ' (unavailable)',
+  '默认模型': 'Default model',
+  '（Host 当前）': ' (Host current)',
+  '查看默认模型说明': 'View default model details',
+  '默认模型修改失败，请重试。': 'Failed to change the default model; try again.',
+  '当前配置的默认模型已不可用，请重新选择或跟随 Host 默认。':
+    'The configured default model is unavailable. Choose another one or follow the Host default.',
+  '重新获取': 'Fetch again',
   '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。': 'This affects only new sessions. If the current chat already has a session, send /new, then send a regular message to apply it.',
   '当前 Agent Preset 已不可用，请选择其他 Preset 或跟随 Host 默认。': 'The current Agent Preset is unavailable. Choose another preset or follow the Host default.',
   'Agent Preset 修改失败，请重试。': 'Could not update the Agent Preset. Try again.',
@@ -851,6 +858,8 @@ function channelName(value) {
 function translateDynamic(text) {
   const guidanceLimit = /^增强提示词不得超过 (\d+) 个字符。$/.exec(text);
   if (guidanceLimit) return `Guidance must not exceed ${guidanceLimit[1]} characters.`;
+  const inheritCurrent = /^跟随 Host 默认（当前：(.+)）$/.exec(text);
+  if (inheritCurrent) return `Follow the Host default (currently: ${inheritCurrent[1]})`;
   let match = /^(\d+) \/ (\d+) 在线$/.exec(text);
   if (match) return `${match[1]}/${match[2]} online`;
   match = /^已接入 (\d+) 个机器人，其中 (\d+) 个在线$/.exec(text);

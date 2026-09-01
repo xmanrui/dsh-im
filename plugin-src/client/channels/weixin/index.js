@@ -21,6 +21,12 @@ import {
   AgentPresetEditor,
   EMPTY_AGENT_PRESET_CATALOG,
 } from '../../agent-preset.js';
+import {
+  DefaultModelEditor,
+  EMPTY_MODEL_CATALOG,
+  ModelCatalogContext,
+  normalizeModelCatalog,
+} from '../../default-model.js';
 import { useWorkspaceSnapshotFence } from '../../workspace-snapshot-fence.js';
 import {
   BotSettingsButton,
@@ -209,7 +215,10 @@ export function AccountCard({
   onReconnect,
   onWorkspaceSave,
   onAgentPresetSave,
+  onDefaultModelSave,
   onContextEnhancementSave,
+  catalogError,
+  onRefreshModelCatalog,
   onRequestRemove,
   onConfirmRemove,
   onCancelRemove,
@@ -248,6 +257,13 @@ export function AccountCard({
         agentPreset: account.agentPreset,
         disabled: Boolean(busy),
         onSave: onAgentPresetSave,
+      }),
+      h(DefaultModelEditor, {
+        defaultModel: account.defaultModel,
+        disabled: Boolean(busy),
+        onSave: onDefaultModelSave,
+        catalogError,
+        onRefreshCatalog: onRefreshModelCatalog,
       }),
       h(ContextEnhancementEditor, {
         config: account.contextEnhancement,
@@ -297,7 +313,10 @@ function AccountList(props) {
         onReconnect: () => props.onReconnect(account),
         onWorkspaceSave: (workspace) => props.onWorkspaceSave(account, workspace),
         onAgentPresetSave: (agentPreset) => props.onAgentPresetSave(account, agentPreset),
+        onDefaultModelSave: (model) => props.onDefaultModelSave(account, model),
         onContextEnhancementSave: (config) => props.onContextEnhancementSave(account, config),
+        catalogError: props.catalogError,
+        onRefreshModelCatalog: props.onRefreshModelCatalog,
         onRequestRemove: () => props.onRequestRemove(account),
         onConfirmRemove: () => props.onConfirmRemove(account),
         onCancelRemove: props.onCancelRemove,
@@ -326,6 +345,8 @@ export function WeixinSettingsTab({ rpcCall }) {
     agentPresetCatalog: EMPTY_AGENT_PRESET_CATALOG,
   });
   const [provision, setProvision] = React.useState(null);
+  const [modelCatalog, setModelCatalog] = React.useState(EMPTY_MODEL_CATALOG);
+  const [modelCatalogError, setModelCatalogError] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [busyByBot, setBusyByBot] = React.useState({});
   const [feedbackByBot, setFeedbackByBot] = React.useState({});
@@ -393,6 +414,30 @@ export function WeixinSettingsTab({ rpcCall }) {
     void loadStatus({ signal: controller.signal, restoreProvisioning: true });
     return () => controller.abort();
   }, [loadStatus]);
+
+  const loadModelCatalog = React.useCallback(async ({ signal } = {}) => {
+    if (!mountedRef.current || signal?.aborted) return undefined;
+    try {
+      const catalog = normalizeModelCatalog(
+        await invoke(WEIXIN_ENDPOINTS.modelCatalog, {}, signal),
+      );
+      if (!mountedRef.current || signal?.aborted) return undefined;
+      setModelCatalog(catalog);
+      setModelCatalogError(null);
+    } catch (error) {
+      if (error?.name === 'AbortError' || signal?.aborted || !mountedRef.current) return undefined;
+      setModelCatalog(EMPTY_MODEL_CATALOG);
+      setModelCatalogError(presentError(error).message);
+      return undefined;
+    }
+    return undefined;
+  }, [invoke]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void loadModelCatalog({ signal: controller.signal });
+    return () => controller.abort();
+  }, [loadModelCatalog]);
 
   React.useEffect(() => {
     if (model.phase !== 'ready') return undefined;
@@ -688,6 +733,8 @@ export function WeixinSettingsTab({ rpcCall }) {
 
   return h(AgentPresetCatalogContext.Provider, {
     value: model.agentPresetCatalog ?? EMPTY_AGENT_PRESET_CATALOG,
+  }, h(ModelCatalogContext.Provider, {
+    value: modelCatalog ?? EMPTY_MODEL_CATALOG,
   }, h('section', { className: 'dxw-page dim-channelPage', 'aria-label': '微信设置' },
     h(Heading, {
       totals: model.totals,
@@ -724,13 +771,18 @@ export function WeixinSettingsTab({ rpcCall }) {
                   onAgentPresetSave: (account, agentPreset) => saveBotSetting(
                     account, 'preset', WEIXIN_ENDPOINTS.setAgentPreset, { agentPreset },
                   ),
+                  onDefaultModelSave: (account, model) => saveBotSetting(
+                    account, 'default-model', WEIXIN_ENDPOINTS.setDefaultModel, { model },
+                  ),
                   onContextEnhancementSave: (account, config) => saveBotSetting(
                     account, 'context-enhancement', WEIXIN_ENDPOINTS.setContextEnhancement, { config },
                   ),
+                  catalogError: modelCatalogError,
+                  onRefreshModelCatalog: () => void loadModelCatalog(),
                   onRequestRemove: (account) => setRemoveTarget(account.botId),
                   onConfirmRemove: (account) => void remove(account),
                   onCancelRemove: () => setRemoveTarget(null),
                 })
               : null),
-  ));
+  )));
 }

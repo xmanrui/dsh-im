@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- 九个 IM 渠道新增机器人级“默认模型”配置：每个机器人可在设置卡片中选择自己的默认模型（可含推理等级），或通过 `/model default <序号或 Provider/模型ID> [推理等级ID]` 设置、`/model default clear` 恢复跟随 Host 默认。该选择在机器人创建新 Harness 会话时立即应用，已有会话不受影响；配置的模型不可用时新会话创建会明确报错而不是静默改用其他模型。
+  All nine IM channels now support a per-bot default model: each bot can pick its own default model (with an optional reasoning effort) on its settings card, or set it with `/model default <index or provider/model-id> [reasoning effort ID]` and restore the Host default with `/model default clear`. The selection is applied the moment the bot creates a new Harness Session, while existing Sessions are untouched; if the configured model becomes unavailable, new-Session creation fails with a clear message instead of silently switching models.
+
 ## [4.4.0] - 2026-09-01
 
 ### Added / 新增

@@ -13,6 +13,7 @@ import {
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
+import { cachedModelCatalog } from '../../../../src/channels/shared/default-model.mjs';
 import {
   createDeliveryAdapter,
   supportsDeliveryChannel,
@@ -58,6 +59,7 @@ export async function createTokenProductionController(ctx, config, internals, de
   const logger = typeof ctx.logger === 'function'
     ? ctx.logger(`dsh-im:${channel}`) : (ctx.logger ?? console);
   const agentPresetCatalog = () => listAgentPresetCatalog(ctx);
+  const modelCatalog = cachedModelCatalog(() => harness.listModels());
   const paths = pluginPaths(config, channel);
   const configStore = await new ResolvedConfigStore(paths.config).load();
   const defaultWorkspace = resolve(config.workspace ?? process.cwd());
@@ -149,6 +151,7 @@ export async function createTokenProductionController(ctx, config, internals, de
     workspaces,
     stateFor,
     agentPresetCatalog,
+    modelCatalog,
   });
   const supervisor = createSupervisor({
     channel,

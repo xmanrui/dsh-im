@@ -11,6 +11,12 @@ import {
   SET_AGENT_PRESET_ENDPOINT,
   validAgentPresetPayload,
 } from './agent-preset-rpc.mjs';
+import {
+  MODEL_CATALOG_ENDPOINT,
+  publicDefaultModelError,
+  SET_DEFAULT_MODEL_ENDPOINT,
+  validDefaultModelPayload,
+} from './default-model-rpc.mjs';
 
 export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   status: 'connection.status',
@@ -19,6 +25,8 @@ export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   deleteBot: 'bot.delete',
   setWorkspace: SET_WORKSPACE_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
+  setDefaultModel: SET_DEFAULT_MODEL_ENDPOINT,
+  modelCatalog: MODEL_CATALOG_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
 });
@@ -75,6 +83,13 @@ function payloadFailure(endpoint, payload) {
     return validAgentPresetPayload(payload)
       ? null : '请选择 Agent Preset。';
   }
+  if (endpoint === TOKEN_BOT_ENDPOINTS.setDefaultModel) {
+    return validDefaultModelPayload(payload)
+      ? null : '请提交有效的默认模型设置。';
+  }
+  if (endpoint === TOKEN_BOT_ENDPOINTS.modelCatalog) {
+    return exactKeys(payload, []) ? null : 'bot.model.catalog does not accept fields.';
+  }
   if (endpoint === TOKEN_BOT_ENDPOINTS.setContextEnhancement) {
     return validContextEnhancementPayload(payload)
       ? null : '请提交有效的上下文增强设置。';
@@ -99,6 +114,8 @@ function sanitizePublic(value) {
 function operationError(channel, error) {
   const workspaceError = publicWorkspaceError(error);
   if (workspaceError) return workspaceError;
+  const defaultModelError = publicDefaultModelError(error);
+  if (defaultModelError) return defaultModelError;
   if (error?.code === 'webhook-configured') {
     return { code: 'webhook-configured', message: error.message };
   }
@@ -173,6 +190,12 @@ export function createTokenBotRpcHandler(controller, { channel }) {
       } else if (endpoint === TOKEN_BOT_ENDPOINTS.setAgentPreset) {
         if (typeof controller.updateAgentPreset !== 'function') throw new Error('Agent preset update is unavailable');
         value = await controller.updateAgentPreset(payload.botId, payload.agentPreset);
+      } else if (endpoint === TOKEN_BOT_ENDPOINTS.setDefaultModel) {
+        if (typeof controller.updateDefaultModel !== 'function') throw new Error('Default model update is unavailable');
+        value = await controller.updateDefaultModel(payload.botId, payload.model);
+      } else if (endpoint === TOKEN_BOT_ENDPOINTS.modelCatalog) {
+        if (typeof controller.listModelCatalog !== 'function') throw new Error('Model catalog is unavailable');
+        value = await controller.listModelCatalog();
       } else {
         value = await controller.deleteBot(payload.botId);
       }

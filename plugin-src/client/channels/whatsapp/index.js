@@ -10,6 +10,12 @@ import {
   AgentPresetEditor,
   EMPTY_AGENT_PRESET_CATALOG,
 } from '../../agent-preset.js';
+import {
+  DefaultModelEditor,
+  EMPTY_MODEL_CATALOG,
+  ModelCatalogContext,
+  normalizeModelCatalog,
+} from '../../default-model.js';
 import { useWorkspaceSnapshotFence } from '../../workspace-snapshot-fence.js';
 import {
   BotSettingsButton,
@@ -186,7 +192,10 @@ export function WhatsappAccountCard({
   onReconnect,
   onWorkspaceSave,
   onAgentPresetSave,
+  onDefaultModelSave,
   onContextEnhancementSave,
+  catalogError,
+  onRefreshModelCatalog,
   onRequestRemove,
   onConfirmRemove,
   onCancelRemove,
@@ -231,6 +240,13 @@ export function WhatsappAccountCard({
         disabled: Boolean(busy),
         onSave: onAgentPresetSave,
       }),
+      h(DefaultModelEditor, {
+        defaultModel: account.defaultModel,
+        disabled: Boolean(busy),
+        onSave: onDefaultModelSave,
+        catalogError,
+        onRefreshCatalog: onRefreshModelCatalog,
+      }),
       h(ContextEnhancementEditor, {
         config: account.contextEnhancement,
         disabled: Boolean(busy),
@@ -268,6 +284,8 @@ export function WhatsappSettingsTab({ rpcCall }) {
     agentPresetCatalog: EMPTY_AGENT_PRESET_CATALOG,
   });
   const [provision, setProvision] = React.useState(null);
+  const [modelCatalog, setModelCatalog] = React.useState(EMPTY_MODEL_CATALOG);
+  const [modelCatalogError, setModelCatalogError] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [busyByBot, setBusyByBot] = React.useState({});
   const [testNoticeByBot, setTestNoticeByBot] = React.useState({});
@@ -328,6 +346,30 @@ export function WhatsappSettingsTab({ rpcCall }) {
     void loadStatus({ signal: controller.signal, restore: true });
     return () => controller.abort();
   }, [loadStatus]);
+
+  const loadModelCatalog = React.useCallback(async ({ signal } = {}) => {
+    if (!mounted.current || signal?.aborted) return undefined;
+    try {
+      const catalog = normalizeModelCatalog(
+        await invoke(WHATSAPP_ENDPOINTS.modelCatalog, {}, signal),
+      );
+      if (!mounted.current || signal?.aborted) return undefined;
+      setModelCatalog(catalog);
+      setModelCatalogError(null);
+    } catch (error) {
+      if (error?.name === 'AbortError' || signal?.aborted || !mounted.current) return undefined;
+      setModelCatalog(EMPTY_MODEL_CATALOG);
+      setModelCatalogError(presentError(error).message);
+      return undefined;
+    }
+    return undefined;
+  }, [invoke]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void loadModelCatalog({ signal: controller.signal });
+    return () => controller.abort();
+  }, [loadModelCatalog]);
 
   React.useEffect(() => {
     if (model.phase !== 'ready') return undefined;
@@ -493,12 +535,20 @@ export function WhatsappSettingsTab({ rpcCall }) {
               WHATSAPP_ENDPOINTS.setAgentPreset,
               { botId: account.botId, agentPreset },
             ),
+            onDefaultModelSave: (defaultModel) => botAction(
+              account,
+              'default-model',
+              WHATSAPP_ENDPOINTS.setDefaultModel,
+              { botId: account.botId, model: defaultModel },
+            ),
             onContextEnhancementSave: (config) => botAction(
               account,
               'context-enhancement',
               WHATSAPP_ENDPOINTS.setContextEnhancement,
               { botId: account.botId, config },
             ),
+            catalogError: modelCatalogError,
+            onRefreshModelCatalog: () => void loadModelCatalog(),
             onRequestRemove: () => setRemoveTarget(account.botId),
             onCancelRemove: () => setRemoveTarget(null),
             onConfirmRemove: async () => {
@@ -513,6 +563,8 @@ export function WhatsappSettingsTab({ rpcCall }) {
 
   return h(AgentPresetCatalogContext.Provider, {
     value: model.agentPresetCatalog ?? EMPTY_AGENT_PRESET_CATALOG,
+  }, h(ModelCatalogContext.Provider, {
+    value: modelCatalog ?? EMPTY_MODEL_CATALOG,
   }, h('section', {
     className: 'ddt-page dwa-page dim-channelPage',
     'aria-label': 'WhatsApp 设置',
@@ -550,5 +602,5 @@ export function WhatsappSettingsTab({ rpcCall }) {
               : model.bots.length === 0
                 ? h(EmptyView, { busy, onStart: () => void startProvisioning(false) })
                 : null,
-          botList)));
+          botList))));
 }
