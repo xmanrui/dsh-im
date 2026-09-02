@@ -1188,7 +1188,7 @@ export class DingtalkHarnessBridge {
         cardStarted = await cardStream.start(t(CARD_INITIAL_TEXT));
         if (cardStarted) cardStartedAt = startedAt;
       }
-      const { answer, artifacts = [] } = await askInWorkspaceSession({
+      const { answer, artifacts = [], sessionId: resultSessionId } = await askInWorkspaceSession({
         harness: this.#harness,
         state: this.#state,
         key,
@@ -1310,6 +1310,23 @@ export class DingtalkHarnessBridge {
       if (!textDeliveryError && delivery.artifactSendErrors === 0) {
         clearLastMessageFailure(this.#status);
       }
+      // 正常应答后观察绑定会话：后续外来 turn（如 dsh 后台任务完成）镜像推送。
+      void this.#deferredDeliverer.watchSession({
+        key,
+        sessionId: resultSessionId,
+        route: {
+          sessionWebhook,
+          sessionWebhookExpiredTime: Number(message.sessionWebhookExpiredTime) || 0,
+          fallbackTarget: fileTarget(message, sender, this.#clientId),
+          cardTarget: cardTarget(message, sender),
+          at: this.#atUsersFor(message),
+        },
+      }).catch((error) => {
+        this.#logger.warn?.(
+          '[dsh-dingtalk] failed to watch the session for later turns:',
+          error?.message ?? error,
+        );
+      });
       return delivery.receipt;
     } catch (error) {
       let batchFailureMessage = null;

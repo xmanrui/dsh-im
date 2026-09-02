@@ -31,6 +31,26 @@ function webhookUsable(route, now = Date.now()) {
   return expiry <= 0 || now < expiry - WEBHOOK_EXPIRY_MARGIN_MS;
 }
 
+// 提取目标 turn 的最后一个 assistant/message 全文（终稿语义与
+// HarnessReplyTracker 一致，但镜像会话观察不绑定 promptRpcId）。
+function watchTurnText(events, turn) {
+  let answer = '';
+  for (const entry of [...events]
+    .map((item) => item?.event ?? item)
+    .filter(Boolean)
+    .sort((left, right) => (left.seq ?? -1) - (right.seq ?? -1))) {
+    if (entry.type !== 'assistant/message' || entry.data?.turn !== turn) continue;
+    const text = Array.isArray(entry.data?.message?.content)
+      ? entry.data.message.content
+        .flatMap((block) => (block?.type === 'text' && typeof block.text === 'string' ? [block.text] : []))
+        .join('\n')
+        .trim()
+      : '';
+    if (text) answer = text;
+  }
+  return answer;
+}
+
 /**
  * 钉钉延迟交付：ask 以 deferOnTimeout 交回仍在运行的 turn 后，
  * 在其终态（turn/end，任意 reason）时投递结果。路由优先当次会话的
@@ -50,6 +70,8 @@ export function createDeferredDeliverer({
   sendText,
 }) {
   const entries = new Map(); // `${sessionId}\0${turn}` → entry
+  const watchEntries = new Map(); // conversationKey → { sessionId, route, lastSeq }
+  const watchScans = new Map();   // `watch\0${key}` → 在途扫描（串行防重）
   const watcherSignal = signal ?? new AbortController().signal;
   const scans = new Map(); // entryKey → 在途 scan promise（串行防重复）
   let watcherStarted = false;
@@ -59,9 +81,13 @@ export function createDeferredDeliverer({
   // 主动推送与当前会话绑定关联（用户语义）：仅在 turn 终态时刻评估，
   // 运行期间切回有效，完成后再切回不补投。state 不提供 sessionFor 时
   // 视为匹配（能力探测降级，不吞结果）。
-  function bindingMatches(entry) {
+  function bindingCurrent(key, sessionId) {
     if (typeof state?.sessionFor !== 'function') return true;
-    return state.sessionFor(entry.key) === entry.deferred.sessionId;
+    return state.sessionFor(key) === sessionId;
+  }
+
+  function bindingMatches(entry) {
+    return bindingCurrent(entry.key, entry.deferred.sessionId);
   }
 
   async function deliverCard(entry, text) {
@@ -152,6 +178,17 @@ export function createDeferredDeliverer({
       status.messagesReplied = (status.messagesReplied ?? 0) + 1;
       status.lastReplyAt = new Date().toISOString();
     }
+    // 交付成功后接续观察该 session 的后续 turn（deferred 与 watch 语义闭环）。
+    // '__watch__' 标记的 shim 投递不在此列——防止 scanWatch 的投递递归注册观察。
+    if (entry.deferred.sessionId && entry.deferred.sessionId !== '__watch__') {
+      void watchSession({
+        key: entry.key,
+        sessionId: entry.deferred.sessionId,
+        route: entry.route,
+      }).catch((error) => {
+        logger.warn?.('[dsh-dingtalk] failed to continue watching after delivery:', error?.message ?? error);
+      });
+    }
   }
 
   async function deliver(entry, tracker) {
@@ -213,10 +250,14 @@ export function createDeferredDeliverer({
             || event?.data?.turn === null) return;
           const entry = entries.get(`${sessionId}\0${event.data.turn}`);
           if (entry) void scanEntry(entry);
+          for (const [conversationKey, watchEntry] of watchEntries) {
+            if (watchEntry.sessionId === sessionId) void scanWatch(conversationKey);
+          }
         },
         onReconnect: () => {
           // 断连期间可能错过 turn/end，重连后对账。
           for (const entry of [...entries.values()]) void scanEntry(entry);
+          for (const conversationKey of [...watchEntries.keys()]) void scanWatch(conversationKey);
         },
       });
       Promise.resolve(watcher).catch((error) => {
@@ -253,5 +294,74 @@ export function createDeferredDeliverer({
     return false;
   }
 
-  return { register, pendingFor };
+  async function scanWatch(conversationKey) {
+    const scanKey = `watch\0${conversationKey}`;
+    if (watchScans.has(scanKey)) return watchScans.get(scanKey);
+    const task = (async () => {
+      if (watcherSignal.aborted) return;
+      const entry = watchEntries.get(conversationKey);
+      if (!entry) return;
+      const history = await harness.rpc(
+        'session.history',
+        { sessionId: entry.sessionId, maxMessages: 50 },
+        30_000,
+        { signal: watcherSignal },
+      );
+      const events = [...(history.events ?? [])]
+        .map((item) => item?.event ?? item)
+        .filter(Boolean)
+        .sort((left, right) => (left.seq ?? -1) - (right.seq ?? -1));
+      for (const event of events) {
+        if (event.type !== 'turn/end' || event.seq <= entry.lastSeq) continue;
+        if (!bindingCurrent(conversationKey, entry.sessionId)) {
+          watchEntries.delete(conversationKey);
+          logger.warn?.('[dsh-dingtalk] session watch dropped: conversation moved to another session');
+          return;
+        }
+        const turn = event.data?.turn;
+        const answer = watchTurnText(events, turn);
+        const shim = {
+          key: conversationKey,
+          route: entry.route,
+          deferred: { sessionId: '__watch__', releaseOwnership: () => {} },
+        };
+        const text = deferredTerminalText(event.data?.reason, answer);
+        const cardInstanceId = await deliverCard(shim, text);
+        if (cardInstanceId !== null) {
+          await deliverText(shim, text, [cardInstanceId]);
+        } else {
+          await deliverText(shim, text);
+        }
+        entry.lastSeq = event.seq;
+      }
+    })().catch((error) => {
+      if (!watcherSignal.aborted) {
+        logger.warn?.('[dsh-dingtalk] session watch scan failed:', error?.message ?? error);
+      }
+    }).finally(() => watchScans.delete(scanKey));
+    watchScans.set(scanKey, task);
+    return task;
+  }
+
+  async function watchSession({ key, sessionId, route }) {
+    if (typeof sessionId !== 'string' || !sessionId
+      || !route?.sessionWebhook || !route?.fallbackTarget) {
+      throw new TypeError('watchSession requires sessionId and a delivery route');
+    }
+    // 能力探测：harness 无 rpc（如精简测试夹具）时静默不观察，不制造噪音。
+    if (typeof harness?.rpc !== 'function') return;
+    const history = await harness.rpc(
+      'session.history',
+      { sessionId, maxMessages: 50 },
+      30_000,
+      { signal: watcherSignal },
+    );
+    const baseline = Math.max(-1, ...(history.events ?? [])
+      .map((item) => item?.event?.seq ?? item?.seq ?? -1));
+    watchEntries.set(key, { sessionId, route, lastSeq: baseline });
+    ensureWatcher();
+    await scanWatch(key);
+  }
+
+  return { register, pendingFor, watchSession };
 }

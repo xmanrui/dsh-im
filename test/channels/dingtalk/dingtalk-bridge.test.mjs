@@ -3031,6 +3031,38 @@ test('switching sessions without a background task sends no running notice', asy
   assert.doesNotMatch(fx.sent.at(-1), /仍有任务在后台运行/);
 });
 
+test('a normal DingTalk answer starts watching the session for later turns', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('p2p:staff-approved', 'session-defer');
+  const fx = deferredHarnessFixture({ history: { events: [] } });
+  fx.harness.ask = async () => '快答';
+  const bridge = new DingtalkHarnessBridge({
+    api: fx.api,
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    harness: fx.harness,
+    state: fixture.state,
+  });
+  await bridge.accept(message('ding-watch-1', '普通问题'));
+  await bridge.waitForIdle();
+  assert.ok(fx.sent.includes('快答'), 'normal answer delivered');
+  // 外来 turn（turn 9，如 dsh 后台任务完成唤起）终态后无需任何用户操作，答案送达。
+  fx.setHistory({ events: [
+    { seq: 1, type: 'turn/start', data: { turn: 9 } },
+    {
+      seq: 2,
+      type: 'assistant/message',
+      data: { turn: 9, message: { content: [{ type: 'text', text: '后台完成' }] } },
+    },
+    { seq: 3, type: 'turn/end', data: { turn: 9, reason: { kind: 'completed' } } },
+  ] });
+  fx.listeners[0].onSessionEvent({
+    sessionId: 'session-defer',
+    event: { type: 'turn/end', seq: 3, data: { turn: 9, reason: { kind: 'completed' } } },
+  });
+  await eventually(() => fx.sent.some((text) => text.includes('后台完成')));
+});
+
 test('DingTalk default reply timeout is a three-minute foreground window', () => {
   assert.equal(DINGTALK_DEFAULT_REPLY_TIMEOUT_MS, 180_000);
 });

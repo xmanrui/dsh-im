@@ -132,6 +132,22 @@ const CARD_ROUTE = {
   cardTarget: { type: 'user', userId: 'staff-approved' },
 };
 
+function watchHistoryFixture({ turns = [] } = {}) {
+  // turns: [{ turn, text, reason, seqBase }] 生成 turn/start + assistant/message + turn/end
+  const events = [];
+  for (const [i, { turn, text = `后续答案 ${turn}`, reason = { kind: 'completed' } }] of turns.entries()) {
+    const seq = 1 + i * 3;
+    events.push({ seq, type: 'turn/start', data: { turn } });
+    events.push({
+      seq: seq + 1,
+      type: 'assistant/message',
+      data: { turn, message: { content: [{ type: 'text', text }] } },
+    });
+    events.push({ seq: seq + 2, type: 'turn/end', data: { turn, reason } });
+  }
+  return { events };
+}
+
 test('deferredTerminalText keeps error semantics for every terminal reason', () => {
   assert.equal(deferredTerminalText({ kind: 'completed' }, '答案'), '答案');
   assert.equal(deferredTerminalText(null, '答案'), '答案');
@@ -326,4 +342,89 @@ test('pendingFor reports in-flight entries for the conversation binding', async 
   assert.equal(fx.deliverer.pendingFor('p2p:staff-approved', 'session-defer'), true);
   assert.equal(fx.deliverer.pendingFor('p2p:staff-approved', 'session-other'), false);
   assert.equal(fx.deliverer.pendingFor('group:conversation-1', 'session-defer'), false);
+});
+
+test('a watched session pushes later foreign turns to the chat', async () => {
+  const cards = { created: [], finished: [], failed: [] };
+  const fx = delivererFixture({ history: watchHistoryFixture({ turns: [{ turn: 5 }] }), cards });
+  await fx.deliverer.watchSession({
+    key: 'p2p:staff-approved',
+    sessionId: 'session-defer',
+    route: CARD_ROUTE,
+  });
+  // 基线吞掉已有 turn 5；后续 turn 6 经事件推送
+  fx.setHistory(watchHistoryFixture({ turns: [{ turn: 5 }, { turn: 6, text: '后台任务完成结果' }] }));
+  fx.listeners[0].onSessionEvent({
+    sessionId: 'session-defer',
+    event: { type: 'turn/end', seq: 8, data: { turn: 6, reason: { kind: 'completed' } } },
+  });
+  await eventually(() => cards.created.length === 1);
+  assert.equal(cards.created[0].initialText, '后台任务完成结果');
+  assert.equal(cards.finished.length, 1);
+  // 观察条目存续：再来一 turn 仍推
+  fx.setHistory(watchHistoryFixture({ turns: [
+    { turn: 5 }, { turn: 6, text: '后台任务完成结果' }, { turn: 7, text: '第二条后台结果' },
+  ] }));
+  fx.listeners[0].onSessionEvent({
+    sessionId: 'session-defer',
+    event: { type: 'turn/end', seq: 11, data: { turn: 7, reason: { kind: 'completed' } } },
+  });
+  await eventually(() => cards.created.length === 2);
+  assert.equal(cards.created[1].initialText, '第二条后台结果');
+});
+
+test('the just-answered turn is not re-pushed (baseline)', async () => {
+  const cards = { created: [], finished: [], failed: [] };
+  const fx = delivererFixture({ history: watchHistoryFixture({ turns: [{ turn: 5 }] }), cards });
+  await fx.deliverer.watchSession({ key: 'p2p:staff-approved', sessionId: 'session-defer', route: CARD_ROUTE });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(cards.created.length, 0, 'baseline seq swallows the already-answered turn');
+});
+
+test('a watch entry stops pushing once the binding moves away', async () => {
+  const cards = { created: [], finished: [], failed: [] };
+  const fx = delivererFixture({ history: watchHistoryFixture({ turns: [] }), cards });
+  await fx.deliverer.watchSession({ key: 'p2p:staff-approved', sessionId: 'session-defer', route: CARD_ROUTE });
+  fx.setBinding('session-other');
+  fx.setHistory(watchHistoryFixture({ turns: [{ turn: 6 }] }));
+  fx.listeners[0].onSessionEvent({
+    sessionId: 'session-defer',
+    event: { type: 'turn/end', seq: 3, data: { turn: 6, reason: { kind: 'completed' } } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(cards.created.length, 0);
+  // 条目已删：切回绑定后也不会补推历史
+  fx.setBinding('session-defer');
+  fx.listeners[0].onSessionEvent({
+    sessionId: 'session-defer',
+    event: { type: 'turn/end', seq: 3, data: { turn: 6, reason: { kind: 'completed' } } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(cards.created.length, 0);
+});
+
+test('reconnect rescan delivers turns missed while offline', async () => {
+  const cards = { created: [], finished: [], failed: [] };
+  const fx = delivererFixture({ history: watchHistoryFixture({ turns: [] }), cards });
+  await fx.deliverer.watchSession({ key: 'p2p:staff-approved', sessionId: 'session-defer', route: CARD_ROUTE });
+  fx.setHistory(watchHistoryFixture({ turns: [{ turn: 6, text: '离线期间完成' }] }));
+  fx.listeners[0].onReconnect?.();
+  await eventually(() => cards.created.length === 1);
+  assert.equal(cards.created[0].initialText, '离线期间完成');
+});
+
+test('a successful deferred delivery continues watching the session', async () => {
+  const cards = { created: [], finished: [], failed: [] };
+  const fx = delivererFixture({ cards }); // historyFixture 默认终态 → 延迟交付立即发生
+  await fx.deliverer.register({ key: 'p2p:staff-approved', deferred: deferredFixture(), route: CARD_ROUTE });
+  await eventually(() => cards.finished.length === 1); // 延迟结果卡片
+  // 同 session 后续 turn 自动推送（观察已由延迟交付接续注册）
+  fx.setHistory(watchHistoryFixture({ turns: [
+    { turn: 1 }, { turn: 2, text: '后台续作结果' },
+  ] }));
+  fx.listeners[0].onSessionEvent({
+    sessionId: 'session-defer',
+    event: { type: 'turn/end', seq: 8, data: { turn: 2, reason: { kind: 'completed' } } },
+  });
+  await eventually(() => cards.created.some(({ initialText }) => initialText === '后台续作结果'));
 });
