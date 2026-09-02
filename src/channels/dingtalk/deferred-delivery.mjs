@@ -89,6 +89,7 @@ export function createDeferredDeliverer({
           clientId,
           clientSecret,
           cardInstanceId,
+          text: t('卡片已结束，请查看后续消息。'),
           target: cardTarget,
           signal: AbortSignal.timeout(5_000),
         }).catch(() => undefined);

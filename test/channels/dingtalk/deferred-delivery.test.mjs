@@ -84,6 +84,9 @@ function delivererFixture({
         return { delivered: true, completed: true };
       },
       failAiCard: async (request) => {
+        if (typeof request?.text !== 'string' || !request.text.trim()) {
+          throw new TypeError('text is required');
+        }
         cards.failed.push(request);
         return true;
       },
@@ -245,6 +248,7 @@ test('a failed card finalize marks the card failed and falls back to text', asyn
   await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: CARD_ROUTE });
   assert.equal(cards.failed.length, 1);
   assert.equal(cards.failed[0].cardInstanceId, 'card-defer-1');
+  assert.equal(cards.failed[0].text, '卡片已结束，请查看后续消息。');
   assert.equal(fx.sent.length, 1, 'text fallback after finalize failure');
 });
 
