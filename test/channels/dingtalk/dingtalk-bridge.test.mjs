@@ -2820,6 +2820,11 @@ function deferredHarnessFixture({ history = { events: [] }, cards = null } = {})
     harness: {
       sessionExists: async () => true,
       rpc: async (method) => (method === 'session.history' ? history : null),
+      bindWorkspaceSession: async (_key, sessionId) => ({
+        sessionId,
+        workspace: '/tmp/work',
+        title: '后台任务会话',
+      }),
       watchHarnessEvents: ({ signal, onSessionEvent, onReconnect }) => {
         listeners.push({ onSessionEvent, onReconnect });
         return new Promise((resolve) => {
@@ -2983,6 +2988,47 @@ test('DingTalk delivers a deferred group result as a finalized AI card', async (
     false,
     'card delivery must not also send the result as webhook text',
   );
+});
+
+test('switching back to a session with a background task notifies the user', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('p2p:staff-approved', 'session-defer');
+  const fx = deferredHarnessFixture({
+    history: { events: [
+      { seq: 1, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, type: 'user/message', data: { turn: 1, source: { rpcId: 'dingtalk-defer-1' } } },
+    ] },
+  });
+  // ask 返回 deferred 句柄 → 转后台条目在途
+  const bridge = new DingtalkHarnessBridge({
+    api: fx.api,
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    harness: fx.harness,
+    state: fixture.state,
+  });
+  await bridge.accept(message('ding-defer-h-1', '慢任务'));
+  await bridge.waitForIdle();
+  // /session 切回（绑定本就未变，同 id 重绑同样触发）
+  await bridge.accept(message('ding-defer-h-2', '/session session-defer'));
+  await bridge.waitForIdle();
+  assert.match(fx.sent.at(-1), /仍有任务在后台运行/);
+});
+
+test('switching sessions without a background task sends no running notice', async () => {
+  const fixture = stateFixture();
+  const fx = deferredHarnessFixture();
+  const bridge = new DingtalkHarnessBridge({
+    api: fx.api,
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    harness: fx.harness,
+    state: fixture.state,
+  });
+  await bridge.accept(message('ding-defer-h-3', '/session session-defer'));
+  await bridge.waitForIdle();
+  assert.match(fx.sent.at(-1), /当前聊天已绑定会话/);
+  assert.doesNotMatch(fx.sent.at(-1), /仍有任务在后台运行/);
 });
 
 test('DingTalk default reply timeout is a three-minute foreground window', () => {

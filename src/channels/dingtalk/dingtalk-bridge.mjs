@@ -73,6 +73,7 @@ import { createDeferredDeliverer } from './deferred-delivery.mjs';
 const CARD_INITIAL_TEXT = '已连接 DeepSeek Harness，正在思考…';
 const INTERACTION_RESOLVED_TEXT = '这个问题已在其他客户端处理，无需再次回答。';
 const DEFERRED_HANDOFF_NOTICE = '任务仍在运行，已转入后台。完成后我会把结果发到这里；发送 /stop 可停止任务。';
+const DEFERRED_RUNNING_NOTICE = '当前会话仍有任务在后台运行，完成后会推送结果；发送 /stop 可停止任务。';
 
 // 前台等待窗口：超时后转后台（deferOnTimeout 交付），不再是报错阈值。
 export const DINGTALK_DEFAULT_REPLY_TIMEOUT_MS = 180_000;
@@ -1124,6 +1125,22 @@ export class DingtalkHarnessBridge {
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
           await this.#send(sessionWebhook, reply, this.#atUsersFor(message));
+        }
+        if (workspaceCommand.boundSessionId
+          && typeof this.#deferredDeliverer.pendingFor === 'function'
+          && this.#deferredDeliverer.pendingFor(key, workspaceCommand.boundSessionId)) {
+          try {
+            await this.#send(
+              sessionWebhook,
+              t(DEFERRED_RUNNING_NOTICE),
+              this.#atUsersFor(message),
+            );
+          } catch (error) {
+            this.#logger.warn?.(
+              '[dsh-dingtalk] deferred running notice failed:',
+              error?.message ?? error,
+            );
+          }
         }
         return;
       }

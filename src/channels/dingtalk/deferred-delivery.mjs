@@ -246,5 +246,12 @@ export function createDeferredDeliverer({
     await scanEntry(entry);
   }
 
-  return { register };
+  function pendingFor(key, sessionId) {
+    for (const entry of entries.values()) {
+      if (entry.key === key && entry.deferred.sessionId === sessionId) return true;
+    }
+    return false;
+  }
+
+  return { register, pendingFor };
 }

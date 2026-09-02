@@ -59,4 +59,7 @@ export default {
   '任务已停止。': 'Task stopped.',
   '任务已中止。': 'Task aborted.',
   '任务已结束。': 'Task ended.',
+  // Deferred-turn bridge notices (dingtalk-bridge.mjs, constants passed via t())
+  '当前会话仍有任务在后台运行，完成后会推送结果；发送 /stop 可停止任务。':
+    'This session still has a task running in the background. The result will be pushed when it completes; send /stop to stop it.',
 };

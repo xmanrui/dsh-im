@@ -319,3 +319,11 @@ test('a state without sessionFor keeps delivering (capability-graceful)', async 
   await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: P2P_ROUTE });
   assert.deepEqual(fx.sent, ['后台完成的结果']);
 });
+
+test('pendingFor reports in-flight entries for the conversation binding', async () => {
+  const fx = delivererFixture({ history: historyFixture({ ended: false }) });
+  await fx.deliverer.register({ key: 'p2p:staff-approved', deferred: deferredFixture(), route: P2P_ROUTE });
+  assert.equal(fx.deliverer.pendingFor('p2p:staff-approved', 'session-defer'), true);
+  assert.equal(fx.deliverer.pendingFor('p2p:staff-approved', 'session-other'), false);
+  assert.equal(fx.deliverer.pendingFor('group:conversation-1', 'session-defer'), false);
+});
