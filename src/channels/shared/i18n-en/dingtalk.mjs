@@ -49,4 +49,14 @@ export default {
   '钉钉机器人（{clientId}）': 'DingTalk bot ({clientId})',
   '钉钉 Stream 消息连接运行正常': 'The DingTalk Stream message connection is running normally',
   '钉钉消息连接当前离线': 'The DingTalk message connection is currently offline',
+
+  // Deferred-turn terminal copy (deferred-delivery.mjs)
+  '任务已结束，但没有可发送的文本结果。': 'The task ended, but there is no text result to send.',
+  '任务失败：{detail}': 'Task failed: {detail}',
+  '任务失败：模型运行出错。': 'Task failed: the model run encountered an error.',
+  '任务已达到回复长度上限并结束。': 'The task ended after reaching the reply length limit.',
+  '任务被安全策略拦截。': 'The task was blocked by the security policy.',
+  '任务已停止。': 'Task stopped.',
+  '任务已中止。': 'Task aborted.',
+  '任务已结束。': 'Task ended.',
 };
