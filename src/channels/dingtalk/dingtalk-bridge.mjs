@@ -68,9 +68,11 @@ import {
   evaluateInboundAccess,
 } from '../shared/inbound-access.mjs';
 import { t } from '../shared/i18n.mjs';
+import { createDeferredDeliverer } from './deferred-delivery.mjs';
 
 const CARD_INITIAL_TEXT = '已连接 DeepSeek Harness，正在思考…';
 const INTERACTION_RESOLVED_TEXT = '这个问题已在其他客户端处理，无需再次回答。';
+const DEFERRED_HANDOFF_NOTICE = '任务仍在运行，已转入后台。完成后我会把结果发到这里；发送 /stop 可停止任务。';
 
 const HELP_TEXT_LINES = [
   '钉钉机器人已连接 DeepSeek Harness。',
@@ -491,6 +493,7 @@ export class DingtalkHarnessBridge {
   #acceptedMessageIds = new Map();
   #approvals;
   #batchInputs = new BatchInputManager();
+  #deferredDeliverer;
 
   constructor({
     api,
@@ -523,6 +526,17 @@ export class DingtalkHarnessBridge {
     this.#logger = logger;
     this.#approvals = new HarnessApprovalQueue({ label: 'DingTalk', logger });
     this.#replyTimeoutMs = replyTimeoutMs;
+    this.#deferredDeliverer = createDeferredDeliverer({
+      api,
+      clientId: this.#clientId,
+      clientSecret: this.#clientSecret,
+      harness,
+      state,
+      status: this.#status,
+      logger,
+      signal,
+      sendText: (sessionWebhook, text, at) => this.#send(sessionWebhook, text, at),
+    });
     this.#reactionTimeoutMs = Number.isFinite(reactionTimeoutMs) && reactionTimeoutMs > 0
       ? Math.floor(reactionTimeoutMs)
       : 5_000;
@@ -1165,6 +1179,7 @@ export class DingtalkHarnessBridge {
         existsOptions: { signal: this.#signal },
         askOptions: {
           timeoutMs: this.#replyTimeoutMs,
+          deferOnTimeout: true,
           signal: this.#signal,
           control: { owner: this, key },
           onUpdate: cardStarted
@@ -1180,6 +1195,43 @@ export class DingtalkHarnessBridge {
           files: promptMessage.files,
         },
       });
+      if (answer?.deferred === true) {
+        if (batchSubmission) {
+          this.#batchInputs.complete(key, batchSubmission.token);
+          batchSettled = true;
+        }
+        const notice = t(DEFERRED_HANDOFF_NOTICE);
+        try {
+          const streamed = cardStarted && await cardStream.finish(notice);
+          if (!streamed) {
+            await this.#send(sessionWebhook, notice, this.#atUsersFor(message));
+          }
+        } catch (error) {
+          this.#logger.warn?.(
+            '[dsh-dingtalk] deferred handoff notice failed:',
+            error?.message ?? error,
+          );
+        }
+        this.#deferredDeliverer.register({
+          key,
+          deferred: answer,
+          route: {
+            sessionWebhook,
+            sessionWebhookExpiredTime: Number(message.sessionWebhookExpiredTime) || 0,
+            fallbackTarget: fileTarget(message, sender, this.#clientId),
+            at: this.#atUsersFor(message),
+          },
+        }).catch((error) => {
+          this.#logger.warn?.(
+            '[dsh-dingtalk] failed to register a deferred turn:',
+            error?.message ?? error,
+          );
+        });
+        this.#finishStatusReaction(statusReaction, 'clear');
+        increment(this.#status, 'messagesReplied');
+        this.#status.lastReplyAt = new Date().toISOString();
+        return null;
+      }
       if (batchSubmission) {
         this.#batchInputs.complete(key, batchSubmission.token);
         batchSettled = true;

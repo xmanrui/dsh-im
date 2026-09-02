@@ -2798,3 +2798,129 @@ test('DingTalk group batch commands are rejected without reaching Harness', asyn
   assert.equal(asks, 0);
   assert.match(sent.at(-1), /仅支持私聊/);
 });
+
+// ── Deferred handoff: slow turns notify, then push on completion ──────────
+
+function deferredHarnessFixture({ history = { events: [] } } = {}) {
+  const listeners = [];
+  const releaseCalls = [];
+  const sent = [];
+  const proactive = [];
+  return {
+    listeners,
+    releaseCalls,
+    sent,
+    proactive,
+    setHistory: (next) => { history = next; },
+    harness: {
+      sessionExists: async () => true,
+      rpc: async (method) => (method === 'session.history' ? history : null),
+      watchHarnessEvents: ({ signal, onSessionEvent, onReconnect }) => {
+        listeners.push({ onSessionEvent, onReconnect });
+        return new Promise((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener('abort', resolve, { once: true });
+        });
+      },
+      ask: async () => ({
+        deferred: true,
+        sessionId: 'session-defer',
+        turn: 1,
+        promptRpcId: 'dingtalk-defer-1',
+        afterSeq: -1,
+        releaseOwnership: () => releaseCalls.push('release'),
+      }),
+    },
+    api: {
+      sendText: async ({ text }) => {
+        sent.push(text);
+        return { messageId: `ding-${sent.length}` };
+      },
+      sendRobotText: async ({ target, text }) => {
+        proactive.push({ target, text });
+        return {};
+      },
+    },
+  };
+}
+
+test('DingTalk defers a slow turn instead of erroring, then pushes the result', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('p2p:staff-approved', 'session-defer');
+  const fx = deferredHarnessFixture();
+  const bridge = new DingtalkHarnessBridge({
+    api: fx.api,
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    harness: fx.harness,
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('ding-defer-1', '慢任务', {
+    sessionWebhookExpiredTime: Date.now() + 5_400_000,
+  }));
+  await bridge.waitForIdle();
+
+  assert.match(fx.sent.at(-1), /任务仍在运行/);
+  assert.equal(
+    fx.sent.filter((text) => text.includes('MODEL_REPLY_TIMEOUT')
+      || text.includes('等待模型回复超时')).length,
+    0,
+    'deferred handoff must not surface the timeout error',
+  );
+
+  fx.setHistory({ events: [
+    { seq: 1, type: 'turn/start', data: { turn: 1 } },
+    { seq: 2, type: 'user/message', data: { turn: 1, source: { rpcId: 'dingtalk-defer-1' } } },
+    {
+      seq: 3,
+      type: 'assistant/chunk',
+      data: { turn: 1, step: 0, chunk: { type: 'text-delta', index: 0, text: '后台完成的结果' } },
+    },
+    { seq: 4, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ] });
+  fx.listeners[0].onSessionEvent({
+    sessionId: 'session-defer',
+    event: { type: 'turn/end', seq: 4, data: { turn: 1, reason: { kind: 'completed' } } },
+  });
+  await eventually(() => fx.sent.some((text) => text.includes('后台完成的结果')));
+  assert.deepEqual(fx.releaseCalls, ['release']);
+});
+
+test('DingTalk deferred result falls back to proactive delivery after the webhook window', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('p2p:staff-approved', 'session-defer');
+  const fx = deferredHarnessFixture({
+    history: { events: [
+      { seq: 1, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, type: 'user/message', data: { turn: 1, source: { rpcId: 'dingtalk-defer-1' } } },
+      {
+        seq: 3,
+        type: 'assistant/chunk',
+        data: { turn: 1, step: 0, chunk: { type: 'text-delta', index: 0, text: '后台完成的结果' } },
+      },
+      { seq: 4, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+    ] },
+  });
+  const bridge = new DingtalkHarnessBridge({
+    api: fx.api,
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    harness: fx.harness,
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('ding-defer-2', '慢任务', {
+    sessionWebhookExpiredTime: Date.now() - 1_000,
+  }));
+  await bridge.waitForIdle();
+
+  // 注册时 history 已终态 → 立即经主动推送交付，不等待 watcher 事件。
+  assert.equal(fx.proactive.length, 1);
+  assert.deepEqual(fx.proactive[0].target, {
+    type: 'user',
+    userId: 'staff-approved',
+    robotCode: 'ding-client',
+  });
+  assert.match(fx.proactive[0].text, /后台完成的结果/);
+});
