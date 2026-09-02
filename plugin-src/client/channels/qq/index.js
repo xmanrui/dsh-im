@@ -5,6 +5,7 @@ import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from '../.
 import { h } from '../../i18n.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
+import { InboundAttachmentEditor } from '../../inbound-attachment.js';
 import {
   AgentPresetCatalogContext,
   AgentPresetEditor,
@@ -169,6 +170,8 @@ export function AccountCard({
   onWorkspaceSave,
   onAgentPresetSave,
   onContextEnhancementSave,
+      onInboundRetentionSave,
+      onClearInboundAttachments,
   onRequestRemove,
   onConfirmRemove,
   onCancelRemove,
@@ -213,6 +216,12 @@ export function AccountCard({
         config: account.contextEnhancement,
         disabled: Boolean(busy),
         onSave: onContextEnhancementSave,
+      }),
+      h(InboundAttachmentEditor, {
+        retention: account.inboundRetention,
+        disabled: Boolean(busy),
+        onSave: onInboundRetentionSave,
+        onClear: onClearInboundAttachments,
       }),
       h('div', { className: 'ddt-accountFooter dim-cardFooter' },
         h('div', { className: 'dim-cardFooterLayout' },
@@ -489,6 +498,18 @@ export function QqSettingsTab({ rpcCall }) {
               'context-enhancement',
               QQ_ENDPOINTS.setContextEnhancement,
               { botId: account.botId, config },
+            ),
+            onInboundRetentionSave: (retention) => botAction(
+              account,
+              'inbound-retention',
+              QQ_ENDPOINTS.setInboundRetention,
+              { botId: account.botId, retention },
+            ),
+            onClearInboundAttachments: () => botAction(
+              account,
+              'inbound-attachments',
+              QQ_ENDPOINTS.clearInboundAttachments,
+              { botId: account.botId },
             ),
             onRequestRemove: () => setRemoveTarget(account.botId),
             onCancelRemove: () => setRemoveTarget(null),

@@ -16,6 +16,7 @@ import {
 import { createPollScheduler, useAnimationFrameScheduler } from '../../lifecycle.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
+import { InboundAttachmentEditor } from '../../inbound-attachment.js';
 import {
   AgentPresetCatalogContext,
   AgentPresetEditor,
@@ -210,6 +211,8 @@ export function AccountCard({
   onWorkspaceSave,
   onAgentPresetSave,
   onContextEnhancementSave,
+      onInboundRetentionSave,
+      onClearInboundAttachments,
   onRequestRemove,
   onConfirmRemove,
   onCancelRemove,
@@ -255,6 +258,12 @@ export function AccountCard({
         disabled: Boolean(busy),
         onSave: onContextEnhancementSave,
       }),
+      h(InboundAttachmentEditor, {
+        retention: account.inboundRetention,
+        disabled: Boolean(busy),
+        onSave: onInboundRetentionSave,
+        onClear: onClearInboundAttachments,
+      }),
       h('div', { className: 'dxw-accountFooter dim-cardFooter' },
         h('div', { className: 'dim-cardFooterLayout' },
           h('div', { className: 'dxw-actions dim-cardActions' },
@@ -298,6 +307,8 @@ function AccountList(props) {
         onWorkspaceSave: (workspace) => props.onWorkspaceSave(account, workspace),
         onAgentPresetSave: (agentPreset) => props.onAgentPresetSave(account, agentPreset),
         onContextEnhancementSave: (config) => props.onContextEnhancementSave(account, config),
+        onInboundRetentionSave: (retention) => props.onInboundRetentionSave(account, retention),
+        onClearInboundAttachments: () => props.onClearInboundAttachments(account),
         onRequestRemove: () => props.onRequestRemove(account),
         onConfirmRemove: () => props.onConfirmRemove(account),
         onCancelRemove: props.onCancelRemove,
@@ -726,6 +737,12 @@ export function WeixinSettingsTab({ rpcCall }) {
                   ),
                   onContextEnhancementSave: (account, config) => saveBotSetting(
                     account, 'context-enhancement', WEIXIN_ENDPOINTS.setContextEnhancement, { config },
+                  ),
+                  onInboundRetentionSave: (account, retention) => saveBotSetting(
+                    account, 'inbound-retention', WEIXIN_ENDPOINTS.setInboundRetention, { retention },
+                  ),
+                  onClearInboundAttachments: (account) => saveBotSetting(
+                    account, 'inbound-attachments', WEIXIN_ENDPOINTS.clearInboundAttachments, {},
                   ),
                   onRequestRemove: (account) => setRemoveTarget(account.botId),
                   onConfirmRemove: (account) => void remove(account),

@@ -11,6 +11,12 @@ import {
   SET_AGENT_PRESET_ENDPOINT,
   validAgentPresetPayload,
 } from './agent-preset-rpc.mjs';
+import {
+  CLEAR_INBOUND_ATTACHMENTS_ENDPOINT,
+  SET_INBOUND_RETENTION_ENDPOINT,
+  validClearInboundAttachmentsPayload,
+  validInboundRetentionPayload,
+} from './inbound-retention-rpc.mjs';
 
 export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   status: 'connection.status',
@@ -21,6 +27,8 @@ export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
+  setInboundRetention: SET_INBOUND_RETENTION_ENDPOINT,
+  clearInboundAttachments: CLEAR_INBOUND_ATTACHMENTS_ENDPOINT,
 });
 
 const ENDPOINTS = Object.freeze(Object.values(TOKEN_BOT_ENDPOINTS));
@@ -82,6 +90,14 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === TOKEN_BOT_ENDPOINTS.setAccessPolicy) {
     return validAccessPolicyPayload(payload)
       ? null : '请提交有效的访问设置。';
+  }
+  if (endpoint === TOKEN_BOT_ENDPOINTS.setInboundRetention) {
+    return validInboundRetentionPayload(payload)
+      ? null : '请提交有效的附件保留设置。';
+  }
+  if (endpoint === TOKEN_BOT_ENDPOINTS.clearInboundAttachments) {
+    return validClearInboundAttachmentsPayload(payload)
+      ? null : 'bot.inbound-attachments.clear requires a botId.';
   }
   return 'Unknown bot endpoint.';
 }
@@ -167,6 +183,12 @@ export function createTokenBotRpcHandler(controller, { channel }) {
       } else if (endpoint === TOKEN_BOT_ENDPOINTS.setContextEnhancement) {
         if (typeof controller.updateContextEnhancement !== 'function') throw new Error('Context enhancement update is unavailable');
         value = await controller.updateContextEnhancement(payload.botId, payload.config);
+      } else if (endpoint === TOKEN_BOT_ENDPOINTS.setInboundRetention) {
+        if (typeof controller.updateInboundRetention !== 'function') throw new Error('Inbound retention update is unavailable');
+        value = await controller.updateInboundRetention(payload.botId, payload.retention);
+      } else if (endpoint === TOKEN_BOT_ENDPOINTS.clearInboundAttachments) {
+        if (typeof controller.clearInboundAttachments !== 'function') throw new Error('Attachment cleanup is unavailable');
+        value = await controller.clearInboundAttachments(payload.botId);
       } else if (endpoint === TOKEN_BOT_ENDPOINTS.setAccessPolicy) {
         if (typeof controller.updateAccessPolicy !== 'function') throw new Error('Access policy update is unavailable');
         value = await controller.updateAccessPolicy(payload.botId, payload.policy);

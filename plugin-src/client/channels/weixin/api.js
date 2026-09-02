@@ -2,6 +2,7 @@ import { normalizeAgentPresetCatalog, normalizeAgentPresetId, SET_AGENT_PRESET_E
 import { normalizeLastMessageError } from '../../last-message-error.js';
 import { normalizeAccessPolicy } from '../../../../src/channels/shared/access-policy.mjs';
 import { normalizeContextEnhancementConfig } from '../../../../src/channels/shared/context-enhancement.mjs';
+import { normalizeInboundRetention } from '../../../../src/channels/shared/inbound-retention.mjs';
 
 export const WEIXIN_RPC_CHANNEL = '/weixin';
 export const WEIXIN_ENDPOINTS = Object.freeze({
@@ -15,6 +16,8 @@ export const WEIXIN_ENDPOINTS = Object.freeze({
   setWorkspace: 'bot.workspace.set',
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: 'bot.context-enhancement.set',
+  setInboundRetention: 'bot.inbound-retention.set',
+  clearInboundAttachments: 'bot.inbound-attachments.clear',
   setAccessPolicy: 'bot.access-policy.set',
 });
 
@@ -126,6 +129,7 @@ function normalizeBot(value) {
     workspace: string(value.workspace).slice(0, 4_096),
     agentPreset: normalizeAgentPresetId(value.agentPreset),
     contextEnhancement: normalizeContextEnhancementConfig(value.contextEnhancement),
+      inboundRetention: normalizeInboundRetention(value.inboundRetention) ?? 'turn',
     ...(Object.hasOwn(value, 'accessPolicy')
       ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }
       : {}),

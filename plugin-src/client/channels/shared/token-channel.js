@@ -5,6 +5,7 @@ import { h } from '../../i18n.js';
 import { installDingtalkStyles } from '../dingtalk/styles.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
+import { InboundAttachmentEditor } from '../../inbound-attachment.js';
 import {
   AgentPresetCatalogContext,
   AgentPresetEditor,
@@ -75,7 +76,7 @@ export function createTokenChannelSettings(definition) {
     accountSettingsEndpoint = null,
   } = definition;
 
-  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onAgentPresetSave, onContextEnhancementSave, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove }) {
+  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onAgentPresetSave, onContextEnhancementSave, onInboundRetentionSave, onClearInboundAttachments, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove }) {
     const state = busy === 'reconnect' ? 'connecting' : account.state;
     const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
     const stateLabel = account.connected ? '运行正常' : state === 'connecting' ? '正在连接' : '连接未就绪';
@@ -119,6 +120,12 @@ export function createTokenChannelSettings(definition) {
           config: account.contextEnhancement,
           disabled: Boolean(busy),
           onSave: onContextEnhancementSave,
+        }),
+        h(InboundAttachmentEditor, {
+          retention: account.inboundRetention,
+          disabled: Boolean(busy),
+          onSave: onInboundRetentionSave,
+          onClear: onClearInboundAttachments,
         }),
         AccountSettings ? h(AccountSettings, {
           account,
@@ -329,6 +336,18 @@ export function createTokenChannelSettings(definition) {
                 'context-enhancement',
                 endpoints.setContextEnhancement,
                 { botId: account.botId, config },
+              ),
+              onInboundRetentionSave: (retention) => botAction(
+                account,
+                'inbound-retention',
+                endpoints.setInboundRetention,
+                { botId: account.botId, retention },
+              ),
+              onClearInboundAttachments: () => botAction(
+                account,
+                'inbound-attachments',
+                endpoints.clearInboundAttachments,
+                { botId: account.botId },
               ),
               onAccountSettingsSave: AccountSettings && accountSettingsEndpoint
                 ? (payload) => botAction(

@@ -114,7 +114,7 @@ function createSessionMaintenanceExecutor(agents) {
 }
 
 function createFileIngressExecutor(agents) {
-  return ({ sessionId, workspace, files, signal }) => {
+  return ({ sessionId, workspace, files, signal, retention }) => {
     const agent = agents.get(sessionId);
     const attachedWorkspace = agent?.session?.header?.cwd;
     const exactWorkspace = typeof attachedWorkspace === 'string' && attachedWorkspace
@@ -126,7 +126,16 @@ function createFileIngressExecutor(agents) {
         'The Harness Session workspace is unavailable for inbound files.',
       );
     }
-    return stageInboundFiles({ files }, { workspace: exactWorkspace, signal });
+    return stageInboundFiles(
+      { files },
+      {
+        workspace: exactWorkspace,
+        signal,
+        // The scoped harness injects the bot's configured retention; keep
+        // turn-based cleanup when no explicit value was provided.
+        ...(retention !== undefined ? { retention } : {}),
+      },
+    );
   };
 }
 

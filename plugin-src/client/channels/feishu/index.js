@@ -17,6 +17,7 @@ import {
 import { useAnimationFrameScheduler } from "../../lifecycle.js";
 import { WorkspaceEditor } from "../../workspace-editor.js";
 import { ContextEnhancementEditor } from "../../context-enhancement.js";
+import { InboundAttachmentEditor } from "../../inbound-attachment.js";
 import {
   AgentPresetCatalogContext,
   AgentPresetEditor,
@@ -556,6 +557,8 @@ export function BotCard({
   onWorkspaceSave,
   onAgentPresetSave,
   onContextEnhancementSave,
+      onInboundRetentionSave,
+      onClearInboundAttachments,
   onGroupResponseModeSave,
   onGroupMessagePermissionAuthorize,
   onRequestRemove,
@@ -626,6 +629,12 @@ export function BotCard({
         config: connection.contextEnhancement,
         disabled: Boolean(busy),
         onSave: onContextEnhancementSave,
+      }),
+      h(InboundAttachmentEditor, {
+        retention: connection.inboundRetention,
+        disabled: Boolean(busy),
+        onSave: onInboundRetentionSave,
+        onClear: onClearInboundAttachments,
       }),
       h(GroupResponseModeEditor, {
         value: connection.groupResponseMode,
@@ -725,6 +734,8 @@ function BotList(props) {
           onWorkspaceSave: (workspace) => props.onWorkspaceSave(bot, workspace),
           onAgentPresetSave: (agentPreset) => props.onAgentPresetSave(bot, agentPreset),
           onContextEnhancementSave: (config) => props.onContextEnhancementSave(bot, config),
+        onInboundRetentionSave: (retention) => props.onInboundRetentionSave(bot, retention),
+        onClearInboundAttachments: () => props.onClearInboundAttachments(bot),
           onGroupResponseModeSave: (groupResponseMode) => props.onGroupResponseModeSave(bot, groupResponseMode),
           onGroupMessagePermissionAuthorize: () => props.onGroupMessagePermissionAuthorize(bot),
           onRequestRemove: () => props.onRequestRemove(bot),
@@ -1543,6 +1554,12 @@ export function FeishuSettingsTab({ rpcCall }) {
                   ),
                   onContextEnhancementSave: (connection, config) => saveBotSetting(
                     connection, "context-enhancement", FEISHU_ENDPOINTS.setContextEnhancement, { config },
+                  ),
+                  onInboundRetentionSave: (connection, retention) => saveBotSetting(
+                    connection, "inbound-retention", FEISHU_ENDPOINTS.setInboundRetention, { retention },
+                  ),
+                  onClearInboundAttachments: (connection) => saveBotSetting(
+                    connection, "inbound-attachments", FEISHU_ENDPOINTS.clearInboundAttachments, {},
                   ),
                   onGroupResponseModeSave: saveGroupResponseMode,
                   onGroupMessagePermissionAuthorize: authorizeGroupMessages,

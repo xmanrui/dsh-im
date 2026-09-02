@@ -5,6 +5,7 @@ import { QrActionIcon } from '../../credential-binding.js';
 import { h } from '../../i18n.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
+import { InboundAttachmentEditor } from '../../inbound-attachment.js';
 import {
   AgentPresetCatalogContext,
   AgentPresetEditor,
@@ -187,6 +188,8 @@ export function WhatsappAccountCard({
   onWorkspaceSave,
   onAgentPresetSave,
   onContextEnhancementSave,
+      onInboundRetentionSave,
+      onClearInboundAttachments,
   onRequestRemove,
   onConfirmRemove,
   onCancelRemove,
@@ -235,6 +238,12 @@ export function WhatsappAccountCard({
         config: account.contextEnhancement,
         disabled: Boolean(busy),
         onSave: onContextEnhancementSave,
+      }),
+      h(InboundAttachmentEditor, {
+        retention: account.inboundRetention,
+        disabled: Boolean(busy),
+        onSave: onInboundRetentionSave,
+        onClear: onClearInboundAttachments,
       }),
       h('div', { className: 'ddt-accountFooter dim-cardFooter' },
         h('div', { className: 'dim-cardFooterLayout' },
@@ -498,6 +507,18 @@ export function WhatsappSettingsTab({ rpcCall }) {
               'context-enhancement',
               WHATSAPP_ENDPOINTS.setContextEnhancement,
               { botId: account.botId, config },
+            ),
+            onInboundRetentionSave: (retention) => botAction(
+              account,
+              'inbound-retention',
+              WHATSAPP_ENDPOINTS.setInboundRetention,
+              { botId: account.botId, retention },
+            ),
+            onClearInboundAttachments: () => botAction(
+              account,
+              'inbound-attachments',
+              WHATSAPP_ENDPOINTS.clearInboundAttachments,
+              { botId: account.botId },
             ),
             onRequestRemove: () => setRemoveTarget(account.botId),
             onCancelRemove: () => setRemoveTarget(null),

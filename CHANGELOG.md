@@ -6,6 +6,7 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ## [4.7.0] - 2026-09-02
 
 ### Added / 新增
@@ -46,6 +47,12 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 飞书流式回复在同一轮出现 Harness 问题或审批交互时，会先结束当前卡片并在交互完成后创建新卡片，使最终回答显示在交互卡片之后；卡片轮换失败时保持可用的降级投递。
   When a Feishu streaming turn presents an in-turn Harness question or approval, dsh-im now finalizes the current card and starts a new one after the interaction so the final answer appears below the interaction card, with usable fallback delivery if card rotation fails.
 
+=======
+### Added / 新增
+
+- 入站附件新增每机器人“保留策略”配置：`临时附件（每轮对话后自动清理）`（默认，行为不变）与 `永久附件（保留至手动删除）`。永久模式下附件保存到 Session 工作区 `.dsh-im/inbound/<yyyyMMdd-HHmmss>-<随机串>/` 中不再自动删除，可在设置卡片上切换策略并通过“清空附件目录”按钮（带二次确认）一键清理；新增聊天命令 `/attachmentlist` 列出附件、`/attachmentdelete <序号>` 删除单个附件、`/attachmentdelete all confirm` 清空附件目录。策略通过 `bot.inbound-retention.set`、清空通过 `bot.inbound-attachments.clear` RPC 保存与执行；切换策略不影响已存在的附件，临时模式下 `turn-` 残留目录也会在列表中标注并可一并清理。
+  Inbound attachments now support a per-bot retention setting: `turn` (default; auto cleanup after each turn, unchanged behavior) or `forever` (files persist under the Session workspace `.dsh-im/inbound/<yyyyMMdd-HHmmss>-<random>/` until deleted manually). The policy is toggleable on each bot settings card together with a double-confirm clear-attachments action; new chat commands `/attachmentlist`, `/attachmentdelete <index>`, and `/attachmentdelete all confirm` manage attachments from IM. Saving uses the `bot.inbound-retention.set` RPC and clearing uses `bot.inbound-attachments.clear`; switching the policy never touches existing attachments, and leftover `turn-` batches are flagged in listings and clearable as well.
+>>>>>>> 5c03f94 (feat(inbound): per-bot attachment retention (turn/forever), /attachment* commands and settings UI)
 ## [4.4.0] - 2026-09-01
 
 ### Added / 新增

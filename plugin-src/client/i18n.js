@@ -4,6 +4,13 @@ export const IM_LOCALE_NAMESPACE = 'dsh-im';
 
 const EN = Object.freeze({
   '$locale': 'en',
+
+  "入站附件保留策略": "Inbound attachment retention",
+  "临时附件（每轮对话后自动清理）": "Temporary attachments (auto-cleaned after each turn)",
+  "永久附件（保留至手动删除）": "Permanent attachments (kept until deleted manually)",
+  "保存保留策略": "Save retention policy",
+  "再次点击确认清空": "Click again to confirm clearing",
+  "清空附件目录": "Clear attachment directory",
   'IM机器人': 'IM bots',
   'IM机器人设置': 'IM bot settings',
   '更多机器人设置': 'More bot settings',

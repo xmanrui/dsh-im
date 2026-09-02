@@ -19,6 +19,10 @@ import {
 } from './access-policy.mjs';
 import { CONNECTION_TEST_STATE_IDENTITY } from './connection-test.mjs';
 import {
+  deleteInboundAttachments,
+  normalizeInboundRetention,
+} from './inbound-file.mjs';
+import {
   DEFAULT_CONTEXT_ENHANCEMENT_CONFIG,
   normalizeContextEnhancementConfig,
   validateContextEnhancementConfig,
@@ -194,6 +198,18 @@ function normalizeDocument(value) {
   if (!deliveryTargets) return null;
   const accessPolicies = normalizeAccessPolicies(value.accessPolicies, workspaces);
   const version = value.accessPolicies === undefined ? value.version : 2;
+  const inboundRetention = Object.create(null);
+  // Retention damage is isolated per bot, like other per-bot sections.
+  if (value.inboundRetention && typeof value.inboundRetention === 'object'
+    && !Array.isArray(value.inboundRetention)) {
+    for (const [botId, retention] of Object.entries(value.inboundRetention)) {
+      if (/^[A-Za-z0-9_-]{1,128}$/.test(botId)) {
+        const normalized = normalizeInboundRetention(retention);
+        // 'turn' is the default; only meaningful values are stored.
+        if (normalized === 'forever') inboundRetention[botId] = normalized;
+      }
+    }
+  }
   return {
     // A v1 file cannot be emitted with this optional v2 section. If one is
     // recovered from an interrupted/manual edit, retain it on the next write.
@@ -203,6 +219,7 @@ function normalizeDocument(value) {
     contextEnhancement,
     deliveryTargets,
     accessPolicies,
+    inboundRetention,
   };
 }
 
@@ -213,6 +230,7 @@ function storedDocument({
   contextEnhancement,
   deliveryTargets,
   accessPolicies,
+  inboundRetention,
 }) {
   const document = { version, workspaces };
   if (Object.keys(agentPresets).length > 0) document.agentPresets = agentPresets;
@@ -224,6 +242,9 @@ function storedDocument({
   }
   if (version >= 2 && Object.keys(accessPolicies).length > 0) {
     document.accessPolicies = accessPolicies;
+  }
+  if (Object.keys(inboundRetention).length > 0) {
+    document.inboundRetention = inboundRetention;
   }
   return document;
 }
@@ -268,6 +289,7 @@ export class BotWorkspaceStore {
   #workspaces = {};
   #agentPresets = {};
   #contextEnhancement = {};
+  #inboundRetention = Object.create(null);
   #deliveryTargets = Object.create(null);
   #accessPolicies = Object.create(null);
   #generations = new Map();
@@ -294,6 +316,7 @@ export class BotWorkspaceStore {
       this.#workspaces = normalized.workspaces;
       this.#agentPresets = normalized.agentPresets;
       this.#contextEnhancement = normalized.contextEnhancement;
+      this.#inboundRetention = normalized.inboundRetention;
       this.#deliveryTargets = normalized.deliveryTargets;
       this.#accessPolicies = normalized.accessPolicies;
     } catch (error) {
@@ -302,6 +325,7 @@ export class BotWorkspaceStore {
       this.#workspaces = {};
       this.#agentPresets = {};
       this.#contextEnhancement = {};
+      this.#inboundRetention = Object.create(null);
       this.#deliveryTargets = Object.create(null);
       this.#accessPolicies = Object.create(null);
     }
@@ -340,6 +364,52 @@ export class BotWorkspaceStore {
     return this.has(id) && Object.hasOwn(this.#contextEnhancement, id)
       ? this.#contextEnhancement[id]
       : DEFAULT_CONTEXT_ENHANCEMENT_CONFIG;
+  }
+
+  /** 'turn' (auto cleanup) by default; 'forever' keeps attachments until manual deletion. */
+  inboundRetentionFor(botId) {
+    const id = botIdOf(botId);
+    return this.has(id) && this.#inboundRetention[id] === 'forever'
+      ? 'forever'
+      : 'turn';
+  }
+
+  async setInboundRetention(botId, value, { incarnation } = {}) {
+    const id = botIdOf(botId);
+    if (!this.has(id)
+      || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+      const error = new Error('找不到要修改的机器人。');
+      error.code = 'workspace-bot-not-found';
+      throw error;
+    }
+    const retention = normalizeInboundRetention(value);
+    if (!retention) {
+      const error = new TypeError('inboundRetention must be "turn" or "forever"');
+      error.code = 'workspace-inbound-retention-invalid';
+      throw error;
+    }
+    return this.#enqueue(id, async () => {
+      if (!this.has(id)
+        || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      if (this.inboundRetentionFor(id) === retention) return retention;
+      const next = { ...this.#inboundRetention };
+      // 'turn' is the default; only meaningful values are stored.
+      if (retention === 'forever') next[id] = retention;
+      else delete next[id];
+      await this.#persist(
+        this.#contextEnhancement,
+        this.#deliveryTargets,
+        this.#version,
+        this.#accessPolicies,
+        next,
+      );
+      this.#inboundRetention = next;
+      return retention;
+    });
   }
 
   accessPolicyFor(botId) {
@@ -767,6 +837,7 @@ export class BotWorkspaceStore {
       ...Object.keys(this.#contextEnhancement),
       ...Object.keys(this.#deliveryTargets),
       ...Object.keys(this.#accessPolicies),
+      ...Object.keys(this.#inboundRetention),
       ...this.#dirtyRemovals,
     ]);
     for (const botId of candidates) {
@@ -785,6 +856,7 @@ export class BotWorkspaceStore {
           agentPreset: this.agentPresetFor(bot.botId),
           contextEnhancement: this.contextEnhancementFor(bot.botId),
           accessPolicy: this.accessPolicyFor(bot.botId),
+          inboundRetention: this.inboundRetentionFor(bot.botId),
         }
         : bot),
     };
@@ -817,13 +889,16 @@ export class BotWorkspaceStore {
     const hadContextEnhancement = Object.hasOwn(this.#contextEnhancement, id);
     const hadDeliveryTargets = Object.hasOwn(this.#deliveryTargets, id);
     const hadAccessPolicy = Object.hasOwn(this.#accessPolicies, id);
+    const hadInboundRetention = Object.hasOwn(this.#inboundRetention, id);
     const needsCleanup = hadWorkspace || hadPreset || hadContextEnhancement
-      || hadDeliveryTargets || hadAccessPolicy || this.#dirtyRemovals.has(id);
+      || hadDeliveryTargets || hadAccessPolicy || hadInboundRetention
+      || this.#dirtyRemovals.has(id);
     delete this.#workspaces[id];
     delete this.#agentPresets[id];
     delete this.#contextEnhancement[id];
     delete this.#deliveryTargets[id];
     delete this.#accessPolicies[id];
+    delete this.#inboundRetention[id];
     this.#generations.delete(id);
     this.#incarnations.delete(id);
     if (!needsCleanup) return {
@@ -858,6 +933,7 @@ export class BotWorkspaceStore {
     deliveryTargets = this.#deliveryTargets,
     version = this.#version,
     accessPolicies = this.#accessPolicies,
+    inboundRetention = this.#inboundRetention,
   ) {
     await writeStoredDocument(this.#path, storedDocument({
       version,
@@ -866,6 +942,7 @@ export class BotWorkspaceStore {
       contextEnhancement,
       deliveryTargets,
       accessPolicies,
+      inboundRetention,
     }));
     this.#dirtyRemovals.clear();
   }
@@ -875,7 +952,8 @@ export class BotWorkspaceStore {
       || Object.keys(this.#agentPresets).length > 0
       || Object.keys(this.#contextEnhancement).length > 0
       || Object.keys(this.#deliveryTargets).length > 0
-      || Object.keys(this.#accessPolicies).length > 0) {
+      || Object.keys(this.#accessPolicies).length > 0
+      || Object.keys(this.#inboundRetention).length > 0) {
       await this.#persist();
       return;
     }
@@ -991,6 +1069,16 @@ export function createBotWorkspaceScope(
     };
   };
   const sessionGenerations = new Map();
+  // Attach the bot's configured attachment retention to every prompt so the
+  // file ingress executor stages uploads with the right lifecycle.
+  const injectInboundRetention = (args) => {
+    const [prompt, options, ...rest] = args;
+    const normalizedOptions = typeof options === 'number'
+      ? { timeoutMs: options }
+      : (options && typeof options === 'object' ? { ...options } : {});
+    normalizedOptions.inboundFileRetention = workspaces.inboundRetentionFor(botId);
+    return [prompt, normalizedOptions, ...rest];
+  };
   const scopedHarness = new Proxy(harness, {
     get(target, property) {
       if (property === 'agentPresetSettings') {
@@ -1237,7 +1325,7 @@ export function createBotWorkspaceScope(
                   'The bot workspace changed before this prompt started.',
                 );
               }
-              return target.ask(sessionId, ...args);
+              return target.ask(sessionId, ...injectInboundRetention(args));
             },
           });
         };
@@ -1263,7 +1351,7 @@ export function createBotWorkspaceScope(
             error.code = WORKSPACE_SESSION_STALE;
             throw error;
           }
-          return target.ask(sessionId, ...args);
+          return target.ask(sessionId, ...injectInboundRetention(args));
         };
       }
       if (property === 'executeCommand' && typeof target.executeCommand === 'function') {
@@ -1377,6 +1465,37 @@ export function createWorkspaceAwareController(controller, { workspaces, stateFo
       );
     });
   };
+  const updateInboundRetention = (botId, value, projectStatus) => {
+    const incarnation = workspaces.incarnationFor(botId);
+    const retention = normalizeInboundRetention(value);
+    if (!retention) {
+      const error = new TypeError('inboundRetention must be "turn" or "forever"');
+      error.code = 'workspace-inbound-retention-invalid';
+      throw error;
+    }
+    return withBotTransition(botId, async () => {
+      const snapshot = await controller.status();
+      if (!snapshot?.bots?.some((bot) => bot?.botId === botId)) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      await workspaces.setInboundRetention(botId, retention, { incarnation });
+      const decorated = workspaces.decorateStatus(await controller.status());
+      return projectStatus ? await projectStatus(decorated) : decorated;
+    });
+  };
+  const clearInboundAttachments = async (botId) => {
+    const snapshot = await controller.status();
+    if (!snapshot?.bots?.some((bot) => bot?.botId === botId)) {
+      const error = new Error('找不到要修改的机器人。');
+      error.code = 'workspace-bot-not-found';
+      throw error;
+    }
+    const workspace = workspaces.workspaceFor(botId);
+    await deleteInboundAttachments(workspace, 'all');
+    return { cleared: true };
+  };
   const updateContextEnhancement = (botId, value, projectStatus) => {
     const incarnation = workspaces.incarnationFor(botId);
     const config = validateContextEnhancementConfig(value);
@@ -1467,6 +1586,8 @@ export function createWorkspaceAwareController(controller, { workspaces, stateFo
       if (property === 'updateWorkspace') return updateWorkspace;
       if (property === 'updateAgentPreset') return updateAgentPreset;
       if (property === 'updateContextEnhancement') return updateContextEnhancement;
+      if (property === 'updateInboundRetention') return updateInboundRetention;
+      if (property === 'clearInboundAttachments') return clearInboundAttachments;
       if (property === 'updateAccessPolicy') return updateAccessPolicy;
       const value = Reflect.get(target, property, target);
       if (typeof value !== 'function') return value;

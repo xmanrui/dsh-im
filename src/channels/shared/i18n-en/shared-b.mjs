@@ -260,4 +260,17 @@ export default {
     'The task has ended and there is no running task to steer. Send a message to start a new task.',
   '已提交补充指令，Agent 会在下一步读取。':
     'Additional instruction submitted; the Agent will read it at the next step.',
+
+  // attachment-command.mjs
+  "当前机器人暂不支持列出附件。": "This bot does not support listing attachments yet.",
+  "当前机器人暂不支持删除附件。": "This bot does not support deleting attachments yet.",
+  "附件目录为空。": "The attachment directory is empty.",
+  "入站附件（{count}）：": "Inbound attachments ({count}):",
+  " [临时残留]": " [leftover]",
+  "删除用法：/attachmentdelete 序号；/attachmentdelete all 清空附件目录。": "Deletion: /attachmentdelete index; /attachmentdelete all clears the attachment directory.",
+  "将清空整个附件目录（.dsh-im/inbound）。请再发送一次 /attachmentdelete all confirm 确认执行。": "This will clear the whole attachment directory (.dsh-im/inbound). Send /attachmentdelete all confirm once more to proceed.",
+  "已清空附件目录。": "The attachment directory has been cleared.",
+  "附件序号不存在，请先执行 /attachmentlist。": "Attachment index not found. Run /attachmentlist first.",
+  "已删除附件：{name}": "Attachment deleted: {name}",
+  "用法：/attachmentdelete 序号 删除单个附件；/attachmentdelete all confirm 清空附件目录。": "Usage: /attachmentdelete index deletes one attachment; /attachmentdelete all confirm clears the attachment directory.",
 };

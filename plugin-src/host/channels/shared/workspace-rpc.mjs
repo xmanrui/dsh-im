@@ -23,6 +23,7 @@ export function publicWorkspaceError(error) {
     'agent-preset-invalid',
     'agent-preset-unavailable',
     'context-enhancement-invalid',
+    'workspace-inbound-retention-invalid',
   ].includes(error?.code)) return null;
   return { code: error.code, message: error.message };
 }

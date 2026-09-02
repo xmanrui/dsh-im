@@ -3,6 +3,10 @@ import { isAbsolute, resolve } from 'node:path';
 
 import { t } from './i18n.mjs';
 import { WORKSPACE_SESSION_STALE } from './workspace-session.mjs';
+import {
+  isAttachmentCommand,
+  runAttachmentCommand,
+} from './attachment-command.mjs';
 
 const WORKSPACE_COMMAND = /^\/workspace(?:\s+([\s\S]+))?$/i;
 const WORKSPACE_LIST_COMMAND = /^\/workspacelist(?:\s+([\s\S]+))?$/i;
@@ -372,6 +376,8 @@ async function runSessionBindCommand(command, harness, conversationKey) {
 }
 
 export async function runWorkspaceCommand(text, harness, conversationKey) {
+  const attachmentResult = await runAttachmentCommand(text, harness);
+  if (attachmentResult) return attachmentResult;
   if (!isWorkspaceCommand(text)) return null;
   const command = text.trim();
   if (SESSION_BIND_PREFIX.test(command)) {
@@ -418,6 +424,7 @@ export async function runWorkspaceCommand(text, harness, conversationKey) {
 }
 
 export function isWorkspaceCommand(text) {
+  if (isAttachmentCommand(text)) return true;
   if (typeof text !== 'string') return false;
   const command = text.trim();
   return SESSION_BIND_PREFIX.test(command)

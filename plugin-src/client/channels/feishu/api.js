@@ -10,6 +10,7 @@ import { normalizeAgentPresetCatalog, normalizeAgentPresetId } from "../../agent
 import { normalizeLastMessageError } from "../../last-message-error.js";
 import { normalizeAccessPolicy } from "../../../../src/channels/shared/access-policy.mjs";
 import { normalizeContextEnhancementConfig } from "../../../../src/channels/shared/context-enhancement.mjs";
+import { normalizeInboundRetention } from "../../../../src/channels/shared/inbound-retention.mjs";
 
 export const FEISHU_RPC_CHANNEL = "/feishu";
 
@@ -27,6 +28,8 @@ export const FEISHU_ENDPOINTS = Object.freeze({
   setWorkspace: "bot.workspace.set",
   setAgentPreset: "bot.preset.set",
   setContextEnhancement: "bot.context-enhancement.set",
+  setInboundRetention: "bot.inbound-retention.set",
+  clearInboundAttachments: "bot.inbound-attachments.clear",
   setAccessPolicy: "bot.access-policy.set",
   setGroupResponseMode: "bot.group-response-mode.set",
   // Kept for rolling upgrades. The multi-bot UI never calls these endpoints.
@@ -208,6 +211,7 @@ export function normalizeBotConnection(value, fallbackBotId) {
     workspace: optionalString(value.workspace)?.slice(0, 4_096) ?? "",
     agentPreset: normalizeAgentPresetId(value.agentPreset),
     contextEnhancement: normalizeContextEnhancementConfig(value.contextEnhancement),
+      inboundRetention: normalizeInboundRetention(value.inboundRetention) ?? 'turn',
     ...(Object.hasOwn(value, "accessPolicy")
       ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }
       : {}),

@@ -6,6 +6,7 @@ import { adoptRegisteredWorkspaceSession } from './harness-session-binding.mjs';
 import {
   appendInboundFilesToPrompt,
   InboundFileError,
+  normalizeInboundRetention,
 } from './inbound-file.mjs';
 import {
   IMAGE_FILE_FALLBACK_PROMPT,
@@ -1249,7 +1250,7 @@ export class HarnessClient {
   }
 
   /** Stage inbound file sources into the Session workspace via the Host executor. */
-  async #stageWorkspaceFiles(sessionId, files, signal) {
+  async #stageWorkspaceFiles(sessionId, files, signal, retention) {
     if (!this.#fileIngressExecutor) {
       throw new InboundFileError(
         'inbound-file-ingress-unavailable',
@@ -1270,6 +1271,7 @@ export class HarnessClient {
       workspace: sessionWorkspace,
       files,
       signal,
+      retention,
     });
   }
 
@@ -1288,7 +1290,8 @@ export class HarnessClient {
       : undefined;
     const control = normalizeControl(options.control);
     const inboundFiles = Array.isArray(options.files) ? options.files.filter(Boolean) : [];
-    await this.ensureRunning({ signal });
+  const inboundFileRetention = normalizeInboundRetention(options.inboundFileRetention) ?? 'turn';
+  await this.ensureRunning({ signal });
     const before = await this.rpc(
       'session.history',
       { sessionId, maxMessages: 1 },
@@ -1362,7 +1365,7 @@ export class HarnessClient {
     try {
       const basePrompt = prompt;
       if (inboundFiles.length > 0) {
-        const staged = await this.#stageWorkspaceFiles(sessionId, inboundFiles, signal);
+        const staged = await this.#stageWorkspaceFiles(sessionId, inboundFiles, signal, inboundFileRetention);
         stagedBatches.push(staged);
         prompt = appendInboundFilesToPrompt(prompt, staged);
       }
@@ -1413,7 +1416,7 @@ export class HarnessClient {
         if (imageSources.length === 0) throw error;
         let stagedImages;
         try {
-          stagedImages = await this.#stageWorkspaceFiles(sessionId, imageSources, signal);
+          stagedImages = await this.#stageWorkspaceFiles(sessionId, imageSources, signal, inboundFileRetention);
         } catch (stagingError) {
           if (signal?.aborted) throw signal.reason ?? stagingError;
           console.warn(
