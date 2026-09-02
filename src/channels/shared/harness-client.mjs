@@ -1276,6 +1276,7 @@ export class HarnessClient {
   async ask(sessionId, prompt, options = {}) {
     if (typeof options === 'number') options = { timeoutMs: options };
     const timeoutMs = options.timeoutMs ?? 600_000;
+    const deferOnTimeout = options.deferOnTimeout === true;
     const signal = options.signal;
     const onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : null;
     const progressMode = options.progressMode === 'all' ? 'all' : 'latest';
@@ -1332,6 +1333,7 @@ export class HarnessClient {
     const stagedBatches = [];
     let promptAccepted = false;
     let turnFinished = false;
+    let deferredOwnershipKept = false;
 
     const deliverArtifacts = async () => {
       if (!onArtifact || artifactsDelivered || tracker.turn === null) {
@@ -1477,6 +1479,23 @@ export class HarnessClient {
           if (ownership?.stopRequested) throw turnStoppedError();
           throw harnessTurnError(tracker.reason);
         }
+        if (deferOnTimeout && tracker.turn !== null && !ownership?.stopRequested) {
+          // 把仍在运行的 turn 交还调用方：control/interaction ownership 保持注册，
+          // /stop 在渠道交付结果并调用 releaseOwnership() 之前一直有效。
+          deferredOwnershipKept = true;
+          return {
+            deferred: true,
+            sessionId,
+            turn: tracker.turn,
+            promptRpcId,
+            afterSeq: baselineSeq,
+            releaseOwnership: () => {
+              if (!ownership) return;
+              this.#unregisterControlOwnership(ownership);
+              this.#unregisterInteractionOwnership(sessionId, ownership);
+            },
+          };
+        }
         throw new HarnessTurnError('harness-reply-timeout');
       } catch (error) {
         // Once cancellation was accepted, transport/poll failures and timeouts
@@ -1499,7 +1518,7 @@ export class HarnessClient {
         }
       }
       closeArtifactConsumer();
-      if (ownership) {
+      if (ownership && !deferredOwnershipKept) {
         this.#unregisterControlOwnership(ownership);
         this.#unregisterInteractionOwnership(sessionId, ownership);
       }

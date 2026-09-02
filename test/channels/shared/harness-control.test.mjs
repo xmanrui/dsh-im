@@ -388,6 +388,41 @@ test('HarnessClient marks a reply timeout after prompt admission', async () => {
   });
 });
 
+test('HarnessClient defers a reply timeout with a delivery handle when asked', async () => {
+  const turn = controlledTurn();
+  const owner = {};
+  const control = { owner, key: 'direct:defer' };
+  const asking = turn.client.ask(turn.id, 'work', {
+    timeoutMs: 1_500,
+    deferOnTimeout: true,
+    control,
+  });
+  await turn.admitted;
+  const handle = await asking;
+  assert.equal(handle.deferred, true);
+  assert.equal(handle.sessionId, turn.id);
+  assert.equal(typeof handle.turn, 'number');
+  assert.equal(typeof handle.promptRpcId, 'string');
+  assert.equal(typeof handle.afterSeq, 'number');
+  assert.equal(typeof handle.releaseOwnership, 'function');
+  // Ownership 在交接后保留，/stop 语义不丢失。
+  assert.equal(await turn.client.hasActiveTurn(turn.id, control), true);
+  handle.releaseOwnership();
+  assert.equal(await turn.client.hasActiveTurn(turn.id, control), false);
+});
+
+test('HarnessClient keeps throwing reply timeouts without deferOnTimeout', async () => {
+  const turn = controlledTurn();
+  const asking = turn.client.ask(turn.id, 'work', { timeoutMs: 1_500 });
+  await turn.admitted;
+  await assert.rejects(asking, (error) => {
+    assert.ok(error instanceof HarnessTurnError);
+    assert.equal(error.code, 'harness-reply-timeout');
+    assert.equal(error.promptAccepted, true);
+    return true;
+  });
+});
+
 test('control methods require exact owner identity, key, and Session before any RPC', async () => {
   const turn = controlledTurn();
   const owner = {};
