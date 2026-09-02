@@ -172,6 +172,10 @@ export function normalizeSlackEvent(payload, botUserId, {
     senderIsBot: String(event.user) === String(botUserId),
     kind: direct ? 'direct' : 'group',
     conversationId: direct ? String(event.channel) : `${event.channel}:${threadTs}`,
+    contextSource: () => ({
+      chatId: String(event.channel),
+      threadId: event.thread_ts ? String(event.thread_ts) : undefined,
+    }),
     content: stripBotMention(event.text ?? '', botUserId),
     plainText: !Array.isArray(event.files) || event.files.length === 0,
     images: Array.isArray(event.files)

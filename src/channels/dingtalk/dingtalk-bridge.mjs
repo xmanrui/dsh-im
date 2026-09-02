@@ -1136,6 +1136,7 @@ export class DingtalkHarnessBridge {
           senderId: sender,
           senderName: message.senderNick,
           conversationTitle: message.conversationTitle,
+          chatId: message.conversationId,
         }));
         contextEnhanced = content !== originalContent;
       }

@@ -1056,6 +1056,7 @@ export class WecomHarnessBridge {
         content = enhanceContextContent(originalContent, snapshot, () => ({
           channel: 'wecom',
           senderId,
+          chatId,
         }));
         contextEnhanced = content !== originalContent;
       }

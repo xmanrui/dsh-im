@@ -266,6 +266,8 @@ export function normalizeTelegramUpdate(update, {
         .filter((value) => typeof value === 'string' && value.trim())
         .map((value) => value.trim()).join(' ') || message.from?.username,
       conversationTitle: direct ? undefined : message.chat?.title,
+      chatId: String(chatId),
+      threadId: messageThreadId === undefined ? undefined : String(messageThreadId),
     }),
     senderIsBot: message.from?.is_bot === true,
     kind: direct ? 'direct' : 'group',

@@ -6,7 +6,23 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
-<<<<<<< HEAD
+### Added / 新增
+
+- 入站附件新增每机器人“保留策略”配置：`临时附件（每轮对话后自动清理）`（默认，行为不变）与 `永久附件（保留至手动删除）`。永久模式下附件保存到 Session 工作区 `.dsh-im/inbound/<yyyyMMdd-HHmmss>-<随机串>/` 中不再自动删除，可在设置卡片上切换策略并通过“清空附件目录”按钮（带二次确认）一键清理；新增聊天命令 `/attachmentlist` 列出附件、`/attachmentdelete <序号>` 删除单个附件、`/attachmentdelete all confirm` 清空附件目录。策略通过 `bot.inbound-retention.set`、清空通过 `bot.inbound-attachments.clear` RPC 保存与执行；切换策略不影响已存在的附件，临时模式下 `turn-` 残留目录也会在列表中标注并可一并清理。
+  Inbound attachments now support a per-bot retention setting: `turn` (default; auto cleanup after each turn, unchanged behavior) or `forever` (files persist under the Session workspace `.dsh-im/inbound/<yyyyMMdd-HHmmss>-<random>/` until deleted manually). The policy is toggleable on each bot settings card together with a double-confirm clear-attachments action; new chat commands `/attachmentlist`, `/attachmentdelete <index>`, and `/attachmentdelete all confirm` manage attachments from IM. Saving uses the `bot.inbound-retention.set` RPC and clearing uses `bot.inbound-attachments.clear`; switching the policy never touches existing attachments, and leftover `turn-` batches are flagged in listings and clearable as well.
+
+## [4.8.0] - 2026-09-02
+
+### Added / 新增
+
+- 上下文增强新增两个来源字段：`chatId`（会话标识，用于区分群组或私聊）与 `threadId`（话题标识，飞书话题群会带上 `thread_id`，用于区分同一群组内的不同话题）。九个渠道均可勾选；飞书群聊直接提供群 ID，Slack/Telegram 话题、Discord 频道等渠道也按各自事件补齐。仍只发送当前消息中已有的值，不查询平台 API。
+  Context enhancement adds two source fields: `chatId` (the chat ID that distinguishes groups or direct chats) and `threadId` (the topic ID; Feishu topic chats carry `thread_id`, telling different topics inside the same group apart). All nine channels can select them; Feishu group chats provide the group ID directly, and Slack/Telegram topics, Discord channels, and other channels are wired per their own events. Only values already present in the current message are sent; no platform APIs are queried.
+
+### Fixed / 修复
+
+- 机器人工作区目录选择器现在同时识别新版 DSH 的 `directory-picker/*` 错误码与旧版连字符错误码；native 后端会正确回退到系统目录选择器，已失效的保存路径也会回退到 Host 主目录。
+  The bot workspace directory picker now recognizes both current DSH `directory-picker/*` error codes and legacy hyphenated codes, restoring the native system-picker fallback and the Host-home fallback for stale saved paths.
+
 ## [4.7.0] - 2026-09-02
 
 ### Added / 新增
@@ -47,12 +63,6 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 飞书流式回复在同一轮出现 Harness 问题或审批交互时，会先结束当前卡片并在交互完成后创建新卡片，使最终回答显示在交互卡片之后；卡片轮换失败时保持可用的降级投递。
   When a Feishu streaming turn presents an in-turn Harness question or approval, dsh-im now finalizes the current card and starts a new one after the interaction so the final answer appears below the interaction card, with usable fallback delivery if card rotation fails.
 
-=======
-### Added / 新增
-
-- 入站附件新增每机器人“保留策略”配置：`临时附件（每轮对话后自动清理）`（默认，行为不变）与 `永久附件（保留至手动删除）`。永久模式下附件保存到 Session 工作区 `.dsh-im/inbound/<yyyyMMdd-HHmmss>-<随机串>/` 中不再自动删除，可在设置卡片上切换策略并通过“清空附件目录”按钮（带二次确认）一键清理；新增聊天命令 `/attachmentlist` 列出附件、`/attachmentdelete <序号>` 删除单个附件、`/attachmentdelete all confirm` 清空附件目录。策略通过 `bot.inbound-retention.set`、清空通过 `bot.inbound-attachments.clear` RPC 保存与执行；切换策略不影响已存在的附件，临时模式下 `turn-` 残留目录也会在列表中标注并可一并清理。
-  Inbound attachments now support a per-bot retention setting: `turn` (default; auto cleanup after each turn, unchanged behavior) or `forever` (files persist under the Session workspace `.dsh-im/inbound/<yyyyMMdd-HHmmss>-<random>/` until deleted manually). The policy is toggleable on each bot settings card together with a double-confirm clear-attachments action; new chat commands `/attachmentlist`, `/attachmentdelete <index>`, and `/attachmentdelete all confirm` manage attachments from IM. Saving uses the `bot.inbound-retention.set` RPC and clearing uses `bot.inbound-attachments.clear`; switching the policy never touches existing attachments, and leftover `turn-` batches are flagged in listings and clearable as well.
->>>>>>> 5c03f94 (feat(inbound): per-bot attachment retention (turn/forever), /attachment* commands and settings UI)
 ## [4.4.0] - 2026-09-01
 
 ### Added / 新增
@@ -596,7 +606,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.7.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.8.0...HEAD
+[4.8.0]: https://github.com/xmanrui/dsh-im/compare/v4.7.0...v4.8.0
 [4.7.0]: https://github.com/xmanrui/dsh-im/compare/v4.6.0...v4.7.0
 [4.6.0]: https://github.com/xmanrui/dsh-im/compare/v4.5.0...v4.6.0
 [4.5.0]: https://github.com/xmanrui/dsh-im/compare/v4.4.0...v4.5.0

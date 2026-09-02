@@ -683,11 +683,14 @@ export class TextHarnessBridge {
       let contextEnhanced = false;
       if (snapshot) {
         const originalContent = content ?? text;
+        const contextSource = message.contextSource?.();
         content = enhanceContextContent(originalContent, snapshot, () => ({
           channel: this.#descriptor.key,
           senderId,
-          senderName: message.contextSource?.()?.senderName,
-          conversationTitle: message.contextSource?.()?.conversationTitle,
+          senderName: contextSource?.senderName,
+          conversationTitle: contextSource?.conversationTitle,
+          chatId: contextSource?.chatId ?? message.conversationId,
+          threadId: contextSource?.threadId,
         }));
         contextEnhanced = content !== originalContent;
       }

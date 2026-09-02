@@ -7,6 +7,17 @@ function pickerErrorCode(error) {
   return error?.rpcError?.code ?? error?.code;
 }
 
+const PICKER_ERROR_KINDS = new Map([
+  ['directory-picker/unavailable', 'unavailable'],
+  ['directory-picker-unavailable', 'unavailable'],
+  ['directory-picker/unreadable', 'unreadable'],
+  ['directory-unreadable', 'unreadable'],
+]);
+
+function pickerErrorKind(error) {
+  return PICKER_ERROR_KINDS.get(pickerErrorCode(error));
+}
+
 function pickerErrorDetails(error) {
   return error?.rpcError?.details ?? error?.details;
 }
@@ -110,9 +121,9 @@ export function WorkspaceDirectoryPicker({
       const initialPath = initialPathRef.current;
       const initial = await loadDirectory(initialPath || undefined, { reportError: false });
       if (!active || initial.aborted || initial.value) return;
-      const code = pickerErrorCode(initial.error);
+      const kind = pickerErrorKind(initial.error);
       const details = pickerErrorDetails(initial.error);
-      if (code === 'directory-picker-unavailable'
+      if (kind === 'unavailable'
         && details?.capability === 'native'
         && typeof picker.pickDirectory === 'function') {
         setLoading(true);
@@ -128,7 +139,7 @@ export function WorkspaceDirectoryPicker({
         }
         return;
       }
-      if (initialPath && code === 'directory-unreadable') {
+      if (initialPath && kind === 'unreadable') {
         const home = await loadDirectory(undefined, { reportError: false });
         if (!active || home.aborted || home.value) return;
         setError(pickerErrorMessage(home.error));
