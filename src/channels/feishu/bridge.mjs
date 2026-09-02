@@ -3330,6 +3330,8 @@ export class FeishuHarnessBridge {
       content = enhanceContextContent(originalContent, snapshot, () => ({
         channel: 'feishu',
         senderId: senderOpenId(event),
+        chatId: event.message.chat_id,
+        threadId: event.message.thread_id,
       }));
       contextEnhanced = content !== originalContent;
     }

@@ -1,0 +1,11 @@
+# Context enhancement
+
+Open **Context enhancement** on a bot card to configure separate enable switches, source fields, and guidance for group and direct chats, then **Save** to apply the complete configuration atomically. The two scopes do not share settings. Each offers `channel`, `conversationType`, `senderId`, `senderName`, `conversationTitle`, `chatId`, `threadId`, and `botId`, with only `senderId` selected by default. `chatId` lets the model know which group or direct chat a message came from, and Feishu topic chats additionally carry `threadId` to tell different topics inside the same group apart. Only values selected for the current scope and already available in the incoming message are included; no platform profile API is queried. Weixin currently supports DMs only.
+
+When enabled, ordinary user messages receive the current scope's `<dsh_im_source>` prefix. Nonempty guidance for that scope is automatically wrapped in `<dsh_im_source_guidance>` tags. Both guidance fields start empty and have their own instructions, example, **Use example**, and **Clear** actions. No fields selected in the current scope means no source block. Commands, approvals and question answers keep their existing control paths.
+
+Existing shared fields and guidance are automatically copied into both group and direct configurations during upgrade, while their original enable switches remain independent. The first read does not rewrite the settings file; the new structure is persisted through the existing mechanism on the next successful bot-settings write, with no manual migration required.
+
+When the current conversation scope is off, text, images, files and Session behavior are unchanged, without enhancement assembly or extra network queries. Unsaved or cancelled drafts have no effect. Saving does not reconnect bots or recreate Sessions; messages already received retain their original configuration snapshot.
+
+These blocks are **user-message content**, not changes to Harness, system prompts or permissions. Identifiers may contain platform user IDs or phone-number-like values and are sent to the current model and stored in Session history. Turning the feature off stops future additions; it does not erase existing history.

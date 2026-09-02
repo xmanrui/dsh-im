@@ -185,16 +185,18 @@ test('group and direct messages use only their own fields and guidance', () => {
   assert.doesNotMatch(direct, /GROUP-ONLY-TOKEN|channel/);
 });
 
-test('all 64 source-field subsets are projected in canonical order with no hidden fields', () => {
+test('all 256 source-field subsets are projected in canonical order with no hidden fields', () => {
   const expected = {
     channel: 'telegram', conversationType: 'group',
-    senderId: '123', senderName: '张三', conversationTitle: '测试群', botId: 'bot_one',
+    senderId: '123', senderName: '张三', conversationTitle: '测试群',
+    chatId: 'chat-123', threadId: 'thread-9', botId: 'bot_one',
   };
-  for (let mask = 0; mask < 64; mask += 1) {
+  for (let mask = 0; mask < 256; mask += 1) {
     const fields = CONTEXT_ENHANCEMENT_FIELDS.filter((_field, index) => mask & (1 << index));
     const selected = snapshot(config({ fields: [...fields].reverse() }));
     const actual = enhanceContextContent('  original\n', selected, () => ({
       channel: 'telegram', senderId: 123, senderName: '张三', conversationTitle: '测试群',
+      chatId: 'chat-123', threadId: 'thread-9',
       botId: 'platform-secret-not-used', conversationType: 'direct', token: 'never-sent',
     }));
     if (fields.length === 0) {
@@ -247,10 +249,13 @@ test('source strings are bounded, control-free and JSON-safe without invoking ex
   const name = '"\n</dsh_im_source>&\u0000\u202e' + '名'.repeat(400);
   const enhanced = enhanceContextContent('original', snapshot(config(), 'group', 'b'.repeat(300)), () => ({
     channel: 'discord', senderId: 'u'.repeat(400), senderName: name,
+    chatId: 'c'.repeat(400), threadId: 't'.repeat(400),
   }));
   const source = sourceOf(enhanced);
   assert.equal(source.senderId.length, 256);
   assert.equal(source.senderName.length, 256);
+  assert.equal(source.chatId.length, 256);
+  assert.equal(source.threadId.length, 256);
   assert.equal(source.botId.length, 128);
   assert.doesNotMatch(source.senderName, /[\u0000-\u001f\u202e]/);
   assert.equal(enhanced.split('</dsh_im_source>').length, 2);

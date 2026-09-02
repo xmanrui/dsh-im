@@ -46,23 +46,26 @@ function directoryListing(path, childNames = [], { home = '/workspace', truncate
   };
 }
 
-function nativeUnavailable() {
+function nativeUnavailable({
+  code = 'directory-picker/unavailable',
+  capability = 'native',
+} = {}) {
   const error = new Error('Directory browsing is unavailable');
   error.rpcError = {
-    code: 'directory-picker-unavailable',
+    code,
     message: error.message,
-    details: { capability: 'native' },
+    details: { capability },
   };
   return error;
 }
 
-function nativeDirectoryPicker(selected) {
+function nativeDirectoryPicker(selected, unavailable = undefined) {
   const calls = { list: 0, pick: 0 };
   return {
     calls,
     async listDirectory() {
       calls.list += 1;
-      throw nativeUnavailable();
+      throw nativeUnavailable(unavailable);
     },
     async pickDirectory() {
       calls.pick += 1;
@@ -256,7 +259,7 @@ test('WorkspaceEditor keeps the prior folder unselectable when a typed path cann
     async listDirectory(path) {
       if (path === missing) {
         const error = new Error('cannot read requested folder');
-        error.rpcError = { code: 'directory-unreadable', message: error.message, details: { path } };
+        error.rpcError = { code: 'directory-picker/unreadable', message: error.message, details: { path } };
         throw error;
       }
       return {
@@ -387,6 +390,50 @@ test('WorkspaceEditor falls back to one native picker without restarting after s
   assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
 });
 
+test('WorkspaceEditor keeps the legacy native unavailable code compatible', async () => {
+  const saved = [];
+  const picker = nativeDirectoryPicker('/workspace/legacy-native', {
+    code: 'directory-picker-unavailable',
+  });
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(WorkspaceEditor, {
+      workspace: '/workspace/current',
+      directoryPicker: picker,
+      async onSave(value) { saved.push(value); },
+    }));
+  });
+  await act(async () => {
+    renderer.root.findByProps({ className: 'dim-workspaceEdit' }).props.onClick();
+    await flushMicrotasks();
+  });
+
+  assert.deepEqual(saved, ['/workspace/legacy-native']);
+  assert.deepEqual(picker.calls, { list: 1, pick: 1 });
+});
+
+test('WorkspaceEditor does not treat a non-native unavailable capability as native', async () => {
+  const picker = nativeDirectoryPicker('/workspace/must-not-pick', {
+    capability: 'browse',
+  });
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(WorkspaceEditor, {
+      workspace: '/workspace/current',
+      directoryPicker: picker,
+      async onSave() { throw new Error('must not save'); },
+    }));
+  });
+  await act(async () => {
+    renderer.root.findByProps({ className: 'dim-workspaceEdit' }).props.onClick();
+    await flushMicrotasks();
+  });
+
+  assert.deepEqual(picker.calls, { list: 1, pick: 0 });
+  assert.equal(renderer.root.findAllByProps({ role: 'alert' }).length, 1);
+  assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 1);
+});
+
 test('WorkspaceEditor treats native picker cancellation as cancellation, not an error', async () => {
   let saves = 0;
   const picker = nativeDirectoryPicker(null);
@@ -409,40 +456,42 @@ test('WorkspaceEditor treats native picker cancellation as cancellation, not an 
   assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
 });
 
-test('WorkspaceEditor falls back to the Host home when the saved path is unreadable', async () => {
-  const listed = [];
-  const saved = [];
-  const picker = {
-    async listDirectory(path) {
-      listed.push(path);
-      if (path === '/workspace/gone') {
-        const error = new Error('missing');
-        error.rpcError = { code: 'directory-unreadable', message: 'missing', details: { path } };
-        throw error;
-      }
-      return directoryListing('/workspace', ['projects']);
-    },
-  };
-  let renderer;
-  await act(async () => {
-    renderer = create(React.createElement(WorkspaceEditor, {
-      workspace: '/workspace/gone',
-      directoryPicker: picker,
-      async onSave(value) { saved.push(value); },
-    }));
-  });
-  await act(async () => {
-    renderer.root.findByProps({ className: 'dim-workspaceEdit' }).props.onClick();
-    await flushMicrotasks();
-  });
+for (const unreadableCode of ['directory-picker/unreadable', 'directory-unreadable']) {
+  test(`WorkspaceEditor falls back to the Host home for ${unreadableCode}`, async () => {
+    const listed = [];
+    const saved = [];
+    const picker = {
+      async listDirectory(path) {
+        listed.push(path);
+        if (path === '/workspace/gone') {
+          const error = new Error('missing');
+          error.rpcError = { code: unreadableCode, message: 'missing', details: { path } };
+          throw error;
+        }
+        return directoryListing('/workspace', ['projects']);
+      },
+    };
+    let renderer;
+    await act(async () => {
+      renderer = create(React.createElement(WorkspaceEditor, {
+        workspace: '/workspace/gone',
+        directoryPicker: picker,
+        async onSave(value) { saved.push(value); },
+      }));
+    });
+    await act(async () => {
+      renderer.root.findByProps({ className: 'dim-workspaceEdit' }).props.onClick();
+      await flushMicrotasks();
+    });
 
-  assert.deepEqual(listed, ['/workspace/gone', undefined]);
-  await act(async () => {
-    renderer.root.findByProps({ className: 'dim-directoryPickerPrimary' }).props.onClick();
-    await flushMicrotasks();
+    assert.deepEqual(listed, ['/workspace/gone', undefined]);
+    await act(async () => {
+      renderer.root.findByProps({ className: 'dim-directoryPickerPrimary' }).props.onClick();
+      await flushMicrotasks();
+    });
+    assert.deepEqual(saved, ['/workspace']);
   });
-  assert.deepEqual(saved, ['/workspace']);
-});
+}
 
 test('WorkspaceEditor moves keyboard focus into and back out of the picker', async () => {
   let dialogFocus = 0;

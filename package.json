@@ -1,6 +1,6 @@
 {
   "name": "@xmanrui/dsh-im",
-  "version": "4.7.0",
+  "version": "4.8.0",
   "description": "把九种 IM 机器人和公网 AI Office 接入本机 DeepSeek Harness。 Connect nine IM channels and a public AI Office to a local DeepSeek Harness.",
   "keywords": [
     "deepseek-harness",
@@ -34,6 +34,10 @@
     {
       "name": "divingleee",
       "url": "https://github.com/divingleee"
+    },
+    {
+      "name": "Chan-0312",
+      "url": "https://github.com/Chan-0312"
     }
   ],
   "license": "MIT",

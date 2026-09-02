@@ -1,6 +1,7 @@
 // Shared by the Host and settings UI; keep this module browser-compatible.
 export const CONTEXT_ENHANCEMENT_FIELDS = Object.freeze([
-  'channel', 'conversationType', 'senderId', 'senderName', 'conversationTitle', 'botId',
+  'channel', 'conversationType', 'senderId', 'senderName', 'conversationTitle',
+  'chatId', 'threadId', 'botId',
 ]);
 
 export const CONTEXT_ENHANCEMENT_GUIDANCE_MAX_LENGTH = 8_000;
@@ -38,7 +39,7 @@ const CHANNELS = new Set([
 ]);
 const SOURCE_LIMITS = {
   channel: 16, conversationType: 6, senderId: 256, senderName: 256,
-  conversationTitle: 256, botId: 128,
+  conversationTitle: 256, chatId: 256, threadId: 256, botId: 128,
 };
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
 
@@ -64,7 +65,7 @@ function validateContextEnhancementScope(input) {
     throw invalidConfig('群聊和私聊开关必须是布尔值。');
   }
   if (!Array.isArray(fields) || ![...fields].every((field) => CONTEXT_ENHANCEMENT_FIELDS.includes(field))) {
-    throw invalidConfig('来源字段只能选择已定义的六个字段。');
+    throw invalidConfig('来源字段只能选择已定义的八个字段。');
   }
   if (typeof guidance !== 'string' || guidance.length > CONTEXT_ENHANCEMENT_GUIDANCE_MAX_LENGTH) {
     throw invalidConfig(`增强提示词不得超过 ${CONTEXT_ENHANCEMENT_GUIDANCE_MAX_LENGTH} 个字符。`);
@@ -150,7 +151,7 @@ function sourceString(value, field) {
 function sourceBlock(snapshot, sourceFactory) {
   const { fields } = snapshot.config;
   const needsSource = fields.some((field) => [
-    'channel', 'senderId', 'senderName', 'conversationTitle',
+    'channel', 'senderId', 'senderName', 'conversationTitle', 'chatId', 'threadId',
   ].includes(field));
   const source = needsSource ? sourceFactory?.() : null;
   const projected = {};

@@ -307,6 +307,10 @@ for (const channel of CHANNELS) {
     test(`${channel} ${kind}: enabled source uses the actual event, optional name and internal bot ID`, async () => {
       const current = fixture(channel, { contextEnhancement: provider(channel, settings()) });
       await current.bridge.accept(current.event(1, 'hello', { kind }));
+      const chatId = channel === 'telegram' ? '100'
+        : channel === 'whatsapp' ? (kind === 'group' ? 'chat@g.us' : 'actor@s.whatsapp.net')
+          : channel === 'wecom' || channel === 'qq' || channel === 'weixin'
+            ? (kind === 'group' ? 'chat' : 'actor') : 'chat';
       const expected = {
         channel, conversationType: kind,
         senderId: channel === 'telegram' ? '42' : channel === 'whatsapp' ? 'actor@s.whatsapp.net' : 'actor',
@@ -314,6 +318,8 @@ for (const channel of CHANNELS) {
           ? { senderName: 'Ada' } : {}),
         ...(channel === 'dingtalk' && kind === 'group' ? { conversationTitle: '钉钉测试群' } : {}),
         ...(channel === 'telegram' && kind === 'group' ? { conversationTitle: 'Telegram群' } : {}),
+        chatId,
+        ...(channel === 'slack' && kind === 'group' ? { threadId: 'thread-existing' } : {}),
         botId: `${channel}_internal`,
       };
       assert.deepEqual(sourceOf(current.prompts[0]), expected);
@@ -553,4 +559,26 @@ test('Discord prefers event member nickname, global name, then username without 
   }
   assert.deepEqual(current.prompts.map((content) => sourceOf(content).senderName),
     ['Group Nick', 'Global Name', 'username', undefined]);
+});
+
+test('Feishu topics expose chatId always and threadId only when the event carries a thread', async () => {
+  const current = fixture('feishu', { contextEnhancement: provider('feishu', settings()) });
+  await current.bridge.accept(current.event(1, 'main channel', { kind: 'group' }));
+  const main = sourceOf(current.prompts[0]);
+  assert.equal(main.chatId, 'chat');
+  assert.equal(Object.hasOwn(main, 'threadId'), false);
+  assert.deepEqual(main, {
+    channel: 'feishu', conversationType: 'group', senderId: 'actor',
+    chatId: 'chat', botId: 'feishu_internal',
+  });
+  const topic = current.event(2, 'inside a topic', { kind: 'group' });
+  topic.message.thread_id = 'omt_topic';
+  await current.bridge.accept(topic);
+  const topicSource = sourceOf(current.prompts[1]);
+  assert.equal(topicSource.chatId, 'chat');
+  assert.equal(topicSource.threadId, 'omt_topic');
+  assert.equal(current.sessions.size, 2, 'topic messages keep their own thread-scoped Session');
+  await current.bridge.accept(current.event(3, 'direct chat', { kind: 'direct' }));
+  assert.equal(sourceOf(current.prompts[2]).chatId, 'chat');
+  assert.equal(Object.hasOwn(sourceOf(current.prompts[2]), 'threadId'), false);
 });

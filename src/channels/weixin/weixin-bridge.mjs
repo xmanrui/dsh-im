@@ -786,6 +786,7 @@ export class WeixinHarnessBridge {
           content = enhanceContextContent(originalContent, snapshot, () => ({
             channel: 'weixin',
             senderId: sender,
+            chatId: sender,
           }));
           contextEnhanced = content !== originalContent;
         }

@@ -45,7 +45,7 @@ Connect IM bots to DeepSeek Harness by scanning a QR code, using an App Manifest
 
 ![IM 机器人页面](docs/images/imbot.png)
 
-![上下文增强页面](docs/images/Context_enhancement.png)
+<img src="docs/images/Context_enhancement.png" alt="上下文增强页面" width="49%"> <img src="docs/images/access_mode.png" alt="访问模式页面" width="49%">
 
 ## 当前内置渠道
 
@@ -85,13 +85,7 @@ Connect IM bots to DeepSeek Harness by scanning a QR code, using an App Manifest
 
 ## AI Office Connector
 
-「AI Office」页让本机 Harness 主动连接公网 Office，本机无需公网 IP、端口转发或 WebSocket 服务。Device Token 只写入 Harness 凭据存储；普通配置文件仅保存设备 ID、Office Origin、工作区 alias 和 Instruction Preset alias。Office 只能选择 alias，不会收到本机绝对路径。
-
-当前协议版本为 `office-harness.v1`。连接器使用 `POST /api/harness/connector/heartbeat` 完成鉴权和能力握手，再以 `GET /api/harness/connector/stream` 建立 SSE 下行；设置页会从 Office Base URL 自动展示全部固定 Hook，并在断线后按退避策略自动重连。
-
-Office 的 `job.available` 会触发本机拉取任务、校验 Workspace/Preset alias、领取 90 秒租约并每 30 秒续租。连接器创建独立 Harness Session，把状态、工具名和增量文字安全回传 Office，终态只允许写入一次。Harness 发起的工具审批或补充问题会进入 Office 人工面板；批准、拒绝或文字答案再经 SSE 回到原 Session，断线时由租约与 Heartbeat 恢复。
-
-Heartbeat 成功响应必须是 JSON：`{"ok":true,"protocolVersion":"office-harness.v1"}`。这使「连接测试通过」代表命中了兼容的 Office Connector，而不只是某个碰巧返回 200 的网址。
+[查看 AI Office Connector 说明](docs/AI-Office-Connector.md)
 
 ## 安装
 
@@ -143,41 +137,15 @@ dsh web
 
 ### 上下文增强
 
-点击机器人卡片中的「上下文增强」，分别设置群聊和私聊的启用开关、来源字段与增强提示词，点击「保存」后原子生效。两个场景互不共用配置；五个可选字段均为 `channel`、`conversationType`、`senderId`、`senderName`、`botId`，各自默认只选择 `senderId`。插件只发送当前场景勾选且当前消息已有的值，不查询平台 API 补全。微信当前只支持私聊。
-
-开启后，插件在普通用户消息前附加当前场景的 `<dsh_im_source>` 来源块；当前场景非空的增强提示词自动包裹为 `<dsh_im_source_guidance>`。两个场景的提示词默认留空，并分别提供说明、示例、「填入示例」和「清空」；当前场景字段全部取消时不生成来源块。命令、审批和问题回答继续走原有控制链路。
-
-升级前已经保存的共用字段与增强提示词会自动复制到群聊、私聊两份配置，原有两个开关也分别保留。升级后的首次读取不会改写配置文件；之后任意一次机器人设置成功保存时，会随现有设置写入机制自动落盘为新结构，无需手工迁移。
-
-当前会话类型未开启时，原有文字、图片、文件和会话处理保持不变，不组装增强内容，也不新增网络查询。草稿、清空后取消等操作不改变运行配置；保存不重连机器人、不重建会话，已经接收的消息仍使用接收时的配置。
-
-来源与提示词都属于**用户消息内容**，不修改 Harness、系统提示词或权限。来源标识可能包含平台用户 ID 或电话号码形式的信息，并随消息交给当前模型、留在会话历史中；关闭只停止后续附加，不删除已经写入的历史。
+[查看上下文增强说明](docs/上下文增强.md)
 
 ### 访问模式
 
-每个 Telegram 机器人都可以在自己的卡片中切换访问模式。旧机器人和新接入机器人均默认使用**兼容模式**：私聊直接响应，群聊仅在提及机器人或回复机器人消息时响应。只有主动切换到**安全模式（私聊白名单）**后，机器人才会忽略全部群聊，并只接受该机器人白名单中的数字 User ID。白名单每行一个 ID、按机器人独立保存；切回兼容模式时会保留但不使用，再切回安全模式即可继续使用。安全模式的空白名单会拒绝该机器人的所有入站消息。
-
-每个 WhatsApp 机器人也有独立的访问模式。旧机器人升级后和新接入机器人都默认使用**仅自己模式**，只响应已绑定账号的自聊消息。**指定联系人模式**额外接受白名单电话号码的私聊并忽略群聊；号码需包含国家或地区代码，每行一个，可带开头的 `+`。**开放响应模式**响应所有私聊、已绑定账号自己发出的群聊消息，以及其他群成员对该账号的提及或回复；因此也可以把“仅自己”的群当作独立会话使用。切换模式会保留白名单；指定联系人模式的空白名单等同于仅自己模式。未授权消息会被静默忽略。
+[查看访问模式说明](docs/访问模式.md)
 
 ## 检查与安装更新
 
-在「设置 → IM机器人」右上角点击 GitHub 左侧的「检查更新」。只有点击后才查询 npm 官方源；发现新版后，确认目标版本和当前 profile 再安装。更新只涉及 `@xmanrui/dsh-im`，不拉取 GitHub，不更新 Harness 或 Desktop 本体。
-
-安装完成后，后台仍需手动重启，页面根据 Host 状态显示「已安装，待手动重启」。更新功能不会主动重启、执行热更新或刷新页面。宿主自带的模块监视机制可能自行刷新插件界面，但界面变化不代表后台版本已生效，运行版本以 Host 报告为准。请在机器人任务空闲时更新，并自行重启当前 Harness / Desktop。关闭设置页不会取消已提交的安装任务。
-
-手动重启后，如果原页面仍显示待重启，点击窗口中的「刷新状态」，或重新打开「待手动重启」窗口。该操作只重新读取当前 Host 状态，不查询 npm，也不刷新页面。
-
-按钮复用 Desktop 内置包管理服务或标准 Harness 的 CLI，执行相当于以下命令的精确版本安装（将示例 profile、版本替换为确认值）：
-
-```sh
-dsh plugin --profile web add -w --save-exact @xmanrui/dsh-im@3.1.0 --registry=https://registry.npmjs.org/
-```
-
-更新窗口下方的「手工更新」会按当前 profile 生成精简命令，例如 `dsh plugin --profile web add -w @xmanrui/dsh-im@3.1.1`，点击命令最右侧的复制图标后可在终端执行。已知目标版本时指定该版本；尚未查到版本时使用 `@latest`，以执行时 npm 返回的版本为准。手工命令沿用本机 npm 源配置，不拉取 GitHub；按钮安装仍固定使用官方源并保存精确版本。浏览器无法复制时可选中文本手动复制。Desktop 请使用当前 Desktop 的内置终端；Web 请使用启动当前 Harness 的环境并保持相同 `DSH_HOME`。如果已经提示「待手动重启」，通常只需重启，无需再次安装。源码链接或无法安全确认的 profile 不生成可能覆盖安装的命令。
-
-源码 `link:`、`file:`、Git 来源或无法确认归属的安装只提供版本检查，不会替换开发链接；如需迁移为 npm 安装，请自行确认对应 profile。作用域 registry 冲突、Node 版本不满足要求或缺少当前 Host 的执行器时，按钮会说明原因。标准 Windows CLI 暂需手动更新；Desktop 使用其原有执行器。
-
-安装期间不要同时在终端或插件市场修改该 profile。失败可能已经改变部分依赖，不能视为自动回滚；先检查安装状态，必要时按上述命令重装原精确版本，再手动重启。更新器只在当前 `DSH_HOME/updates/dsh-im` 下保存该 profile 最近一次任务与清单备份，不复制机器人凭据；残留安装进程或锁状态不明确时，请先人工确认，不要盲目重试或删除锁。
+[查看检查与安装更新说明](docs/检查与安装更新.md)
 
 ## 机器人命令
 
@@ -214,48 +182,9 @@ dsh plugin --profile web add -w --save-exact @xmanrui/dsh-im@3.1.0 --registry=ht
 | 交互式提问 | 回复选项序号、选项文字或自定义文字；多选时用逗号分隔。 |
 | 远程审批 | 回复 `批准` / `拒绝` / `同意` / `不同意` / `yes` / `no`。 |
 
-示例：先发送 `/models`，再发送 `/model 2` 切换到列表中的第 2 个模型；先发送 `/reasoninglist`，再发送 `/reasoning 2` 切换到当前模型的第 2 个推理等级；先发送 `/presetlist`，再发送 `/preset 2` 为当前机器人选择第 2 个 Agent Preset。其他命令示例：`/help`、`/new`、`/status`、`/version`、`/model deepseek-official/deepseek-v4-pro max`、`/reasoning --default`、`/preset marketing-jeep`、`/preset --default`、`/steer 只检查配置文件`、`/stop`、`/compact`、`/workspace /Users/alice/projects/my-app`、`/sessionlist 2`、`/sessionlist /Users/alice/projects/my-app`、`/session session-id`、`/history` 或 `/history 5`
-
-Slack 桌面端若未注册同名的原生 Slash Command，会拦截直接以 `/` 开头的消息。此时请加一个前导空格发送，例如 ` /presetlist`、` /preset 2`、` /history` 或 ` /history 10`；插件命令层会去除首尾空白，执行效果与无空格命令相同。
-
-**飞书输入框的 `/` 命令面板**：机器人启动时，dsh-im 会调用飞书 `app_slash_commands` OpenAPI，把常用命令（`menu`、`new`、`help`、`status`、`compact`、`sessionlist`、`workspacelist`、`watch`、`unwatch`、`watchlist`、`archived`）注册成原生 Slash Command，这样在飞书单聊输入框输入 `/` 会弹出命令面板，点选即触发。命令列表由 dsh-im 自己持有并推送注册，不依赖 dsh/Harness 后端。扫码新建的应用会默认申请 `application:app_slash_command:read` 和 `application:app_slash_command:write`；已有应用可通过“补全权限”或私聊 `/repair` 增量补全并按飞书提示发布。注册后飞书客户端约有几分钟缓存延迟。该能力是尽力而为的，注册失败不会影响机器人消息收发。
-
 ### 命令说明
 
-- `/help` 不需要参数，也不会创建会话；它会返回当前机器人支持的完整命令列表。
-- `/status` 不需要参数，也不会向模型发送消息或改变会话绑定；它用于确认当前机器人能够连接 DeepSeek Harness。
-- `/version` 不需要参数，也不会访问 Harness、创建会话或调用模型；它返回当前运行的 dsh-im 插件版本。
-- `/new` 只解除当前聊天在 dsh-im 中保存的会话绑定，不会删除、清空或归档旧 Session。下一条普通消息会在当前工作区创建并绑定一个新 Session。任务正在运行或等待问题、审批时，应先完成交互或使用 `/stop`，再使用 `/new`。
-- `/models` 不需要参数，也不会创建会话。它为 Harness 当前配置的全部可用模型分配序号，同时显示可稳定复制的 `Provider/模型ID`；某个 Provider 查询失败时，其他 Provider 的结果仍会显示。
-- `/model` 不带参数时查看当前会话的模型和推理等级；带参数时接受 `/models` 列出的序号或精确完整模型 ID，并可追加目标模型元数据公布的精确推理等级 ID，例如 `/model 2 max`。省略推理等级时，由 Harness 解析目标模型的当前默认值。聊天尚无会话时，有效的切换命令会创建并绑定一个空白会话，但不会触发模型回复。
-- `/reasoninglist` 和 `/reasonings` 完全等价，按当前模型的元数据列出可选推理等级并标记当前值和默认值。`/reasoning` 查看当前值；`/reasoning <序号或等级ID>` 接受列表序号或元数据中的精确 ID；`/reasoning --default` 让 Harness 重新采用当前模型的默认推理等级。所有 `/reasoning...` 命令都要求当前聊天已有 Session，不会自行创建 Session 或触发模型回复。
-- 正在运行任务或等待审批、问题回答时不能修改模型或推理等级；请等待完成，或先使用 `/stop`。修改从下一次模型请求起生效，并沿用 Harness 的默认保存语义：Harness 会尝试把已接受的模型和推理等级保存为以后新会话的默认选择，已有其他会话不受影响。含图片的会话无法切换到不支持图片输入的模型。
-- `/presetlist` 和 `/presets` 完全等价，不需要参数，也不会创建会话。它们每次都读取 Host 当前可用的 Agent Preset，显示名称、稳定 ID、Host 默认项和当前机器人的选择；已删除或损坏的当前选择会保留并标记为“已不可用”，不会被自动清除。列表只公开安全的名称和 ID，不公开 Preset 路径、错误或其他 Host 内部字段。
-- `/preset` 不带参数时查看当前机器人的“新会话设置”，不是查看或修改当前 Session。带参数时接受最近一次 `/presetlist` 在当前聊天中显示的序号或完整 ID；纯数字 ID 使用 `/preset id:<ID>`。选择序号时会先按该次列表解析 ID，再用 Host 最新目录复验，目录已经变化时会要求重新列出。
-- `/preset --default` 清除当前机器人的显式覆盖值，让以后新建的 Session 在创建时跟随 Host 当前默认；显式选择一个恰好等于 Host 默认的 ID 则会固定该 ID。目录暂时不可读时仍可恢复为跟随 Host 默认。
-- Agent Preset 修改是机器人级配置，会影响该机器人所有聊天以后创建的新 Session，但不会修改、停止、解绑或重建已有 Session，也不会自动执行 `/new`。若当前聊天已有会话，继续发送消息仍使用原 Session；发送 `/new` 后的下一条普通消息才会按新设置创建 Session。任务正在运行或等待交互时也可查询或修改 Preset，因为命令不会触碰当前 Session。
-- `/stop` 和 `/steer` 只控制当前聊天自己发起的运行任务，即使多个聊天绑定同一个 Session，也不会有意控制其他聊天的任务。`/stop` 不删除会话或历史，并保留尚未开始的排队消息；重复发送是安全的。
-- `/steer` 只接受文字，可包含多行；它不会创建新会话或第二个任务。没有运行任务时请直接发送普通消息；等待审批或问题回答时请先处理交互，或使用 `/stop`。
-- `/batch`、`/send` 和 `/cancel` 仅在与机器人的私聊中可用。发送 `/batch` 后，接下来的纯文字消息会暂存，最多 10 条；第 10 条仍会收录并提示提交，之后的消息不会收录，也不会自动提交。发送 `/send` 后，机器人会按原顺序将整批内容作为一次输入处理；发送 `/cancel` 会直接丢弃当前批次。图片、文件和其他命令不会被收录。机器人重启会丢失尚未提交的批次。未进入批量输入模式时，普通聊天流程不变。
-- 飞书 `/repair` 仅在私聊中可用，并与其他命令一样只服从当前飞书机器人的渠道访问策略；插件不另行区分管理员和普通用户。它增量补全当前缺少的 `card.action.trigger`、`im:message:readonly`、`im:resource`、`application:app_slash_command:read` 和 `application:app_slash_command:write`，确认页只显示当前应用缺少的项。授权页必须由在飞书开放平台中有权访问目标应用的账号打开。普通 `/repair` 会启动修复；若旧任务仍在等待授权，会先作废旧的一次性链接再生成新链接。发送 `/repair qr` 获取当前链接的二维码，`/repair status` 查询当前任务，`/repair verify` 重新查询验证状态，`/repair cancel` 取消任务；这四个补充命令均不会另起授权。平台已接受更新、正在等待测试按钮回调时，不会并发启动第二次修复。
-- `/compact` 只作用于当前聊天已经绑定的 Harness 会话，不会把命令发送给模型。当前聊天尚未创建会话、会话正在生成回复或没有可压缩历史时，机器人会直接返回对应状态。
-- 只接受已经存在的绝对目录；路径无效时机器人会返回具体提示和正确用法。
-- `/workspacelist` 不需要参数。它合并 Harness 全局登记项与当前机器人的路径；当前路径仍存在且可安全显示时会排在首位并标记为“当前”。`/workspace N` 会在执行时按最新列表顺序切换，也可继续使用绝对路径。
-- `/sessionlist` 和 `/sessions` 完全等价。数字参数按命令执行时与 `/workspacelist` 相同的最新顺序解析；也可使用绝对路径直接指定工作区。结果会回显最终选中的路径。
-- `/sessionlist --limit N` 和 `/sessions --limit N` 只限制本次命令的返回条数，不改变任何全局或机器人配置。未指定 `--limit` 时仍列出全部会话。
-- 两个会话列表命令都会列出该工作区登记的所有会话。已归档会话会标记为“已归档”；空白会话和子代理会话在它们归属该工作区时也会列出；没有标题的会话显示为“暂无标题”。结果中的 ID 可直接用于 `/session Session ID`。
-- `/session` 只接受一个由 `/sessionlist` 获得的 Session ID。它不会新建会话或立即向模型发送消息；绑定成功后，当前聊天的后续消息会继续该会话。普通归档会话可以绑定但不会自动取消归档，子代理会话不能绑定。
-- `/history` 在九个渠道的私聊中统一可用，只读取当前聊天已经绑定的会话，不新建会话、不调用模型，也不影响正在运行的任务或待处理交互。默认返回最近 3 条；`/history N` 接受正整数，超过 5 自动按 5 条处理，数量不足时返回实际条数。零、负数、小数、非数字和多个参数会提示用法，附带图片或文件时会拒绝处理；批量输入收集中请先 `/send` 或 `/cancel`。
-- 历史预览中，一条用户消息或一条助手最终回复各算一条，不按轮次或天数计数。先取最新 N 条，再按从旧到新的顺序显示；不展示工具、推理、注入内容或尚未完成的助手片段，不下载或重发历史附件。长正文会截断并注明，全部结果最多发送 3 段文字，不自动翻页。绑定会话后可手动发送 `/history`，不会自动重发历史。正文仍可能包含会话原有的敏感信息，请只向可信用户开放机器人。
-- `/session` 会自动定位会话唯一所属的工作区。同工作区绑定只替换当前聊天的映射；跨工作区绑定会切换该机器人的工作区、清除该机器人所有聊天的旧会话映射，再绑定当前聊天，因此会影响该机器人的其他聊天。已经开始生成的回复仍可完成。
-- 工作区切换和会话绑定只会清除或替换 dsh-im 的聊天映射，不会删除、清空或归档任何旧 Session 内容；旧 Session 仍可再次列出和绑定。
-- 任何通过当前渠道访问策略的用户都可以执行这些命令，不另行区分管理员和普通用户。Telegram 兼容模式遵循原有私聊及群聊提及/回复规则；安全模式只允许当前机器人白名单中的私聊用户执行。WhatsApp 仅自己模式只接受自聊，指定联系人模式接受自聊和白名单私聊，开放响应模式接受所有私聊、已绑定账号自己发出的群聊消息，以及其他群成员的提及或回复。
-- Agent Preset 名称和 ID 来自同一个 Harness Host，且任何有命令权限的用户都能修改该机器人所有聊天未来新 Session 的 Preset；请只向可信用户开放 `/presetlist` 和 `/preset`。
-- 工作区列表来自 Harness Host 的全局登记信息，可能包含其他机器人、其他渠道或非 IM 项目的本机绝对路径。请将机器人可见范围限制给可信用户。
-- 会话列表同样来自该全局 Harness Host；会话 ID 和标题可能属于其他机器人、其他渠道或非 IM 项目，并可能包含敏感元数据。开放命令前请确保所有可见用户都可信。
-- 任何能执行 `/session` 的用户都能接续所选会话，并通过后续消息写入会话或触发其可用工具。请只向可信用户开放机器人及其会话列表。
-- 切换成功后只清除当前机器人的旧 Harness 会话映射，不影响其他机器人。
-- 新工作区对后续消息生效；已经开始生成的回复会继续完成。
+[查看命令说明](docs/机器人命令.md)
 
 ## 其它功能
 

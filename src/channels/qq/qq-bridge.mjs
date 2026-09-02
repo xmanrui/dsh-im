@@ -890,6 +890,7 @@ export class QqHarnessBridge {
           channel: 'qq',
           senderId: sender,
           senderName: message.kind === 'group' ? message.senderName : undefined,
+          chatId: message.kind === 'group' ? message.groupOpenid : message.senderId,
         }));
         contextEnhanced = content !== originalContent;
       }
