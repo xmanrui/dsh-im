@@ -51,6 +51,7 @@ function deferredFixture(overrides = {}) {
 function delivererFixture({
   history = historyFixture(),
   sendText,
+  cards = null,   // null = 不提供卡片 API（文本路径）；对象 = 卡片 fake 与记录器
 } = {}) {
   const listeners = [];
   const sent = [];
@@ -71,6 +72,22 @@ function delivererFixture({
       proactive.push({ target, text });
       return {};
     },
+    ...(cards ? {
+      createAiCard: async ({ initialText, target }) => {
+        cards.created.push({ initialText, target });
+        if (cards.createError) throw new Error('card create rejected');
+        return { cardInstanceId: cards.cardInstanceId ?? 'card-defer-1' };
+      },
+      finishAiCard: async ({ cardInstanceId, text }) => {
+        cards.finished.push({ cardInstanceId, text });
+        if (cards.finishError) throw new Error('card finish rejected');
+        return { delivered: true, completed: true };
+      },
+      failAiCard: async (request) => {
+        cards.failed.push(request);
+        return true;
+      },
+    } : {}),
   };
   const deliverer = createDeferredDeliverer({
     api,
@@ -85,7 +102,7 @@ function delivererFixture({
     }),
   });
   return {
-    deliverer, listeners, sent, proactive, remembered,
+    deliverer, listeners, sent, proactive, remembered, cards: cards ?? null,
     setHistory: (next) => { history = next; },
   };
 }
@@ -95,6 +112,11 @@ const P2P_ROUTE = {
   sessionWebhookExpiredTime: 0,
   fallbackTarget: { type: 'user', userId: 'staff-approved', robotCode: 'ding-client' },
   at: undefined,
+};
+
+const CARD_ROUTE = {
+  ...P2P_ROUTE,
+  cardTarget: { type: 'user', userId: 'staff-approved' },
 };
 
 test('deferredTerminalText keeps error semantics for every terminal reason', () => {
@@ -186,4 +208,51 @@ test('reconnect compensation rescans turns that ended while offline', async () =
   fx.setHistory(historyFixture());
   fx.listeners[0].onReconnect?.();
   await eventually(() => fx.sent.length === 1);
+});
+
+test('a card-capable route delivers the deferred result as a finalized AI card', async () => {
+  const cards = { created: [], finished: [], failed: [] };
+  const fx = delivererFixture({ cards });
+  const deferred = deferredFixture();
+  await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: CARD_ROUTE });
+  assert.equal(cards.created.length, 1);
+  assert.equal(cards.created[0].initialText, '后台完成的结果');
+  assert.deepEqual(cards.created[0].target, { type: 'user', userId: 'staff-approved' });
+  assert.deepEqual(cards.finished, [{
+    cardInstanceId: 'card-defer-1',
+    text: '后台完成的结果',
+  }]);
+  assert.equal(fx.sent.length, 0, 'card delivery must not also send webhook text');
+  assert.equal(fx.proactive.length, 0);
+  assert.equal(deferred.released, 1);
+  assert.deepEqual(fx.remembered[0].providerMessageIds, ['card-defer-1']);
+});
+
+test('a failed card creation falls back to the webhook text path', async () => {
+  const cards = { created: [], finished: [], failed: [], createError: true };
+  const fx = delivererFixture({ cards });
+  const deferred = deferredFixture();
+  await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: CARD_ROUTE });
+  assert.equal(fx.sent.length, 1);
+  assert.equal(fx.sent[0], '后台完成的结果');
+  assert.equal(deferred.released, 1);
+});
+
+test('a failed card finalize marks the card failed and falls back to text', async () => {
+  const cards = { created: [], finished: [], failed: [], finishError: true };
+  const fx = delivererFixture({ cards });
+  const deferred = deferredFixture();
+  await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: CARD_ROUTE });
+  assert.equal(cards.failed.length, 1);
+  assert.equal(cards.failed[0].cardInstanceId, 'card-defer-1');
+  assert.equal(fx.sent.length, 1, 'text fallback after finalize failure');
+});
+
+test('a card-capable api without a cardTarget in the route keeps the text path', async () => {
+  const cards = { created: [], finished: [], failed: [] };
+  const fx = delivererFixture({ cards });
+  const deferred = deferredFixture();
+  await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: P2P_ROUTE });
+  assert.equal(cards.created.length, 0);
+  assert.equal(fx.sent.length, 1);
 });

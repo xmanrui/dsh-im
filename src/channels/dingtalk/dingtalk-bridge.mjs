@@ -1222,6 +1222,7 @@ export class DingtalkHarnessBridge {
             sessionWebhook,
             sessionWebhookExpiredTime: Number(message.sessionWebhookExpiredTime) || 0,
             fallbackTarget: fileTarget(message, sender, this.#clientId),
+            cardTarget: cardTarget(message, sender),
             at: this.#atUsersFor(message),
           },
         }).catch((error) => {

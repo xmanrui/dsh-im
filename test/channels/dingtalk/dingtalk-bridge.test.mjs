@@ -2802,16 +2802,20 @@ test('DingTalk group batch commands are rejected without reaching Harness', asyn
 
 // ── Deferred handoff: slow turns notify, then push on completion ──────────
 
-function deferredHarnessFixture({ history = { events: [] } } = {}) {
+function deferredHarnessFixture({ history = { events: [] }, cards = null } = {}) {
   const listeners = [];
   const releaseCalls = [];
   const sent = [];
   const proactive = [];
+  const cardCreates = [];
+  const cardFinishes = [];
   return {
     listeners,
     releaseCalls,
     sent,
     proactive,
+    cardCreates,
+    cardFinishes,
     setHistory: (next) => { history = next; },
     harness: {
       sessionExists: async () => true,
@@ -2841,6 +2845,17 @@ function deferredHarnessFixture({ history = { events: [] } } = {}) {
         proactive.push({ target, text });
         return {};
       },
+      // cards = null 时不下发卡片函数：既有用例保持文本链可观察行为。
+      ...(cards ? {
+        createAiCard: async ({ initialText, target }) => {
+          cardCreates.push({ initialText, target });
+          return { cardInstanceId: 'card-bridge-defer' };
+        },
+        finishAiCard: async ({ cardInstanceId, text }) => {
+          cardFinishes.push({ cardInstanceId, text });
+          return { delivered: true, completed: true };
+        },
+      } : {}),
     },
   };
 }
@@ -2924,6 +2939,50 @@ test('DingTalk deferred result falls back to proactive delivery after the webhoo
     robotCode: 'ding-client',
   });
   assert.match(fx.proactive[0].text, /后台完成的结果/);
+});
+
+test('DingTalk delivers a deferred group result as a finalized AI card', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('group:conversation-group-1', 'session-defer');
+  const fx = deferredHarnessFixture({
+    cards: true,
+    history: { events: [
+      { seq: 1, type: 'turn/start', data: { turn: 1 } },
+      { seq: 2, type: 'user/message', data: { turn: 1, source: { rpcId: 'dingtalk-defer-1' } } },
+      {
+        seq: 3,
+        type: 'assistant/chunk',
+        data: { turn: 1, step: 0, chunk: { type: 'text-delta', index: 0, text: '后台完成的结果' } },
+      },
+      { seq: 4, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+    ] },
+  });
+  const bridge = new DingtalkHarnessBridge({
+    api: fx.api,
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    harness: fx.harness,
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('ding-defer-card-1', '慢任务', {
+    conversationType: '2',
+    conversationId: 'conversation-group-1',
+    isInAtList: true,
+  }));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(fx.cardCreates[0].target, {
+    type: 'group',
+    openConversationId: 'conversation-group-1',
+    atUserIds: { 'staff-approved': '钉钉用户' },
+  });
+  assert.equal(fx.cardFinishes[0].cardInstanceId, 'card-bridge-defer');
+  assert.equal(
+    fx.sent.some((text) => text.includes('后台完成的结果')),
+    false,
+    'card delivery must not also send the result as webhook text',
+  );
 });
 
 test('DingTalk default reply timeout is a three-minute foreground window', () => {

@@ -55,11 +55,54 @@ export function createDeferredDeliverer({
 
   const entryKeyOf = (deferred) => `${deferred.sessionId}\0${deferred.turn}`;
 
-  async function deliver(entry, tracker) {
-    const text = deferredTerminalText(tracker.reason, tracker.answer);
-    let providerMessageIds = [];
-    let delivered = false;
-    if (webhookUsable(entry.route)) {
+  async function deliverCard(entry, text) {
+    const cardTarget = entry.route.cardTarget;
+    if (!cardTarget
+      || typeof api.createAiCard !== 'function'
+      || typeof api.finishAiCard !== 'function') return null;
+    let cardInstanceId = null;
+    try {
+      ({ cardInstanceId } = await api.createAiCard({
+        clientId,
+        clientSecret,
+        target: cardTarget,
+        initialText: text,
+        signal: watcherSignal,
+      }));
+      await api.finishAiCard({
+        clientId,
+        clientSecret,
+        cardInstanceId,
+        target: cardTarget,
+        text,
+        signal: watcherSignal,
+      });
+      return cardInstanceId;
+    } catch (error) {
+      logger.warn?.(
+        '[dsh-dingtalk] deferred card delivery failed, falling back to text:',
+        error?.message ?? error,
+      );
+      // finalize 失败时卡片可能停在“处理中”——尽力打成错误态；结果随后以文本送达。
+      if (cardInstanceId && typeof api.failAiCard === 'function') {
+        await api.failAiCard({
+          clientId,
+          clientSecret,
+          cardInstanceId,
+          target: cardTarget,
+          signal: AbortSignal.timeout(5_000),
+        }).catch(() => undefined);
+      }
+      return null;
+    }
+  }
+
+  async function deliverText(entry, text, providerMessageIds = []) {
+    // 卡片已送达（providerMessageIds 来自卡片实例）时直接进入收尾，不再
+    // 叠加 webhook 文本；文本链仍由显式 delivered 旗标驱动（webhook 成功后
+    // id 可能为空，不能用 id 判定是否已投递）。
+    let delivered = providerMessageIds.length > 0;
+    if (!delivered && webhookUsable(entry.route)) {
       try {
         providerMessageIds = await sendText(
           entry.route.sessionWebhook,
@@ -99,6 +142,15 @@ export function createDeferredDeliverer({
       status.messagesReplied = (status.messagesReplied ?? 0) + 1;
       status.lastReplyAt = new Date().toISOString();
     }
+  }
+
+  async function deliver(entry, tracker) {
+    const text = deferredTerminalText(tracker.reason, tracker.answer);
+    const cardInstanceId = await deliverCard(entry, text);
+    if (cardInstanceId !== null) {
+      return deliverText(entry, text, [cardInstanceId]);
+    }
+    return deliverText(entry, text);
   }
 
   async function scanEntry(entry) {
