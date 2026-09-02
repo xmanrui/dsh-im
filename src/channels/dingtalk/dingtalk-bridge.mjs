@@ -1318,7 +1318,11 @@ export class DingtalkHarnessBridge {
           sessionWebhook,
           sessionWebhookExpiredTime: Number(message.sessionWebhookExpiredTime) || 0,
           fallbackTarget: fileTarget(message, sender, this.#clientId),
-          cardTarget: cardTarget(message, sender),
+          // 惰性求值：cardTarget 的群聊分支会读取 senderNick（增强专属源），
+          // 只有真正推送后续 turn 时才允许访问，增强关闭时不得提前读取。
+          get cardTarget() {
+            return cardTarget(message, sender);
+          },
           at: this.#atUsersFor(message),
         },
       }).catch((error) => {
