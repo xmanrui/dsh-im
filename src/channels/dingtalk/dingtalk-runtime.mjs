@@ -2,6 +2,7 @@ import { createDingtalkApi } from './dingtalk-api.mjs';
 import {
   createDingtalkBridgeStatus,
   DingtalkHarnessBridge,
+  DINGTALK_DEFAULT_REPLY_TIMEOUT_MS,
 } from './dingtalk-bridge.mjs';
 import { sendRememberedConnectionTest } from '../shared/connection-test.mjs';
 import { t } from '../shared/i18n.mjs';
@@ -155,7 +156,7 @@ export class DingtalkRuntime {
     contextEnhancement,
     accessPolicy,
     logger = console,
-    replyTimeoutMs = 600_000,
+    replyTimeoutMs = DINGTALK_DEFAULT_REPLY_TIMEOUT_MS,
     maxMessageChars = 4_000,
     connectTimeoutMs = 15_000,
     connectPollIntervalMs = 25,

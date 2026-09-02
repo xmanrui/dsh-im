@@ -74,6 +74,9 @@ const CARD_INITIAL_TEXT = '已连接 DeepSeek Harness，正在思考…';
 const INTERACTION_RESOLVED_TEXT = '这个问题已在其他客户端处理，无需再次回答。';
 const DEFERRED_HANDOFF_NOTICE = '任务仍在运行，已转入后台。完成后我会把结果发到这里；发送 /stop 可停止任务。';
 
+// 前台等待窗口：超时后转后台（deferOnTimeout 交付），不再是报错阈值。
+export const DINGTALK_DEFAULT_REPLY_TIMEOUT_MS = 180_000;
+
 const HELP_TEXT_LINES = [
   '钉钉机器人已连接 DeepSeek Harness。',
   '',
@@ -505,7 +508,7 @@ export class DingtalkHarnessBridge {
     accessPolicy,
     status = createDingtalkBridgeStatus(),
     logger = console,
-    replyTimeoutMs = 600_000,
+    replyTimeoutMs = DINGTALK_DEFAULT_REPLY_TIMEOUT_MS,
     reactionTimeoutMs = 5_000,
     maxMessageChars = 4_000,
     signal,

@@ -8,6 +8,7 @@ import {
   createDingtalkBridgeStatus,
   dingtalkInboundMessage,
   DingtalkHarnessBridge,
+  DINGTALK_DEFAULT_REPLY_TIMEOUT_MS,
 } from '../../../src/channels/dingtalk/dingtalk-bridge.mjs';
 import {
   DINGTALK_DONE_REACTION_NAME,
@@ -2923,4 +2924,8 @@ test('DingTalk deferred result falls back to proactive delivery after the webhoo
     robotCode: 'ding-client',
   });
   assert.match(fx.proactive[0].text, /后台完成的结果/);
+});
+
+test('DingTalk default reply timeout is a three-minute foreground window', () => {
+  assert.equal(DINGTALK_DEFAULT_REPLY_TIMEOUT_MS, 180_000);
 });
