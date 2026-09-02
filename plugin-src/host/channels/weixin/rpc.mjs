@@ -1,5 +1,11 @@
 import QRCode from 'qrcode';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
+import {
+  CLEAR_INBOUND_ATTACHMENTS_ENDPOINT,
+  SET_INBOUND_RETENTION_ENDPOINT,
+  validClearInboundAttachmentsPayload,
+  validInboundRetentionPayload,
+} from '../shared/inbound-retention-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import {
@@ -28,6 +34,8 @@ export const WEIXIN_ENDPOINTS = Object.freeze({
   setWorkspace: SET_WORKSPACE_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
+  setInboundRetention: SET_INBOUND_RETENTION_ENDPOINT,
+  clearInboundAttachments: CLEAR_INBOUND_ATTACHMENTS_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
 });
 export const WEIXIN_RPC_ENDPOINTS = Object.freeze(Object.values(WEIXIN_ENDPOINTS));
@@ -91,12 +99,20 @@ function payloadFailure(endpoint, payload) {
     return validContextEnhancementPayload(payload)
       ? null : '请提交有效的上下文增强设置。';
   }
+  if (endpoint === WEIXIN_ENDPOINTS.setInboundRetention) {
+    return validInboundRetentionPayload(payload)
+      ? null : '请提交有效的附件保留设置。';
+  }
+  if (endpoint === WEIXIN_ENDPOINTS.clearInboundAttachments) {
+    return validClearInboundAttachmentsPayload(payload)
+      ? null : 'weixin.inbound-attachments.clear requires a botId.';
+  }
   if (endpoint === WEIXIN_ENDPOINTS.setAccessPolicy) {
     return validAccessPolicyPayload(payload)
       ? null : '请提交有效的访问设置。';
   }
   return 'Unknown Weixin endpoint.';
-}
+  }
 
 function badRequest(message) {
   return { ok: false, error: { code: 'bad-request', message } };
@@ -235,6 +251,12 @@ export function createWeixinRpcHandler(controller, { encodeQr = qrDataUrl } = {}
           await controller.updateAgentPreset(payload.botId, payload.agentPreset),
           cachedEncode,
         );
+      } else if (endpoint === WEIXIN_ENDPOINTS.setInboundRetention) {
+        if (typeof controller.updateInboundRetention !== 'function') throw new Error('Inbound retention update is unavailable');
+        value = await controller.updateInboundRetention(payload.botId, payload.retention);
+      } else if (endpoint === WEIXIN_ENDPOINTS.clearInboundAttachments) {
+        if (typeof controller.clearInboundAttachments !== 'function') throw new Error('Attachment cleanup is unavailable');
+        value = await controller.clearInboundAttachments(payload.botId);
       } else {
         value = await publicStatus(await controller.deleteBot(payload.botId), cachedEncode);
       }

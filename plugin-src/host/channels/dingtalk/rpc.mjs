@@ -1,5 +1,11 @@
 import QRCode from 'qrcode';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
+import {
+  CLEAR_INBOUND_ATTACHMENTS_ENDPOINT,
+  SET_INBOUND_RETENTION_ENDPOINT,
+  validClearInboundAttachmentsPayload,
+  validInboundRetentionPayload,
+} from '../shared/inbound-retention-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { publicWorkspaceError, SET_WORKSPACE_ENDPOINT, validWorkspacePayload } from '../shared/workspace-rpc.mjs';
@@ -21,6 +27,8 @@ export const DINGTALK_ENDPOINTS = Object.freeze({
   setWorkspace: SET_WORKSPACE_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
+  setInboundRetention: SET_INBOUND_RETENTION_ENDPOINT,
+  clearInboundAttachments: CLEAR_INBOUND_ATTACHMENTS_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   approveSender: 'bot.sender.approve',
   revokeSender: 'bot.sender.revoke',
@@ -102,6 +110,14 @@ function payloadFailure(endpoint, payload) {
     return validContextEnhancementPayload(payload)
       ? null : '请提交有效的上下文增强设置。';
   }
+  if (endpoint === DINGTALK_ENDPOINTS.setInboundRetention) {
+    return validInboundRetentionPayload(payload)
+      ? null : '请提交有效的附件保留设置。';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.clearInboundAttachments) {
+    return validClearInboundAttachmentsPayload(payload)
+      ? null : 'dingtalk.inbound-attachments.clear requires a botId.';
+  }
   if (endpoint === DINGTALK_ENDPOINTS.setAccessPolicy) {
     return validAccessPolicyPayload(payload)
       ? null : '请提交有效的访问设置。';
@@ -123,7 +139,7 @@ function payloadFailure(endpoint, payload) {
       : 'bot.sender.revoke requires botId, senderKey, and confirm=true.';
   }
   return 'Unknown DingTalk endpoint.';
-}
+  }
 
 function badRequest(message) {
   return { ok: false, error: { code: 'bad-request', message } };
@@ -268,6 +284,12 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
         value = await controller.updateContextEnhancement(
           payload.botId, payload.config, (status) => publicStatus(status, cachedEncode),
         );
+      } else if (endpoint === DINGTALK_ENDPOINTS.setInboundRetention) {
+        if (typeof controller.updateInboundRetention !== 'function') throw new Error('Inbound retention update is unavailable');
+        value = await controller.updateInboundRetention(payload.botId, payload.retention);
+      } else if (endpoint === DINGTALK_ENDPOINTS.clearInboundAttachments) {
+        if (typeof controller.clearInboundAttachments !== 'function') throw new Error('Attachment cleanup is unavailable');
+        value = await controller.clearInboundAttachments(payload.botId);
       } else if (endpoint === DINGTALK_ENDPOINTS.setAccessPolicy) {
         if (typeof controller.updateAccessPolicy !== 'function') throw new Error('Access policy update is unavailable');
         value = await controller.updateAccessPolicy(

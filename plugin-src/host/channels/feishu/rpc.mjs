@@ -10,6 +10,12 @@ import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { publicWorkspaceError, validWorkspacePayload } from '../shared/workspace-rpc.mjs';
 import { validAgentPresetPayload } from '../shared/agent-preset-rpc.mjs';
 import { validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
+import {
+  CLEAR_INBOUND_ATTACHMENTS_ENDPOINT,
+  SET_INBOUND_RETENTION_ENDPOINT,
+  validClearInboundAttachmentsPayload,
+  validInboundRetentionPayload,
+} from '../shared/inbound-retention-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
 import { normalizeContextEnhancementConfig } from '../../../../src/channels/shared/context-enhancement.mjs';
 import {
@@ -429,6 +435,14 @@ function validPayload(endpoint, payload) {
     return validContextEnhancementPayload(payload)
       ? null : '请提交有效的上下文增强设置。';
   }
+  if (endpoint === FEISHU_ENDPOINTS.setInboundRetention) {
+    return validInboundRetentionPayload(payload)
+      ? null : '请提交有效的附件保留设置。';
+  }
+  if (endpoint === FEISHU_ENDPOINTS.clearInboundAttachments) {
+    return validClearInboundAttachmentsPayload(payload)
+      ? null : 'feishu.inbound-attachments.clear requires a botId.';
+  }
   if (endpoint === FEISHU_ENDPOINTS.setAccessPolicy) {
     return validAccessPolicyPayload(payload)
       ? null : '请提交有效的访问设置。';
@@ -441,7 +455,7 @@ function validPayload(endpoint, payload) {
       : '请选择群聊响应方式。';
   }
   return 'Unknown Feishu endpoint.';
-}
+  }
 
 function abortableDelay(milliseconds, signal) {
   return new Promise((resolve, reject) => {
@@ -690,6 +704,12 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
           payload.botId, payload.config,
           (status) => toPublicFeishuStatus(status, { encodeQr: cachedEncodeQr }),
         );
+      } else if (endpoint === FEISHU_ENDPOINTS.setInboundRetention) {
+        if (typeof controller.updateInboundRetention !== 'function') throw new Error('Inbound retention update is unavailable');
+        value = await controller.updateInboundRetention(payload.botId, payload.retention);
+      } else if (endpoint === FEISHU_ENDPOINTS.clearInboundAttachments) {
+        if (typeof controller.clearInboundAttachments !== 'function') throw new Error('Attachment cleanup is unavailable');
+        value = await controller.clearInboundAttachments(payload.botId);
       } else if (endpoint === FEISHU_ENDPOINTS.setAccessPolicy) {
         if (typeof controller.updateAccessPolicy !== 'function') throw new Error('Access policy update is unavailable');
         value = await controller.updateAccessPolicy(
@@ -705,7 +725,7 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
       } else if (endpoint === FEISHU_ENDPOINTS.setGroupResponseMode) {
         if (typeof controller.updateGroupResponseMode !== 'function') {
           throw new Error('Group response mode update is unavailable');
-        }
+      }
         value = await toPublicFeishuStatus(
           await controller.updateGroupResponseMode(payload.botId, payload.groupResponseMode),
           { encodeQr: cachedEncodeQr },
