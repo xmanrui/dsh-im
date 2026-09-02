@@ -339,15 +339,13 @@ const CSS = String.raw`
 .dim-directoryPickerActions button:disabled { cursor: not-allowed; opacity: .52; }
 .dim-panel .dim-cardSummary { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font: inherit; font-size: 12px; font-weight: 400; line-height: normal; overflow-wrap: anywhere; white-space: normal; }
 .dim-panel .dim-cardFooterLayout { min-width: 0; width: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 9px; }
-.dim-panel .dim-inboundRetention { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 10px; }
-.dim-panel .dim-inboundRetentionTitle { display: flex; flex-direction: column; gap: 6px; }
-.dim-panel .dim-inboundRetentionOption { display: flex; align-items: center; gap: 7px; font: inherit; font-size: 12px; line-height: 18px; color: var(--dsw-alias-text-primary, #1f2329); cursor: pointer; }
-.dim-panel .dim-inboundRetentionOption input { margin: 0; }
-.dim-panel .dim-inboundRetentionActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.dim-panel .dim-inboundRetentionSave, .dim-panel .dim-inboundRetentionClear { min-height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); background: transparent; color: var(--dsw-alias-text-primary, #1f2329); font: inherit; font-size: 12px; cursor: pointer; }
-.dim-panel .dim-inboundRetentionSave:disabled, .dim-panel .dim-inboundRetentionClear:disabled { opacity: 0.5; cursor: default; }
-.dim-panel .dim-inboundRetentionClear { color: var(--dsw-alias-text-critical, #d83931); border-color: var(--dsw-alias-text-critical, #d83931); }
-.dim-panel .dim-inboundRetentionClear:not(:disabled):hover { background: rgba(216, 57, 49, 0.06); }
+.dim-panel .dim-inboundRetention { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; column-gap: 10px; row-gap: 6px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 10px; }
+.dim-panel .dim-inboundRetentionHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; min-width: 0; }
+.dim-panel .dim-inboundRetentionHeader .dim-presetTitle { color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; }
+.dim-panel .dim-inboundRetentionSelect { grid-column: 1 / -1; }
+.dim-panel .dim-inboundRetentionClear { flex: none; min-height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); background: transparent; color: var(--dsw-alias-label-secondary, #646a73); font: inherit; font-size: 12px; cursor: pointer; }
+.dim-panel .dim-inboundRetentionClear:disabled { opacity: .5; cursor: default; }
+.dim-panel .dim-inboundRetentionClear:not(:disabled):hover { color: var(--dsw-alias-text-critical, #d83931); border-color: var(--dsw-alias-text-critical, #d83931); }
 .dim-panel .dim-cardFooterLayout > .dim-cardActions { align-self: stretch; }
 .dim-panel .dim-cardFeedback { width: 100%; padding: 8px 10px; border-radius: 8px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f7f8fa); font: inherit; font-size: 12px; font-weight: 400; line-height: 18px; overflow-wrap: anywhere; white-space: normal; }
 .dim-panel .dim-cardActions { flex: none; width: 100%; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin: 0; }
