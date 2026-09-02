@@ -35,6 +35,7 @@ function webhookUsable(route, now = Date.now()) {
  * 钉钉延迟交付：ask 以 deferOnTimeout 交回仍在运行的 turn 后，
  * 在其终态（turn/end，任意 reason）时投递结果。路由优先当次会话的
  * sessionWebhook（未明确过期时），否则回退主动推送 sendRobotText。
+ * 投递受会话绑定闸门约束（终态时刻评估）。
  * 无看门狗、无持久化：条目仅存于内存（范围裁定见实施计划）。
  */
 export function createDeferredDeliverer({
@@ -54,6 +55,14 @@ export function createDeferredDeliverer({
   let watcherStarted = false;
 
   const entryKeyOf = (deferred) => `${deferred.sessionId}\0${deferred.turn}`;
+
+  // 主动推送与当前会话绑定关联（用户语义）：仅在 turn 终态时刻评估，
+  // 运行期间切回有效，完成后再切回不补投。state 不提供 sessionFor 时
+  // 视为匹配（能力探测降级，不吞结果）。
+  function bindingMatches(entry) {
+    if (typeof state?.sessionFor !== 'function') return true;
+    return state.sessionFor(entry.key) === entry.deferred.sessionId;
+  }
 
   async function deliverCard(entry, text) {
     const cardTarget = entry.route.cardTarget;
@@ -171,6 +180,15 @@ export function createDeferredDeliverer({
       );
       tracker.consumeAll(history.events ?? []);
       if (tracker.finished && entries.delete(key)) {
+        if (!bindingMatches(entry)) {
+          // 绑定已切走（/new 或 /session 切换）：按约定不投递；结果保留在
+          // 该 session 的 history 中，/session 切回后可用 /history 查看。
+          entry.deferred.releaseOwnership?.();
+          logger.warn?.(
+            '[dsh-dingtalk] deferred result dropped: conversation moved to another session',
+          );
+          return;
+        }
         await deliver(entry, tracker);
       }
     })().catch((error) => {

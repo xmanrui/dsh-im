@@ -51,7 +51,9 @@ function deferredFixture(overrides = {}) {
 function delivererFixture({
   history = historyFixture(),
   sendText,
-  cards = null,   // null = 不提供卡片 API（文本路径）；对象 = 卡片 fake 与记录器
+  cards = null,
+  boundSession = 'session-defer',     // 默认与 deferredFixture().sessionId 一致
+  sessionForCapability = true,        // false 则 state 不提供 sessionFor（能力缺失场景）
 } = {}) {
   const listeners = [];
   const sent = [];
@@ -92,12 +94,19 @@ function delivererFixture({
       },
     } : {}),
   };
+  const binding = { session: boundSession };
+  const state = {
+    ...(sessionForCapability ? {
+      sessionFor: (key) => binding.session,
+    } : {}),
+    rememberOutboundMessage: async (entry) => remembered.push(entry),
+  };
   const deliverer = createDeferredDeliverer({
     api,
     clientId: 'ding-client',
     clientSecret: 'host-secret',
     harness,
-    state: { rememberOutboundMessage: async (entry) => remembered.push(entry) },
+    state,
     logger: { warn: () => {} },
     sendText: sendText ?? (async (_webhook, text, _at) => {
       sent.push(text);
@@ -107,6 +116,7 @@ function delivererFixture({
   return {
     deliverer, listeners, sent, proactive, remembered, cards: cards ?? null,
     setHistory: (next) => { history = next; },
+    setBinding: (next) => { binding.session = next; },
   };
 }
 
@@ -259,4 +269,53 @@ test('a card-capable api without a cardTarget in the route keeps the text path',
   await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: P2P_ROUTE });
   assert.equal(cards.created.length, 0);
   assert.equal(fx.sent.length, 1);
+});
+
+test('a deferred result is dropped when the conversation moved to another session', async () => {
+  const fx = delivererFixture({ boundSession: 'session-other' });
+  const deferred = deferredFixture();
+  await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: P2P_ROUTE });
+  assert.equal(fx.sent.length, 0);
+  assert.equal(fx.proactive.length, 0);
+  assert.equal(deferred.released, 1, 'dropped entry must release ownership');
+  assert.equal(fx.remembered.length, 0);
+  // 条目已删：重复事件不补投。
+  fx.listeners[0].onSessionEvent({
+    sessionId: 'session-defer',
+    event: { type: 'turn/end', seq: 4, data: { turn: 1, reason: { kind: 'completed' } } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fx.sent.length, 0);
+});
+
+test('switching back while the turn runs delivers at completion', async () => {
+  const fx = delivererFixture({ history: historyFixture({ ended: false }), boundSession: 'session-other' });
+  const deferred = deferredFixture();
+  await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: P2P_ROUTE });
+  assert.equal(fx.sent.length, 0);
+  fx.setBinding('session-defer');
+  fx.setHistory(historyFixture());
+  fx.listeners[0].onSessionEvent({
+    sessionId: 'session-defer',
+    event: { type: 'turn/end', seq: 4, data: { turn: 1, reason: { kind: 'completed' } } },
+  });
+  await eventually(() => fx.sent.length === 1);
+  assert.equal(deferred.released, 1);
+});
+
+test('switching back after completion does not retroactively deliver', async () => {
+  const fx = delivererFixture({ boundSession: 'session-other' });
+  const deferred = deferredFixture();
+  await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: P2P_ROUTE });
+  assert.equal(fx.sent.length, 0, 'dropped at completion while unbound');
+  fx.setBinding('session-defer');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fx.sent.length, 0, 'no retroactive delivery after rebind');
+});
+
+test('a state without sessionFor keeps delivering (capability-graceful)', async () => {
+  const fx = delivererFixture({ sessionForCapability: false });
+  const deferred = deferredFixture();
+  await fx.deliverer.register({ key: 'p2p:staff-approved', deferred, route: P2P_ROUTE });
+  assert.deepEqual(fx.sent, ['后台完成的结果']);
 });
