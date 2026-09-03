@@ -250,6 +250,7 @@ function controlledTurn({ sessionId, initialEnd = false, controlExecutor } = {})
   let answer = initialEnd ? 'already complete' : '';
   let endReason = initialEnd ? 'completed' : null;
   let historyFailure = null;
+  let sessionRunning = false;
   const client = new HarnessClient({
     baseUrl: 'http://127.0.0.1:3982',
     workspace: '/tmp/workspace',
@@ -298,6 +299,7 @@ function controlledTurn({ sessionId, initialEnd = false, controlExecutor } = {})
     }
     if (method === 'session.prompt' && payload.mode === 'steer') return {};
     if (method === 'session.cancel') return {};
+    if (method === 'session.list') return { items: [{ sessionId: id, running: sessionRunning }] };
     throw new Error(`Unexpected RPC ${method}`);
   };
   return {
@@ -307,6 +309,7 @@ function controlledTurn({ sessionId, initialEnd = false, controlExecutor } = {})
     admitted: admitted.promise,
     promptRpcId: () => promptRpcId,
     setText(text) { answer = text; },
+    setRunning(value) { sessionRunning = value; },
     failHistory(error = new Error('history unavailable')) { historyFailure = error; },
     finish({ text = '', reason = 'cancelled' } = {}) {
       answer = text;
@@ -379,6 +382,59 @@ test('HarnessClient accepts partial text only for completed or omitted end reaso
 test('HarnessClient marks a reply timeout after prompt admission', async () => {
   const turn = controlledTurn();
   const asking = turn.client.ask(turn.id, 'work', { timeoutMs: 1 });
+  await turn.admitted;
+  await assert.rejects(asking, (error) => {
+    assert.ok(error instanceof HarnessTurnError);
+    assert.equal(error.code, 'harness-reply-timeout');
+    assert.equal(error.promptAccepted, true);
+    return true;
+  });
+});
+
+test('HarnessClient defers a reply timeout with a delivery handle when asked', async () => {
+  const turn = controlledTurn();
+  const owner = {};
+  const control = { owner, key: 'direct:defer' };
+  const asking = turn.client.ask(turn.id, 'work', {
+    foregroundHandoffMs: 1,
+    deferOnTimeout: true,
+    control,
+  });
+  await turn.admitted;
+  turn.setRunning(true);
+  const handle = await asking;
+  assert.equal(handle.deferred, true);
+  assert.equal(handle.sessionId, turn.id);
+  assert.equal(typeof handle.turn, 'number');
+  assert.equal(typeof handle.promptRpcId, 'string');
+  assert.equal(typeof handle.afterSeq, 'number');
+  assert.equal(typeof handle.releaseOwnership, 'function');
+  // Ownership 在交接后保留，/stop 语义不丢失。
+  assert.equal(await turn.client.hasActiveTurn(turn.id, control), true);
+  handle.releaseOwnership();
+  assert.equal(await turn.client.hasActiveTurn(turn.id, control), false);
+});
+
+test('HarnessClient never defers a turn the liveness probe cannot confirm', async () => {
+  const turn = controlledTurn();
+  // 停滞窗口极短 + 前台交接开启：session.list 报告未运行时不允许转后台，
+  // 必须走 #122 的停滞超时报错路径。
+  const asking = turn.client.ask(turn.id, 'work', {
+    timeoutMs: 1,
+    foregroundHandoffMs: 1,
+    deferOnTimeout: true,
+  });
+  await turn.admitted;
+  await assert.rejects(asking, (error) => {
+    assert.ok(error instanceof HarnessTurnError);
+    assert.equal(error.code, 'harness-reply-timeout');
+    return true;
+  });
+});
+
+test('HarnessClient keeps throwing reply timeouts without deferOnTimeout', async () => {
+  const turn = controlledTurn();
+  const asking = turn.client.ask(turn.id, 'work', { timeoutMs: 1_500 });
   await turn.admitted;
   await assert.rejects(asking, (error) => {
     assert.ok(error instanceof HarnessTurnError);

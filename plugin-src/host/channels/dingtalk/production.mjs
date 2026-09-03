@@ -6,6 +6,7 @@ import { DingtalkConfigStore } from '../../../../src/channels/dingtalk/config-st
 import { DingtalkDeviceAuth } from '../../../../src/channels/dingtalk/device-auth.mjs';
 import { DingtalkController } from '../../../../src/channels/dingtalk/dingtalk-controller.mjs';
 import { DingtalkRuntime } from '../../../../src/channels/dingtalk/dingtalk-runtime.mjs';
+import { DINGTALK_DEFAULT_FOREGROUND_HANDOFF_MS } from '../../../../src/channels/dingtalk/dingtalk-bridge.mjs';
 import { HarnessClient } from '../../../../src/channels/dingtalk/harness-client.mjs';
 import { DingtalkStateStore } from '../../../../src/channels/dingtalk/state-store.mjs';
 import {
@@ -122,7 +123,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         accessPolicy: accessPolicyProvider(workspaces, botId, {
           channel: 'dingtalk', config: botConfig,
         }),
-        replyTimeoutMs: config.replyTimeoutMs ?? 600_000,
+        replyTimeoutMs: config.replyTimeoutMs ?? DINGTALK_DEFAULT_FOREGROUND_HANDOFF_MS,
         maxMessageChars: config.maxMessageChars ?? 4_000,
         connectTimeoutMs: config.connectTimeoutMs ?? 15_000,
         logger: {

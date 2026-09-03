@@ -68,9 +68,16 @@ import {
   evaluateInboundAccess,
 } from '../shared/inbound-access.mjs';
 import { t } from '../shared/i18n.mjs';
+import { createDeferredDeliverer } from './deferred-delivery.mjs';
 
 const CARD_INITIAL_TEXT = '已连接 DeepSeek Harness，正在思考…';
 const INTERACTION_RESOLVED_TEXT = '这个问题已在其他客户端处理，无需再次回答。';
+const DEFERRED_HANDOFF_NOTICE = '任务仍在运行，已转入后台。完成后我会把结果发到这里；发送 /stop 可停止任务。';
+const DEFERRED_RUNNING_NOTICE = '当前会话仍有任务在后台运行，完成后会推送结果；发送 /stop 可停止任务。';
+
+// 前台等待窗口：超过后把仍在运行的 turn 转入后台延迟交付（deferOnTimeout）。
+// 它与 harness-client 的 timeoutMs（#122 停滞窗口，超时才报错）是两个独立语义。
+export const DINGTALK_DEFAULT_FOREGROUND_HANDOFF_MS = 180_000;
 
 const HELP_TEXT_LINES = [
   '钉钉机器人已连接 DeepSeek Harness。',
@@ -479,7 +486,7 @@ export class DingtalkHarnessBridge {
   #accessPolicy;
   #status;
   #logger;
-  #replyTimeoutMs;
+  #foregroundHandoffMs;
   #reactionTimeoutMs;
   #maxMessageChars;
   #signal;
@@ -492,6 +499,7 @@ export class DingtalkHarnessBridge {
   #acceptedMessageIds = new Map();
   #approvals;
   #batchInputs = new BatchInputManager();
+  #deferredDeliverer;
 
   constructor({
     api,
@@ -503,7 +511,7 @@ export class DingtalkHarnessBridge {
     accessPolicy,
     status = createDingtalkBridgeStatus(),
     logger = console,
-    replyTimeoutMs = 600_000,
+    foregroundHandoffMs = DINGTALK_DEFAULT_FOREGROUND_HANDOFF_MS,
     reactionTimeoutMs = 5_000,
     maxMessageChars = 4_000,
     signal,
@@ -523,7 +531,18 @@ export class DingtalkHarnessBridge {
     this.#status = status;
     this.#logger = logger;
     this.#approvals = new HarnessApprovalQueue({ label: 'DingTalk', logger });
-    this.#replyTimeoutMs = replyTimeoutMs;
+    this.#foregroundHandoffMs = foregroundHandoffMs;
+    this.#deferredDeliverer = createDeferredDeliverer({
+      api,
+      clientId: this.#clientId,
+      clientSecret: this.#clientSecret,
+      harness,
+      state,
+      status: this.#status,
+      logger,
+      signal,
+      sendText: (sessionWebhook, text, at) => this.#send(sessionWebhook, text, at),
+    });
     this.#reactionTimeoutMs = Number.isFinite(reactionTimeoutMs) && reactionTimeoutMs > 0
       ? Math.floor(reactionTimeoutMs)
       : 5_000;
@@ -1109,6 +1128,22 @@ export class DingtalkHarnessBridge {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
           await this.#send(sessionWebhook, reply, this.#atUsersFor(message));
         }
+        if (workspaceCommand.boundSessionId
+          && typeof this.#deferredDeliverer.pendingFor === 'function'
+          && this.#deferredDeliverer.pendingFor(key, workspaceCommand.boundSessionId)) {
+          try {
+            await this.#send(
+              sessionWebhook,
+              t(DEFERRED_RUNNING_NOTICE),
+              this.#atUsersFor(message),
+            );
+          } catch (error) {
+            this.#logger.warn?.(
+              '[dsh-dingtalk] deferred running notice failed:',
+              error?.message ?? error,
+            );
+          }
+        }
         return;
       }
       const compactCommand = isPlainText && !hasImages && !hasFiles
@@ -1156,7 +1191,7 @@ export class DingtalkHarnessBridge {
         cardStarted = await cardStream.start(t(CARD_INITIAL_TEXT));
         if (cardStarted) cardStartedAt = startedAt;
       }
-      const { answer, artifacts = [] } = await askInWorkspaceSession({
+      const { answer, artifacts = [], sessionId: resultSessionId } = await askInWorkspaceSession({
         harness: this.#harness,
         state: this.#state,
         key,
@@ -1166,7 +1201,10 @@ export class DingtalkHarnessBridge {
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: {
-          timeoutMs: this.#replyTimeoutMs,
+          // 前台交接窗口独立于 timeoutMs：停滞窗口沿用 harness-client 默认（#122 语义），
+          // 这里只决定多久后把仍在运行的任务转入后台交付。
+          foregroundHandoffMs: this.#foregroundHandoffMs,
+          deferOnTimeout: true,
           signal: this.#signal,
           control: { owner: this, key },
           onUpdate: cardStarted
@@ -1182,6 +1220,44 @@ export class DingtalkHarnessBridge {
           files: promptMessage.files,
         },
       });
+      if (answer?.deferred === true) {
+        if (batchSubmission) {
+          this.#batchInputs.complete(key, batchSubmission.token);
+          batchSettled = true;
+        }
+        const notice = t(DEFERRED_HANDOFF_NOTICE);
+        try {
+          const streamed = cardStarted && await cardStream.finish(notice);
+          if (!streamed) {
+            await this.#send(sessionWebhook, notice, this.#atUsersFor(message));
+          }
+        } catch (error) {
+          this.#logger.warn?.(
+            '[dsh-dingtalk] deferred handoff notice failed:',
+            error?.message ?? error,
+          );
+        }
+        this.#deferredDeliverer.register({
+          key,
+          deferred: answer,
+          route: {
+            sessionWebhook,
+            sessionWebhookExpiredTime: Number(message.sessionWebhookExpiredTime) || 0,
+            fallbackTarget: fileTarget(message, sender, this.#clientId),
+            cardTarget: cardTarget(message, sender),
+            at: this.#atUsersFor(message),
+          },
+        }).catch((error) => {
+          this.#logger.warn?.(
+            '[dsh-dingtalk] failed to register a deferred turn:',
+            error?.message ?? error,
+          );
+        });
+        this.#finishStatusReaction(statusReaction, 'clear');
+        increment(this.#status, 'messagesReplied');
+        this.#status.lastReplyAt = new Date().toISOString();
+        return null;
+      }
       if (batchSubmission) {
         this.#batchInputs.complete(key, batchSubmission.token);
         batchSettled = true;

@@ -26,6 +26,7 @@ test('/session binds exactly one safe Session ID to the current conversation', a
   assert.doesNotMatch(result.message, /\u202e|\n下一行/);
   assert.match(result.message, /ID：session-123/);
   assert.match(result.message, /归档：是/);
+  assert.equal(result.boundSessionId, 'session-123');
   assert.equal(result.messages.join(''), result.message);
 });
 

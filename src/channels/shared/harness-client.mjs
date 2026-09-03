@@ -1280,7 +1280,14 @@ export class HarnessClient {
 
   async ask(sessionId, prompt, options = {}) {
     if (typeof options === 'number') options = { timeoutMs: options };
+    // timeoutMs is the stall window (#122): a reply times out only after a
+    // full quiet window AND a liveness probe confirms the Session stopped.
     const timeoutMs = options.timeoutMs ?? 600_000;
+    // foregroundHandoffMs is a separate foreground wait window: once it
+    // elapses while the turn is still running, ask() returns a deferred
+    // delivery handle (see deferOnTimeout) instead of blocking the caller.
+    const foregroundHandoffMs = options.foregroundHandoffMs ?? 0;
+    const deferOnTimeout = options.deferOnTimeout === true;
     const signal = options.signal;
     const onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : null;
     const progressMode = options.progressMode === 'all' ? 'all' : 'latest';
@@ -1337,6 +1344,7 @@ export class HarnessClient {
     const stagedBatches = [];
     let promptAccepted = false;
     let turnFinished = false;
+    let deferredOwnershipKept = false;
 
     const deliverArtifacts = async () => {
       if (!onArtifact || artifactsDelivered || tracker.turn === null) {
@@ -1446,6 +1454,8 @@ export class HarnessClient {
         // Interaction ownership is intentionally not a liveness signal: it stays
         // active until turn/end and can therefore outlive a stalled turn.
         let lastProgressAt = Date.now();
+        const askedAt = lastProgressAt;
+        let handoffProbeAt = 0;
         let lastPollSeq = tracker.lastSeq;
         while (true) {
           await sleep(300, signal);
@@ -1492,6 +1502,47 @@ export class HarnessClient {
             throw harnessTurnError(tracker.reason);
           }
 
+          // Foreground handoff (deferOnTimeout): after the independent wait
+          // window elapses, hand a still-running turn back to the caller for
+          // background delivery. Liveness stays authoritative — a probe that
+          // cannot confirm a running Session never defers, so the #122 stall
+          // semantics below remain the only timeout path. The probe is
+          // throttled so a long-lived chatty turn does not spam session.list.
+          if (
+            deferOnTimeout
+            && foregroundHandoffMs > 0
+            && tracker.turn !== null
+            && !ownership?.stopRequested
+            && Date.now() - askedAt >= foregroundHandoffMs
+            && Date.now() - handoffProbeAt >= 30_000
+          ) {
+            handoffProbeAt = Date.now();
+            let handoffRunning = false;
+            try {
+              handoffRunning = await this.isSessionRunning(sessionId, { signal });
+            } catch (error) {
+              if (signal?.aborted) throw signal.reason ?? error;
+              // A failed liveness probe is not evidence of a live turn.
+            }
+            if (handoffRunning) {
+              // 把仍在运行的 turn 交还调用方：control/interaction ownership 保持注册，
+              // /stop 在渠道交付结果并调用 releaseOwnership() 之前一直有效。
+              deferredOwnershipKept = true;
+              return {
+                deferred: true,
+                sessionId,
+                turn: tracker.turn,
+                promptRpcId,
+                afterSeq: baselineSeq,
+                releaseOwnership: () => {
+                  if (!ownership) return;
+                  this.#unregisterControlOwnership(ownership);
+                  this.#unregisterInteractionOwnership(sessionId, ownership);
+                },
+              };
+            }
+          }
+
           if (Date.now() - lastProgressAt < timeoutMs) continue;
 
           let running = false;
@@ -1528,7 +1579,7 @@ export class HarnessClient {
         }
       }
       closeArtifactConsumer();
-      if (ownership) {
+      if (ownership && !deferredOwnershipKept) {
         this.#unregisterControlOwnership(ownership);
         this.#unregisterInteractionOwnership(sessionId, ownership);
       }

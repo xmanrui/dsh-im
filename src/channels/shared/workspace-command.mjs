@@ -365,7 +365,12 @@ async function runSessionBindCommand(command, harness, conversationKey) {
       t('归档：{archived}', { archived: bound?.archived === true ? t('是') : t('否') }),
       t('发送 /history 查看最近对话。'),
     ].join('\n');
-    return commandResult(message, splitWorkspaceCommandMessage(message));
+    return {
+      handled: true,
+      message,
+      messages: splitWorkspaceCommandMessage(message),
+      boundSessionId,
+    };
   } catch (error) {
     return commandResult(sessionBindErrorMessage(error));
   }

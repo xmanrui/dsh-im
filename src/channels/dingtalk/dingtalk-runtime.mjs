@@ -2,6 +2,7 @@ import { createDingtalkApi } from './dingtalk-api.mjs';
 import {
   createDingtalkBridgeStatus,
   DingtalkHarnessBridge,
+  DINGTALK_DEFAULT_FOREGROUND_HANDOFF_MS,
 } from './dingtalk-bridge.mjs';
 import { sendRememberedConnectionTest } from '../shared/connection-test.mjs';
 import { t } from '../shared/i18n.mjs';
@@ -132,7 +133,8 @@ export class DingtalkRuntime {
   #contextEnhancement;
   #accessPolicy;
   #logger;
-  #replyTimeoutMs;
+  // 沿用 replyTimeoutMs 作为宿主配置键（与其他渠道一致），语义为前台交接窗口。
+  #foregroundHandoffMs;
   #maxMessageChars;
   #connectTimeoutMs;
   #connectPollIntervalMs;
@@ -155,7 +157,7 @@ export class DingtalkRuntime {
     contextEnhancement,
     accessPolicy,
     logger = console,
-    replyTimeoutMs = 600_000,
+    replyTimeoutMs = DINGTALK_DEFAULT_FOREGROUND_HANDOFF_MS,
     maxMessageChars = 4_000,
     connectTimeoutMs = 15_000,
     connectPollIntervalMs = 25,
@@ -174,7 +176,7 @@ export class DingtalkRuntime {
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
     this.#logger = logger;
-    this.#replyTimeoutMs = replyTimeoutMs;
+    this.#foregroundHandoffMs = replyTimeoutMs;
     this.#maxMessageChars = maxMessageChars;
     this.#connectTimeoutMs = connectTimeoutMs;
     this.#connectPollIntervalMs = connectPollIntervalMs;
@@ -244,7 +246,7 @@ export class DingtalkRuntime {
         accessPolicy: this.#accessPolicy,
         status: this.#status,
         logger: this.#logger,
-        replyTimeoutMs: this.#replyTimeoutMs,
+        foregroundHandoffMs: this.#foregroundHandoffMs,
         maxMessageChars: this.#maxMessageChars,
         signal,
       });
