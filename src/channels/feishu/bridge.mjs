@@ -1186,7 +1186,7 @@ export class FeishuHarnessBridge {
     }
     const workspaceCommand = commandText === null
       ? null
-      : await runWorkspaceCommand(text, this.#harness, key);
+      : await runWorkspaceCommand(text, this.#harness, key, senderOpenId(event));
     if (workspaceCommand) {
       for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
         await this.#send(event.message.chat_id, reply, { replyTo: event.message.message_id });

@@ -626,7 +626,7 @@ export class TextHarnessBridge {
         return;
       }
       const workspaceCommand = !hasImages && !hasFiles
-        ? await runWorkspaceCommand(text, this.#harness, conversationKey)
+        ? await runWorkspaceCommand(text, this.#harness, conversationKey, senderId)
         : null;
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {

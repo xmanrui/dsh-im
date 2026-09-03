@@ -268,7 +268,7 @@ export default {
   "入站附件（{count}）：": "Inbound attachments ({count}):",
   " [临时残留]": " [leftover]",
   "删除用法：/attachmentdelete 序号；/attachmentdelete all 清空附件目录。": "Deletion: /attachmentdelete index; /attachmentdelete all clears the attachment directory.",
-  "将清空整个附件目录（.dsh-im/inbound）。请再发送一次 /attachmentdelete all confirm 确认执行。": "This will clear the whole attachment directory (.dsh-im/inbound). Send /attachmentdelete all confirm once more to proceed.",
+  "将清空整个附件目录（.dsh-im/inbound）。请再发送一次 /attachmentdelete all confirm 确认执行（需由同一用户确认）。": "This will clear the whole attachment directory (.dsh-im/inbound). Send /attachmentdelete all confirm once more to proceed (the same user must confirm).",
   "尚未发起清空或确认已超时，请先发送 /attachmentdelete all。": "No clear request is pending or the confirmation timed out. Send /attachmentdelete all first.",
   "附件目录不在工作区内，已取消删除。": "The attachment directory does not resolve inside the workspace; deletion was cancelled.",
   "已清空附件目录。": "The attachment directory has been cleared.",

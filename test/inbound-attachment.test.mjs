@@ -179,6 +179,37 @@ test('pending clear confirmation expires after the TTL', async (t) => {
   assert.equal((await listInboundAttachments(root)).length, 1);
 });
 
+test('clear confirmation is bound to the actor who armed it', async (t) => {
+  const root = await workspace(t);
+  const harness = fakeHarness(root);
+  await stageInboundFiles({
+    files: [{ name: 'actor.txt', data: Buffer.from('x'), mediaType: 'text/plain' }],
+  }, { workspace: root, retention: 'forever' });
+
+  const guard = await runAttachmentCommand('/attachmentdelete all', harness, 'group:chat-1', 'user-a');
+  assert.match(guard.message, /confirm/);
+
+  const otherActor = await runAttachmentCommand(
+    '/attachmentdelete all confirm', harness, 'group:chat-1', 'user-b',
+  );
+  assert.equal(otherActor.handled, true);
+  assert.match(otherActor.message, /\/attachmentdelete all/);
+  assert.equal((await listInboundAttachments(root)).length, 1);
+
+  const otherConversation = await runAttachmentCommand(
+    '/attachmentdelete all confirm', harness, 'group:chat-2', 'user-a',
+  );
+  assert.equal(otherConversation.handled, true);
+  assert.match(otherConversation.message, /\/attachmentdelete all/);
+  assert.equal((await listInboundAttachments(root)).length, 1);
+
+  const cleared = await runAttachmentCommand(
+    '/attachmentdelete all confirm', harness, 'group:chat-1', 'user-a',
+  );
+  assert.ok(cleared.handled);
+  assert.deepEqual(await listInboundAttachments(root), []);
+});
+
 test('deleteInboundAttachments fails closed when the attachment root is a symlink outside the workspace', async (t) => {
   const root = await workspace(t);
   const external = await workspace(t);

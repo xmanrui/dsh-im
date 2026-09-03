@@ -213,7 +213,9 @@ test('all nine channel bridges advertise /session and pass their current convers
     const source = await readFile(new URL(file, import.meta.url), 'utf8');
     assert.match(source, /\/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话/);
     assert.ok(
-      source.includes(`runWorkspaceCommand(text, this.#harness, ${key})`),
+      // The trailing comma keeps the intent (each bridge passes its current
+      // conversation key) while allowing the actor argument appended after it.
+      source.includes(`runWorkspaceCommand(text, this.#harness, ${key},`),
       `${file} must pass ${key} to the shared command`,
     );
   }

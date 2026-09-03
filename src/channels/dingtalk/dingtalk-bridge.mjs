@@ -1103,7 +1103,7 @@ export class DingtalkHarnessBridge {
         return;
       }
       const workspaceCommand = isPlainText && !hasImages && !hasFiles
-        ? await runWorkspaceCommand(text, this.#harness, key)
+        ? await runWorkspaceCommand(text, this.#harness, key, sender)
         : null;
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
