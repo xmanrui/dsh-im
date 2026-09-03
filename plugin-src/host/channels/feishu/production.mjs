@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { unlink } from 'node:fs/promises';
 import * as Lark from '@larksuiteoapi/node-sdk';
 import HttpsProxyAgent from 'https-proxy-agent';
@@ -23,6 +23,7 @@ import {
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
+import { ConversationRoleStore } from '../../../../src/channels/shared/conversation-role-store.mjs';
 import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
 import {
   accessPolicyProvider,
@@ -157,6 +158,23 @@ export async function createProductionController(ctx, config = {}, internals = {
     if (!botConfig) throw new Error('Unknown Feishu bot');
     return stateFor(botConfig);
   };
+  // Conversation role overrides live beside each bot's state so a workspace
+  // switch or removal can clear them together with that bot's session mappings.
+  const roleStores = new Map();
+  const rolePathFor = (botConfig) => !botConfig.id
+    || !botConfig.secretRef
+    || botConfig.secretRef === LEGACY_FEISHU_SECRET_REF
+    ? join(dirname(paths.legacyState), 'roles.json')
+    : resolve(paths.bots, botConfig.id, 'roles.json');
+  const roleFor = async (botConfig) => {
+    const roleKey = botConfig.id ?? '__legacy__';
+    let roleStore = roleStores.get(roleKey);
+    if (!roleStore) {
+      roleStore = await new ConversationRoleStore(rolePathFor(botConfig)).load();
+      roleStores.set(roleKey, roleStore);
+    }
+    return roleStore;
+  };
   const commandExecutor = createHarnessCommandExecutor(ctx, internals.commandExecutor);
   const { controlExecutor, sessionMaintenanceExecutor, fileIngressExecutor } = createHarnessSessionExecutors(ctx, {
     controlExecutor: internals.controlExecutor,
@@ -205,6 +223,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         ownerOpenIds: botConfig.ownerOpenIds ?? [botConfig.ownerOpenId],
         harness: workspaceScope.harness,
         state: workspaceScope.state,
+        roleStore: await roleFor(botConfig),
         contextEnhancement: { botId: id, getSettings: () => workspaces.contextEnhancementFor(id) },
         accessPolicy: accessPolicyProvider(workspaces, id, {
           channel: 'feishu', config: botConfig,
@@ -224,6 +243,13 @@ export async function createProductionController(ctx, config = {}, internals = {
       stateStores.delete(botId);
       try {
         await unlink(statePathFor(botConfig));
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+      const roleKey = botConfig.id ?? '__legacy__';
+      roleStores.delete(roleKey);
+      try {
+        await unlink(rolePathFor(botConfig));
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
       }

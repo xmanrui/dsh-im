@@ -41,6 +41,19 @@ async function createSession(harness, options) {
  * current workspace. A concurrent workspace switch invalidates the scoped
  * session and retries before any prompt is sent to the stale session.
  */
+/**
+ * When a role store is present and the conversation has a role override, the
+ * session binding is scoped to that role (`<key>:<presetId>`) and the role
+ * preset is injected when creating a fresh session. Without an override this
+ * is a no-op, keeping the default bot-preset behavior unchanged.
+ */
+function resolveRoleBinding(roleStore, botId, key, state) {
+  if (!roleStore || !botId || typeof roleStore.overrideFor !== 'function') return null;
+  const presetId = roleStore.overrideFor(botId, key);
+  if (!presetId) return null;
+  return { presetId, roleKey: `${key}:${presetId}` };
+}
+
 export async function askInWorkspaceSession({
   harness,
   state,
@@ -51,6 +64,8 @@ export async function askInWorkspaceSession({
   createOptions,
   existsOptions,
   askOptions,
+  roleStore,
+  botId,
 }) {
   const initialTitle = contextEnhanced
     ? initialSessionTitle({
@@ -62,15 +77,29 @@ export async function askInWorkspaceSession({
   const renameSignal = createOptions?.signal
     ?? (typeof askOptions === 'object' ? askOptions?.signal : undefined);
   const renameOptions = renameSignal ? { signal: renameSignal } : undefined;
+  const roleBinding = resolveRoleBinding(roleStore, botId, key, state);
+  const bindKey = roleBinding?.roleKey ?? key;
+  const scopedCreateOptions = roleBinding
+    ? { ...createOptions, agentPreset: roleBinding.presetId }
+    : createOptions;
   while (true) {
     try {
-      const binding = await withSessionBindingLock(state, key, async () => {
-        let sessionId = state.sessionFor(key);
+      const binding = await withSessionBindingLock(state, bindKey, async () => {
+        let sessionId = state.sessionFor(bindKey);
         let session = sessionId ? workspaceSession(harness, sessionId) : null;
         if (!session || !(await sessionExists(session, existsOptions))) {
-          sessionId = await createSession(harness, createOptions);
-          if (await state.setSession(key, sessionId) === false) return null;
+          sessionId = await createSession(harness, scopedCreateOptions);
+          if (await state.setSession(bindKey, sessionId) === false) return null;
           session = workspaceSession(harness, sessionId);
+          if (roleBinding && typeof roleStore?.setRoleSession === 'function') {
+            try {
+              await roleStore.setRoleSession(botId, key, roleBinding.presetId, sessionId);
+            } catch (error) {
+              // Persisting the role session is best-effort; a failure here must
+              // not break the active prompt.
+              console.warn('[dsh-im] unable to persist role session:', error?.message ?? error);
+            }
+          }
           if (initialTitle && typeof session.renameTitle === 'function') {
             try {
               await session.renameTitle(initialTitle, renameOptions);

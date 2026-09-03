@@ -48,6 +48,10 @@ import {
   runPresetCommand,
 } from '../shared/preset-command.mjs';
 import {
+  isRoleCommand,
+  runRoleCommand,
+} from '../shared/role-command.mjs';
+import {
   parseSessionListArgument,
   resolveSessionListWorkspace,
   runWorkspaceCommand,
@@ -480,6 +484,7 @@ export class FeishuHarnessBridge {
   #appId;
   #botOpenId;
   #groupResponseMode;
+  #roleStore;
   #repair;
   #repairAttempt = null;
   #repairMonitorVersion = 0;
@@ -524,6 +529,7 @@ export class FeishuHarnessBridge {
     interactionCards = true,
     logger = console,
     signal,
+    roleStore = null,
   }) {
     if (!client || !harness || !state || !status) {
       throw new TypeError('Feishu bridge dependencies are required');
@@ -555,6 +561,7 @@ export class FeishuHarnessBridge {
     this.#appId = nonEmptyString(appId);
     this.#botOpenId = nonEmptyString(botOpenId);
     this.#groupResponseMode = normalizeFeishuGroupResponseMode(groupResponseMode);
+    this.#roleStore = roleStore ?? null;
     this.#repair = repair ?? null;
     this.#repairPollIntervalMs = repairPollIntervalMs;
     this.#repairLinkWaitMs = repairLinkWaitMs;
@@ -719,7 +726,9 @@ export class FeishuHarnessBridge {
       ? runControlCommand
       : (isModelCommand(commandText)
           ? runModelCommand
-          : (isPresetCommand(commandText) ? runPresetCommand : null));
+          : (isPresetCommand(commandText)
+              ? runPresetCommand
+              : (isRoleCommand(commandText) ? runRoleCommand : null)));
     // In all-message group mode, history must still be refused locally rather
     // than becoming a normal prompt when no mention is present.
     if (commandRunner && (addressed || commandRunner === runHistoryCommand)) {
@@ -1048,6 +1057,8 @@ export class FeishuHarnessBridge {
         hasFiles: hasInboundFiles(message),
         pendingInteraction: this.#hasPendingInteraction(key),
         control: { owner: this, key },
+        roleStore: this.#roleStore,
+        botId: this.#botId,
       },
     );
     if (result?.stopped) {
@@ -3423,6 +3434,8 @@ export class FeishuHarnessBridge {
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: this.#interactionAskOptions(event, key, message.files),
+        roleStore: this.#roleStore,
+        botId: this.#botId,
       });
       markAskComplete();
       let textReceipt;
@@ -3493,6 +3506,8 @@ export class FeishuHarnessBridge {
             createOptions: { signal: this.#signal },
             existsOptions: { signal: this.#signal },
             askOptions,
+            roleStore: this.#roleStore,
+            botId: this.#botId,
           });
           markAskComplete();
           completedAnswer = completed.answer;
@@ -3557,6 +3572,8 @@ export class FeishuHarnessBridge {
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: this.#interactionAskOptions(event, key, message.files),
+        roleStore: this.#roleStore,
+        botId: this.#botId,
       });
       markAskComplete();
       let textReceipt;

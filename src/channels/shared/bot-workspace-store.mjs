@@ -1151,9 +1151,14 @@ export function createBotWorkspaceScope(
             throw error;
           }
           const generation = workspaces.generationFor(botId);
-          const agentPreset = workspaces.agentPresetFor(botId);
+          // A conversation-scoped role preset (passed via createOptions) takes
+          // precedence over the bot default; otherwise fall back to the bot
+          // default preset.
+          const agentPreset = options.agentPreset ?? workspaces.agentPresetFor(botId);
+          const restOptions = { ...options };
+          delete restOptions.agentPreset;
           const sessionId = await target.createSession({
-            ...options,
+            ...restOptions,
             workspace: workspaces.workspaceFor(botId),
             ...(agentPreset == null ? {} : { agentPreset }),
           });
