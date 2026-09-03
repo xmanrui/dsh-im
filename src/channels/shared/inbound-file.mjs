@@ -295,7 +295,10 @@ export async function listInboundAttachments(workspace) {
 /**
  * Delete inbound attachments. `paths` must reference files inside
  * `<workspace>/.dsh-im/inbound`; the sentinel `'all'` removes the whole
- * attachment directory.
+ * attachment directory. Before anything is removed, the attachment root is
+ * resolved canonically and must live inside the workspace; a symlinked root
+ * pointing outside the workspace fails closed instead of deleting the
+ * external directory.
  */
 export async function deleteInboundAttachments(workspace, paths) {
   const root = inboundRoot(workspace);
@@ -305,24 +308,44 @@ export async function deleteInboundAttachments(workspace, paths) {
       'The Harness Session workspace is unavailable for inbound files.',
     );
   }
-  if (paths === 'all') {
-    await rm(root, { recursive: true, force: true });
-    return { deleted: 'all' };
-  }
-  if (!Array.isArray(paths) || paths.length === 0) {
+  if (paths !== 'all' && (!Array.isArray(paths) || paths.length === 0)) {
     throw new InboundFileError(
       'inbound-file-delete-target-invalid',
       'No inbound attachment paths were provided.',
     );
   }
+  try {
+    await stat(root);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      // A missing attachment directory is already empty; deletion is a no-op.
+      return paths === 'all' ? { deleted: 'all' } : { deleted: 0 };
+    }
+    throw error;
+  }
+  const canonicalWorkspace = await realpath(workspace).catch(() => null);
+  const canonicalRoot = await realpath(root).catch(() => null);
+  const rootInWorkspace = canonicalWorkspace && canonicalRoot
+    ? relative(canonicalWorkspace, canonicalRoot)
+    : null;
+  if (!rootInWorkspace || rootInWorkspace.startsWith('..') || isAbsolute(rootInWorkspace)) {
+    throw new InboundFileError(
+      'inbound-file-root-outside-workspace',
+      'The inbound attachment directory does not resolve inside the Harness Session workspace.',
+      t('附件目录不在工作区内，已取消删除。'),
+    );
+  }
+  if (paths === 'all') {
+    await rm(canonicalRoot, { recursive: true, force: true });
+    return { deleted: 'all' };
+  }
   let deleted = 0;
   for (const candidate of paths) {
     if (typeof candidate !== 'string' || !candidate.trim()) continue;
     const target = resolve(workspace, candidate);
-    const canonicalRoot = await realpath(root).catch(() => null);
     const canonicalTarget = await realpath(target).catch(() => null);
-    if (!canonicalRoot || !canonicalTarget) continue;
-    // Only paths inside the attachment root are deletable.
+    if (!canonicalTarget) continue;
+    // Only paths inside the canonical attachment root are deletable.
     const contained = relative(canonicalRoot, canonicalTarget);
     if (!contained || contained.startsWith('..') || isAbsolute(contained)) continue;
     await rm(canonicalTarget, { recursive: true, force: true });

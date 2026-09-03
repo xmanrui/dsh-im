@@ -1494,7 +1494,10 @@ export function createWorkspaceAwareController(controller, { workspaces, stateFo
     }
     const workspace = workspaces.workspaceFor(botId);
     await deleteInboundAttachments(workspace, 'all');
-    return { cleared: true };
+    // Channel settings pages parse the RPC result as a full status snapshot
+    // (normalizeSnapshot/normalizeBotsSnapshot require a bots array), so the
+    // clear response must be decorated exactly like updateInboundRetention.
+    return workspaces.decorateStatus(await controller.status());
   };
   const updateContextEnhancement = (botId, value, projectStatus) => {
     const incarnation = workspaces.incarnationFor(botId);

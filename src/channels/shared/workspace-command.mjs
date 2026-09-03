@@ -376,7 +376,7 @@ async function runSessionBindCommand(command, harness, conversationKey) {
 }
 
 export async function runWorkspaceCommand(text, harness, conversationKey) {
-  const attachmentResult = await runAttachmentCommand(text, harness);
+  const attachmentResult = await runAttachmentCommand(text, harness, conversationKey);
   if (attachmentResult) return attachmentResult;
   if (!isWorkspaceCommand(text)) return null;
   const command = text.trim();

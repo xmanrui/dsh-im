@@ -1,6 +1,7 @@
 import { t } from './i18n.mjs';
 import {
   deleteInboundAttachments,
+  InboundFileError,
   listInboundAttachments,
 } from './inbound-file.mjs';
 
@@ -8,6 +9,38 @@ const ATTACHMENT_LIST_COMMAND = /^\/attachmentlist$/i;
 const ATTACHMENT_DELETE_COMMAND = /^\/attachmentdelete(?:[ \t]+([\s\S]+))?$/i;
 const MAX_DISPLAY_PATH_LENGTH = 4_096;
 const UNSAFE_DISPLAY_TEXT_GLOBAL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
+const CLEAR_CONFIRMATION_TTL_MS = 60_000;
+// Pending "/attachmentdelete all" confirmations, keyed by conversation (or
+// workspace when no conversation key is available). An entry must be armed by
+// "/attachmentdelete all" and consumed by "... all confirm" within the TTL.
+const pendingClearConfirmations = new Map();
+
+function purgeExpiredClearConfirmations(now = Date.now()) {
+  for (const [key, expiresAt] of pendingClearConfirmations) {
+    if (now >= expiresAt) pendingClearConfirmations.delete(key);
+  }
+}
+
+function clearConfirmationKey(harness, conversationKey) {
+  return typeof conversationKey === 'string' && conversationKey
+    ? conversationKey
+    : currentWorkspacePath(harness);
+}
+
+function armClearConfirmation(harness, conversationKey) {
+  purgeExpiredClearConfirmations();
+  const key = clearConfirmationKey(harness, conversationKey);
+  if (!key) return;
+  pendingClearConfirmations.set(key, Date.now() + CLEAR_CONFIRMATION_TTL_MS);
+}
+
+function consumeClearConfirmation(harness, conversationKey) {
+  purgeExpiredClearConfirmations();
+  const key = clearConfirmationKey(harness, conversationKey);
+  if (!key || !pendingClearConfirmations.has(key)) return false;
+  pendingClearConfirmations.delete(key);
+  return true;
+}
 
 function commandResult(message, messages = [message]) {
   return { handled: true, message, messages };
@@ -59,7 +92,7 @@ export function isAttachmentCommand(text) {
     || ATTACHMENT_DELETE_COMMAND.test(command);
 }
 
-export async function runAttachmentCommand(text, harness) {
+export async function runAttachmentCommand(text, harness, conversationKey) {
   if (!isAttachmentCommand(text)) return null;
   const command = text.trim();
 
@@ -91,12 +124,21 @@ export async function runAttachmentCommand(text, harness) {
   }
 
   if (/^all$/iu.test(argument)) {
+    armClearConfirmation(harness, conversationKey);
     return commandResult(t(
       '将清空整个附件目录（.dsh-im/inbound）。请再发送一次 /attachmentdelete all confirm 确认执行。',
     ));
   }
   if (/^all confirm$/iu.test(argument)) {
-    await deleteInboundAttachments(workspace, 'all');
+    if (!consumeClearConfirmation(harness, conversationKey)) {
+      return commandResult(t('尚未发起清空或确认已超时，请先发送 /attachmentdelete all。'));
+    }
+    try {
+      await deleteInboundAttachments(workspace, 'all');
+    } catch (error) {
+      if (error instanceof InboundFileError) return commandResult(error.userMessage);
+      throw error;
+    }
     return commandResult(t('已清空附件目录。'));
   }
 
@@ -107,7 +149,12 @@ export async function runAttachmentCommand(text, harness) {
       return commandResult(t('附件序号不存在，请先执行 /attachmentlist。'));
     }
     const target = attachments[position - 1];
-    await deleteInboundAttachments(workspace, [target.path]);
+    try {
+      await deleteInboundAttachments(workspace, [target.path]);
+    } catch (error) {
+      if (error instanceof InboundFileError) return commandResult(error.userMessage);
+      throw error;
+    }
     return commandResult(t('已删除附件：{name}', { name: safeDisplayName(target.name) }));
   }
 
