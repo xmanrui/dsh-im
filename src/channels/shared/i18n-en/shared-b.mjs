@@ -260,4 +260,34 @@ export default {
     'The task has ended and there is no running task to steer. Send a message to start a new task.',
   '已提交补充指令，Agent 会在下一步读取。':
     'Additional instruction submitted; the Agent will read it at the next step.',
+
+  // role-command.mjs
+  '跟随机器人默认': 'Follow the bot default',
+  '当前聊天角色：{preset}': 'Current chat role: {preset}',
+  '机器人默认：{preset}': 'Bot default: {preset}',
+  '查看可用角色：/roles': 'View available roles: /roles',
+  '清除当前聊天角色：/role --default': 'Clear the current chat role: /role --default',
+  '可用角色（Agent Preset，{count}）：': 'Available roles (Agent Presets, {count}):',
+  '当前聊天': 'Current chat',
+  '选择：/role <序号或 ID>': 'Select: /role <number or ID>',
+  '已清除当前聊天角色，回退机器人默认。':
+    'Cleared the current chat role; it now falls back to the bot default.',
+  '当前聊天角色已设置为：{preset}': 'Current chat role set to: {preset}',
+  '仅影响当前聊天；其他聊天与机器人默认不变。':
+    'This only affects the current chat; other chats and the bot default are unchanged.',
+  '若当前聊天已有会话，请先发送 /new，再发送普通消息，才会使用新角色创建会话。':
+    'If this chat already has a Session, send /new first, then a normal message, for the new role to create a Session.',
+  '该角色不存在或当前不可用，请重新执行 /roles。':
+    'That role does not exist or is currently unavailable; run /roles again.',
+  '获取角色列表已取消。': 'Fetching the role list was cancelled.',
+  '获取当前角色已取消。': 'Fetching the current role was cancelled.',
+  '角色修改已取消。': 'The role change was cancelled.',
+  '暂时无法获取角色列表，请稍后重试。':
+    'The role list is temporarily unavailable; please try again later.',
+  '暂时无法获取当前角色，请稍后重试。':
+    'The current role is temporarily unavailable; please try again later.',
+  '角色修改失败，请稍后重试。': 'The role change failed; please try again later.',
+  '角色命令仅支持纯文字，请移除图片后重试。':
+    'The role command supports text only; please remove images and try again.',
+  '当前机器人未启用角色功能。': 'This bot has no role support enabled.',
 };

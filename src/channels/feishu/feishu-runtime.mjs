@@ -115,6 +115,7 @@ export class FeishuRuntime {
   #state;
   #contextEnhancement;
   #accessPolicy;
+  #roleStore;
   #replyTimeoutMs;
   #connectTimeoutMs;
   #requestTimeoutMs;
@@ -146,6 +147,7 @@ export class FeishuRuntime {
     contextEnhancement,
     accessPolicy,
     repair,
+    roleStore = null,
     replyTimeoutMs = 600000,
     connectTimeoutMs = 15000,
     requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
@@ -179,6 +181,7 @@ export class FeishuRuntime {
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
+    this.#roleStore = roleStore ?? null;
     this.#repair = repair ?? null;
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#connectTimeoutMs = connectTimeoutMs;
@@ -287,6 +290,7 @@ export class FeishuRuntime {
         botOpenId: this.#botOpenId,
         groupResponseMode: this.#groupResponseMode,
         repair: this.#repair,
+        roleStore: this.#roleStore,
         replyTimeoutMs: this.#replyTimeoutMs,
         // Interaction cards (approval/question buttons) are on by default.
         // Set DSH_IM_INTERACTION_CARDS=0 to fall back to plain-text replies.
