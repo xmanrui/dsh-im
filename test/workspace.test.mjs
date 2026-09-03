@@ -962,6 +962,9 @@ test('/workspace command supports fresh list numbers, preserves paths, and retur
   assert.match((await runWorkspaceCommand('/workspace 2', harness)).message, /workspacelist/);
   assert.deepEqual(switched, [alternateWorkspace, alternateWorkspace, defaultWorkspace]);
 
+  assert.match((await runWorkspaceCommand(`/WS ${alternateWorkspace}`, harness)).message, new RegExp(alternateWorkspace));
+  assert.equal(await runWorkspaceCommand('/wsnope /tmp', harness), null);
+
   const invalidHarness = {
     async switchWorkspace() {
       const error = new Error('工作区路径不存在。');
@@ -1018,8 +1021,14 @@ test('/workspacelist returns existing absolute paths with the current workspace 
   assert.equal(result.messages.join(''), result.message);
   assert.equal(listCalls, 1);
 
+  for (const alias of ['/wsl', '/WORKSPACES']) {
+    assert.equal((await runWorkspaceCommand(`  ${alias}  `, harness)).message, result.message);
+  }
+  assert.match((await runWorkspaceCommand('/wsl extra', harness)).message, /用法/);
+  assert.equal(await runWorkspaceCommand('/workspacesnope', harness), null);
+
   assert.match((await runWorkspaceCommand('/workspacelist extra', harness)).message, /用法/);
-  assert.equal(listCalls, 1);
+  assert.equal(listCalls, 3);
   assert.match((await runWorkspaceCommand('/workspacelist', {})).message, /暂不支持/);
   assert.match((await runWorkspaceCommand('/workspacelist', {
     async listWorkspaces() { throw new Error('private host detail'); },

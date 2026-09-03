@@ -76,6 +76,7 @@ import {
   MENU_PAGE_SIZE,
   PRESET_FOLLOW_DEFAULT_SENTINEL,
   STEER_CUSTOM_SENTINEL,
+  approvalCard,
   completionCard,
   customSteerCard,
   helpCard,
@@ -83,6 +84,7 @@ import {
   menuHelpText,
   modelCard,
   presetCard,
+  questionCard,
   sessionListCard,
   statusCard,
   steerCard,
@@ -107,7 +109,7 @@ const WATCH_COMMAND = /^\/watch(?:\s+([^\s]+))?$/i;
 const UNWATCH_COMMAND = /^\/unwatch(?:\s+([^\s]+))?$/i;
 const WATCHLIST_COMMAND = /^\/watchlist$/i;
 const SESSION_LIST_PREFIX = /^\/(?:sessionlist|sessions)(?:\s|$)/i;
-const WORKSPACE_LIST_COMMAND = /^\/workspacelist$/i;
+const WORKSPACE_LIST_COMMAND = /^\/(?:workspacelist|workspaces|wsl)$/i;
 const NUMBER_REPLY = /^\d{1,2}$/;
 /** A displayed menu stays number-tappable for this long. */
 const MENU_TTL_MS = 10 * 60_000;
@@ -146,7 +148,34 @@ const REPAIR_URL_HOSTS = new Set([
 
 const ARCHIVED_COMMAND = /^\/archived(?:\s+(on|off))?$/i;
 /** Matches fast card commands that should not be queued behind a running task. */
-const CARD_COMMAND = /^\/(?:m(?:enu)?|new|help|status|compact|(?:sessionlist|sessions)(?:\s|$)|workspacelist|watchlist|archived(?:\s+(on|off))?)$/i;
+const CARD_COMMAND = /^\/(?:m(?:enu)?|new|help|status|compact|(?:sessionlist|sessions)(?:\s|$)|workspacelist|workspaces|wsl|watchlist|archived(?:\s+(on|off))?)$/i;
+
+/** Pretty-print a tool call's arguments for an approval card. */
+function operationArguments(toolCall) {
+  const source = toolCall?.arguments;
+  if (source !== null && typeof source === 'object') {
+    try {
+      return JSON.stringify(source, null, 2);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof source !== 'string') return null;
+  const raw = printableText(source);
+  // Harness treats an empty tool argument string as an empty object.
+  if (!raw) return source === '' ? '{}' : null;
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
+/** Strip control characters so the approval card text stays clean. */
+function printableText(value) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
+}
 
 function isFeishuLocalCommand(text, { hasImages = false, hasFiles = false } = {}) {
   if (hasImages || hasFiles || typeof text !== 'string') return false;
@@ -471,6 +500,8 @@ export class FeishuHarnessBridge {
   /** Earliest completion that still needs delivery for each watch. */
   #failedWatchSeqs = new Map();
   #cardDataTimeoutMs;
+  /** When true, approval/question interactions render as Feishu cards (buttons). */
+  #interactionCards = true;
 
   constructor({
     client,
@@ -490,6 +521,7 @@ export class FeishuHarnessBridge {
     repairLinkWaitMs = REPAIR_LINK_WAIT_MS,
     cardDataTimeoutMs = CARD_DATA_TIMEOUT_MS,
     replyTimeoutMs = 600_000,
+    interactionCards = true,
     logger = console,
     signal,
   }) {
@@ -528,6 +560,7 @@ export class FeishuHarnessBridge {
     this.#repairLinkWaitMs = repairLinkWaitMs;
     this.#cardDataTimeoutMs = cardDataTimeoutMs;
     this.#replyTimeoutMs = replyTimeoutMs;
+    this.#interactionCards = interactionCards === true;
     this.#logger = logger;
     this.#approvals = new HarnessApprovalQueue({ label: 'Feishu', logger });
     this.#signal = signal;
@@ -1644,10 +1677,15 @@ export class FeishuHarnessBridge {
     }
     const conversationType = route.key.startsWith('p2p:') ? 'direct'
       : route.key.startsWith('group:') ? 'group' : null;
+    const isInteractionResponse = resolvedAction.startsWith('approve:')
+      || resolvedAction.startsWith('reject:')
+      || resolvedAction.startsWith('answer:');
     const access = evaluateInboundAccess(this.#accessPolicy, {
       conversationType,
       senderIds: operatorOpenId,
-      isCommand: true,
+      // These buttons are the card equivalent of an ordinary approval or
+      // question reply. Every other card action remains command-gated.
+      isCommand: !isInteractionResponse,
     });
     if (!access.allowed) {
       if (access.reason === 'command-not-allowed') {
@@ -1710,7 +1748,7 @@ export class FeishuHarnessBridge {
           return;
         }
       }
-      await this.#handleCardAction(resolvedAction, entry);
+      await this.#handleCardAction(resolvedAction, { ...entry, actor: entry.operatorOpenId });
     }, {
       lane: isStop || isRealSteer ? 'control' : 'regular',
       coalesceStop: isStop,
@@ -1868,10 +1906,49 @@ export class FeishuHarnessBridge {
     sessionPage = 0,
     sessionLimit = null,
     selections = [],
+    actor = null,
   }) {
     // Confirmations triggered by a card interaction stay anchored to the
     // card's message so they land inside the same Feishu topic.
     const reply = (text) => this.#send(chatId, text, { replyTo: messageId });
+    // Approval card buttons: approve:<approvalId> / reject:<approvalId>
+    if (action.startsWith('approve:') || action.startsWith('reject:')) {
+      const sep = action.indexOf(':');
+      const approvalId = action.slice(sep + 1);
+      const outcome = action.startsWith('approve:') ? 'allowed-once' : 'rejected';
+      // Bind the decision to the operator so another allowed group member
+      // cannot decide someone else's approval.
+      const submitted = await this.#approvals.submitByApprovalId(approvalId, outcome, { actor });
+      if (!submitted) {
+        await reply(t('该审批已处理或不存在，无需重复操作。')).catch(() => undefined);
+      }
+      return;
+    }
+    // Question option buttons: answer:<interactionId>:<index>:<optionLabel>
+    if (action.startsWith('answer:')) {
+      const rest = action.slice('answer:'.length);
+      const firstSep = rest.indexOf(':');
+      if (firstSep !== -1) {
+        const interactionId = rest.slice(0, firstSep);
+        const afterId = rest.slice(firstSep + 1);
+        const indexSep = afterId.indexOf(':');
+        const indexText = indexSep === -1 ? afterId : afterId.slice(0, indexSep);
+        const optionLabel = indexSep === -1 ? '' : afterId.slice(indexSep + 1);
+        const qKey = this.#interactionKeys.get(interactionId);
+        const pending = qKey ? this.#pendingInteractions.get(qKey) : null;
+        // Only the actor who started the interaction may answer it, and the
+        // card must still target the current question (a stale card from an
+        // earlier question in a multi-question interaction must not submit).
+        if (pending && pending.kind === 'question' && !pending.submitting
+          && pending.actor === actor
+          && Number(indexText) === pending.index) {
+          await this.#submitQuestionAnswer(pending, optionLabel, { chatId });
+        } else {
+          await reply(INTERACTION_RESOLVED_TEXT()).catch(() => undefined);
+        }
+      }
+      return;
+    }
     if (action === 'sessions' || /^sessions:\d+$/.test(action)) {
       const page = action === 'sessions' ? 0 : Number(action.slice('sessions:'.length));
       await this.#showSessions(
@@ -3585,7 +3662,18 @@ export class FeishuHarnessBridge {
     const question = pending.questions[pending.index];
     if (!question) return;
 
-    pending.answers.push(harnessAnswerForQuestion(question, text));
+    await this.#submitQuestionAnswer(pending, text, {
+      chatId: event.message.chat_id,
+      messageId,
+    });
+  }
+
+  async #submitQuestionAnswer(pending, answerText, { chatId, messageId } = {}) {
+    const question = pending.questions[pending.index];
+    if (!question) return;
+    pending.chatId = chatId ?? pending.chatId;
+
+    pending.answers.push(harnessAnswerForQuestion(question, answerText));
     pending.index += 1;
     if (pending.index < pending.questions.length) {
       if (pending.claimedReplyMessageId === messageId) {
@@ -3603,6 +3691,7 @@ export class FeishuHarnessBridge {
     }
 
     pending.submitting = true;
+    const key = pending.key;
     try {
       await pending.interaction.respond({
         ok: true,
@@ -3620,7 +3709,9 @@ export class FeishuHarnessBridge {
       if (error?.code === 'interaction-not-pending') {
         this.#rememberResolvedInteraction(key, pending);
         this.#clearPendingInteraction(key, pending.interactionId);
-        await this.#send(event.message.chat_id, INTERACTION_RESOLVED_TEXT(), { replyTo: event.message.message_id }).catch(() => undefined);
+        if (chatId && messageId) {
+          await this.#send(chatId, INTERACTION_RESOLVED_TEXT(), { replyTo: messageId }).catch(() => undefined);
+        }
         return;
       }
       pending.submitting = false;
@@ -3628,8 +3719,10 @@ export class FeishuHarnessBridge {
       pending.index -= 1;
       this.#status.lastError = '回答提交失败。';
       this.#logger.error?.('[dsh-feishu] failed to answer a Harness interaction');
-      await this.#send(event.message.chat_id, t('回答提交失败，请重新发送当前问题的答案。'))
-        .catch(() => undefined);
+      if (chatId) {
+        await this.#send(chatId, t('回答提交失败，请重新发送当前问题的答案。'))
+          .catch(() => undefined);
+      }
     }
   }
 
@@ -3645,6 +3738,32 @@ export class FeishuHarnessBridge {
       actor,
       requiresMention,
       send: (text) => this.#send(chatId, text, { replyTo: replyToMessageId }),
+      // Approvals render as interactive cards with approve/reject buttons by
+      // default. Set the bridge `interactionCards` option (or
+      // DSH_IM_INTERACTION_CARDS=0) to keep the plain-text reply flow.
+      ...(this.#interactionCards
+        ? {
+            render: async (pending) => {
+              // Show the approval as an interactive card with approve/reject buttons.
+              await this.#sendCard(
+                chatId,
+                approvalCard({
+                  toolName: pending.toolCall?.name ?? pending.payload?.toolName,
+                  operation: operationArguments(pending.toolCall),
+                  reason: pending.payload?.reason,
+                  approvalId: pending.approvalId,
+                }),
+                { key, replyTo: replyToMessageId },
+              ).catch(async () => {
+                // Fall back to the plain-text approval if the card cannot be
+                // sent. If the text send also fails, let the error propagate so
+                // the pending approval is not marked as presented and the
+                // existing retry/reconnect logic can run.
+                await this.#send(chatId, pending.text, { replyTo: replyToMessageId });
+              });
+            },
+          }
+        : {}),
     })) return;
 
     // Approval requests return above; the existing question state machine stays unchanged.
@@ -3738,18 +3857,53 @@ export class FeishuHarnessBridge {
   async #presentInteraction(pending) {
     const question = pending.questions[pending.index];
     if (!question) return;
-    const messageId = await this.#send(
-      pending.chatId,
-      harnessQuestionText(
-        question,
-        pending.index,
-        pending.questions.length,
-        { requiresMention: pending.requiresMention },
-      ),
-      // Reply to the message that started the turn so the question lands in
-      // the same Feishu thread/topic instead of the group's default area.
-      { replyTo: pending.replyToMessageId },
-    );
+    const options = Array.isArray(question?.options) ? question.options : [];
+    // Single-choice questions with options render as interactive cards by
+    // default. Multi-select or free-text questions and the text reply flow
+    // remain when `interactionCards` is disabled (or DSH_IM_INTERACTION_CARDS=0).
+    const interactive = this.#interactionCards
+      && options.length > 0
+      && question.multiSelect !== true;
+    let messageId;
+    if (interactive) {
+      // Single-choice question with options: render each option as a button.
+      messageId = await this.#sendCard(
+        pending.chatId,
+        questionCard({
+          interactionId: pending.interactionId,
+          header: question.header,
+          question: question.question,
+          detail: question.detail,
+          options,
+          index: pending.index,
+          total: pending.questions.length,
+        }),
+        { key: pending.key, replyTo: pending.replyToMessageId },
+      ).catch(async () => {
+        // Fall back to the plain-text question if the card cannot be sent.
+        // If the text send also fails, let the error propagate so the pending
+        // question is not marked as presented and the existing retry logic runs.
+        return this.#send(
+          pending.chatId,
+          harnessQuestionText(question, pending.index, pending.questions.length, {
+            requiresMention: pending.requiresMention,
+          }),
+          { replyTo: pending.replyToMessageId },
+        );
+      });
+    } else {
+      // Multi-select or free-text questions keep the plain-text reply flow.
+      messageId = await this.#send(
+        pending.chatId,
+        harnessQuestionText(
+          question,
+          pending.index,
+          pending.questions.length,
+          { requiresMention: pending.requiresMention },
+        ),
+        { replyTo: pending.replyToMessageId },
+      );
+    }
     if (messageId) {
       pending.questionMessageIds.add(messageId);
       if (pending.inactive) this.#rememberResolvedInteraction(pending.key, pending);

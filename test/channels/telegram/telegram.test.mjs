@@ -1120,7 +1120,7 @@ test('Telegram maps one reply_to_message snapshot without expanding nested repli
     authorId: '123456789',
     authorName: 'Harness Bot',
     content: '第一层原文',
-    attachments: [{ kind: 'image', name: 'quoted-photo.jpg' }],
+    attachments: [{ kind: 'image' }],
   });
   assert.doesNotMatch(JSON.stringify(replied.replyTo), /不应递归/);
 
@@ -1140,6 +1140,22 @@ test('Telegram maps one reply_to_message snapshot without expanding nested repli
   }, { botId: '123456789', username: 'HarnessBot' });
   assert.deepEqual(documentReply.replyTo.attachments, [{ kind: 'file', name: 'brief.pdf' }]);
   assert.equal(documentReply.replyTo.authorName, 'alice');
+
+  const stickerReply = normalizeTelegramUpdate({
+    update_id: 18,
+    message: {
+      message_id: 12,
+      chat: { id: 88, type: 'private' },
+      from: { id: 42, is_bot: false },
+      text: '这个贴纸是什么意思？',
+      reply_to_message: {
+        message_id: 6,
+        from: { id: 41, username: 'alice' },
+        sticker: { file_id: 'opaque-sticker-id', file_unique_id: 'opaque-unique-id' },
+      },
+    },
+  }, { botId: '123456789', username: 'HarnessBot' });
+  assert.deepEqual(stickerReply.replyTo.attachments, [{ kind: 'image' }]);
 });
 
 test('Telegram uses TextQuote and bounded history loading when reply_to_message omits text', async () => {

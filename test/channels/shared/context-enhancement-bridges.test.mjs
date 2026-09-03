@@ -161,6 +161,11 @@ function fixture(channel, { contextEnhancement, onAsk } = {}) {
     });
   } else {
     bridge = new FeishuHarnessBridge({ ...dependencies, status: {}, allowedSenderOpenIds: new Set(['*']),
+      // This shared suite asserts that approval/question replies are not
+      // context-enhanced. It drives the plain-text reply flow, so pin the
+      // text presentation; the default interaction cards are tested in the
+      // Feishu bridge tests.
+      interactionCards: false,
       channel: {}, client: { im: { v1: {
         message: { create: async (request) => {
           calls.push(['createMessage', request]);

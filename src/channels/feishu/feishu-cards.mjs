@@ -492,6 +492,7 @@ export function menuHelpText() {
     '/session ID  绑定已有会话',
     '/workspacelist  列出工作区',
     '/workspace 工作区序号或绝对路径  切换工作区',
+    '/ws、/wsl、/workspaces  工作区命令别名',
     '/new  开启全新会话',
     '',
     '📊 状态 / 压缩',
@@ -595,6 +596,7 @@ export function helpCard(extraTextLines = []) {
     { tag: 'hr' },
     { tag: 'div', text: markdown([
       t(HELP_TEXT_COMMANDS),
+      t('/ws、/wsl、/workspaces  工作区命令别名'),
       t('`/version` — 查看插件版本'),
       t('/history [数量]  查看最近历史消息（默认 3 条，最多 5 条）'),
     ].join('\n') + extraText) },
@@ -866,4 +868,71 @@ export function customSteerCard() {
     button(t('🔙 返回菜单'), 'back_to_menu'),
   ];
   return cardWith(t('➕ 自定义指令'), elements);
+}
+
+/**
+ * Interactive approval card with approve / reject buttons. Action values carry
+ * the approvalId so the card callback can submit the decision:
+ *   approve:<approvalId>  /  reject:<approvalId>
+ * `requiresMention` is advisory; a button click is itself the operator's
+ * explicit intent, so it does not need an @ mention in groups.
+ */
+export function approvalCard({ toolName, operation, reason, approvalId }) {
+  const elements = [];
+  if (toolName) {
+    elements.push({ tag: 'div', text: markdown(t('工具：{tool}', { tool: String(toolName) })) });
+  }
+  if (operation) {
+    // Cap the operation text so an oversized argument list cannot overflow the
+    // card (the plain-text path rejects >6000 chars; here we truncate so the
+    // approve/reject buttons still render).
+    const MAX_OPERATION_CHARS = 6_000;
+    const op = String(operation);
+    const shown = op.length > MAX_OPERATION_CHARS
+      ? `${op.slice(0, MAX_OPERATION_CHARS)}\n…（操作参数过长，已截断）`
+      : op;
+    elements.push({ tag: 'div', text: markdown(t('操作参数：\n{operation}', { operation: shown })) });
+  }
+  if (reason) {
+    elements.push({ tag: 'div', text: markdown(t('原因：{reason}', { reason: String(reason) })) });
+  }
+  elements.push(
+    { tag: 'hr' },
+    buttonPair(t('✅ 批准'), `approve:${approvalId}`, t('❌ 拒绝'), `reject:${approvalId}`),
+  );
+  return cardWith(t('🔐 工具审批'), elements);
+}
+
+/**
+ * Interactive question card. When the question carries options, each option is
+ * rendered as its own button; the selected option label is submitted via a
+ * card callback. Multi-select questions fall back to the plain-text flow (the
+ * caller decides), because a multi-select needs a confirm step.
+ * Action: answer:<interactionId>:<optionLabel>
+ */
+export function questionCard({ interactionId, header, question, detail, options, index, total }) {
+  const elements = [];
+  const progress = total > 1 ? `（${index + 1}/${total}）` : '';
+  if (header) elements.push({ tag: 'div', text: markdown(String(header)) });
+  const qText = typeof question === 'string' && question.trim() ? question : t('请输入你的回答。');
+  elements.push({ tag: 'div', text: markdown(String(qText)) });
+  if (detail) elements.push({ tag: 'div', text: markdown(String(detail)) });
+
+  if (Array.isArray(options) && options.length > 0) {
+    elements.push({ tag: 'hr' });
+    for (const option of options) {
+      const label = typeof option?.label === 'string' ? option.label : '';
+      if (!label) continue;
+      const description = typeof option?.description === 'string' && option.description.trim()
+        ? option.description.trim()
+        : '';
+      // Include the option description in the button so the user sees the full
+      // meaning (mirrors the text form "1. label — description").
+      const buttonText = description ? `${label}\n${description}` : label;
+      // Action carries the question index so a stale card from a previous
+      // question cannot be applied to the current one: answer:<interactionId>:<index>:<label>
+      elements.push(button(buttonText, `answer:${interactionId}:${index}:${label}`));
+    }
+  }
+  return cardWith(t('❓ 请补充信息{progress}', { progress }), elements);
 }

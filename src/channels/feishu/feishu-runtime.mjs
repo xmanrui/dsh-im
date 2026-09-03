@@ -288,6 +288,11 @@ export class FeishuRuntime {
         groupResponseMode: this.#groupResponseMode,
         repair: this.#repair,
         replyTimeoutMs: this.#replyTimeoutMs,
+        // Interaction cards (approval/question buttons) are on by default.
+        // Set DSH_IM_INTERACTION_CARDS=0 to fall back to plain-text replies.
+        interactionCards: !['0', 'false', 'no', 'off'].includes(
+          String(process.env.DSH_IM_INTERACTION_CARDS ?? '').trim().toLowerCase(),
+        ),
         signal,
         logger: this.#logger,
       });

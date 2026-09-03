@@ -123,6 +123,7 @@ export default {
   '/workspace 工作区序号或绝对路径  切换工作区':
     '/workspace <workspace index or absolute path>  Switch workspace',
   '/workspacelist  列出工作区绝对路径': '/workspacelist  List absolute workspace paths',
+  '/ws、/wsl、/workspaces  工作区命令别名': '/ws, /wsl, /workspaces  Workspace command aliases',
   '/sessionlist [工作区序号或绝对路径]  列出会话 ID 和标题':
     '/sessionlist [workspace index or absolute path]  List session IDs and titles',
   '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题':

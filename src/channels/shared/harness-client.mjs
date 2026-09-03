@@ -435,6 +435,11 @@ export class HarnessReplyTracker {
     return this.#finished;
   }
 
+  /** The highest event seq consumed so far; advances as the turn produces events. */
+  get lastSeq() {
+    return this.#lastSeq;
+  }
+
   get answer() {
     return this.#latestText.trim();
   }
@@ -1438,8 +1443,14 @@ export class HarnessClient {
       promptAccepted = true;
 
       try {
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
+        // Treat timeoutMs as a stall window rather than a hard runtime limit.
+        // Durable events are direct progress. Once a full quiet window elapses,
+        // confirm the Session is still running before renewing the wait.
+        // Interaction ownership is intentionally not a liveness signal: it stays
+        // active until turn/end and can therefore outlive a stalled turn.
+        let lastProgressAt = Date.now();
+        let lastPollSeq = tracker.lastSeq;
+        while (true) {
           await sleep(300, signal);
           const history = await this.rpc(
             'session.history',
@@ -1453,6 +1464,9 @@ export class HarnessClient {
             if (!wasActive && ownership.active) ownership.reconnect?.();
           }
           const updates = tracker.consumeAll(history.events ?? []);
+          const seqAdvanced = tracker.lastSeq > lastPollSeq;
+          lastPollSeq = tracker.lastSeq;
+          if (seqAdvanced) lastProgressAt = Date.now();
           if (onUpdate) {
             const visibleUpdates = progressMode === 'all' ? updates : updates.slice(-1);
             for (const update of visibleUpdates) {
@@ -1463,24 +1477,39 @@ export class HarnessClient {
               }
             }
           }
-          if (!tracker.finished) continue;
-          turnFinished = true;
-          if (!ownership?.stopRequested && !harnessTurnSucceeded(tracker.reason)) {
+          if (tracker.finished) {
+            turnFinished = true;
+            if (!ownership?.stopRequested && !harnessTurnSucceeded(tracker.reason)) {
+              throw harnessTurnError(tracker.reason);
+            }
+            // An accepted /stop revokes attachment delivery even when Harness
+            // preserved a useful partial text answer for the existing UX.
+            const artifactCount = ownership?.stopRequested
+              ? 0
+              : await deliverArtifacts();
+            if (tracker.answer) {
+              return tracker.answer;
+            }
+            if (artifactCount > 0) return '';
+            if (ownership?.stopRequested) throw turnStoppedError();
             throw harnessTurnError(tracker.reason);
           }
-          // An accepted /stop revokes attachment delivery even when Harness
-          // preserved a useful partial text answer for the existing UX.
-          const artifactCount = ownership?.stopRequested
-            ? 0
-            : await deliverArtifacts();
-          if (tracker.answer) {
-            return tracker.answer;
+
+          if (Date.now() - lastProgressAt < timeoutMs) continue;
+
+          let running = false;
+          try {
+            running = await this.isSessionRunning(sessionId, { signal });
+          } catch (error) {
+            if (signal?.aborted) throw signal.reason ?? error;
+            // A failed liveness probe is not evidence of progress.
           }
-          if (artifactCount > 0) return '';
-          if (ownership?.stopRequested) throw turnStoppedError();
-          throw harnessTurnError(tracker.reason);
+          if (running) {
+            lastProgressAt = Date.now();
+            continue;
+          }
+          throw new HarnessTurnError('harness-reply-timeout');
         }
-        throw new HarnessTurnError('harness-reply-timeout');
       } catch (error) {
         // Once cancellation was accepted, transport/poll failures and timeouts
         // describe the convergence of that stop, not an unrelated ask failure.

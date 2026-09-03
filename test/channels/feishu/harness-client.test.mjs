@@ -974,3 +974,202 @@ test('HarnessReplyTracker keeps every frame of a batched turn in order', () => {
   ]);
   assert.equal(tracker.answer, '先创建再观察：');
 });
+
+test('new turn events renew the stall window beyond the original fixed deadline', async () => {
+  const client = new HarnessClient({
+    baseUrl: 'http://127.0.0.1:3080',
+    workspace: '/tmp/dsh-feishu-workspace',
+  });
+  client.ensureRunning = async () => undefined;
+  let promptRpcId;
+  let prompted = false;
+  let seq = 0;
+  let historyPolls = 0;
+  let sessionListPolls = 0;
+  const events = [];
+  client.rpc = async (method, _payload, _timeoutMs, options) => {
+    if (method === 'session.history') {
+      if (!prompted) return { events: [] };
+      historyPolls += 1;
+      if (historyPolls === 1) {
+        events.push(
+          { type: 'turn/start', seq: ++seq, data: { turn: 1 } },
+          { type: 'user/message', seq: ++seq, data: { turn: 1, source: { rpcId: promptRpcId } } },
+          { type: 'assistant/chunk', seq: ++seq, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: '第一段' } } },
+        );
+      } else if (historyPolls === 2) {
+        events.push(
+          { type: 'assistant/chunk', seq: ++seq, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: '第二段' } } },
+        );
+      } else if (historyPolls === 3) {
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '最终结果' }] } } },
+          { type: 'turn/end', seq: ++seq, data: { turn: 1, reason: { kind: 'completed' } } },
+        );
+      }
+      return { events: events.map((event) => ({ event })) };
+    }
+    if (method === 'session.prompt') {
+      prompted = true;
+      promptRpcId = options.rpcId;
+      return {};
+    }
+    if (method === 'session.list') {
+      sessionListPolls += 1;
+      return { items: [{ sessionId: 'session-renewal-events', running: false }] };
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  };
+
+  // The third poll lands around 900ms. The old 450ms fixed deadline exits after
+  // the second poll; the stall window reaches the third poll because seq advances.
+  const answer = await client.ask('session-renewal-events', 'long task', {
+    timeoutMs: 450,
+    control: { owner: {}, key: 'route' },
+  });
+  assert.equal(answer, '最终结果');
+  assert.equal(historyPolls, 3);
+  assert.equal(sessionListPolls, 0);
+});
+
+test('a production-owned turn that starts and then stalls still times out', async () => {
+  const client = new HarnessClient({
+    baseUrl: 'http://127.0.0.1:3080',
+    workspace: '/tmp/dsh-feishu-workspace',
+  });
+  client.ensureRunning = async () => undefined;
+  let promptRpcId;
+  let prompted = false;
+  let historyPolls = 0;
+  let sessionListPolls = 0;
+  let events = [];
+  client.rpc = async (method, _payload, _timeoutMs, options) => {
+    if (method === 'session.history') {
+      if (!prompted) return { events: [] };
+      historyPolls += 1;
+      if (historyPolls === 1) {
+        events = [
+          { event: { type: 'turn/start', seq: 1, data: { turn: 1 } } },
+          { event: { type: 'user/message', seq: 2, data: { turn: 1, source: { rpcId: promptRpcId } } } },
+        ];
+      }
+      return { events };
+    }
+    if (method === 'session.prompt') {
+      prompted = true;
+      promptRpcId = options.rpcId;
+      return {};
+    }
+    if (method === 'session.list') {
+      sessionListPolls += 1;
+      return { items: [{ sessionId: 'session-stalled-owned', running: false }] };
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  };
+
+  await assert.rejects(
+    client.ask('session-stalled-owned', 'stall after starting', {
+      timeoutMs: 120,
+      control: { owner: {}, key: 'route' },
+    }),
+    (error) => error?.code === 'harness-reply-timeout',
+    'stale control ownership must not keep a stalled turn alive',
+  );
+  assert.equal(historyPolls, 2);
+  assert.equal(sessionListPolls, 1);
+});
+
+test('a silent turn renews only after Harness confirms the Session is running', async () => {
+  const client = new HarnessClient({
+    baseUrl: 'http://127.0.0.1:3080',
+    workspace: '/tmp/dsh-feishu-workspace',
+  });
+  client.ensureRunning = async () => undefined;
+  let promptRpcId;
+  let prompted = false;
+  let historyPolls = 0;
+  let sessionListPolls = 0;
+  const events = [];
+  client.rpc = async (method, _payload, _timeoutMs, options) => {
+    if (method === 'session.history') {
+      if (!prompted) return { events: [] };
+      historyPolls += 1;
+      if (historyPolls === 1) {
+        events.push(
+          { event: { type: 'turn/start', seq: 1, data: { turn: 1 } } },
+          { event: { type: 'user/message', seq: 2, data: { turn: 1, source: { rpcId: promptRpcId } } } },
+        );
+      } else if (historyPolls === 3) {
+        events.push(
+          { event: { type: 'assistant/message', seq: 3, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '静默任务完成' }] } } } },
+          { event: { type: 'turn/end', seq: 4, data: { turn: 1, reason: { kind: 'completed' } } } },
+        );
+      }
+      return { events };
+    }
+    if (method === 'session.prompt') {
+      prompted = true;
+      promptRpcId = options.rpcId;
+      return {};
+    }
+    if (method === 'session.list') {
+      sessionListPolls += 1;
+      return { items: [{ sessionId: 'session-silent-running', running: true }] };
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  };
+
+  const answer = await client.ask('session-silent-running', 'silent long task', {
+    timeoutMs: 120,
+    control: { owner: {}, key: 'route' },
+  });
+  assert.equal(answer, '静默任务完成');
+  assert.equal(historyPolls, 3);
+  assert.equal(sessionListPolls, 1);
+});
+
+test('a failed liveness probe does not renew a stalled turn', async () => {
+  const client = new HarnessClient({
+    baseUrl: 'http://127.0.0.1:3080',
+    workspace: '/tmp/dsh-feishu-workspace',
+  });
+  client.ensureRunning = async () => undefined;
+  let prompted = false;
+  let promptRpcId;
+  let historyPolls = 0;
+  let sessionListPolls = 0;
+  let events = [];
+  client.rpc = async (method, _payload, _timeoutMs, options) => {
+    if (method === 'session.history') {
+      if (!prompted) return { events: [] };
+      historyPolls += 1;
+      if (historyPolls === 1) {
+        events = [
+          { event: { type: 'turn/start', seq: 1, data: { turn: 1 } } },
+          { event: { type: 'user/message', seq: 2, data: { turn: 1, source: { rpcId: promptRpcId } } } },
+        ];
+      }
+      return { events };
+    }
+    if (method === 'session.prompt') {
+      prompted = true;
+      promptRpcId = options.rpcId;
+      return {};
+    }
+    if (method === 'session.list') {
+      sessionListPolls += 1;
+      throw new Error('probe unavailable');
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  };
+
+  await assert.rejects(
+    client.ask('session-probe-fails', 'stall after starting', {
+      timeoutMs: 120,
+      control: { owner: {}, key: 'route' },
+    }),
+    (error) => error?.code === 'harness-reply-timeout',
+  );
+  assert.equal(historyPolls, 2);
+  assert.equal(sessionListPolls, 1);
+});

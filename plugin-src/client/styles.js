@@ -245,14 +245,15 @@ const CSS = String.raw`
 .dim-contextSwitch:checked { border-color: var(--dsw-alias-state-business-primary, #3370ff); background: var(--dsw-alias-state-business-primary, #3370ff); }
 .dim-contextSwitch:checked::before { transform: translateX(13px); background: #fff; }
 .dim-contextFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 12px; }
-.dim-contextField { min-width: 0; min-height: 30px; display: flex; align-items: center; gap: 6px; }
+.dim-contextField { position: relative; min-width: 0; min-height: 30px; display: flex; align-items: center; gap: 6px; }
 .dim-contextField input { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--dsw-alias-state-business-primary, #3370ff); }
 .dim-contextFieldText { min-width: 0; display: grid; grid-template-columns: max-content max-content; align-items: center; column-gap: 5px; overflow-wrap: anywhere; }
 .dim-contextFieldName { min-width: 0; line-height: 17px; cursor: pointer; }
 .dim-contextFieldKey { min-width: 0; grid-column: 1 / -1; color: var(--dsw-alias-label-tertiary, #8f959e); font: 10px/14px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; cursor: pointer; }
-.dim-contextFieldHelp { position: relative; }
+.dim-contextFieldHelp { position: static; }
 .dim-contextFieldHelpButton { width: 16px; height: 16px; font-size: 10px; }
 .dim-contextTooltip.dim-contextFieldTooltip { top: calc(100% + 6px); right: 0; left: auto; width: min(280px, calc(100vw - 72px)); }
+.dim-contextField:nth-child(odd) .dim-contextFieldTooltip { right: auto; left: 0; }
 .dim-contextEditorHeader { position: relative; flex-wrap: wrap; }
 .dim-contextEditorTitle { min-width: 0; display: inline-flex; align-items: center; gap: 6px; }
 .dim-contextEditorTitle > label { font-weight: 500; }

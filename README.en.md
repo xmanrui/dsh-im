@@ -170,8 +170,8 @@ See the [Proactive Delivery Guide](PROACTIVE_DELIVERY.en.md) ([简体中文](PRO
 | `/cancel` | Cancel batch input and discard its collected messages. |
 | `/repair` | In a Feishu direct chat, incrementally repair the card callback and permissions required for media and the native Slash Command panel. |
 | `/compact` | Immediately compact older context in the Session bound to the current chat. |
-| `/workspace <workspace index or absolute path>` | Switch the current bot's Harness workspace by `/workspacelist` index or absolute path. |
-| `/workspacelist` | List workspace absolute paths that still exist on the current Harness Host. |
+| `/workspace <workspace index or absolute path>`, `/ws <workspace index or absolute path>` | Switch the current bot's Harness workspace by `/workspacelist` index or absolute path. |
+| `/workspacelist`, `/workspaces`, `/wsl` | List workspace absolute paths that still exist on the current Harness Host. |
 | `/sessionlist [workspace number or absolute path]`, `/sessions [...]` | Equivalent aliases that list every registered session ID and title in the selected workspace; omit the argument to use the current workspace. |
 | `/sessionlist --limit N`, `/sessions --limit N` | List the first N sessions in the current workspace's existing order; N must be a positive integer. |
 | `/session <Session ID>` | Bind the current chat to an existing Harness session. |

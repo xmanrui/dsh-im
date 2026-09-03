@@ -70,6 +70,7 @@ test('menu and card help advertise Agent Preset, reasoning, and batch commands',
   assert.match(help, /\/presets/);
   assert.match(help, /\/sessions/);
   assert.match(help, /\/workspace 工作区序号或绝对路径/);
+  assert.match(help, /\/ws、\/wsl、\/workspaces/);
   assert.match(help, /\/preset \[序号或完整ID\]/);
   assert.match(help, /\/preset id:<ID>/);
   assert.match(help, /\/preset --default/);
@@ -85,6 +86,7 @@ test('menu and card help advertise Agent Preset, reasoning, and batch commands',
   assert.match(card, /\/presets/);
   assert.match(card, /\/sessions/);
   assert.match(card, /\/workspace 工作区序号或绝对路径/);
+  assert.match(card, /\/ws、\/wsl、\/workspaces/);
   assert.match(card, /\/reasoninglist/);
   assert.match(card, /\/reasonings/);
   assert.match(card, /\/reasoning \[序号、等级ID或 --default\]/);
@@ -220,7 +222,9 @@ test('reachable Feishu cards contain no Chinese literals in English mode', () =>
     const englishMenuHelp = menuHelpText();
     const englishCardHelp = helpCard(['Additional help']);
     assert.match(englishMenuHelp, /\/workspace <workspace index or absolute path>/);
+    assert.match(englishMenuHelp, /\/ws, \/wsl, \/workspaces/);
     assert.match(englishCardHelp, /\/workspace <workspace index or absolute path>/);
+    assert.match(englishCardHelp, /\/ws, \/wsl, \/workspaces/);
     rendered.push(
       menuCard({
         workspaces: ['/work'],

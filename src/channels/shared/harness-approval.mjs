@@ -245,6 +245,10 @@ export class HarnessApprovalQueue {
       await this.#rejectInteraction(interaction, payload);
       return true;
     }
+    // Optional channel-provided renderer. When present, the approval is shown
+    // as an interactive card (e.g. Feishu approve/reject buttons) instead of
+    // plain text. Channels that don't provide one keep the text-reply path.
+    const render = typeof context?.render === 'function' ? context.render : null;
 
     const text = harnessApprovalText(payload, {
       toolCall: interaction.toolCall,
@@ -267,6 +271,7 @@ export class HarnessApprovalQueue {
       actor,
       requiresMention: context.requiresMention === true,
       send,
+      render,
       text,
       presented: false,
       presentationTask: null,
@@ -284,6 +289,20 @@ export class HarnessApprovalQueue {
     route.items.push(pending);
     this.#routes.set(key, route);
     if (route.items[0] === pending) await this.#present(pending);
+    return true;
+  }
+
+  /**
+   * Submit an approval decision by id, as triggered by a channel card button
+   * (e.g. Feishu approve/reject). Returns false when no matching pending
+   * approval is found. Callers may pass the acting user to enforce that only
+   * the originating actor can decide.
+   */
+  async submitByApprovalId(approvalId, outcome, { actor } = {}) {
+    const pending = this.#byId.get(cleanText(approvalId));
+    if (!pending || pending.inactive || pending.resolving || pending.submitting) return false;
+    if (actor !== undefined && pending.actor !== actor) return false;
+    await this.#submit(pending, outcome);
     return true;
   }
 
@@ -353,7 +372,11 @@ export class HarnessApprovalQueue {
     if (this.#routes.get(pending.key)?.items[0] !== pending
       || pending.inactive || pending.resolving || pending.presented) return;
     if (pending.presentationTask) return pending.presentationTask;
-    const task = Promise.resolve().then(() => pending.send(pending.text));
+    // A channel-provided renderer shows the approval as an interactive card
+    // (e.g. approve/reject buttons); otherwise fall back to plain text.
+    const task = pending.render
+      ? Promise.resolve().then(() => pending.render(pending, pending.send))
+      : Promise.resolve().then(() => pending.send(pending.text));
     pending.presentationTask = task;
     try {
       await task;

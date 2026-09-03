@@ -2,7 +2,6 @@ import { promptContentForMessage } from '../image-prompt.mjs';
 
 const REPLY_CONTENT_MAX_CODE_POINTS = 8_000;
 const REPLY_ATTACHMENTS_MAX = 20;
-const REPLY_ID_MAX_CODE_POINTS = 512;
 const REPLY_AUTHOR_NAME_MAX_CODE_POINTS = 256;
 const REPLY_ATTACHMENT_NAME_MAX_CODE_POINTS = 255;
 
@@ -105,8 +104,6 @@ async function resolveReference(reference, signal) {
 }
 
 function normalizeReference(reference) {
-  const messageId = cleanString(reference.messageId, REPLY_ID_MAX_CODE_POINTS);
-  const authorId = cleanString(reference.authorId, REPLY_ID_MAX_CODE_POINTS);
   const authorName = cleanString(reference.authorName, REPLY_AUTHOR_NAME_MAX_CODE_POINTS);
   const content = cleanString(reference.content, REPLY_CONTENT_MAX_CODE_POINTS, { multiline: true });
   const { attachments, truncated: attachmentsTruncated } = cleanAttachments(reference.attachments);
@@ -114,19 +111,16 @@ function normalizeReference(reference) {
   if (!content.value && attachments.length === 0 && !unavailableReason) {
     unavailableReason = 'not-delivered';
   }
+  const truncated = authorName.truncated
+    || content.truncated
+    || attachmentsTruncated;
   return {
     note: REPLY_NOTE,
-    ...(messageId.value ? { messageId: messageId.value } : {}),
-    ...(authorId.value ? { authorId: authorId.value } : {}),
     ...(authorName.value ? { authorName: authorName.value } : {}),
     ...(content.value ? { content: content.value } : {}),
-    attachments,
+    ...(attachments.length > 0 ? { attachments } : {}),
     ...(unavailableReason ? { unavailableReason } : {}),
-    truncated: messageId.truncated
-      || authorId.truncated
-      || authorName.truncated
-      || content.truncated
-      || attachmentsTruncated,
+    ...(truncated ? { truncated: true } : {}),
   };
 }
 

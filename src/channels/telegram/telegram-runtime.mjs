@@ -21,7 +21,10 @@ export const TELEGRAM_COMMAND_MENU = Object.freeze([
   { command: 'new', description: '开启一个全新会话' },
   { command: 'compact', description: '压缩当前会话的较早上下文' },
   { command: 'workspace', description: '切换工作区' },
+  { command: 'ws', description: '切换工作区' },
   { command: 'workspacelist', description: '列出工作区绝对路径' },
+  { command: 'workspaces', description: '列出工作区绝对路径' },
+  { command: 'wsl', description: '列出工作区绝对路径' },
   { command: 'sessionlist', description: '列出会话 ID 和标题' },
   { command: 'sessions', description: '列出会话 ID 和标题' },
   { command: 'session', description: '将当前聊天绑定到指定会话' },
@@ -139,11 +142,10 @@ function telegramFileSource(message, loadFile) {
   };
 }
 
-function telegramReplyAttachment(kind, file, fallbackName) {
+function telegramReplyAttachment(kind, file) {
   if (!file || typeof file !== 'object') return null;
   const name = typeof file.file_name === 'string' && file.file_name
-    ? file.file_name : typeof fallbackName === 'string' && fallbackName
-      ? fallbackName : undefined;
+    ? file.file_name : undefined;
   return { kind, ...(name ? { name } : {}) };
 }
 
@@ -153,11 +155,7 @@ function telegramReplyAttachments(message) {
     const largest = message.photo.reduce((best, candidate) => (
       photoScore(candidate) > photoScore(best) ? candidate : best
     ));
-    attachments.push(telegramReplyAttachment(
-      'image',
-      largest,
-      `${largest.file_unique_id ?? largest.file_id ?? 'telegram-photo'}.jpg`,
-    ));
+    attachments.push(telegramReplyAttachment('image', largest));
   } else if (message?.document) {
     attachments.push(telegramReplyAttachment(
       imageTypeForDocument(message.document) ? 'image' : 'file',
@@ -177,7 +175,6 @@ function telegramReplyAttachments(message) {
     attachments.push(telegramReplyAttachment(
       message.sticker.is_video === true ? 'video' : 'image',
       message.sticker,
-      message.sticker.file_unique_id ?? message.sticker.file_id,
     ));
   }
   return attachments.filter(Boolean);

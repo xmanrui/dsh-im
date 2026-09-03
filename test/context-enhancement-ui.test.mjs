@@ -645,7 +645,10 @@ test('the approved neutral entry and theme-aware modal keep responsive labels an
   assert.match(styles, /\.dim-contextGuidance textarea::placeholder \{[^}]*--dsw-alias-label-tertiary[^}]*opacity: 1;/);
   assert.match(styles, /\.dim-contextFieldKey \{[^}]*ui-monospace/);
   assert.match(styles, /\.dim-contextFieldText \{[^}]*grid-template-columns: max-content max-content;[^}]*column-gap: 5px;/);
+  assert.match(styles, /\.dim-contextField \{[^}]*position: relative;/);
+  assert.match(styles, /\.dim-contextFieldHelp \{[^}]*position: static;/);
   assert.match(styles, /\.dim-contextTooltip\.dim-contextFieldTooltip \{[^}]*right: 0;[^}]*left: auto;/);
+  assert.match(styles, /\.dim-contextField:nth-child\(odd\) \.dim-contextFieldTooltip \{[^}]*right: auto;[^}]*left: 0;/);
   assert.match(styles, /@media \(pointer: coarse\) \{\s*\.dim-contextEntry[^}]*min-height: 44px;/);
   assert.match(styles, /\.dim-contextLabel \{[^}]*overflow-wrap: anywhere;/);
   assert.match(styles, /\.dim-contextTooltip \{[^}]*opacity: 0;[^}]*visibility: hidden;/);

@@ -356,4 +356,15 @@ export default {
     '⚠️ Repair verification failed: the dedicated test card could not be sent, so card.action.trigger cannot be confirmed restored. Do not authorize again; check the bot message permission and connection status first.',
   '⚠️ 修复验证中断：Runtime 已停止，未完成 card.action.trigger 实测，不能确认修复成功。请不要重复授权；先等待机器人恢复连接。':
     '⚠️ Repair verification interrupted: the Runtime stopped before the card.action.trigger test completed, so the repair cannot be confirmed. Do not authorize again; wait for the bot to reconnect.',
+
+  // feishu/bridge.mjs — interaction cards (approve/reject / answer buttons)
+  '该审批已处理或不存在，无需重复操作。':
+    'This approval has already been processed or does not exist; no need to repeat the action.',
+  // feishu/feishu-cards.mjs — approval card
+  '操作参数：\n{operation}': 'Operation parameters:\n{operation}',
+  '✅ 批准': '✅ Approve',
+  '❌ 拒绝': '❌ Reject',
+  '🔐 工具审批': '🔐 Tool approval',
+  // feishu/feishu-cards.mjs — question card
+  '❓ 请补充信息{progress}': '❓ Please provide more information{progress}',
 };

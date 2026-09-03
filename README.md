@@ -173,8 +173,8 @@ dsh web
 | `/cancel` | 取消批量输入并丢弃已收集的消息。 |
 | `/repair` | 在飞书私聊中增量修复卡片回调，并补全媒体与原生 Slash Command 面板所需的权限。 |
 | `/compact` | 立即压缩当前聊天绑定会话的较早上下文。 |
-| `/workspace <工作区序号或绝对路径>` | 按 `/workspacelist` 序号或绝对路径切换当前机器人的 Harness 工作区。 |
-| `/workspacelist` | 列出当前 Harness Host 上仍然存在的工作区绝对路径。 |
+| `/workspace <工作区序号或绝对路径>`、`/ws <工作区序号或绝对路径>` | 按 `/workspacelist` 序号或绝对路径切换当前机器人的 Harness 工作区。 |
+| `/workspacelist`、`/workspaces`、`/wsl` | 列出当前 Harness Host 上仍然存在的工作区绝对路径。 |
 | `/sessionlist [工作区序号或绝对路径]`、`/sessions [...]` | 两个等价命令；列出指定工作区登记的所有会话 ID 和标题，省略参数时使用当前工作区。 |
 | `/sessionlist --limit N`、`/sessions --limit N` | 列出当前工作区现有顺序中的前 N 个会话；N 必须是正整数。 |
 | `/session <Session ID>` | 将当前聊天绑定到指定的已有 Harness 会话。 |
