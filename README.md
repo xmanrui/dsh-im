@@ -41,6 +41,23 @@
 
 Connect IM bots to DeepSeek Harness by scanning a QR code, using an App Manifest, or entering existing bot credentials, and let the local Harness connect outward to a public AI Office. One plugin and one settings entry manage nine multi-bot IM channels and the AI Office Connector.
 
+## 本 Fork 的改进（分支 `fix/im-linear-streaming-reply`）
+
+基于上游 v4.9.1，针对回复渲染链路修复并完善了以下缺陷：
+
+| 缺陷 | 修复与设计 |
+| --- | --- |
+| 多 step 回复被截断，只发送最后一段（上游 issue #112，企微与 Telegram 同根因） | 共享 `HarnessReplyTracker` 改为按 (step, index) 排序**跨 step 累积整回合文本**，step 之间空行分段、step 内单换行；权威的 `assistant/message` 事件按 step 替换该 step 的流式 delta，避免重复又不再丢失前文。修复覆盖全部九个渠道（飞书/钉钉的 HarnessClient 继承共享 tracker） |
+| 中间态（思考/工具调用）与正文糊在一起 | 思考、工具调用、整理结果分别渲染为醒目的状态行（🧠 / 🔧 / ⌛ emoji），与正文之间用空行分隔；最终消息 = 整回合线性累积的完整文本，不再撤回已显示内容 |
+| 长时间思考或工具调用时，Telegram 私聊 Rich Draft 消失、状态切换时才重新弹出 | 共享 4 秒心跳在刷新"正在输入"的同时**强制重发最近一帧**（`TelegramDeliveryStream.refresh()` 绕过更新去重），Draft 在静默期持续可见 |
+| 渠道按载体适配 | 微信 / QQ 等不支持编辑消息的渠道保持"正在输入 + 最终静态全文"（由共享 tracker 修复截断）；企微 / 飞书 / 钉钉走各自卡片流，状态行自然流入 |
+
+测试：新增 `test/harness-reply-tracker.test.mjs` 及 Telegram 草案刷新用例，**全部 2122 个测试通过**。
+
+⚠️ **验证范围**：目前仅在 **Telegram** 渠道实机验证通过；微信 / QQ / 企业微信 / 飞书 / 钉钉 / Slack / Discord / WhatsApp 的改动依赖共享代码、单元测试已覆盖，但**尚未实机逐一验证**，欢迎反馈。
+
+感兴趣可以安装试用：将插件依赖指向本 fork 分支（例如 npm 安装 `@xmanrui/dsh-im@github:geekyfoxlab/dsh-im#fix/im-linear-streaming-reply`），或等待上游合并后升级。
+
 ## 界面
 
 ![IM 机器人页面](docs/images/imbot.png)
