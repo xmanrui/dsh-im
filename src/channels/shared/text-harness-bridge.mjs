@@ -667,11 +667,13 @@ export class TextHarnessBridge {
         this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] typing indicator failed:`, error);
       });
       // Telegram 的"正在输入"只持续约 5 秒；处理期间每 4 秒刷新一次，
-      // 让对话顶部在长任务期间保持输入中状态。
+      // 让对话顶部在长任务期间保持输入中状态。同时重发当前状态帧，
+      // 防止短时效载体（如私聊 Rich Draft）在长时间思考/工具调用期间消失。
       let typingTimer = null;
       if (typeof this.#bot.sendTyping === 'function') {
         typingTimer = setInterval(() => {
           this.#bot.sendTyping?.(target).catch(() => undefined);
+          stream?.refresh?.().catch(() => undefined);
         }, 4000);
         typingTimer.unref?.();
       }

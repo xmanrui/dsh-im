@@ -333,6 +333,7 @@ class TelegramDeliveryStream {
   #providerMessageIds;
   #closed = false;
   #lastUpdate = null;
+  #lastBlock = null;
 
   constructor({ update, finish, fail, providerMessageIds = [], presentation, logger }) {
     this.#update = update;
@@ -350,6 +351,7 @@ class TelegramDeliveryStream {
   async update(value) {
     if (this.#closed) return undefined;
     const block = createTextDeliveryBlock(value);
+    this.#lastBlock = block;
     const key = `${block.format}:${block.text}`;
     if (key === this.#lastUpdate) return undefined;
     this.#lastUpdate = key;
@@ -357,6 +359,19 @@ class TelegramDeliveryStream {
       return await this.#update(block);
     } catch (error) {
       this.#logger.warn?.('[dsh-im:telegram] rich stream update failed:', error);
+      return undefined;
+    }
+  }
+
+  /** Re-send the most recent frame even if it is unchanged, to keep
+      short-lived carriers (e.g. the private-chat Rich Draft) visible
+      during long silent stretches such as a running tool call. */
+  async refresh() {
+    if (this.#closed || !this.#lastBlock) return undefined;
+    try {
+      return await this.#update(this.#lastBlock);
+    } catch (error) {
+      this.#logger.warn?.('[dsh-im:telegram] rich stream refresh failed:', error);
       return undefined;
     }
   }

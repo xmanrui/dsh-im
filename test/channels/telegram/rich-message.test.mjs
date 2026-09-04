@@ -247,6 +247,97 @@ test('Telegram private stream reuses one non-zero Draft id and persists one Rich
   });
 });
 
+test('Telegram private stream refresh re-sends the latest draft frame during long silence', async () => {
+  const drafts = [];
+  const client = new TelegramBotClient({
+    api: {
+      sendRichMessageDraft: async (payload) => { drafts.push(payload); return true; },
+      sendRichMessage: async () => ({ message_id: 811 }),
+      sendMessage: async () => ({ message_id: 812 }),
+    },
+    logger: { warn() {} },
+  });
+  const stream = await client.openDeliveryStream({
+    chatId: 42,
+    chatType: 'private',
+    replyToMessageId: 44,
+    messageThreadId: 66,
+  });
+  // Opening the stream emits the initial '正在处理…' draft.
+  assert.equal(drafts.length, 1);
+  const draftId = drafts[0].draftId;
+  const statusFrame = { kind: 'text', text: '🔧 正在使用bash…', format: 'plain' };
+  await stream.update(statusFrame);
+  assert.equal(drafts.length, 2);
+  // Identical updates are deduplicated…
+  await stream.update(statusFrame);
+  assert.equal(drafts.length, 2);
+  // …but refresh forces a re-send with the same draft id so the draft stays
+  // visible while a tool call or thinking step produces no new frames.
+  await stream.refresh();
+  await stream.refresh();
+  assert.equal(drafts.length, 4);
+  assert.equal(drafts[2].draftId, draftId);
+  assert.deepEqual(drafts[2].richMessage, drafts[1].richMessage);
+  // After the stream finishes, refresh is a safe no-op.
+  await stream.finish({ kind: 'text', text: '## done', format: 'markdown' });
+  await stream.refresh();
+  assert.equal(drafts.length, 4);
+});
+
+test('shared bridge heartbeat refreshes the stream while the turn is silent', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  let askStarted;
+  const started = new Promise((resolve) => { askStarted = resolve; });
+  let releaseAsk;
+  const gate = new Promise((resolve) => { releaseAsk = resolve; });
+  const refreshes = [];
+  const stream = {
+    providerMessageIds: [],
+    presentation: 'telegram-rich-draft',
+    async update() {},
+    async refresh() { refreshes.push(true); },
+    async finish() {
+      return { presentation: 'telegram-rich-final', providerMessageIds: [], deliveryOutcome: 'sent' };
+    },
+    async fail() {},
+    cancel() {},
+  };
+  const bridge = new TelegramHarnessBridge({
+    bot: {
+      sendTyping: async () => {},
+      openDeliveryStream: async () => stream,
+      sendText: async () => ({ message_id: 1299 }),
+    },
+    state: memoryState(),
+    harness: {
+      createSession: async () => 'session-heartbeat',
+      ask: async (_sessionId, _text, options) => {
+        askStarted();
+        await options.onUpdate({ type: 'tool', name: 'bash' });
+        await gate;
+        return '完成';
+      },
+    },
+  });
+  const acceptPromise = bridge.accept({
+    messageId: 'hb-inbound',
+    senderId: 'hb-user',
+    kind: 'direct',
+    conversationId: 'hb-user',
+    content: 'long task',
+    addressed: true,
+    replyTarget: { chatId: 42, chatType: 'private', replyToMessageId: 44 },
+  });
+  await started;
+  t.mock.timers.tick(4000);
+  t.mock.timers.tick(4000);
+  assert.ok(refreshes.length >= 2, 'silent turn should refresh the draft every interval');
+  releaseAsk();
+  const receipt = await acceptPromise;
+  assert.equal(receipt.deliveryOutcome, 'sent');
+});
+
 test('Telegram group and Topic stream keeps one placeholder and finalizes it in place', async () => {
   const created = [];
   const edited = [];
