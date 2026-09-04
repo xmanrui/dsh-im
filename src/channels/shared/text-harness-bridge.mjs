@@ -70,6 +70,16 @@ function cleanText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/** Compose the live reply draft: linear body text on top, a refreshing status line below. */
+function composeReplyBlock(text, status) {
+  const body = cleanText(text);
+  const note = cleanText(status);
+  if (body && note) return createTextDeliveryBlock(`${body}\n\n${note}`, 'markdown');
+  if (body) return createTextDeliveryBlock(body, 'markdown');
+  if (note) return createTextDeliveryBlock(note, 'plain');
+  return null;
+}
+
 function canClaimInteractionReply(message, pending, senderId) {
   return pending.actor === senderId
     && (message.kind !== 'group' || message.addressed === true)
@@ -656,6 +666,15 @@ export class TextHarnessBridge {
       await this.#bot.sendTyping?.(target).catch((error) => {
         this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] typing indicator failed:`, error);
       });
+      // Telegram 的"正在输入"只持续约 5 秒；处理期间每 4 秒刷新一次，
+      // 让对话顶部在长任务期间保持输入中状态。
+      let typingTimer = null;
+      if (typeof this.#bot.sendTyping === 'function') {
+        typingTimer = setInterval(() => {
+          this.#bot.sendTyping?.(target).catch(() => undefined);
+        }, 4000);
+        typingTimer.unref?.();
+      }
       let streamFinished = false;
       if (typeof this.#bot.openDeliveryStream === 'function') {
         try {
@@ -682,6 +701,8 @@ export class TextHarnessBridge {
         : undefined;
       const snapshot = this.#acceptedMessageIds.get(messageId);
       let contextEnhanced = false;
+      let streamedText = '';
+      let streamedStatus = '';
       if (snapshot) {
         const originalContent = content ?? text;
         const contextSource = message.contextSource?.();
@@ -695,7 +716,9 @@ export class TextHarnessBridge {
         }));
         contextEnhanced = content !== originalContent;
       }
-      const { answer, artifacts = [] } = await askInWorkspaceSession({
+      let askOutcome;
+      try {
+        askOutcome = await askInWorkspaceSession({
         harness: this.#harness,
         state: this.#state,
         key: conversationKey,
@@ -709,13 +732,18 @@ export class TextHarnessBridge {
           signal: this.#signal,
           control: { owner: this, key: conversationKey },
           onUpdate: stream ? async (update) => {
-            const progress = update.type === 'text' ? update.text
-              : update.type === 'tool' ? t('正在使用{name}…', { name: update.name }) : update.text;
-            if (progress) {
-              const format = update.type === 'text' ? 'markdown' : 'plain';
-              await stream.update(semanticStream
-                ? createTextDeliveryBlock(progress, format)
-                : progress);
+            if (update.type === 'text') {
+              streamedText = update.text;
+            } else {
+              streamedStatus = update.type === 'tool'
+                ? (update.description
+                  ? `🔧 ${t('正在使用{name}（{description}）…', { name: update.name, description: update.description })}`
+                  : `🔧 ${t('正在使用{name}…', { name: update.name })}`)
+                : (cleanText(update.text) || streamedStatus);
+            }
+            const block = composeReplyBlock(streamedText, streamedStatus);
+            if (block) {
+              await stream.update(semanticStream ? block : block.text);
             }
           } : undefined,
           onInteraction: (interaction) => this.#handleInteraction(interaction, {
@@ -728,6 +756,10 @@ export class TextHarnessBridge {
           files: message.files,
         },
       });
+      } finally {
+        if (typingTimer !== null) clearInterval(typingTimer);
+      }
+      const { answer, artifacts = [] } = askOutcome;
       if (batchSubmission) {
         this.#batches.complete(conversationKey, batchSubmission.token);
       }

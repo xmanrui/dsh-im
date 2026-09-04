@@ -953,7 +953,7 @@ test('HarnessReplyTracker emits tool progress without exposing tool results', ()
 
   assert.deepEqual(tracker.consume([
     { type: 'tool/result', seq: 4, data: { turn: 1, step: 1, secret: 'not rendered' } },
-  ]), { type: 'status', text: '正在整理结果…', toolName: 'web_search' });
+  ]), { type: 'status', text: '⌛ 正在整理结果…', toolName: 'web_search' });
 });
 
 test('HarnessReplyTracker keeps every frame of a batched turn in order', () => {
@@ -969,7 +969,7 @@ test('HarnessReplyTracker keeps every frame of a batched turn in order', () => {
   assert.deepEqual(updates, [
     { type: 'text', text: '先创建再观察：' },
     { type: 'tool', name: 'add_observations' },
-    { type: 'status', text: '正在整理结果…', toolName: 'add_observations', error: 'Status code: 404.' },
+    { type: 'status', text: '⌛ 正在整理结果…', toolName: 'add_observations', error: 'Status code: 404.' },
     { type: 'tool', name: 'create_entities' },
   ]);
   assert.equal(tracker.answer, '先创建再观察：');

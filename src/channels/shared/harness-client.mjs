@@ -334,6 +334,30 @@ function toolResultErrorText(error) {
   return null;
 }
 
+/** Pull a short, title-like label out of a tool call's arguments payload. */
+export function toolCallDescription(data) {
+  let args = data?.arguments;
+  if (typeof args === 'string') {
+    try {
+      args = JSON.parse(args);
+    } catch {
+      return null;
+    }
+  }
+  return args && typeof args === 'object' ? nonEmptyText(args.description) : null;
+}
+
+/** For `latest` progress mode: keep the newest text frame plus the newest status frame. */
+export function latestTextAndStatus(updates) {
+  let lastText = null;
+  let lastStatus = null;
+  for (const update of updates) {
+    if (update.type === 'text') lastText = update;
+    else lastStatus = update;
+  }
+  return [lastText, lastStatus].filter(Boolean);
+}
+
 function consumeInteractionOwnership(ownership, entries) {
   const ordered = [...entries]
     .map((entry) => entry?.event ?? entry)
@@ -455,6 +479,37 @@ export class HarnessReplyTracker {
     return this.#targetTurn;
   }
 
+  /** Join all buffered step texts in (step, part) order; separate steps with a blank line. */
+  #accumulatedText() {
+    const parts = [...this.#stepText.entries()]
+      .sort(([left], [right]) => {
+        const [leftStep, leftIndex] = left.split(':').map(Number);
+        const [rightStep, rightIndex] = right.split(':').map(Number);
+        return leftStep - rightStep || leftIndex - rightIndex;
+      });
+    let accumulated = '';
+    let lastStep = null;
+    for (const [partKey, part] of parts) {
+      const partStep = Number(partKey.split(':')[0]);
+      if (accumulated === '') {
+        accumulated = part;
+      } else if (partStep !== lastStep) {
+        accumulated = `${accumulated}\n\n${part}`;
+      } else {
+        accumulated = `${accumulated}\n${part}`;
+      }
+      lastStep = partStep;
+    }
+    return accumulated.trim();
+  }
+
+  #commitText(text, pushUpdate) {
+    if (text && text !== this.#latestText) {
+      this.#latestText = text;
+      pushUpdate({ type: 'text', text });
+    }
+  }
+
   consumeAll(entries) {
     const updates = [];
     // 同一批轮询内的 text 帧只保留最新累积，其余事件逐帧透出，
@@ -501,36 +556,48 @@ export class HarnessReplyTracker {
         const index = event.data.chunk.index ?? 0;
         const key = `${step}:${index}`;
         this.#stepText.set(key, (this.#stepText.get(key) ?? '') + event.data.chunk.text);
-        const prefix = `${step}:`;
-        const text = [...this.#stepText.entries()]
-          .filter(([partKey]) => partKey.startsWith(prefix))
-          .sort(([left], [right]) => Number(left.split(':')[1]) - Number(right.split(':')[1]))
-          .map(([, part]) => part)
-          .join('\n')
-          .trim();
-        if (text && text !== this.#latestText) {
-          this.#latestText = text;
-          pushUpdate({ type: 'text', text });
-        }
+        this.#commitText(this.#accumulatedText(), pushUpdate);
+        continue;
+      }
+
+      if (event.type === 'assistant/chunk' && event.data?.chunk?.type === 'reasoning-delta') {
+        pushUpdate({ type: 'status', text: `🧠 ${t('正在思考…')}` });
         continue;
       }
 
       if (event.type === 'assistant/message') {
         const text = assistantMessageText(event);
-        if (text && text !== this.#latestText) {
-          this.#latestText = text;
-          pushUpdate({ type: 'text', text });
+        if (!text) continue;
+        const step = Number.isInteger(event.data?.step) ? event.data.step : null;
+        if (step === null) {
+          // Canonical message without step metadata: keep the established
+          // replace-latest behavior for channels that never send deltas.
+          this.#commitText(text, pushUpdate);
+        } else {
+          // Canonical message: replace this step's streamed deltas instead of
+          // duplicating them, then re-emit the accumulated text.
+          for (const partKey of [...this.#stepText.keys()]) {
+            if (partKey.startsWith(`${step}:`)) this.#stepText.delete(partKey);
+          }
+          this.#stepText.set(`${step}:0`, text);
+          this.#commitText(this.#accumulatedText(), pushUpdate);
         }
         continue;
       }
 
       if (event.type === 'tool/call') {
         const name = nonEmptyText(event.data?.name) ?? t('工具');
+        const description = toolCallDescription(event.data);
         const callId = nonEmptyText(event.data?.callId)
           ?? nonEmptyText(event.data?.subCallId);
         if (callId) this.#toolNames.set(callId, name);
         this.#lastToolName = name;
-        pushUpdate({ type: 'tool', name, ...(callId ? { callId } : {}) });
+        pushUpdate({
+          type: 'tool',
+          name,
+          ...(description ? { description } : {}),
+          ...(callId ? { callId } : {}),
+        });
       } else if (event.type === 'tool/result') {
         const callId = nonEmptyText(event.data?.message?.source?.callId)
           ?? nonEmptyText(event.data?.callId)
@@ -540,7 +607,7 @@ export class HarnessReplyTracker {
         const error = toolResultErrorText(event.data?.error);
         pushUpdate({
           type: 'status',
-          text: t('正在整理结果…'),
+          text: `⌛ ${t('正在整理结果…')}`,
           ...(toolName ? { toolName } : {}),
           ...(error ? { error } : {}),
         });
@@ -1465,7 +1532,7 @@ export class HarnessClient {
           lastPollSeq = tracker.lastSeq;
           if (seqAdvanced) lastProgressAt = Date.now();
           if (onUpdate) {
-            const visibleUpdates = progressMode === 'all' ? updates : updates.slice(-1);
+            const visibleUpdates = progressMode === 'all' ? updates : latestTextAndStatus(updates);
             for (const update of visibleUpdates) {
               try {
                 await onUpdate(update);

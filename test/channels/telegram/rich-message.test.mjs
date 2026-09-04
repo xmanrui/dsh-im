@@ -803,7 +803,7 @@ test('Telegram Rich text and a result file keep the placeholder and file message
   assert.deepEqual(receipt.artifacts, [{ artifactId: 'telegram-rich-artifact', outcome: 'sent' }]);
 });
 
-test('shared bridge marks assistant updates and final as markdown but status as plain', async () => {
+test('shared bridge streams linear text with a refreshing status line', async () => {
   const blocks = [];
   const stream = {
     providerMessageIds: ['1301'],
@@ -846,9 +846,9 @@ test('shared bridge marks assistant updates and final as markdown but status as 
   });
 
   assert.deepEqual(blocks, [{
-    kind: 'text', text: '正在使用搜索…', format: 'plain',
+    kind: 'text', text: '🔧 正在使用搜索…', format: 'plain',
   }, {
-    kind: 'text', text: '## partial', format: 'markdown',
+    kind: 'text', text: '## partial\n\n🔧 正在使用搜索…', format: 'markdown',
   }, {
     kind: 'text', text: '## final', format: 'markdown',
   }]);

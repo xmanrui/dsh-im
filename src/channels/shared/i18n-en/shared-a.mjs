@@ -174,6 +174,7 @@ export default {
   '{label}连接当前离线': 'The {label} connection is currently offline',
   '已开启新会话。请发送你的问题。': 'A new session has started. Please send your question.',
   '正在使用{name}…': 'Using {name}…',
+  '正在使用{name}（{description}）…': 'Using {name} ({description})…',
   '已停止。': 'Stopped.',
   '请用文字回答当前问题。': 'Please answer the current question with text.',
   '{label}交互问题发送失败。': 'Failed to send the {label} interaction question.',

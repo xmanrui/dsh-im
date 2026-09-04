@@ -125,6 +125,7 @@ export default {
   '正在处理…': 'Processing…',
   '处理完成。': 'Processing complete.',
   '工具': 'tool',
+  '正在思考…': 'Thinking…',
   '正在整理结果…': 'Gathering results…',
   '_正在搜索网络并整理信息…_': '_Searching the web and gathering information…_',
   '_正在使用 {name}…_': '_Using {name}…_',

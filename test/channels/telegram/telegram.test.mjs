@@ -1374,7 +1374,7 @@ test('Telegram bridge ignores unaddressed groups and streams direct replies', as
     connectionTestTarget: { chatId: 88 },
   });
   assert.equal(askCount, 1);
-  assert.deepEqual(updates, ['正在使用搜索…', '处理中']);
+  assert.deepEqual(updates, ['🔧 正在使用搜索…', '处理中\n\n🔧 正在使用搜索…']);
   assert.deepEqual(sent, ['完成']);
   await bridge.sendConnectionTest('card test');
   assert.equal(sent.at(-1), 'card test');
