@@ -15,6 +15,7 @@ import {
 } from '../plugin-src/client/index.js';
 import { CredentialBindingPanel } from '../plugin-src/client/credential-binding.js';
 import { ChannelListHeading } from '../plugin-src/client/channel-card-meta.js';
+import { installImStyles } from '../plugin-src/client/styles.js';
 import { DINGTALK_ENDPOINTS } from '../plugin-src/client/channels/dingtalk/api.js';
 import {
   AccountCard as DingtalkAccountCard,
@@ -123,6 +124,57 @@ function findButton(renderer, label) {
   assert.ok(button, `missing button: ${label}`);
   return button;
 }
+
+test('removing the first account preserves collapse styles and toggling for remaining accounts', () => {
+  const previousDocument = globalThis.document;
+  const styles = new Set();
+  globalThis.document = {
+    querySelector: (selector) => [...styles].find((style) =>
+      selector === `style[data-plugin-css="${style.dataset.pluginCss}"]`) ?? null,
+    createElement: () => {
+      const style = { dataset: {}, textContent: '', remove: () => styles.delete(style) };
+      return style;
+    },
+    head: { appendChild: (style) => styles.add(style) },
+  };
+  const cards = (ids) => React.createElement(React.Fragment, null, ids.map((botId) =>
+    React.createElement(QqAccountCard, {
+      key: botId,
+      account: {
+        botId, connected: true, state: 'connected',
+        bot: { name: botId, appIdMasked: '123••456' },
+        health: { summary: 'Connected', lastCheckedAt: null },
+      },
+    })));
+  const collapseStyles = () => [...styles].find((style) =>
+    style.textContent.includes('.dim-collapsibleAccount:not(.is-open)'));
+  let renderer;
+  let disposeStyles;
+  try {
+    disposeStyles = installImStyles();
+    act(() => { renderer = create(cards(['first', 'second'])); });
+    const stylesheet = collapseStyles();
+    assert.ok(stylesheet);
+
+    act(() => renderer.update(cards(['second'])));
+    assert.equal(collapseStyles(), stylesheet, 'remaining cards still need the shared collapse CSS');
+    const header = () => renderer.root.findByProps({ className: 'dim-collapsibleHead' });
+    assert.equal(header().props['aria-expanded'], 'false');
+    act(() => header().props.onClick());
+    assert.equal(header().props['aria-expanded'], 'true');
+    act(() => header().props.onClick());
+    assert.equal(header().props['aria-expanded'], 'false');
+
+    act(() => renderer.unmount());
+    disposeStyles();
+    assert.equal(styles.size, 0, 'disposing the settings styles still cleans up the document');
+  } finally {
+    act(() => renderer?.unmount());
+    disposeStyles?.();
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+});
 
 test('IM settings renders nine IM channels plus the AI Office connector', async () => {
   const { default: packageMetadata } = await import('../package.json', {

@@ -7,7 +7,7 @@ import {
   normalizeMessageContent,
 } from '@whiskeysockets/baileys';
 
-import { splitMessageText } from '../shared/editable-message-stream.mjs';
+import { createEditableMessageStream, splitMessageText } from '../shared/editable-message-stream.mjs';
 import { t } from '../shared/i18n.mjs';
 import { ImagePromptError } from '../shared/image-prompt.mjs';
 import { trackOutboundArtifactProviderPromise } from '../shared/semantic/artifact.mjs';
@@ -21,6 +21,7 @@ const IMAGE_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'ima
 const DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const IMAGE_DOWNLOAD_TIMEOUT_MS = 15_000;
 const WHATSAPP_MEDIA_UPLOAD_TIMEOUT_MS = 120_000;
+const WHATSAPP_TEXT_LIMIT = 4_000;
 const MESSAGE_WRAPPER_KEYS = [
   'ephemeralMessage',
   'viewOnceMessage',
@@ -441,47 +442,95 @@ export class WhatsappBotClient {
   #socket;
   #outboundIds;
   #signal;
+  #abortController = new AbortController();
   #mediaUploadTimeoutMs;
+  #logger;
   #typingTimers = new Map();
+  #streams = new Set();
 
   constructor(socket, outboundIds, {
     signal,
     mediaUploadTimeoutMs = WHATSAPP_MEDIA_UPLOAD_TIMEOUT_MS,
+    logger = console,
   } = {}) {
     this.#socket = socket;
     this.#outboundIds = outboundIds;
-    this.#signal = signal;
+    this.#signal = signal
+      ? AbortSignal.any([signal, this.#abortController.signal])
+      : this.#abortController.signal;
     this.#mediaUploadTimeoutMs = mediaUploadTimeoutMs;
+    this.#logger = logger;
   }
 
   async sendText(target, text) {
     await this.#stopTyping(target.jid);
     const providerMessageIds = [];
-    for (const [index, chunk] of splitMessageText(text, 4_000).entries()) {
-      const messageId = randomBytes(10).toString('hex').toUpperCase();
-      const options = {
-        ...(index === 0 && target.quoted ? { quoted: target.quoted } : {}),
-        messageId,
-      };
-      // Linked-account group messages are valid inbound prompts in open mode.
-      // Reserve our own id before dispatch so an early local echo cannot loop
-      // back through the bridge as another owner-authored group prompt.
-      if (typeof this.#outboundIds.reserve === 'function') {
-        this.#outboundIds.reserve(messageId);
-      } else {
-        this.#outboundIds.remember(messageId);
-      }
-      const result = await this.#socket.sendMessage(
-        target.jid,
-        { text: chunk },
-        options,
-      );
-      this.#outboundIds.remember(result?.key?.id);
-      if (typeof result?.key?.id === 'string' && result.key.id) {
-        providerMessageIds.push(result.key.id);
-      }
+    for (const [index, chunk] of splitMessageText(text, WHATSAPP_TEXT_LIMIT).entries()) {
+      const result = await this.#sendTextMessage(target, chunk, { quote: index === 0 });
+      providerMessageIds.push(result.key.id);
     }
     return { providerMessageIds };
+  }
+
+  async #sendTextMessage(target, text, { edit, quote = true } = {}) {
+    this.#signal?.throwIfAborted();
+    const messageId = randomBytes(10).toString('hex').toUpperCase();
+    // Reserve both the outgoing envelope and the edited message before dispatch:
+    // linked-account group and self-chat echoes can arrive before send settles.
+    const reserve = (id) => {
+      if (typeof this.#outboundIds.reserve === 'function') this.#outboundIds.reserve(id);
+      else this.#outboundIds.remember(id);
+    };
+    reserve(messageId);
+    if (edit) reserve(edit.id);
+    const pending = this.#socket.sendMessage(
+      target.jid,
+      { text, ...(edit ? { edit } : {}) },
+      { ...(quote && !edit && target.quoted ? { quoted: target.quoted } : {}), messageId },
+    );
+    const result = await waitWithSignal(pending, this.#signal);
+    this.#outboundIds.remember(result?.key?.id);
+    return {
+      ...result,
+      key: { remoteJid: target.jid, fromMe: true, id: messageId, ...result?.key },
+    };
+  }
+
+  async openStream(target) {
+    let messageKey;
+    const stream = createEditableMessageStream({
+      limit: WHATSAPP_TEXT_LIMIT,
+      updateIntervalMs: 1_000,
+      create: async (text) => {
+        const message = await this.#sendTextMessage(target, text);
+        messageKey = message.key;
+        return messageKey.id;
+      },
+      // Baileys edits need the original full message key, not an edit envelope id.
+      edit: async (_messageId, text) => this.#sendTextMessage(target, text, { edit: messageKey }),
+      sendRemainder: (text) => this.#sendTextMessage(target, text, { quote: false }),
+      messageIdForResult: (message) => message?.key?.id,
+      logger: this.#logger,
+    });
+    const finish = stream.finish.bind(stream);
+    const cancel = stream.cancel.bind(stream);
+    stream.finish = async (text) => {
+      try {
+        return await finish(text);
+      } finally {
+        this.#streams.delete(stream);
+        await this.#stopTyping(target.jid);
+      }
+    };
+    stream.cancel = () => {
+      cancel();
+      this.#streams.delete(stream);
+      return this.#stopTyping(target.jid);
+    };
+    await stream.start();
+    this.#signal.throwIfAborted();
+    this.#streams.add(stream);
+    return stream;
   }
 
   async sendFile(target, file) {
@@ -593,8 +642,10 @@ export class WhatsappBotClient {
   }
 
   async close() {
+    this.#abortController.abort();
+    const stoppingStreams = [...this.#streams].map((stream) => stream.cancel());
     const jids = [...this.#typingTimers.keys()];
-    await Promise.allSettled(jids.map((jid) => this.#stopTyping(jid)));
+    await Promise.allSettled([...stoppingStreams, ...jids.map((jid) => this.#stopTyping(jid))]);
   }
 
   async #stopTyping(jid, sendPaused = true) {
@@ -741,6 +792,7 @@ export class WhatsappRuntime {
       const client = new WhatsappBotClient(session.socket, outboundIds, {
         signal: controller.signal,
         mediaUploadTimeoutMs: this.#mediaUploadTimeoutMs,
+        logger: this.#logger,
       });
       this.#client = client;
       this.#bridge = new WhatsappHarnessBridge({
