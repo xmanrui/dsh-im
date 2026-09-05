@@ -29,7 +29,7 @@ const PNG_1X1 = Buffer.from(
 const INITIAL_THINKING_TEXT = '正在思考中…';
 const INITIAL_THINKING_STREAM = `<think>${INITIAL_THINKING_TEXT}`;
 
-function streamedAnswer(answer, thinking = INITIAL_THINKING_TEXT) {
+function streamPreview(answer, thinking = INITIAL_THINKING_TEXT) {
   return `<think>${thinking}</think>\n${answer}`;
 }
 
@@ -565,12 +565,12 @@ test('Enterprise WeChat messages stream Harness progress and finalize once', asy
     { streamId: 'stream-1', content: '<think>正在整理结果…', finish: false },
     {
       streamId: 'stream-1',
-      content: streamedAnswer('回答中', '正在整理结果…'),
+      content: streamPreview('回答中', '正在整理结果…'),
       finish: false,
     },
     {
       streamId: 'stream-1',
-      content: streamedAnswer('最终回答', '正在整理结果…'),
+      content: '最终回答',
       finish: true,
     },
   ]);
@@ -579,10 +579,96 @@ test('Enterprise WeChat messages stream Harness progress and finalize once', asy
   assert.equal(bridge.status.messagesReplied, 1);
 });
 
-test('Enterprise WeChat keeps the thinking block closed when a long answer is split', async () => {
+test('Enterprise WeChat final frames discard progress while preserving the answer', async (t) => {
+  const cases = [
+    { name: 'no tools', updates: [], answer: '直接回答', expected: '直接回答' },
+    {
+      name: 'multiple tools',
+      updates: [
+        { type: 'tool', name: '搜索' },
+        { type: 'status', text: '正在整理结果…' },
+        { type: 'text', text: '初步回答' },
+        { type: 'tool', name: '读取' },
+        { type: 'status', text: '正在整理结果…' },
+      ],
+      answer: '完整回答', expected: '完整回答',
+    },
+    { name: 'empty answer', updates: [], answer: '', expected: '任务已完成，但没有生成可显示的文本。' },
+    {
+      name: 'literal think tags in answer', updates: [],
+      answer: '示例：`<think>正在整理结果…</think>` 是正文。',
+      expected: '示例：`<think>正在整理结果…</think>` 是正文。',
+    },
+    {
+      name: 'stopped after progress',
+      updates: [{ type: 'status', text: '正在整理结果…' }],
+      error: Object.assign(new Error('turn stopped'), { code: 'turn-stopped' }),
+      expected: '已停止。',
+    },
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario.name, async () => {
+      const transport = testClient();
+      const bridge = new WecomHarnessBridge({
+        client: transport.client,
+        generateStreamId: () => 'final-content-stream',
+        harness: {
+          sessionExists: async () => true,
+          ask: async (_session, _text, { onUpdate }) => {
+            for (const update of scenario.updates) await onUpdate(update);
+            if (scenario.error) throw scenario.error;
+            return scenario.answer;
+          },
+        },
+        state: state(),
+      });
+
+      await bridge.accept(frame());
+
+      const final = transport.streamed.filter(({ finish }) => finish);
+      assert.deepEqual(final, [{
+        messageId: 'msg-1', streamId: 'final-content-stream',
+        content: scenario.expected, finish: true,
+      }]);
+      assert.equal(transport.streamed.at(-1), final[0]);
+      assert.deepEqual(transport.active, []);
+    });
+  }
+});
+
+test('Enterprise WeChat finalizes a failed turn without its last progress text', async () => {
+  const transport = testClient();
+  const bridge = new WecomHarnessBridge({
+    client: transport.client,
+    generateStreamId: () => 'error-content-stream',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_session, _text, { onUpdate }) => {
+        await onUpdate({ type: 'tool', name: '搜索' });
+        await onUpdate({ type: 'status', text: '正在整理结果…' });
+        throw new Error('private provider failure');
+      },
+    },
+    state: state(),
+    logger: { error() {} },
+  });
+
+  await bridge.accept(frame());
+
+  const final = transport.streamed.filter(({ finish }) => finish);
+  assert.equal(final.length, 1);
+  assert.equal(final[0].streamId, 'error-content-stream');
+  assert.match(final[0].content, /^任务未完成/);
+  assert.match(final[0].content, /错误码：INTERNAL_UNKNOWN；参考号：MF-[A-F0-9]{8}$/);
+  assert.doesNotMatch(final[0].content, /<\/?think>|正在整理结果|private provider failure/);
+  assert.equal(transport.streamed.at(-1), final[0]);
+  assert.deepEqual(transport.active, []);
+});
+
+test('Enterprise WeChat splits the final answer without progress or lost Unicode text', async () => {
   const replies = [];
   const active = [];
-  const answer = '结'.repeat(7_000);
+  const answer = '结🙂'.repeat(4_000);
   const bridge = new WecomHarnessBridge({
     client: {
       replyStream: async (_frame, streamId, content, finish) => {
@@ -603,12 +689,12 @@ test('Enterprise WeChat keeps the thinking block closed when a long answer is sp
 
   const final = replies.find(({ finish }) => finish);
   assert.ok(final);
-  assert.match(final.content, /^<think>正在思考中…<\/think>\n/);
+  assert.doesNotMatch(final.content, /<\/?think>|正在思考中/);
   assert.ok(Buffer.byteLength(final.content) <= 18_000);
   assert.ok(active.length > 0);
   assert.equal(
     [final.content, ...active.map(({ body }) => body.markdown.content)].join(''),
-    streamedAnswer(answer),
+    answer,
   );
   assert.equal(active.every(({ body }) => Buffer.byteLength(body.markdown.content) <= 18_000), true);
 });
@@ -641,6 +727,40 @@ test('Enterprise WeChat falls back to a plain active reply when the stream canno
     chatId: 'member-1',
     body: { msgtype: 'markdown', markdown: { content: '最终回答' } },
   }]);
+});
+
+test('Enterprise WeChat falls back to the full plain answer when stream finalization fails', async () => {
+  const transport = testClient();
+  const sendStream = transport.client.replyStream;
+  const attemptedFinals = [];
+  transport.client.replyStream = async (source, streamId, content, finish) => {
+    if (finish) {
+      attemptedFinals.push(content);
+      throw new Error('stream finalization unavailable');
+    }
+    return sendStream(source, streamId, content, finish);
+  };
+  const bridge = new WecomHarnessBridge({
+    client: transport.client,
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_session, _text, { onUpdate }) => {
+        await onUpdate({ type: 'status', text: '正在整理结果…' });
+        return '完整最终回答';
+      },
+    },
+    state: state(),
+    logger: { warn() {} },
+  });
+
+  await bridge.accept(frame());
+
+  assert.deepEqual(attemptedFinals, ['完整最终回答']);
+  assert.deepEqual(transport.active, [{
+    chatId: 'member-1',
+    body: { msgtype: 'markdown', markdown: { content: '完整最终回答' } },
+  }]);
+  assert.equal(bridge.status.messagesReplied, 1);
 });
 
 test('Enterprise WeChat downloads an image with its AES key and submits structured content once', async () => {
@@ -689,7 +809,7 @@ test('Enterprise WeChat downloads an image with its AES key and submits structur
       },
     ],
   }]);
-  assert.equal(transport.streamed.at(-1).content, streamedAnswer('图片识别完成'));
+  assert.equal(transport.streamed.at(-1).content, '图片识别完成');
 });
 
 test('Enterprise WeChat preserves mixed-message text and image order', async () => {
@@ -809,7 +929,7 @@ test('Enterprise WeChat applies the unified access policy before attachments or 
     text: { content: '普通消息' },
   }));
   assert.equal(harnessCalls.some(([operation]) => operation === 'ask'), true);
-  assert.equal(transport.streamed.at(-1).content, streamedAnswer('白名单消息已处理'));
+  assert.equal(transport.streamed.at(-1).content, '白名单消息已处理');
 
   const callsBeforeDeniedCommand = harnessCalls.length;
   const repliesBeforeDeniedCommand = transport.streamed.length;
@@ -869,7 +989,7 @@ test('Enterprise WeChat bridge hands its prefetched native file to the current H
     name: 'file',
     loaded: { data: bytes, name: '企微报告.docx' },
   }]);
-  assert.equal(transport.streamed.at(-1).content, streamedAnswer('文件已收到'));
+  assert.equal(transport.streamed.at(-1).content, '文件已收到');
 });
 
 test('Enterprise WeChat starts image download before an earlier conversation turn finishes', async () => {
@@ -1028,7 +1148,7 @@ test('Enterprise WeChat finalizes an existing progress stream when Harness fails
   });
   assert.equal(replies[1].streamId, 'stream-failure');
   assert.equal(replies[1].finish, true);
-  assert.match(replies[1].content, /^<think>正在思考中…<\/think>\n/);
+  assert.doesNotMatch(replies[1].content, /<\/?think>|正在思考中/);
   assert.match(replies[1].content, /任务未完成，暂时无法确定原因/);
   assert.match(replies[1].content, /错误码：INTERNAL_UNKNOWN；参考号：MF-[A-F0-9]{8}$/);
   assert.equal(store.seen.has('msg-1'), true);
@@ -1156,7 +1276,7 @@ test('an Enterprise WeChat answer bypasses the original conversation queue', asy
       answer: { answers: [{ id: 'environment', selected: ['测试环境'] }] },
     },
   }]);
-  assert.equal(transport.streamed.at(-1).content, streamedAnswer('你选择了：测试环境'));
+  assert.equal(transport.streamed.at(-1).content, '你选择了：测试环境');
   assert.equal(transport.streamed.at(-1).finish, true);
 });
 
@@ -1224,7 +1344,7 @@ test('an answer waits for the first Enterprise WeChat question delivery acknowle
   assert.deepEqual(responses[0].value.answer.answers, [
     { id: 'environment', selected: ['测试环境'] },
   ]);
-  assert.equal(streamed.at(-1).content, streamedAnswer('首问回答完成'));
+  assert.equal(streamed.at(-1).content, '首问回答完成');
 });
 
 test('pending Enterprise WeChat questions stay isolated by conversation', async () => {
@@ -1997,7 +2117,7 @@ test('Enterprise WeChat returns the authoritative receipt and one safe notice wh
 
   const receipt = await bridge.accept(frame({ msgid: 'wecom-all-fail' }));
 
-  assert.deepEqual(finalStreamTexts, [streamedAnswer('文字结果')]);
+  assert.deepEqual(finalStreamTexts, ['文字结果']);
   assert.equal(attemptedActiveTexts.length, 2, 'must not append a generic error after the safe notice');
   assert.equal(visibleActiveTexts.length, 1);
   assert.match(visibleActiveTexts[0], /暂时无法读取或准备发送.*仍可访问/);
@@ -2052,10 +2172,10 @@ test('Enterprise WeChat keeps the generic error when no answer or file failure n
   await bridge.accept(frame({ msgid: 'wecom-no-visible-failure' }));
 
   assert.equal(attemptedActiveTexts.length, 2);
-  assert.equal(finalStreamTexts[0], streamedAnswer('文字结果'));
+  assert.equal(finalStreamTexts[0], '文字结果');
   assert.match(
     finalStreamTexts[1],
-    /^<think>正在思考中…<\/think>\n回复发送结果未能确认/,
+    /^回复发送结果未能确认/,
   );
   assert.match(finalStreamTexts[1], /错误码：CHANNEL_DELIVERY_UNCERTAIN；参考号：MF-[A-F0-9]{8}$/);
 });
@@ -2165,7 +2285,7 @@ test('Enterprise WeChat uses a neutral final text for a file-only Turn', async (
 
   await bridge.accept(frame({ msgid: 'wecom-file-only' }));
 
-  assert.deepEqual(finalTexts, [streamedAnswer('结果文件已生成。')]);
+  assert.deepEqual(finalTexts, ['结果文件已生成。']);
   assert.deepEqual(files, [{ chatId: 'member-1', type: 'file', mediaId: 'media-only' }]);
 });
 
@@ -2236,7 +2356,7 @@ test('Enterprise WeChat batch input collects ten texts and submits one ordered H
   assert.match(prompts[0], /\[消息 1\]\n企微内容 1/);
   assert.match(prompts[0], /\[消息 10\]\n企微内容 10/);
   assert.doesNotMatch(prompts[0], /企微引用不能收录|不会收录/);
-  assert.equal(transport.streamed.at(-1).content, streamedAnswer('批量完成'));
+  assert.equal(transport.streamed.at(-1).content, '批量完成');
 });
 
 test('Enterprise WeChat rejects batch commands in groups without invoking Harness', async () => {

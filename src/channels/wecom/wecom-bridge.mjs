@@ -358,15 +358,17 @@ function thinkingProgressText(update) {
 }
 
 function streamContent(thinkingText, answerText = '', { finish = false } = {}) {
+  const answer = String(answerText ?? '').trim();
+  // Progress is transient: the final frame must contain only the delivered text.
+  if (finish) return answer;
+
   const thinking = String(thinkingText ?? '')
     .replace(/<\/?think>/gi, '')
     .trim();
-  const answer = String(answerText ?? '').trim();
   if (!thinking) return answer;
-  const thinkBlock = finish || answer
-    ? `<think>${thinking}</think>`
+  return answer
+    ? `<think>${thinking}</think>\n${answer}`
     : `<think>${thinking}`;
-  return answer ? `${thinkBlock}\n${answer}` : thinkBlock;
 }
 
 function artifactFailureText(fileName, error) {
