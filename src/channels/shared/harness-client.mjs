@@ -1585,7 +1585,10 @@ export class HarnessClient {
             lastProgressAt = Date.now();
             continue;
           }
-          throw new HarnessTurnError('harness-reply-timeout');
+          const timeoutError = new HarnessTurnError('harness-reply-timeout');
+          // Data-only context for deferred delivery; timeout semantics unchanged.
+          timeoutError.details = { turn: tracker.turn, lastSeq: tracker.lastSeq };
+          throw timeoutError;
         }
       } catch (error) {
         // Once cancellation was accepted, transport/poll failures and timeouts
