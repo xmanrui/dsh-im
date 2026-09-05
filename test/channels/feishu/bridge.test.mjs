@@ -7923,3 +7923,70 @@ test('/stop without deferred entries behaves exactly as before', async () => {
   assert.equal(cancelCalls.length, 0, 'session.cancel must not fire without pending entries');
   assert.ok(sent.some((text) => text.includes('当前聊天没有正在运行的任务')));
 });
+
+test('restart compensation delivers entries whose turn already completed', async () => {
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-timeout']]);
+  const harness = watchHarness({ history: deferredAnswerHistory });
+  const sent = [];
+  await state.putDeferred(deferredEntryFixture());
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async ({ text }) => sent.push(text)),
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+
+  await eventually(
+    () => sent.some((text) => text.includes('计算结果：42')),
+    'startup compensation must deliver the completed answer',
+  );
+  await eventually(() => state.deferredEntries().length === 0, 'the entry must be consumed');
+  await bridge.waitForIdle();
+});
+
+test('restart compensation keeps entries waiting when the turn has not finished', async () => {
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-timeout']]);
+  const harness = watchHarness({ history: [] });
+  const sent = [];
+  await state.putDeferred(deferredEntryFixture());
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async ({ text }) => sent.push(text)),
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(sent.length, 0, 'nothing may be pushed before the turn finishes');
+  assert.equal(state.deferredEntries().length, 1, 'the entry must stay pending');
+  await bridge.waitForIdle();
+});
+
+test('mux reconnect re-runs deferred compensation', async () => {
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-timeout']]);
+  const harness = watchHarness({ history: [] });
+  const sent = [];
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async ({ text }) => sent.push(text)),
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await bridge.waitForIdle();
+  harness._setHistory(deferredAnswerHistory);
+  await state.putDeferred(deferredEntryFixture());
+
+  harness._listeners.at(-1).onReconnect();
+  await eventually(
+    () => sent.some((text) => text.includes('计算结果：42')),
+    'reconnect compensation must deliver the completed answer',
+  );
+  await eventually(() => state.deferredEntries().length === 0, 'the entry must be consumed');
+  await bridge.waitForIdle();
+});

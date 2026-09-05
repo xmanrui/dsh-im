@@ -591,7 +591,10 @@ export class FeishuHarnessBridge {
     // Persisted watches must resume at runtime start, not on the first
     // message. Older hosts without the mux watcher simply skip this.
     if (typeof this.#harness?.watchHarnessEvents === 'function') {
-      queueMicrotask(() => this.#ensureEventWatcher());
+      queueMicrotask(() => {
+        this.#ensureEventWatcher();
+        this.#resumeDeferredDeliveries();
+      });
     }
   }
 
@@ -3128,6 +3131,22 @@ export class FeishuHarnessBridge {
     }
   }
 
+  /** Restart/reconnect compensation: re-hydrate every pending deferred entry. */
+  #resumeDeferredDeliveries() {
+    if (this.#signal?.aborted) return;
+    void (async () => {
+      const entries = await this.#deferredRegistry().allPending();
+      for (const entry of entries) {
+        if (this.#signal?.aborted) return;
+        try {
+          await this.#hydrateDeferredEntry(entry);
+        } catch (error) {
+          this.#logger.warn?.('[dsh-feishu] deferred resume failed:', error.message);
+        }
+      }
+    })();
+  }
+
   /** Deliver deferred entries whose turn just reached its terminal state. */
   async #processDeferredTurnEnd(sessionId, event) {
     const entries = await this.#deferredRegistry().pendingForSession(sessionId);
@@ -3165,6 +3184,7 @@ export class FeishuHarnessBridge {
         onSessionEvent: (payload) => this.#onHarnessEvent(payload),
         onReconnect: () => {
           void this.#compensateMissedEvents();
+          void this.#resumeDeferredDeliveries();
         },
       });
       Promise.resolve(this.#eventWatcher).catch((error) => {
