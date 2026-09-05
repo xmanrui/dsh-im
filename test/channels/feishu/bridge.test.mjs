@@ -7855,11 +7855,13 @@ test('/stop cancels a pending deferred background session when no turn is active
   const sent = [];
   const harness = {
     ensureRunning: async () => true,
+    isSessionRunning: async () => true,
     rpc: async (method, params) => {
       if (method === 'session.cancel') {
         cancelCalls.push(params);
         return {};
       }
+      if (method === 'session.history') return { events: [] };
       throw new Error(`unexpected rpc ${method}`);
     },
     workspaceSession: () => ({
@@ -7991,9 +7993,20 @@ test('mux reconnect re-runs deferred compensation', async () => {
   await bridge.waitForIdle();
 });
 
-test('a claimed terminal frame is not pushed twice', async () => {
+test('overlapping live and compensation processors push the answer exactly once', async () => {
   const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-timeout']]);
-  const harness = watchHarness({ history: deferredAnswerHistory });
+  const historyGate = deferred();
+  const harness = watchHarness({ history: [] });
+  let historyReads = 0;
+  harness.rpc = async (method) => {
+    if (method === 'session.history') {
+      historyReads += 1;
+      return historyGate.promise.then(() => ({
+        events: deferredAnswerHistory.map((event) => ({ event })),
+      }));
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  };
   const sent = [];
   const bridge = new FeishuHarnessBridge({
     client: textClient(async ({ text }) => sent.push(text)),
@@ -8004,17 +8017,22 @@ test('a claimed terminal frame is not pushed twice', async () => {
     allowedSenderOpenIds: new Set(['ou_owner']),
   });
   await bridge.waitForIdle();
-  // Another processor (startup resume) already claimed seq 8.
-  await state.putDeferred({ ...deferredEntryFixture(), lastSeenEndSeq: 8 });
+  await state.putDeferred(deferredEntryFixture());
 
-  harness._listeners.at(-1).onSessionEvent({
-    sessionId: 'session-timeout',
-    event: { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } },
-  });
+  const listener = harness._listeners.at(-1);
+  const turnEnd = { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } };
+  listener.onSessionEvent({ sessionId: 'session-timeout', event: turnEnd });
+  listener.onReconnect();
+  await eventually(() => historyReads >= 2, 'both processors must reach the history read');
+  historyGate.resolve();
   await bridge.waitForIdle();
 
-  assert.equal(sent.length, 0, 'a claimed frame must not push again');
-  assert.equal(state.deferredEntries().length, 1, 'the claiming processor owns the entry');
+  assert.equal(
+    sent.filter((text) => text.includes('计算结果：42')).length,
+    1,
+    'concurrent processors must not push the answer twice',
+  );
+  assert.equal(state.deferredEntries().length, 0);
 });
 
 test('a failed deferred push rolls the claim back and allows a retry', async () => {
@@ -8043,15 +8061,284 @@ test('a failed deferred push rolls the claim back and allows a retry', async () 
   const turnEnd = { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } };
   harness._listeners.at(-1).onSessionEvent({ sessionId: 'session-timeout', event: turnEnd });
   await bridge.waitForIdle();
-  const failed = state.deferredEntries()[0];
-  assert.equal(failed.attempts, 1, 'the failed push must be recorded');
-  assert.equal(failed.lastSeenEndSeq, -1, 'the claim must roll back so a retry can push');
+  assert.equal(state.deferredEntries()[0]?.attempts, 1, 'the failed push must be recorded');
 
   failNow.value = false;
   harness._listeners.at(-1).onSessionEvent({ sessionId: 'session-timeout', event: turnEnd });
   await bridge.waitForIdle();
   assert.ok(sent.some((text) => text.includes('计算结果：42')), 'the retry must deliver');
   assert.equal(state.deferredEntries().length, 0);
+});
+
+// ── Review round 2 (PR #153): maintainer reproduction scenarios ──────────
+
+test('/stop must not cancel a session the conversation has rebound away from', async () => {
+  const fixture = deferredAwareStateFixture([['p2p:ou_owner', 'session-rebound']]);
+  const cancelCalls = [];
+  const sent = [];
+  const harness = {
+    ensureRunning: async () => true,
+    rpc: async (method, params) => {
+      if (method === 'session.cancel') {
+        cancelCalls.push(params);
+        return {};
+      }
+      throw new Error(`unexpected rpc ${method}`);
+    },
+    workspaceSession: () => ({
+      async sessionExists() { return true; },
+      async stopActiveTurn() { return false; },
+      async steerActiveTurn() { return false; },
+    }),
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async (outgoing) => sent.push(outgoing.text)),
+    channel: {},
+    harness,
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await fixture.state.putDeferred(deferredEntryFixture());
+
+  await bridge.accept(event('stop-rebound', '/stop', { senderOpenId: 'ou_owner' }));
+  await bridge.waitForIdle();
+
+  assert.equal(cancelCalls.length, 0, 'a rebound chat must not cancel the old session');
+  assert.equal(sent.some((text) => text.includes('计算结果：42')), false);
+  assert.equal(fixture.deferredRows.size, 0, 'the stale entry must be cleaned');
+});
+
+test('/stop delivers a finished background result instead of cancelling the next turn', async () => {
+  const fixture = deferredAwareStateFixture([['p2p:ou_owner', 'session-timeout']]);
+  const cancelCalls = [];
+  const sent = [];
+  const harness = {
+    ensureRunning: async () => true,
+    isSessionRunning: async () => true,
+    rpc: async (method, params) => {
+      if (method === 'session.cancel') {
+        cancelCalls.push(params);
+        return {};
+      }
+      if (method === 'session.history') {
+        return { events: deferredAnswerHistory.map((event) => ({ event })) };
+      }
+      throw new Error(`unexpected rpc ${method}`);
+    },
+    workspaceSession: () => ({
+      async sessionExists() { return true; },
+      async stopActiveTurn() { return false; },
+      async steerActiveTurn() { return false; },
+    }),
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async (outgoing) => sent.push(outgoing.text)),
+    channel: {},
+    harness,
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  // Turn 3 already finished; its delivery failed earlier, so the entry is
+  // still pending while the desktop already runs the next turn.
+  await fixture.state.putDeferred(deferredEntryFixture());
+
+  await bridge.accept(event('stop-finished', '/stop', { senderOpenId: 'ou_owner' }));
+  await bridge.waitForIdle();
+
+  assert.equal(
+    cancelCalls.length,
+    0,
+    'a finished background turn must never cancel the next running turn',
+  );
+  assert.ok(
+    sent.some((text) => text.includes('计算结果：42')),
+    'the finished result must be delivered instead',
+  );
+  assert.equal(fixture.deferredRows.size, 0);
+});
+
+test('a completed turn/end with lagging history stays pending until the answer exists', async () => {
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-timeout']]);
+  // History projection lags the mux: the turn/end frame is not persisted yet.
+  const harness = watchHarness({
+    history: [
+      { type: 'assistant/message', seq: 7, data: { turn: 3, message: { content: [{ type: 'text', text: '计算结果：42' }] } } },
+    ],
+  });
+  const sent = [];
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async ({ text }) => sent.push(text)),
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await bridge.waitForIdle();
+  await state.putDeferred(deferredEntryFixture());
+
+  harness._listeners.at(-1).onSessionEvent({
+    sessionId: 'session-timeout',
+    event: { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } },
+  });
+  await bridge.waitForIdle();
+
+  assert.equal(
+    state.deferredEntries().length,
+    1,
+    'the entry must stay pending while history lags the mux',
+  );
+  assert.equal(
+    sent.some((text) => text.includes('没有可推送的最终结果')),
+    false,
+    'must not announce a missing result while history is incomplete',
+  );
+
+  // The history projection catches up; compensation delivers the answer.
+  harness._setHistory(deferredAnswerHistory);
+  harness._listeners.at(-1).onReconnect();
+  await eventually(() => sent.some((text) => text.includes('计算结果：42')));
+  await eventually(() => state.deferredEntries().length === 0);
+  await bridge.waitForIdle();
+});
+
+test('restart must re-deliver a claimed-but-unsent entry left by a previous process', async () => {
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-timeout']]);
+  const harness = watchHarness({ history: deferredAnswerHistory });
+  const sent = [];
+  // Claimed on disk (lastSeenEndSeq=8) but the process died before sending.
+  await state.putDeferred({ ...deferredEntryFixture(), lastSeenEndSeq: 8 });
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async ({ text }) => sent.push(text)),
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+
+  await eventually(
+    () => sent.some((text) => text.includes('计算结果：42')),
+    'startup must re-deliver a claimed-but-unsent entry',
+  );
+  await eventually(() => state.deferredEntries().length === 0, 'the entry must be consumed');
+  await bridge.waitForIdle();
+});
+
+test('restart compensation reports stopped background turns instead of waiting forever', async () => {
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-timeout']]);
+  const stoppedHistory = [
+    { type: 'assistant/message', seq: 7, data: { turn: 3, message: { content: [{ type: 'text', text: '半截回答' }] } } },
+    { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'stopped' } } },
+  ];
+  const harness = watchHarness({ history: stoppedHistory });
+  const sent = [];
+  await state.putDeferred(deferredEntryFixture());
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async ({ text }) => sent.push(text)),
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+
+  await eventually(
+    () => sent.some((text) => text.includes('后台任务已结束（已停止）')),
+    'offline stops must surface the status notice',
+  );
+  assert.equal(sent.some((text) => text.includes('半截回答')), false, 'no partial answer may leak');
+  await eventually(() => state.deferredEntries().length === 0, 'the stopped entry must be consumed');
+  await bridge.waitForIdle();
+});
+
+test('deferred card delivery keeps managed-topic routing (replyInThread + thread registration)', async () => {
+  const { state } = await watchStoreFixture([['group:oc_chat:managed:om_root', 'session-timeout']]);
+  const harness = watchHarness({ history: deferredAnswerHistory });
+  const cardWrites = [];
+  const streamCalls = [];
+  const channel = {
+    stream: async (chatId, { markdown }, options) => {
+      streamCalls.push(options);
+      await options.onReplyThreadId?.('omt_new');
+      await markdown({ setContent: async (content) => cardWrites.push(content) });
+      return { messageId: 'om_card_1' };
+    },
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(() => {}),
+    channel,
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+    groupTopicReply: true,
+  });
+  await bridge.waitForIdle();
+  await state.putDeferred(deferredEntryFixture({ key: 'group:oc_chat:managed:om_root' }));
+
+  harness._listeners.at(-1).onSessionEvent({
+    sessionId: 'session-timeout',
+    event: { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } },
+  });
+  await bridge.waitForIdle();
+
+  assert.equal(streamCalls.length, 1);
+  assert.equal(
+    streamCalls[0].replyInThread,
+    true,
+    'the card must carry replyInThread for managed topics',
+  );
+  assert.deepEqual(
+    state.topicRootFor('omt_new'),
+    { rootMessageId: 'om_inbound', chatId: 'oc_chat' },
+    'the thread registration must persist the topic root',
+  );
+  assert.ok(cardWrites.some((content) => content.includes('计算结果：42')));
+});
+
+test('deferred plain-text fallback replies inside the managed topic thread', async () => {
+  const { state } = await watchStoreFixture([['group:oc_chat:managed:om_root', 'session-timeout']]);
+  const harness = watchHarness({ history: deferredAnswerHistory });
+  const replies = [];
+  const client = {
+    im: { v1: { message: {
+      reply: async (request) => {
+        replies.push(request.data);
+        return { code: 0, data: { message_id: 'om_reply_1' } };
+      },
+      create: async () => {
+        throw new Error('must not fall back to plain create inside a topic');
+      },
+    } } },
+  };
+  const bridge = new FeishuHarnessBridge({
+    client,
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+    groupTopicReply: true,
+  });
+  await bridge.waitForIdle();
+  await state.putDeferred(deferredEntryFixture({ key: 'group:oc_chat:managed:om_root' }));
+
+  harness._listeners.at(-1).onSessionEvent({
+    sessionId: 'session-timeout',
+    event: { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } },
+  });
+  await bridge.waitForIdle();
+
+  assert.equal(replies.length, 1, 'the fallback must stay a threaded reply');
+  assert.equal(
+    replies[0].reply_in_thread,
+    true,
+    'the threaded reply must carry reply_in_thread after intent restoration',
+  );
+  assert.ok(JSON.parse(replies[0].content).text.includes('计算结果：42'));
 });
 
 test('completed deferred answers prefer a streaming card over plain text', async () => {

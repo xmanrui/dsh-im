@@ -20,45 +20,103 @@ function orderedEvents(entries) {
     .sort((left, right) => (left.seq ?? -1) - (right.seq ?? -1));
 }
 
-function assistantAnswer(event) {
-  if (event?.type !== 'assistant/message' || !Number.isSafeInteger(event.data?.turn)) return null;
-  if (event.data.interrupted === true) return null;
-  const content = Array.isArray(event.data?.message?.content) ? event.data.message.content : [];
-  const text = content
+function textFromContent(content) {
+  if (!Array.isArray(content)) return '';
+  return content
     .flatMap((block) => (block?.type === 'text' && typeof block.text === 'string' ? [block.text] : []))
     .join('\n')
     .trim();
-  return text ? { turn: event.data.turn, text } : null;
 }
 
 /**
  * Extract the final answer of one completed turn from durable history events.
- * `turn` omitted → the latest ended turn wins. Returns
- * `{ found, turn, text, reason, endSeq }`; `found: false` when the turn ended
- * without a completed final answer (stopped/failed/empty/interrupted).
+ *
+ * Mirrors HarnessReplyTracker accumulation: chunk deltas accumulate per
+ * (step, part index); a canonical assistant/message replaces its step; steps
+ * join with a blank line. `turn` omitted → the latest ended turn wins.
+ * Returns `{ found, turn, text, reason, endSeq }`; `found: false` when the
+ * turn ended without a completed final answer (stopped/failed/empty/
+ * interrupted) — `reason`/`endSeq` still identify the confirmed terminal.
  */
 export function extractCompletedTurnAnswer(entries, { turn } = {}) {
   const events = orderedEvents(entries);
-  const answers = new Map();
-  for (const event of events) {
-    const answer = assistantAnswer(event);
-    if (answer) answers.set(answer.turn, answer);
-  }
   const wantTurn = Number.isSafeInteger(turn) ? turn : null;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.type !== 'turn/end' || !Number.isSafeInteger(event.data?.turn)) continue;
-    if (wantTurn !== null && event.data.turn !== wantTurn) continue;
-    const raw = event.data?.reason;
-    const reason = typeof raw === 'string' ? raw : typeof raw?.kind === 'string' ? raw.kind : null;
-    const answer = answers.get(event.data.turn);
-    if (reason === 'completed' && answer?.text) {
-      return { found: true, turn: event.data.turn, text: answer.text, reason, endSeq: event.seq ?? -1 };
-    }
-    if (wantTurn !== null) {
-      return { found: false, turn: event.data.turn, text: null, reason, endSeq: event.seq ?? -1 };
+  const chunkParts = new Map();   // turn -> step -> partIndex -> text
+  const canonical = new Map();    // turn -> step -> { text, interrupted }
+  for (const event of events) {
+    if (event?.type === 'assistant/chunk' && event.data?.chunk?.type === 'text-delta') {
+      const turnId = event.data?.turn;
+      if (!Number.isSafeInteger(turnId)) continue;
+      const text = event.data.chunk.text;
+      if (typeof text !== 'string' || !text) continue;
+      const step = Number.isSafeInteger(event.data.step) ? event.data.step : 0;
+      const index = Number.isSafeInteger(event.data.chunk.index) ? event.data.chunk.index : 0;
+      const steps = chunkParts.get(turnId) ?? new Map();
+      const parts = steps.get(step) ?? new Map();
+      parts.set(index, (parts.get(index) ?? '') + text);
+      steps.set(step, parts);
+      chunkParts.set(turnId, steps);
+    } else if (event?.type === 'assistant/message') {
+      const turnId = event.data?.turn;
+      if (!Number.isSafeInteger(turnId)) continue;
+      const text = textFromContent(event.data?.message?.content);
+      if (!text) continue;
+      const step = Number.isSafeInteger(event.data.step) ? event.data.step : 0;
+      const steps = canonical.get(turnId) ?? new Map();
+      steps.set(step, { text, interrupted: event.data.interrupted === true });
+      canonical.set(turnId, steps);
     }
   }
+
+  function turnText(turnId) {
+    const steps = canonical.get(turnId);
+    const chunks = chunkParts.get(turnId);
+    const stepNumbers = new Set([...(steps?.keys() ?? []), ...(chunks?.keys() ?? [])]);
+    return [...stepNumbers]
+      .sort((left, right) => left - right)
+      .map((step) => {
+        const message = steps?.get(step);
+        if (message) return message.text;
+        return [...(chunks?.get(step)?.entries() ?? [])]
+          .sort(([left], [right]) => left - right)
+          .map(([, part]) => part)
+          .join('\n')
+          .trim();
+      })
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  function interruptedFinal(turnId) {
+    const steps = canonical.get(turnId);
+    if (!steps || steps.size === 0) return false;
+    const lastStep = [...steps.keys()].sort((left, right) => left - right).at(-1);
+    return steps.get(lastStep).interrupted === true;
+  }
+
+  function scan(matchTurn, acceptAnyTerminal = false) {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event?.type !== 'turn/end' || !Number.isSafeInteger(event.data?.turn)) continue;
+      if (matchTurn !== null && event.data.turn !== matchTurn) continue;
+      const raw = event.data?.reason;
+      const reason = typeof raw === 'string' ? raw : typeof raw?.kind === 'string' ? raw.kind : null;
+      const hasAnswer = reason === 'completed' && !interruptedFinal(event.data.turn);
+      const text = hasAnswer ? turnText(event.data.turn) : null;
+      if (hasAnswer && text) {
+        return { found: true, turn: event.data.turn, text, reason, endSeq: event.seq ?? -1 };
+      }
+      if (matchTurn !== null || acceptAnyTerminal) {
+        return { found: false, turn: event.data.turn, text: null, reason, endSeq: event.seq ?? -1 };
+      }
+    }
+    return null;
+  }
+
+  const completed = scan(wantTurn);
+  if (completed) return completed;
+  const anyTerminal = scan(wantTurn, true);
+  if (anyTerminal) return anyTerminal;
   return { found: false, turn: wantTurn, text: null, reason: null, endSeq: -1 };
 }
 
@@ -116,9 +174,6 @@ export function createDeferredDeliveryRegistry(store, {
     },
     async allPending() {
       return (await store.listDeferred()).filter((entry) => entry.status === 'pending');
-    },
-    async markSeen(entry, endSeq) {
-      await store.patchDeferred(entry.id, { lastSeenEndSeq: endSeq });
     },
     async markFailedAttempt(entry) {
       // Read fresh state: the caller's snapshot goes stale across attempts.

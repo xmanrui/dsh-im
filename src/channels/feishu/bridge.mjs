@@ -512,6 +512,10 @@ export class FeishuHarnessBridge {
   #eventWatcher = null;
   /** Lazily built deferred-delivery registry over the state store. */
   #deferredRegistryInstance = null;
+  /** In-memory terminal-frame claims: entry id → claimed end seq. */
+  #deferredClaims = new Map();
+  /** Delay between history-lag retries for a completed terminal frame. */
+  #deferredRetryDelayMs = 300;
   /** Serializes completion work per session without blocking unrelated sessions. */
   #eventTails = new Map();
   /** Coalesces baseline compensation and records whether a trailing pass is needed. */
@@ -2856,6 +2860,37 @@ export class FeishuHarnessBridge {
     let cancelledAny = false;
     for (const entry of entries) {
       try {
+        // 绑定闸门：会话切走后，旧会话不再受当前聊天的 /stop 控制。
+        if (this.#state.sessionFor(entry.key) !== entry.sessionId) {
+          await this.#deferredRegistry().remove(entry);
+          continue;
+        }
+        // 回合身份核验：目标回合已终态就绝不再取消——改为补投其结果，
+        // 避免误停同一 Session 上后续正在运行的回合。
+        const history = await this.#harness.rpc(
+          'session.history',
+          { sessionId: entry.sessionId, maxMessages: 50 },
+          30_000,
+          { signal: this.#signal },
+        );
+        const outcome = extractCompletedTurnAnswer(
+          orderedHistoryEvents(history),
+          { turn: Number.isSafeInteger(entry.turn) ? entry.turn : undefined },
+        );
+        if (outcome.endSeq !== -1 && outcome.endSeq > entry.afterSeq) {
+          const result = await this.#processDeferredEntry(entry, {
+            endSeq: outcome.endSeq,
+            outcome: outcome.found ? outcome : { found: false, reason: outcome.reason },
+          });
+          if (result === 'delivered') await this.#deferredRegistry().remove(entry);
+          continue;
+        }
+        // Sessions run turns sequentially: the target turn has not ended, so
+        // a running Session is running exactly this turn — safe to cancel.
+        if (typeof this.#harness.isSessionRunning === 'function'
+          && !(await this.#harness.isSessionRunning(entry.sessionId).catch(() => false))) {
+          continue;
+        }
         await this.#harness.rpc(
           'session.cancel',
           { sessionId: entry.sessionId, keepInbox: true },
@@ -3036,7 +3071,7 @@ export class FeishuHarnessBridge {
     }
   }
 
-  /** Push immediately when the timed-out turn already completed (lost-event case). */
+  /** Hydrate one entry from durable history; returns the processing result. */
   async #hydrateDeferredEntry(entry) {
     const history = await this.#harness.rpc(
       'session.history',
@@ -3047,12 +3082,17 @@ export class FeishuHarnessBridge {
     const outcome = extractCompletedTurnAnswer(orderedHistoryEvents(history), {
       turn: Number.isSafeInteger(entry.turn) ? entry.turn : undefined,
     });
-    if (!outcome.found || outcome.endSeq <= entry.afterSeq) return;
+    // Any terminal frame the ask loop never consumed (seq beyond afterSeq) is
+    // the delivery trigger: completed carries the answer, stopped/failed carry
+    // the status notice. No terminal frame yet → keep waiting. A persisted
+    // lastSeenEndSeq left by a crashed process is not a delivery receipt.
+    if (outcome.endSeq === -1 || outcome.endSeq <= entry.afterSeq) return 'waiting';
     const result = await this.#processDeferredEntry(entry, {
       endSeq: outcome.endSeq,
-      outcome,
+      outcome: outcome.found ? outcome : { found: false, reason: outcome.reason },
     });
     if (result === 'delivered') await this.#deferredRegistry().remove(entry);
+    return result;
   }
 
   /**
@@ -3060,22 +3100,34 @@ export class FeishuHarnessBridge {
    * Returns 'delivered' | 'gate-dropped' | 'retry' | 'abandoned' | 'duplicate'.
    */
   async #processDeferredEntry(entry, { endSeq, outcome }) {
-    if (Number.isSafeInteger(entry.lastSeenEndSeq)
-      && endSeq <= entry.lastSeenEndSeq) return 'duplicate';
-    if (this.#state.sessionFor(entry.key) !== entry.sessionId) {
-      // 绑定闸门：会话切走后不再打扰，结果保留在 Session 历史（/history 可查）。
-      await this.#deferredRegistry().remove(entry);
-      return 'gate-dropped';
+    const claimed = this.#deferredClaims.get(entry.id);
+    if (claimed !== undefined && endSeq <= claimed) return 'duplicate';
+    // Atomic check-and-claim with no await in between: overlapping processors
+    // (startup resume vs. live mux frames) cannot both pass this point. The
+    // claim is in-memory only — a claimed-but-unsent entry left behind by a
+    // crashed process must be re-delivered after restart, never skipped.
+    this.#deferredClaims.set(entry.id, endSeq);
+    try {
+      if (this.#state.sessionFor(entry.key) !== entry.sessionId) {
+        // 绑定闸门：会话切走后不再打扰，结果保留在 Session 历史（/history 可查）。
+        await this.#deferredRegistry().remove(entry);
+        return 'gate-dropped';
+      }
+      // Restore topic intent from the persisted key: the in-memory anchor
+      // cache does not survive restarts (mirrors the watch completion path).
+      this.#rememberTopicReply(entry.replyToMessageId ?? null, entry.key);
+      if (isTopicGroupKey(entry.key)) this.#rememberTopicRoot(entry.replyToMessageId);
+      const delivered = await this.#pushDeferredOutcome(entry, outcome);
+      if (!delivered) {
+        // Roll the claim back so a later retry can still push for this frame.
+        this.#deferredClaims.delete(entry.id);
+        const attempts = await this.#deferredRegistry().markFailedAttempt(entry);
+        return attempts >= 3 ? 'abandoned' : 'retry';
+      }
+      return 'delivered';
+    } finally {
+      if (this.#deferredClaims.get(entry.id) === endSeq) this.#deferredClaims.delete(entry.id);
     }
-    // Claim the terminal frame before pushing so overlapping processors
-    // (startup resume vs. live mux frames) cannot double-push the answer.
-    await this.#deferredRegistry().markSeen(entry, endSeq);
-    const delivered = await this.#pushDeferredOutcome(entry, outcome);
-    if (delivered) return 'delivered';
-    // Roll the claim back so a later retry can still push for this frame.
-    await this.#deferredRegistry().markSeen(entry, Number.isSafeInteger(entry.lastSeenEndSeq) ? entry.lastSeenEndSeq : -1);
-    const attempts = await this.#deferredRegistry().markFailedAttempt(entry);
-    return attempts >= 3 ? 'abandoned' : 'retry';
   }
 
   async #pushDeferredOutcome(entry, outcome) {
@@ -3111,7 +3163,17 @@ export class FeishuHarnessBridge {
           markdown: async (controller) => {
             await controller.setContent(markdownText);
           },
-        }, replyToMessageId ? { replyTo: replyToMessageId } : {});
+        }, {
+          ...(replyToMessageId ? { replyTo: replyToMessageId } : {}),
+          ...(this.#replyInThreadFor(replyToMessageId) ? {
+            replyInThread: true,
+            onReplyThreadId: async (threadId) => this.#registerTopicThreadId(
+              threadId,
+              replyToMessageId,
+              chatId,
+            ),
+          } : {}),
+        });
         return true;
       } catch (error) {
         this.#logger.warn?.(
@@ -3150,7 +3212,7 @@ export class FeishuHarnessBridge {
   }
 
   /** Deliver deferred entries whose turn just reached its terminal state. */
-  async #processDeferredTurnEnd(sessionId, event) {
+  async #processDeferredTurnEnd(sessionId, event, attempt = 0) {
     const entries = await this.#deferredRegistry().pendingForSession(sessionId);
     if (entries.length === 0) return;
     const endTurn = Number.isSafeInteger(event.data?.turn) ? event.data.turn : null;
@@ -3165,11 +3227,22 @@ export class FeishuHarnessBridge {
       if (Number.isSafeInteger(entry.turn) && endTurn !== null && entry.turn !== endTurn) continue;
       const targetTurn = endTurn ?? (Number.isSafeInteger(entry.turn) ? entry.turn : undefined);
       const outcome = extractCompletedTurnAnswer(events, { turn: targetTurn });
+      if (!outcome.found && outcome.endSeq === -1) {
+        // The history projection lags the mux: keep the entry and re-check
+        // shortly instead of announcing a result that may still arrive.
+        if (attempt < 5) {
+          void this.#queueEventTask(sessionId, async () => {
+            await new Promise((resolve) => setTimeout(resolve, this.#deferredRetryDelayMs));
+            await this.#processDeferredTurnEnd(sessionId, event, attempt + 1);
+          });
+        }
+        continue;
+      }
       const result = await this.#processDeferredEntry(entry, {
         endSeq: event.seq,
         outcome: outcome.found
           ? outcome
-          : { found: false, reason: terminalOutcomeOf(event).kind },
+          : { found: false, reason: outcome.endSeq !== -1 ? outcome.reason : terminalOutcomeOf(event).kind },
       });
       if (result === 'delivered') await this.#deferredRegistry().remove(entry);
     }

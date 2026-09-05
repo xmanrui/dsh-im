@@ -27,6 +27,50 @@ describe('extractCompletedTurnAnswer', () => {
     assert.deepEqual(r, { found: true, turn: 3, text: '计算结果：42', reason: 'completed', endSeq: 6 });
   });
 
+  test('多步骤回合按 step 累积、canonical 替换对应 step（对齐 HarnessReplyTracker）', () => {
+    const events = [
+      ev(1, 'assistant/chunk', { turn: 3, step: 0, chunk: { type: 'text-delta', index: 0, text: '计算' } }),
+      ev(2, 'assistant/message', { turn: 3, step: 0, message: { content: [{ type: 'text', text: '计算结果：42' }] } }),
+      ev(3, 'assistant/chunk', { turn: 3, step: 1, chunk: { type: 'text-delta', index: 0, text: '验证' } }),
+      ev(4, 'assistant/message', { turn: 3, step: 1, message: { content: [{ type: 'text', text: '验证通过。' }] } }),
+      ev(5, 'turn/end', { turn: 3, reason: 'completed' }),
+    ];
+    const r = extractCompletedTurnAnswer(events, { turn: 3 });
+    assert.equal(r.found, true);
+    assert.equal(r.text, '计算结果：42\n\n验证通过。');
+  });
+
+  test('多步骤同 step 内多个 chunk 按 index 拼接', () => {
+    const events = [
+      ev(1, 'assistant/chunk', { turn: 3, step: 0, chunk: { type: 'text-delta', index: 0, text: '计算' } }),
+      ev(2, 'assistant/chunk', { turn: 3, step: 0, chunk: { type: 'text-delta', index: 1, text: '结果' } }),
+      ev(3, 'turn/end', { turn: 3, reason: 'completed' }),
+    ];
+    const r = extractCompletedTurnAnswer(events, { turn: 3 });
+    assert.equal(r.text, '计算\n结果');
+  });
+
+  test('acceptAnyTerminal：历史缺 turn/end 时保持等待语义（endSeq=-1）', () => {
+    // mux 已报 completed，但历史投影还没有 turn/end：不能当作已终态处理。
+    const events = [
+      ev(1, 'assistant/message', { turn: 3, message: { content: [{ type: 'text', text: '半截' }] } }),
+    ];
+    const r = extractCompletedTurnAnswer(events, { turn: 3, acceptAnyTerminal: true });
+    assert.equal(r.found, false);
+    assert.equal(r.endSeq, -1);
+  });
+
+  test('acceptAnyTerminal 返回已确认的非 completed 终态（stopped）', () => {
+    const events = [
+      ev(1, 'assistant/message', { turn: 3, message: { content: [{ type: 'text', text: '半截' }] } }),
+      ev(2, 'turn/end', { turn: 3, reason: { kind: 'stopped' } }),
+    ];
+    const r = extractCompletedTurnAnswer(events, { turn: 3, acceptAnyTerminal: true });
+    assert.equal(r.found, false);
+    assert.equal(r.reason, 'stopped');
+    assert.equal(r.endSeq, 2);
+  });
+
   test('turn 缺省时取最新 completed 回合', () => {
     const events = [
       ...historyEvents(),
