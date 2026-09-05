@@ -12,6 +12,8 @@ export default {
   '微信交互问题发送失败。': 'Failed to send the WeChat interaction question.',
   '回复已经生成，但微信发送失败，可能只收到部分内容。请将下面的诊断信息完整反馈给管理员。': 'The reply was generated, but WeChat delivery failed and only part of it may have arrived. Please send the complete diagnostic below to the administrator.',
   '微信发送诊断：{diagnostic}': 'WeChat delivery diagnostic: {diagnostic}',
+  '微信主动消息发送失败。长轮询在线不代表消息可以发送。': 'WeChat outbound delivery failed. Healthy long polling does not guarantee messages can be sent.',
+  'iLink 拒绝发送，可能涉及会话有效期、发送额度或消息内容。可让接收者发一条消息后重试；不要通过反复发送心跳尝试续期。': 'iLink rejected the message; conversation lifetime, sending quota, or message content may be involved. Ask the recipient to send a message before retrying. Repeated heartbeat messages do not renew the conversation.',
 
   // weixin-controller.mjs
   '微信已授权，但无法读取现有登录凭据。请检查 DSH 凭据存储。': 'WeChat was authorized, but the existing login credential could not be read. Please check the DSH credential store.',

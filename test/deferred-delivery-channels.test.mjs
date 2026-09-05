@@ -77,7 +77,10 @@ function channelFixture(channel, record) {
   };
   if (channel === 'weixin') return { Store: WeixinStateStore, target: { toUserId: 'owner' },
     create: (options) => new WeixinHarnessBridge({ ...options, baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'fixture', ownerUserId: 'owner',
-      api: { sendText: async ({ toUserId, text }) => record({ toUserId }, text) } }),
+      api: { sendText: async ({ toUserId, text, contextToken }) => {
+        if (text === ANSWER) assert.equal(contextToken, 'context-stop', 'deferred result uses the latest persisted recipient context');
+        return record({ toUserId }, text);
+      } } }),
     message: (id, text) => ({ message_id: id, message_type: 1, from_user_id: 'owner', context_token: `context-${id}`, item_list: [{ type: 1, text_item: { text } }] }),
   };
   return { Store: DingtalkStateStore, target: { type: 'user', userId: 'owner', robotCode: 'client' },
@@ -123,6 +126,7 @@ for (const channel of ['feishu', 'wecom', 'weixin', 'dingtalk', 'qq', ...Object.
     };
     t.after(async () => { aborts.forEach((a) => a.abort()); await Promise.all(bridges.map((b) => b.waitForIdle())); await rm(dir, { recursive: true, force: true }); });
     const state = await new f.Store(path).load();
+    if (channel === 'weixin') await state.bindContextTokens('fixture');
     const bridge = create(state);
     await bridge.accept(f.message('input', 'please compute'));
     await bridge.waitForIdle();
@@ -136,6 +140,7 @@ for (const channel of ['feishu', 'wecom', 'weixin', 'dingtalk', 'qq', ...Object.
     await bridge.waitForIdle();
 
     const restored = await new f.Store(path).load();
+    if (channel === 'weixin') await restored.bindContextTokens('fixture');
     assert.equal(restored.deferredEntries().length, 1);
     const restarted = create(restored);
     await restarted.waitForIdle();

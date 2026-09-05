@@ -1,4 +1,5 @@
 import { deferredStateAccess, normalizeDeferredState } from '../shared/deferred-state.mjs';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -16,6 +17,7 @@ export const WEIXIN_RECENT_OUTBOUND_LIMIT = 200;
 export const WEIXIN_RECENT_OUTBOUND_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 export const WEIXIN_RECENT_OUTBOUND_TEXT_LIMIT = 8_000;
 export const WEIXIN_RECENT_OUTBOUND_MATCH_TOLERANCE_MS = 15_000;
+const CONTEXT_TOKEN_LIMIT = 1_000;
 
 function nonEmptyString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -24,6 +26,26 @@ function nonEmptyString(value) {
 function timestamp(value) {
   const number = typeof value === 'string' && value.trim() ? Number(value) : value;
   return Number.isFinite(number) && number >= 0 ? Math.trunc(number) : null;
+}
+
+function sequence(value) {
+  const text = typeof value === 'string' ? value : Number.isSafeInteger(value) ? String(value) : '';
+  return /^\d+$/.test(text) ? BigInt(text).toString() : null;
+}
+
+function normalizeContextTokens(value) {
+  if (!value || typeof value !== 'object' || !/^[a-f0-9]{64}$/.test(value.credentialHash ?? '')) return undefined;
+  const users = Object.create(null);
+  for (const [userId, entry] of Object.entries(value.users ?? {}).slice(-CONTEXT_TOKEN_LIMIT)) {
+    if (!nonEmptyString(userId) || !nonEmptyString(entry?.token)) continue;
+    users[userId] = {
+      token: entry.token,
+      seq: sequence(entry.seq),
+      messageTimeMs: timestamp(entry.messageTimeMs),
+      receivedAt: timestamp(entry.receivedAt),
+    };
+  }
+  return { credentialHash: value.credentialHash, users };
 }
 
 function providerMessageIds(value) {
@@ -73,6 +95,7 @@ function normalizeState(value) {
       }
     }
   }
+  const contextTokens = normalizeContextTokens(value.contextTokens);
   return {
     version: 1,
     sessions,
@@ -82,6 +105,7 @@ function normalizeState(value) {
       : [],
     getUpdatesBuf: typeof value.getUpdatesBuf === 'string' ? value.getUpdatesBuf : '',
     recentOutboundMessages: recentOutboundMessages(value.recentOutboundMessages),
+    ...(contextTokens ? { contextTokens } : {}),
   };
 }
 
@@ -110,6 +134,36 @@ export class WeixinStateStore {
   putDeferred(entry) { return this.#deferred.put(entry); }
   patchDeferred(id, patch) { return this.#deferred.patch(id, patch); }
   removeDeferred(id) { return this.#deferred.remove(id); }
+
+  // Context belongs to this bot login, not to a Harness session or workspace.
+  async bindContextTokens(token) {
+    const credentialHash = createHash('sha256').update(token).digest('hex');
+    if (this.#state.contextTokens?.credentialHash === credentialHash) return;
+    this.#state.contextTokens = { credentialHash, users: Object.create(null) };
+    await this.#persist();
+  }
+
+  contextTokenFor(userId) {
+    return this.#state.contextTokens?.users?.[userId]?.token ?? undefined;
+  }
+
+  async rememberContextToken({ userId, contextToken, seq, messageTimeMs }) {
+    if (!nonEmptyString(userId) || !nonEmptyString(contextToken) || !this.#state.contextTokens) return;
+    const users = this.#state.contextTokens.users;
+    const previous = users[userId];
+    const next = { token: contextToken, seq: sequence(seq), messageTimeMs: timestamp(messageTimeMs), receivedAt: Date.now() };
+    // Late/duplicate batches must not replace a newer conversation capability.
+    if (previous) {
+      if (previous.seq !== null && next.seq !== null && BigInt(next.seq) <= BigInt(previous.seq)) return;
+      if (previous.messageTimeMs !== null && next.messageTimeMs !== null
+        && next.messageTimeMs < previous.messageTimeMs) return;
+    }
+    delete users[userId];
+    users[userId] = next;
+    const keys = Object.keys(users);
+    if (keys.length > CONTEXT_TOKEN_LIMIT) delete users[keys[0]];
+    await this.#persist();
+  }
 
   sessionFor(key) {
     return this.#state.sessions[key] ?? null;
@@ -209,7 +263,8 @@ export class WeixinStateStore {
   }
 
   snapshot() {
-    return structuredClone(this.#state);
+    const { contextTokens, ...state } = this.#state;
+    return structuredClone(state);
   }
 
   async remove() {

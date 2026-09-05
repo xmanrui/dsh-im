@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { WeixinStateStore } from '../../../src/channels/weixin/state-store.mjs';
 
 import { WeixinApiError } from '../../../src/channels/weixin/weixin-api.mjs';
 import {
@@ -174,6 +178,101 @@ test('runtime sends a connection test to the bound Weixin owner without reply co
   assert.equal(sends[1].contextToken, undefined);
   assert.equal(sends[1].runId, undefined);
   await runtime.stop();
+});
+
+test('proactive delivery reuses authorized inbound context after restart without requiring a Harness session', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-weixin-proactive-context-'));
+  const path = join(root, 'state.json');
+  const sends = [];
+  let inbound = [
+    { message_id: '1', seq: '10', message_type: 1, from_user_id: 'owner', context_token: 'fresh-context', item_list: [{ type: 1, text_item: { text: '/ping' } }] },
+    { message_id: '2', seq: '11', message_type: 1, from_user_id: 'stranger', context_token: 'stranger-context', item_list: [{ type: 1, text_item: { text: '/ping' } }] },
+  ];
+  const makeRuntime = (state) => new WeixinRuntime({
+    api: {
+      notifyStart: async () => {}, notifyStop: async () => {},
+      getUpdates: async ({ signal }) => {
+        if (inbound.length) { const msgs = inbound; inbound = []; return { ret: 0, msgs, get_updates_buf: 'cursor' }; }
+        return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      },
+      sendText: async (request) => {
+        sends.push(request);
+        if (request.toUserId === 'owner' && request.contextToken !== 'fresh-context') {
+          throw new WeixinApiError('send-rejected', 'prepare failed', { providerCode: '-2' });
+        }
+        return { ret: 0 };
+      },
+    },
+    config: { botId: 'test-bot', baseUrl: 'https://ilinkai.weixin.qq.com/', ownerUserId: 'owner' },
+    token: 'login', harness: { ensureRunning: async () => true }, state,
+    logger: { warn() {}, error() {} },
+  });
+  const state = await new WeixinStateStore(path).load();
+  let runtime = makeRuntime(state);
+  try {
+    await runtime.start();
+    await eventually(() => state.hasSeen('1') && state.hasSeen('2'), 'inbound messages handled');
+    assert.equal(state.contextTokenFor('stranger'), undefined);
+    await runtime.sendProactiveText({ kind: 'user', route: { toUserId: 'owner' } }, 'proactive before restart');
+    assert.equal(sends.at(-1).contextToken, 'fresh-context');
+    assert.equal(sends.at(-1).runId, undefined);
+    await runtime.stop();
+    runtime = makeRuntime(await new WeixinStateStore(path).load());
+    await runtime.start();
+    await runtime.sendProactiveText({ kind: 'user', route: { toUserId: 'owner' } }, 'proactive after restart');
+    assert.equal(sends.at(-1).contextToken, 'fresh-context');
+    await runtime.sendConnectionTest('connection test');
+    assert.equal(sends.at(-1).contextToken, 'fresh-context');
+    await runtime.sendProactiveText({ kind: 'user', route: { toUserId: 'other-user' } }, 'other recipient');
+    assert.equal(sends.at(-1).contextToken, undefined);
+  } finally { await runtime.stop(); }
+});
+
+test('proactive rejection remains visible while polling is healthy, without retries or private diagnostics', async () => {
+  let poll = deferred();
+  let polls = 0;
+  let sends = 0;
+  let rejection = new WeixinApiError('send-rejected', 'private-provider-response', { providerCode: '-2' });
+  const logs = [];
+  const runtime = new WeixinRuntime({
+    api: {
+      notifyStart: async () => {}, notifyStop: async () => {},
+      getUpdates: ({ signal }) => { polls += 1; return abortable(poll.promise, signal); },
+      sendText: async () => { sends += 1; if (rejection) throw rejection; return {}; },
+    },
+    config: { botId: 'bot', baseUrl: 'https://ilinkai.weixin.qq.com/', ownerUserId: 'private-owner' },
+    token: 'private-login', harness: { ensureRunning: async () => true },
+    state: { getUpdatesBuf: () => '', contextTokenFor: () => 'private-context' },
+    logger: { warn: (message) => logs.push(message), error() {} },
+  });
+  await runtime.start();
+  try {
+    await assert.rejects(runtime.sendProactiveText({ kind: 'user', route: { toUserId: 'private-owner' } }, 'private-content'),
+      (error) => error.code === 'send-rejected' && error.providerCode === '-2');
+    assert.equal(sends, 1, 'a rejected send must not trigger retries');
+    const failure = runtime.status.lastMessageError;
+    assert.equal(failure.code, 'CHANNEL_DELIVERY');
+    assert.equal(failure.reason, 'WEIXIN_SEND_FAILED');
+    assert.match(failure.message, /provider=-2/);
+    assert.match(failure.message, /contextToken=yes/);
+    assert.match(failure.message, /接收者发一条消息/);
+    assert.doesNotMatch(JSON.stringify({ failure, logs }), /private-/);
+    const previousPoll = poll;
+    poll = deferred();
+    previousPoll.resolve({ ret: 0, msgs: [] });
+    await eventually(() => polls >= 2, 'healthy polling resumes');
+    assert.equal(runtime.status.ready, true);
+    assert.equal(runtime.status.weixinConnectionState, 'connected');
+    assert.equal(runtime.status.lastMessageError.referenceId, failure.referenceId);
+
+    rejection = new WeixinApiError('network-error', 'private-network-detail');
+    await assert.rejects(runtime.sendConnectionTest('test'));
+    assert.equal(runtime.status.lastMessageError.code, 'CHANNEL_DELIVERY_UNCERTAIN');
+    assert.doesNotMatch(runtime.status.lastMessageError.message, /接收者发一条消息/);
+    rejection = null;
+    await runtime.sendConnectionTest('test');
+    assert.equal(runtime.status.lastMessageError, null);
+  } finally { await runtime.stop(); }
 });
 
 test('runtime cancels typing before notifying iLink that it stopped', async () => {

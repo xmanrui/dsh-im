@@ -65,6 +65,50 @@ test('state store retains sessions, deduplication, and the getUpdates cursor', a
   assert.equal((await stat(path)).mode & 0o777, 0o600);
 });
 
+test('context tokens survive restart and workspace changes, remain private, and are cleared on login change', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-weixin-context-'));
+  const path = join(root, 'state.json');
+  const state = await new WeixinStateStore(path).load();
+  await state.bindContextTokens('bot-login');
+  await state.rememberContextToken({ userId: 'alice', contextToken: 'alice-context', seq: '90071992547409931' });
+  await state.rememberContextToken({ userId: 'bob', contextToken: 'bob-context', seq: '2' });
+  await state.clearSessions();
+  assert.equal(state.contextTokenFor('alice'), 'alice-context');
+  assert.equal(state.contextTokenFor('bob'), 'bob-context');
+  assert.equal(state.contextTokenFor('unknown'), undefined);
+  assert.doesNotMatch(JSON.stringify(state.snapshot()), /alice-context|bob-context/);
+  assert.doesNotMatch(await readFile(path, 'utf8'), /bot-login/);
+  assert.equal((await stat(path)).mode & 0o777, 0o600);
+
+  const restored = await new WeixinStateStore(path).load();
+  await restored.bindContextTokens('bot-login');
+  assert.equal(restored.contextTokenFor('alice'), 'alice-context');
+  await restored.bindContextTokens('replacement-login');
+  assert.equal(restored.contextTokenFor('alice'), undefined);
+  assert.equal((await new WeixinStateStore(path).load()).contextTokenFor('bob'), undefined);
+});
+
+test('context tokens ignore empty, duplicate and older inbound updates across restarts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-weixin-context-order-'));
+  const path = join(root, 'state.json');
+  let state = await new WeixinStateStore(path).load();
+  await state.bindContextTokens('login');
+  await state.rememberContextToken({ userId: 'owner', contextToken: 'new', seq: '90071992547409932', messageTimeMs: 2000 });
+  state = await new WeixinStateStore(path).load();
+  for (const change of [
+    { contextToken: 'old', seq: '90071992547409931' },
+    { contextToken: 'duplicate', seq: '90071992547409932' },
+    { contextToken: 'late', messageTimeMs: 1000 },
+    { contextToken: ' ' },
+    {},
+  ]) await state.rememberContextToken({ userId: 'owner', ...change });
+  assert.equal(state.contextTokenFor('owner'), 'new');
+  await state.rememberContextToken({ userId: 'owner', contextToken: 'newest', seq: '90071992547409933', messageTimeMs: 3000 });
+  assert.equal(state.contextTokenFor('owner'), 'newest');
+  await state.remove();
+  assert.equal(state.contextTokenFor('owner'), undefined);
+});
+
 test('state store resolves recent Weixin bot replies by exact id or one unambiguous timestamp', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-weixin-outbound-state-'));
   const path = join(root, 'account', 'state.json');

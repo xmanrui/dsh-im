@@ -1,6 +1,11 @@
 import { DEFAULT_WEIXIN_MAX_MESSAGE_CHARS, WeixinApiError } from './weixin-api.mjs';
-import { createWeixinBridgeStatus, WeixinHarnessBridge } from './weixin-bridge.mjs';
+import {
+  createWeixinBridgeStatus, WeixinHarnessBridge, weixinSendError, weixinSendFailureOptions,
+} from './weixin-bridge.mjs';
 import { providerMessageIdsFor } from '../shared/semantic/delivery.mjs';
+import {
+  channelDeliveryFailure, clearLastMessageFailure, setLastMessageFailure,
+} from '../shared/message-failure.mjs';
 import {
   connectionTestTarget,
   connectionTestTargetUnavailable,
@@ -175,6 +180,7 @@ export class WeixinRuntime {
         throw harnessHealthError(error);
       }
       this.#status.harnessReachable = true;
+      await this.#state.bindContextTokens?.(this.#token);
       await this.#notifyStart();
       this.#abortController = new AbortController();
       const signal = this.#abortController.signal;
@@ -335,13 +341,32 @@ export class WeixinRuntime {
 
   async #sendTrackedText({ toUserId, text, signal }) {
     const sentAt = Date.now();
-    const result = await this.#api.sendText({
-      baseUrl: this.#config.baseUrl,
-      token: this.#token,
-      toUserId,
-      text,
-      signal,
-    });
+    const contextToken = this.#state.contextTokenFor?.(toUserId);
+    let result;
+    try {
+      result = await this.#api.sendText({
+        baseUrl: this.#config.baseUrl,
+        token: this.#token,
+        toUserId,
+        text,
+        contextToken,
+        signal,
+      });
+    } catch (cause) {
+      if (signal?.aborted) throw cause;
+      const error = weixinSendError(cause, {
+        baseUrl: this.#config.baseUrl, text, chunk: text, chunkIndex: 0, chunkCount: 1,
+        maxMessageChars: this.#maxMessageChars, contextToken,
+      });
+      const failure = setLastMessageFailure(this.#status,
+        channelDeliveryFailure(error, { uncertain: cause?.code !== 'send-rejected' }),
+        weixinSendFailureOptions(error, { proactive: true }));
+      this.#logger.warn?.(`[dsh-weixin] outbound delivery failed [${failure.referenceId}]: ${failure.message}`);
+      throw error;
+    }
+    if (this.#status.lastMessageError?.reason === 'WEIXIN_SEND_FAILED') {
+      clearLastMessageFailure(this.#status);
+    }
     try {
       await this.#state.rememberOutboundMessage?.({
         toUserId,

@@ -297,6 +297,10 @@ The HTTP protocol layer may also return `method-not-allowed` (405), `unsupported
 - Normal delivery uses only a saved `botId + targetId`. Keep the native route in target configuration instead of sending it with every message.
 - One call sends to one target. Notify multiple targets with separate calls and handle each result separately.
 - Targets remain editable while a bot is offline, but testing and delivery require a connected bot.
+- WeChat proactive sends, connection tests, and deferred task results use the latest `context_token` received from the corresponding user by that bot. Context is stored only in the Host account state and restored after restart; it is never included in delivery targets or returned to callers. Rebinding with a different login credential clears it. After upgrading, an inbound user message is needed to populate the cache.
+- iLink server rules still govern whether WeChat accepts a send. Healthy long polling does not guarantee proactive delivery. If `ret=-2 prepare failed` persists, avoid repeated heartbeat messages as a renewal strategy; ask the recipient to send a message before retrying. This error alone does not establish login expiry, context expiry, or exhausted quota.
+
+- Failed WeChat proactive sends remain visible in the account’s latest message error, with sanitized diagnostics including the provider code and whether context was included. Healthy polling does not clear this error; a successful outbound send does. HTTP/RPC still return the existing `delivery-failed` error, with no automatic retry or disconnection of healthy long polling.
 
 ## HTTP and RPC reachability
 
