@@ -258,7 +258,7 @@ Join the WeCom community group, or reach me by email, WeChat, Xiaohongshu, or Wh
       <a href="mailto:longmanr307@gmail.com">longmanr307@gmail.com</a>
     </td>
     <td align="center" valign="top">
-      <a href="docs/images/wecom.jpg"><img src="docs/images/wecom.jpg" alt="dsh-im WeCom group QR code" width="240"></a>
+      <a href="docs/images/wecom.png"><img src="docs/images/wecom.jpg" alt="dsh-im WeCom group QR code" width="240"></a>
     </td>
     <td align="center" valign="top">
       <a href="docs/images/weixin.jpg"><img src="docs/images/weixin.jpg" alt="WeChat QR code" width="240"></a>
