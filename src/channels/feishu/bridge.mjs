@@ -2885,19 +2885,13 @@ export class FeishuHarnessBridge {
           if (result === 'delivered') await this.#deferredRegistry().remove(entry);
           continue;
         }
-        // Sessions run turns sequentially: the target turn has not ended, so
-        // a running Session is running exactly this turn — safe to cancel.
-        if (typeof this.#harness.isSessionRunning === 'function'
-          && !(await this.#harness.isSessionRunning(entry.sessionId).catch(() => false))) {
-          continue;
-        }
-        await this.#harness.rpc(
-          'session.cancel',
-          { sessionId: entry.sessionId, keepInbox: true },
-          30_000,
-          { signal: this.#signal },
+        const session = this.#harness.workspaceSession?.(entry.sessionId);
+        if (typeof session?.stopDeferredTurn !== 'function') continue;
+        const stopped = await session.stopDeferredTurn(
+          { turn: entry.turn, promptRpcId: entry.promptRpcId },
+          { signal: this.#signal, isCurrent: () => this.#state.sessionFor(entry.key) === entry.sessionId },
         );
-        cancelledAny = true;
+        cancelledAny ||= stopped === true;
       } catch (error) {
         this.#logger.warn?.('[dsh-feishu] deferred stop failed:', error.message);
       }
@@ -3058,6 +3052,7 @@ export class FeishuHarnessBridge {
         replyToMessageId: messageId,
         sessionId,
         turn: Number.isSafeInteger(error?.details?.turn) ? error.details.turn : null,
+        promptRpcId: error?.details?.promptRpcId ?? null,
         afterSeq: Number.isSafeInteger(error?.details?.lastSeq) ? error.details.lastSeq : -1,
       });
       await this.#hydrateDeferredEntry(entry);
@@ -3108,6 +3103,12 @@ export class FeishuHarnessBridge {
     // crashed process must be re-delivered after restart, never skipped.
     this.#deferredClaims.set(entry.id, endSeq);
     try {
+      // A slower history RPC may still hold a snapshot already delivered by
+      // another processor. Re-read under the claim, and keep it through removal.
+      const current = (await this.#deferredRegistry().pendingForSession(entry.sessionId))
+        .find((candidate) => candidate.id === entry.id);
+      if (!current) return 'duplicate';
+      entry = current;
       if (this.#state.sessionFor(entry.key) !== entry.sessionId) {
         // 绑定闸门：会话切走后不再打扰，结果保留在 Session 历史（/history 可查）。
         await this.#deferredRegistry().remove(entry);
@@ -3116,7 +3117,9 @@ export class FeishuHarnessBridge {
       // Restore topic intent from the persisted key: the in-memory anchor
       // cache does not survive restarts (mirrors the watch completion path).
       this.#rememberTopicReply(entry.replyToMessageId ?? null, entry.key);
-      if (isTopicGroupKey(entry.key)) this.#rememberTopicRoot(entry.replyToMessageId);
+      if (entry.key === managedGroupKey(entry.chatId, entry.replyToMessageId)) {
+        this.#rememberTopicRoot(entry.replyToMessageId);
+      }
       const delivered = await this.#pushDeferredOutcome(entry, outcome);
       if (!delivered) {
         // Roll the claim back so a later retry can still push for this frame.
@@ -3124,6 +3127,7 @@ export class FeishuHarnessBridge {
         const attempts = await this.#deferredRegistry().markFailedAttempt(entry);
         return attempts >= 3 ? 'abandoned' : 'retry';
       }
+      await this.#deferredRegistry().remove(entry);
       return 'delivered';
     } finally {
       if (this.#deferredClaims.get(entry.id) === endSeq) this.#deferredClaims.delete(entry.id);

@@ -1206,6 +1206,23 @@ export class HarnessClient {
     return Boolean(await this.#refreshControlOwnership(sessionId, control, options));
   }
 
+  /** Cancel only the persisted prompt's exact live turn, in the host's JS tick.
+   * HTTP session.cancel cannot express this precondition, so never fall back to it.
+   */
+  stopDeferredTurn(sessionId, { turn, promptRpcId } = {}, { signal, isCurrent } = {}) {
+    signal?.throwIfAborted();
+    if (typeof sessionId !== 'string' || !sessionId
+      || !Number.isSafeInteger(turn) || turn < 0
+      || typeof promptRpcId !== 'string' || !promptRpcId
+      || typeof this.#controlExecutor !== 'function') return false;
+    if (isCurrent && !isCurrent()) return false;
+    const accepted = this.#controlExecutor({ sessionId, expectedTurn: turn, promptRpcId, action: 'stop' });
+    if (accepted && typeof accepted.then === 'function') {
+      throw new TypeError('controlExecutor must return synchronously');
+    }
+    return accepted === true;
+  }
+
   async stopActiveTurn(sessionId, control, options = {}) {
     if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
     const ownership = await this.#refreshControlOwnership(sessionId, control, options);
@@ -1587,7 +1604,7 @@ export class HarnessClient {
           }
           const timeoutError = new HarnessTurnError('harness-reply-timeout');
           // Data-only context for deferred delivery; timeout semantics unchanged.
-          timeoutError.details = { turn: tracker.turn, lastSeq: tracker.lastSeq };
+          timeoutError.details = { sessionId, promptRpcId, baselineSeq, turn: tracker.turn, lastSeq: tracker.lastSeq };
           throw timeoutError;
         }
       } catch (error) {

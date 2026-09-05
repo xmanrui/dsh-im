@@ -15,6 +15,7 @@ function workspaceSession(harness, sessionId) {
     isRunning: (...args) => harness.isSessionRunning(sessionId, ...args),
     hasActiveTurn: (...args) => harness.hasActiveTurn(sessionId, ...args),
     stopActiveTurn: (...args) => harness.stopActiveTurn(sessionId, ...args),
+    stopDeferredTurn: (...args) => harness.stopDeferredTurn?.(sessionId, ...args) ?? false,
     steerActiveTurn: (...args) => harness.steerActiveTurn(sessionId, ...args),
     ask: (...args) => harness.ask(sessionId, ...args),
   };

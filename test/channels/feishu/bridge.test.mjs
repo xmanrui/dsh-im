@@ -7867,6 +7867,11 @@ test('/stop cancels a pending deferred background session when no turn is active
     workspaceSession: () => ({
       async sessionExists() { return true; },
       async stopActiveTurn() { return false; },
+      async stopDeferredTurn(identity) {
+        assert.equal(identity.turn, 3);
+        cancelCalls.push({ sessionId: 'session-timeout', keepInbox: true });
+        return true;
+      },
       async steerActiveTurn() { return false; },
     }),
   };
@@ -8255,7 +8260,7 @@ test('restart compensation reports stopped background turns instead of waiting f
 });
 
 test('deferred card delivery keeps managed-topic routing (replyInThread + thread registration)', async () => {
-  const { state } = await watchStoreFixture([['group:oc_chat:managed:om_root', 'session-timeout']]);
+  const { state } = await watchStoreFixture([['group:oc_chat:managed:om_inbound', 'session-timeout']]);
   const harness = watchHarness({ history: deferredAnswerHistory });
   const cardWrites = [];
   const streamCalls = [];
@@ -8277,7 +8282,7 @@ test('deferred card delivery keeps managed-topic routing (replyInThread + thread
     groupTopicReply: true,
   });
   await bridge.waitForIdle();
-  await state.putDeferred(deferredEntryFixture({ key: 'group:oc_chat:managed:om_root' }));
+  await state.putDeferred(deferredEntryFixture({ key: 'group:oc_chat:managed:om_inbound' }));
 
   harness._listeners.at(-1).onSessionEvent({
     sessionId: 'session-timeout',
