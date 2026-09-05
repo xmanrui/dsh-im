@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { WhatsappLogoGlyph } from '../../channel-logos.js';
 import { QrActionIcon } from '../../credential-binding.js';
+import { CollapsibleAccountSection } from '../shared/collapsible-account.js';
 import { h } from '../../i18n.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
@@ -203,7 +204,9 @@ export function WhatsappAccountCard({
   const summary = account.error?.message ?? (account.connected ? null : account.health.summary);
   return h('article', { className: 'ddt-card dim-botCard', 'data-bot-id': account.botId },
     h('div', { className: 'ddt-cardBody dim-botCardBody' },
-      h('div', { className: 'ddt-accountTop dim-botCardTop' },
+      h(CollapsibleAccountSection, {
+        id: `wsp-settings-${account.botId.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+        header: h('div', { className: 'ddt-accountTop dim-botCardTop' },
         h('div', { className: 'ddt-accountIdentity dim-botIdentity' },
           h('div', {
             className: 'ddt-avatar dim-botAvatar dwa-avatar',
@@ -211,7 +214,12 @@ export function WhatsappAccountCard({
           }, h(WhatsappLogoGlyph, { size: 29 })),
           h('div', { className: 'dim-botName' },
             h('h3', null, account.bot.name), h('p', null, account.bot.idMasked))),
-        h('div', { className: 'dim-botCardTools' },
+        h('div', {
+            className: 'dim-botCardTools',
+            // The header is the collapse toggle; keep inner controls clickable.
+            onClick: (event) => { event.stopPropagation(); },
+            onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); },
+          },
           h(BotStatusMeta, {
             className: 'ddt-health',
             dotClassName: 'ddt-dot',
@@ -226,8 +234,9 @@ export function WhatsappAccountCard({
             botName: account.bot.name,
             connected: account.connected,
             accessPolicy: account.accessPolicy,
-          }))),
-      h(WorkspaceEditor, {
+          })))
+      },
+        h(WorkspaceEditor, {
         workspace: account.workspace,
         disabled: Boolean(busy),
         onSave: onWorkspaceSave,
@@ -264,7 +273,9 @@ export function WhatsappAccountCard({
           testNotice ? h('div', {
             className: 'ddt-summary dim-cardFeedback',
             role: 'status',
-          }, testNotice) : null))),
+          }, testNotice) : null)),
+      ),
+    ),
     removing ? h(RemoveConfirmation, {
       account,
       busy: busy === 'delete',
