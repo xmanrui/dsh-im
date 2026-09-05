@@ -1173,7 +1173,7 @@ export class FeishuHarnessBridge {
     await this.#state.markSeen(messageId);
     this.#status.lastMessageAt = new Date().toISOString();
     this.#status.messagesReceived += 1;
-    const result = await runner(
+    let result = await runner(
       nonEmptyString(message.content) ?? '',
       this.#harness,
       this.#state,
@@ -1187,6 +1187,17 @@ export class FeishuHarnessBridge {
         control: { owner: this, key },
       },
     );
+    // A timed-out background turn released its ownership, so /stop finds no
+    // active turn — fall through to cancelling pending deferred sessions.
+    if (runner === runControlCommand
+      && result?.stopped !== true
+      && /^\/stop(?=$|\s)/iu.test(nonEmptyString(message.content) ?? '')) {
+      const deferredStopped = await this.#stopDeferredFor(key);
+      if (deferredStopped) {
+        const notice = t('已请求停止后台任务。');
+        result = { message: notice, messages: [notice], stopped: true };
+      }
+    }
     if (result?.stopped) {
       await Promise.allSettled([
         this.#cancelPendingInteraction(key),
@@ -2833,17 +2844,46 @@ export class FeishuHarnessBridge {
     }
   }
 
+  /** Cancel background sessions with pending deferred entries for one key. */
+  async #stopDeferredFor(key) {
+    if (typeof this.#state.deferredEntries !== 'function') return false;
+    const entries = await this.#deferredRegistry().pendingForKey(key);
+    if (entries.length === 0) return false;
+    let cancelledAny = false;
+    for (const entry of entries) {
+      try {
+        await this.#harness.rpc(
+          'session.cancel',
+          { sessionId: entry.sessionId, keepInbox: true },
+          30_000,
+          { signal: this.#signal },
+        );
+        cancelledAny = true;
+      } catch (error) {
+        this.#logger.warn?.('[dsh-feishu] deferred stop failed:', error.message);
+      }
+    }
+    return cancelledAny;
+  }
+
   /**
    * Stop the running task in the bound session (mirrors `/stop`).
    */
   async #handleStop(key, chatId, replyTo = null) {
     try {
-      const result = await runControlCommand(
+      let result = await runControlCommand(
         '/stop', this.#harness, this.#state, key, {
           signal: this.#signal,
           control: { owner: this, key },
         },
       );
+      if (result?.stopped !== true) {
+        const deferredStopped = await this.#stopDeferredFor(key);
+        if (deferredStopped) {
+          const notice = t('已请求停止后台任务。');
+          result = { message: notice, messages: [notice], stopped: true };
+        }
+      }
       if (result?.stopped) {
         await Promise.allSettled([
           this.#cancelPendingInteraction(key),
@@ -2963,7 +3003,7 @@ export class FeishuHarnessBridge {
 
   #deferredRegistry() {
     this.#deferredRegistryInstance ??= createDeferredDeliveryRegistry({
-      listDeferred: async () => this.#state.deferredEntries(),
+      listDeferred: async () => this.#state.deferredEntries?.() ?? [],
       putDeferred: (entry) => this.#state.putDeferred(entry),
       patchDeferred: (id, patch) => this.#state.patchDeferred(id, patch),
       removeDeferred: (id) => this.#state.removeDeferred(id),

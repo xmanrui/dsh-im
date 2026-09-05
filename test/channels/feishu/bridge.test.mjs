@@ -7848,3 +7848,78 @@ test('a stopped deferred turn pushes a short status notice instead of an answer'
   assert.equal(sent.some((text) => text.includes('半截回答')), false, 'no partial answer may leak');
   assert.equal(state.deferredEntries().length, 0);
 });
+
+test('/stop cancels a pending deferred background session when no turn is active', async () => {
+  const fixture = deferredAwareStateFixture([['p2p:ou_owner', 'session-timeout']]);
+  const cancelCalls = [];
+  const sent = [];
+  const harness = {
+    ensureRunning: async () => true,
+    rpc: async (method, params) => {
+      if (method === 'session.cancel') {
+        cancelCalls.push(params);
+        return {};
+      }
+      throw new Error(`unexpected rpc ${method}`);
+    },
+    workspaceSession: () => ({
+      async sessionExists() { return true; },
+      async stopActiveTurn() { return false; },
+      async steerActiveTurn() { return false; },
+    }),
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async (outgoing) => sent.push(outgoing.text)),
+    channel: {},
+    harness,
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await fixture.state.putDeferred(deferredEntryFixture());
+
+  await bridge.accept(event('stop-deferred', '/stop', { senderOpenId: 'ou_owner' }));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(cancelCalls, [{ sessionId: 'session-timeout', keepInbox: true }]);
+  assert.ok(
+    sent.some((text) => text.includes('已请求停止后台任务。')),
+    'the deferred-stop acknowledgement is required',
+  );
+  assert.equal(sent.some((text) => text.includes('当前聊天没有正在运行的任务')), false);
+});
+
+test('/stop without deferred entries behaves exactly as before', async () => {
+  const fixture = deferredAwareStateFixture([['p2p:ou_owner', 'session-timeout']]);
+  const cancelCalls = [];
+  const sent = [];
+  const harness = {
+    ensureRunning: async () => true,
+    rpc: async (method, params) => {
+      if (method === 'session.cancel') {
+        cancelCalls.push(params);
+        return {};
+      }
+      throw new Error(`unexpected rpc ${method}`);
+    },
+    workspaceSession: () => ({
+      async sessionExists() { return true; },
+      async stopActiveTurn() { return false; },
+      async steerActiveTurn() { return false; },
+    }),
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async (outgoing) => sent.push(outgoing.text)),
+    channel: {},
+    harness,
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+
+  await bridge.accept(event('stop-plain', '/stop', { senderOpenId: 'ou_owner' }));
+  await bridge.waitForIdle();
+
+  assert.equal(cancelCalls.length, 0, 'session.cancel must not fire without pending entries');
+  assert.ok(sent.some((text) => text.includes('当前聊天没有正在运行的任务')));
+});

@@ -370,5 +370,6 @@ export default {
   // feishu/bridge.mjs — deferred delivery terminal statuses
   '后台任务已结束（{reason}），没有可推送的最终结果。':
     'The background task has finished ({reason}); there is no final result to deliver.',
+  '已请求停止后台任务。': 'Requested to stop the background task.',
   '任务失败': 'failed',
 };
