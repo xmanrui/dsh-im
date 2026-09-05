@@ -7,6 +7,7 @@ import { sendRememberedConnectionTest } from '../shared/connection-test.mjs';
 import { t } from '../shared/i18n.mjs';
 import { captureContextEnhancement } from '../shared/context-enhancement.mjs';
 import { dingtalkRuntimeStartError } from './connection-error.mjs';
+import { DINGTALK_CARD_TOPIC } from './dingtalk-menu.mjs';
 
 function nonEmptyString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -271,6 +272,22 @@ export class DingtalkRuntime {
       const client = this.#client;
       const bridge = this.#bridge;
       startStage = 'dingtalk-stream-listener-failed';
+      client.registerCallbackListener(DINGTALK_CARD_TOPIC, (response) => {
+        if (this.#client !== client || this.#bridge !== bridge) return;
+        const messageId = nonEmptyString(response?.headers?.messageId);
+        if (messageId) {
+          try { client.socketCallBackResponse(messageId, { success: true }); }
+          catch { this.#logger.warn?.('[dsh-dingtalk] unable to acknowledge a card callback'); }
+        }
+        const task = Promise.resolve().then(async () => {
+          if (this.#bridge !== bridge) return;
+          const callback = typeof response?.data === 'string' ? JSON.parse(response.data) : response?.data;
+          await bridge.acceptCard(callback, messageId);
+        }).catch(() => {
+          if (!signal.aborted) this.#logger.warn?.('[dsh-dingtalk] card callback processing failed');
+        }).finally(() => this.#callbackTasks.delete(task));
+        this.#callbackTasks.add(task);
+      });
       client.registerCallbackListener(this.#topic, (response) => {
         if (this.#client !== client || this.#bridge !== bridge) return;
         const callbackMessageId = nonEmptyString(response?.headers?.messageId);

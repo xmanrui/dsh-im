@@ -158,7 +158,7 @@ See the [Proactive Delivery Guide](PROACTIVE_DELIVERY.en.md) ([简体中文](PRO
 | Command | Description |
 | --- | --- |
 | `/help` | Show the commands and usage supported by the bot. |
-| `/menu`, `/m` | Open the Feishu or Enterprise WeChat interactive menu. WeCom provides native dropdowns for sessions, models, presets and workspaces, plus buttons for applying selections, new sessions, stop, compact, status and help. It also opens on the daily direct-chat entry event. |
+| `/menu`, `/m` | Open the Feishu, DingTalk or Enterprise WeChat interactive menu. DingTalk arranges session, workspace, preset and model dropdowns in two columns; selections apply immediately and update the same card. WeCom requires Apply after selecting and also opens on the daily direct-chat entry event. Menus include new session, stop, compact, status and help buttons. |
 | `/new` | Unbind the current chat so its next ordinary message starts a new Harness Session. |
 | `/status` | Check the connection between the current bot and DeepSeek Harness. |
 | `/version` | Show the version of the running dsh-im plugin. |
@@ -192,6 +192,8 @@ See the [Proactive Delivery Guide](PROACTIVE_DELIVERY.en.md) ([简体中文](PRO
 ### Command details
 
 [Read the command details](docs/bot-commands.md)
+
+DingTalk menus use a shared template built into the plugin; no template setup is needed for each bot. A menu stays active for 30 minutes. Send `/m` again after expiry or a Host restart. Maintainers can import `assets/dingtalk-menu-template.json` into DingTalk's card platform to maintain the template.
 
 ## Other features
 

@@ -169,8 +169,9 @@ test('runtime owns one DWClient, waits for socket OPEN, acknowledges first, and 
   assert.equal(started.ready, true);
   assert.equal(started.dingtalkStreamState, 'connected');
   assert.deepEqual(started.pendingSenders, []);
-  assert.deepEqual(order.slice(0, 3), [
+  assert.deepEqual(order.slice(0, 4), [
     ['harness-ready'],
+    ['register', '/v1.0/card/instances/callback'],
     ['register', 'robot-topic'],
     ['connect'],
   ]);
@@ -196,6 +197,56 @@ test('runtime owns one DWClient, waits for socket OPEN, acknowledges first, and 
   assert.deepEqual(order.at(-1), ['disconnect']);
   assert.equal(runtime.status.ready, false);
   assert.equal(runtime.status.dingtalkStreamState, 'idle');
+});
+
+test('runtime acknowledges a card callback before applying it and ignores callbacks after stop', async () => {
+  const state = stateFixture();
+  await state.setSession('p2p:staff-approved', 'session-before');
+  const listeners = new Map();
+  const acknowledgements = [];
+  const cards = [];
+  const updates = [];
+  const client = {
+    connected: true, socket: { readyState: 1 },
+    registerCallbackListener: (topic, listener) => listeners.set(topic, listener),
+    async connect() {}, disconnect() {},
+    socketCallBackResponse: (id) => acknowledgements.push(id),
+  };
+  const runtime = new DingtalkRuntime({
+    config: { clientId: 'ding-client', approvedSenders: [{ staffId: 'staff-approved' }] },
+    clientSecret: 'secret', state,
+    harness: { ensureRunning: async () => true, currentWorkspace: () => process.cwd() },
+    api: {
+      sendText: async () => assert.fail('card actions should update the same card'),
+      createMenuCard: async (request) => { cards.push(request); return { cardInstanceId: 'menu-card' }; },
+      updateMenuCard: async (request) => updates.push(request),
+    },
+    streamFactory: async () => ({ client, topic: 'robot-topic' }),
+  });
+  await runtime.start();
+  listeners.get('robot-topic')({ headers: { messageId: 'open-envelope' }, data: JSON.stringify({
+    msgId: 'open-menu', msgtype: 'text', text: { content: '/m' },
+    conversationType: '1', senderStaffId: 'staff-approved',
+    sessionWebhook: 'https://oapi.dingtalk.com/robot/reply?ticket=menu',
+  }) });
+  await eventually(() => cards.length === 1);
+  const callback = { headers: { messageId: 'card-envelope' }, data: JSON.stringify({
+    outTrackId: 'menu-card', userId: 'staff-approved',
+    content: JSON.stringify({ cardPrivateData: { actionIds: ['new'], params: {
+      revision: cards[0].data.revision,
+    } } }),
+  }) };
+  const onCard = listeners.get('/v1.0/card/instances/callback');
+  onCard(callback);
+  assert.equal(acknowledgements.at(-1), 'card-envelope');
+  assert.equal(state.sessionFor('p2p:staff-approved'), 'session-before');
+  await eventually(() => updates.length === 1);
+  assert.equal(state.sessionFor('p2p:staff-approved'), null);
+  assert.equal(updates[0].cardInstanceId, 'menu-card');
+  await runtime.stop();
+  onCard({ ...callback, headers: { messageId: 'after-stop' } });
+  assert.equal(acknowledgements.includes('after-stop'), false);
+  assert.equal(updates.length, 1);
 });
 
 test('runtime sends visible-scope messages to Harness without local sender approval', async () => {

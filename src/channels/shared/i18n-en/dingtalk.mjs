@@ -5,6 +5,11 @@ export default {
   '已连接 DeepSeek Harness，正在思考…': 'Connected to DeepSeek Harness, thinking…',
 
   '钉钉机器人已连接 DeepSeek Harness。': 'The DingTalk bot is connected to DeepSeek Harness.',
+  '/m 或 /menu  打开下拉操作菜单': '/m or /menu  Open the dropdown action menu',
+  '会话或工作区已变化，请重新发送 /m。': 'The session or workspace changed. Send /m again.',
+  '会话或工作区已变化，菜单已刷新，请重新选择。': 'The session or workspace changed. The menu was refreshed; please select again.',
+  '当前任务尚未结束，请先停止任务或等待完成后再操作。': 'A task is still running. Stop it or wait until it finishes before making changes.',
+  '操作未完成，请重新发送 /m 后重试。': 'The action did not complete. Send /m again and retry.',
 
 
 

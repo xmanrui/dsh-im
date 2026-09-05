@@ -3,6 +3,7 @@ import { extname } from 'node:path';
 
 import { fetchImageBuffer, ImagePromptError } from '../shared/image-prompt.mjs';
 import { t } from '../shared/i18n.mjs';
+import { DINGTALK_MENU_TEMPLATE_ID, dingtalkMenuCardData } from './dingtalk-menu.mjs';
 
 export const DINGTALK_REGISTRATION_BASE_URL = 'https://oapi.dingtalk.com/';
 export const DINGTALK_API_BASE_URL = 'https://api.dingtalk.com/';
@@ -874,6 +875,38 @@ export function createDingtalkApi({
           { cause: error },
         );
       }
+    },
+
+    async createMenuCard({ clientId, clientSecret, target, data, signal }) {
+      const normalizedTarget = normalizeCardTarget(target);
+      const token = await accessToken({ clientId, clientSecret, signal });
+      const cardInstanceId = `dsh_menu_${randomUUID()}`;
+      const headers = { 'x-acs-dingtalk-access-token': token };
+      await cardRequest('v1.0/card/instances/createAndDeliver', {
+        body: {
+          ...cardDeliverBody(cardInstanceId, normalizedTarget, clientId),
+          cardTemplateId: DINGTALK_MENU_TEMPLATE_ID,
+          outTrackId: cardInstanceId,
+          cardData: dingtalkMenuCardData(data),
+          callbackType: 'STREAM',
+          imGroupOpenSpaceModel: { supportForward: false },
+          imRobotOpenSpaceModel: { supportForward: false },
+        },
+        headers, signal, action: '菜单卡片创建',
+      });
+      return { cardInstanceId };
+    },
+
+    async updateMenuCard({ clientId, clientSecret, cardInstanceId, data, signal }) {
+      if (!nonEmptyString(cardInstanceId)) throw new TypeError('cardInstanceId is required');
+      const token = await accessToken({ clientId, clientSecret, signal });
+      await cardRequest('v1.0/card/instances', {
+        method: 'PUT',
+        body: { outTrackId: cardInstanceId, cardData: dingtalkMenuCardData(data),
+          cardUpdateOptions: { updateCardDataByKey: true } },
+        headers: { 'x-acs-dingtalk-access-token': token }, signal, action: '菜单卡片更新',
+      });
+      return true;
     },
 
     async createAiCard({ clientId, clientSecret, target, initialText, signal }) {

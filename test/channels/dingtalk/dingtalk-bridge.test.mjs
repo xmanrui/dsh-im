@@ -2798,3 +2798,74 @@ test('DingTalk group batch commands are rejected without reaching Harness', asyn
   assert.equal(asks, 0);
   assert.match(sent.at(-1), /仅支持私聊/);
 });
+
+test('native menu selects exact session without a second message and updates the same card', async () => {
+  const fixture = stateFixture();
+  const cards = [];
+  const updates = [];
+  const sent = [];
+  const accessPolicy = directAccessPolicy({ users: [{ id: 'staff-approved', canExecuteCommands: true }] });
+  const harness = {
+    currentWorkspace: () => process.cwd(),
+    listWorkspaces: async () => [process.cwd()],
+    listWorkspaceSessions: async () => ({ sessions: [{ sessionId: 'session-a', title: 'Existing session' }] }),
+    bindWorkspaceSession: async (key, sessionId) => {
+      fixture.sessions.set(key, sessionId);
+      return { sessionId, title: 'Existing session', workspace: process.cwd() };
+    },
+    agentPresetSettings: async () => ({ agentPresetCatalog: { items: [{ id: '123', label: 'Numeric preset' }] } }),
+    listModels: async () => ({ groups: [{ id: 'deepseek', models: [{ id: 'flash', name: 'Flash' }] }], current: { provider: 'deepseek', model: 'flash' } }),
+    ask: async () => assert.fail('menu must not reach the model'),
+  };
+  const bridge = new DingtalkHarnessBridge({
+    api: {
+      sendText: async ({ text }) => sent.push(text),
+      createMenuCard: async (args) => { cards.push(args); return { cardInstanceId: 'menu-one' }; },
+      updateMenuCard: async (args) => updates.push(args),
+    },
+    clientId: 'client', clientSecret: 'secret', harness, state: fixture.state,
+    accessPolicy, logger: { warn() {}, info() {} },
+  });
+  await bridge.accept(message('open-menu', '/m'));
+  assert.equal(cards.length, 1);
+  assert.deepEqual(cards[0].data.session_options.map(x => x.text.zh_CN), ['新会话', 'Existing session']);
+  assert.equal(cards[0].data.model_index, 0);
+  const callback = {
+    outTrackId: 'menu-one', userId: 'staff-approved',
+    content: JSON.stringify({ cardPrivateData: { actionIds: ['session'], params: {
+      revision: cards[0].data.revision, session: { index: 1, value: '1' },
+    } } }),
+  };
+  await bridge.acceptCard({ ...callback, userId: 'another-user' }, 'wrong-user');
+  await bridge.acceptCard({ ...callback, content: '{' }, 'malformed');
+  assert.equal(updates.length, 0);
+  await bridge.acceptCard(callback, 'select-session');
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].cardInstanceId, 'menu-one');
+  assert.equal(fixture.state.sessionFor('p2p:staff-approved'), 'session-a');
+  assert.equal(updates[0].data.session_index, 1);
+  assert.equal(cards.length, 1);
+  assert.equal(sent.length, 0);
+  await bridge.acceptCard(callback, 'select-session');
+  await bridge.acceptCard(callback, 'stale-revision');
+  assert.equal(updates.length, 1);
+
+  const freshCallback = (action) => ({ ...callback, content: JSON.stringify({ cardPrivateData: {
+    actionIds: [action], params: { revision: updates.at(-1).data.revision },
+  } }) });
+  fixture.sessions.set('p2p:staff-approved', 'session-changed-elsewhere');
+  await bridge.acceptCard(freshCallback('new'), 'changed-session');
+  assert.equal(fixture.state.sessionFor('p2p:staff-approved'), 'session-changed-elsewhere');
+  assert.match(updates.at(-1).data.notice, /菜单已刷新/);
+
+  await bridge.accept(message('start-batch', '/batch'));
+  await bridge.acceptCard(freshCallback('new'), 'busy-batch');
+  assert.equal(fixture.state.sessionFor('p2p:staff-approved'), 'session-changed-elsewhere');
+  assert.match(updates.at(-1).data.notice, /当前任务尚未结束/);
+  await bridge.accept(message('cancel-batch', '/cancel'));
+
+  accessPolicy.getSettings().direct.allowlist.users[0].canExecuteCommands = false;
+  await bridge.acceptCard(freshCallback('new'), 'revoked-permission');
+  assert.equal(fixture.state.sessionFor('p2p:staff-approved'), 'session-changed-elsewhere');
+  assert.deepEqual(updates.at(-1).data, { notice: COMMAND_PERMISSION_DENIED_MESSAGE });
+});
