@@ -8028,7 +8028,7 @@ test('overlapping live and compensation processors push the answer exactly once'
   const turnEnd = { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } };
   listener.onSessionEvent({ sessionId: 'session-timeout', event: turnEnd });
   listener.onReconnect();
-  await eventually(() => historyReads >= 2, 'both processors must reach the history read');
+  await eventually(() => historyReads === 1, 'the first processor must reach the history read');
   historyGate.resolve();
   await bridge.waitForIdle();
 
@@ -8047,7 +8047,7 @@ test('a failed deferred push rolls the claim back and allows a retry', async () 
   const failNow = { value: true };
   const client = {
     im: { v1: { message: { create: async (request) => {
-      if (failNow.value) throw new Error('rate limited');
+      if (failNow.value) throw Object.assign(new Error('rate limited'), { status: 429 });
       sent.push(JSON.parse(request.data.content).text);
       return { code: 0, data: { message_id: `om_${sent.length}` } };
     } } } },

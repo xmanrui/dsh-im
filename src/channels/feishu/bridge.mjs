@@ -56,11 +56,7 @@ import {
   workspacePathSnapshot,
 } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
-import {
-  createDeferredDeliveryRegistry,
-  extractCompletedTurnAnswer,
-  terminalOutcomeOf,
-} from '../shared/deferred-delivery.mjs';
+import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
 import { deliverOutboundArtifacts } from '../shared/semantic/artifact-delivery.mjs';
 import {
@@ -510,12 +506,7 @@ export class FeishuHarnessBridge {
   #cardKeys = new Map();
   /** The global event-mux watcher (one per bridge). */
   #eventWatcher = null;
-  /** Lazily built deferred-delivery registry over the state store. */
-  #deferredRegistryInstance = null;
-  /** In-memory terminal-frame claims: entry id → claimed end seq. */
-  #deferredClaims = new Map();
-  /** Delay between history-lag retries for a completed terminal frame. */
-  #deferredRetryDelayMs = 300;
+  #deferred;
   /** Serializes completion work per session without blocking unrelated sessions. */
   #eventTails = new Map();
   /** Coalesces baseline compensation and records whether a trailing pass is needed. */
@@ -592,12 +583,15 @@ export class FeishuHarnessBridge {
     this.#approvals = new HarnessApprovalQueue({ label: 'Feishu', logger });
     this.#signal = signal;
     ensureStatus(this.#status);
+    this.#deferred = createDeferredDeliveryCoordinator({
+      harness, state, signal, logger, watch: false,
+      deliver: (entry, outcome) => this.#deliverDeferredOutcome(entry, outcome),
+    });
     // Persisted watches must resume at runtime start, not on the first
     // message. Older hosts without the mux watcher simply skip this.
     if (typeof this.#harness?.watchHarnessEvents === 'function') {
       queueMicrotask(() => {
         this.#ensureEventWatcher();
-        this.#resumeDeferredDeliveries();
       });
     }
   }
@@ -1142,6 +1136,7 @@ export class FeishuHarnessBridge {
     // Drain to a fixed point: awaited work can register compensation or
     // another serialized tail before it settles.
     for (;;) {
+      await this.#deferred.whenIdle();
       const tasks = [
         ...this.#queues.values(),
         ...[...this.#pendingInteractions.values()].flatMap((pending) => (
@@ -1155,6 +1150,7 @@ export class FeishuHarnessBridge {
       ];
       if (tasks.length === 0) return;
       await Promise.allSettled(tasks);
+      await this.#deferred.whenIdle();
       if (this.#queues.size === 0
         && this.#interactionTasks.size === 0
         && this.#commandTasks.size === 0
@@ -1189,18 +1185,12 @@ export class FeishuHarnessBridge {
         signal: this.#signal,
         isDirect: event.message.chat_type === 'p2p',
         hasImages: hasInboundImages(message),
+        deferredDelivery: this.#deferred,
         hasFiles: hasInboundFiles(message),
         pendingInteraction: this.#hasPendingInteraction(key),
         control: { owner: this, key },
       },
     );
-    // A timed-out background turn released its ownership, so /stop finds no
-    // active turn — fall through to cancelling pending deferred sessions.
-    if (runner === runControlCommand
-      && result?.stopped !== true
-      && /^\/stop$/iu.test(nonEmptyString(message.content) ?? '')) {
-      if (await this.#stopDeferredFor(key)) result = this.#deferredStopResult();
-    }
     if (result?.stopped) {
       await Promise.allSettled([
         this.#cancelPendingInteraction(key),
@@ -2847,58 +2837,6 @@ export class FeishuHarnessBridge {
     }
   }
 
-  #deferredStopResult() {
-    const notice = t('已请求停止后台任务。');
-    return { message: notice, messages: [notice], stopped: true };
-  }
-
-  /** Cancel background sessions with pending deferred entries for one key. */
-  async #stopDeferredFor(key) {
-    if (typeof this.#state.deferredEntries !== 'function') return false;
-    const entries = await this.#deferredRegistry().pendingForKey(key);
-    if (entries.length === 0) return false;
-    let cancelledAny = false;
-    for (const entry of entries) {
-      try {
-        // 绑定闸门：会话切走后，旧会话不再受当前聊天的 /stop 控制。
-        if (this.#state.sessionFor(entry.key) !== entry.sessionId) {
-          await this.#deferredRegistry().remove(entry);
-          continue;
-        }
-        // 回合身份核验：目标回合已终态就绝不再取消——改为补投其结果，
-        // 避免误停同一 Session 上后续正在运行的回合。
-        const history = await this.#harness.rpc(
-          'session.history',
-          { sessionId: entry.sessionId, maxMessages: 50 },
-          30_000,
-          { signal: this.#signal },
-        );
-        const outcome = extractCompletedTurnAnswer(
-          orderedHistoryEvents(history),
-          { turn: Number.isSafeInteger(entry.turn) ? entry.turn : undefined },
-        );
-        if (outcome.endSeq !== -1 && outcome.endSeq > entry.afterSeq) {
-          const result = await this.#processDeferredEntry(entry, {
-            endSeq: outcome.endSeq,
-            outcome: outcome.found ? outcome : { found: false, reason: outcome.reason },
-          });
-          if (result === 'delivered') await this.#deferredRegistry().remove(entry);
-          continue;
-        }
-        const session = this.#harness.workspaceSession?.(entry.sessionId);
-        if (typeof session?.stopDeferredTurn !== 'function') continue;
-        const stopped = await session.stopDeferredTurn(
-          { turn: entry.turn, promptRpcId: entry.promptRpcId },
-          { signal: this.#signal, isCurrent: () => this.#state.sessionFor(entry.key) === entry.sessionId },
-        );
-        cancelledAny ||= stopped === true;
-      } catch (error) {
-        this.#logger.warn?.('[dsh-feishu] deferred stop failed:', error.message);
-      }
-    }
-    return cancelledAny;
-  }
-
   /**
    * Stop the running task in the bound session (mirrors `/stop`).
    */
@@ -2910,9 +2848,6 @@ export class FeishuHarnessBridge {
           control: { owner: this, key },
         },
       );
-      if (result?.stopped !== true) {
-        if (await this.#stopDeferredFor(key)) result = this.#deferredStopResult();
-      }
       if (result?.stopped) {
         await Promise.allSettled([
           this.#cancelPendingInteraction(key),
@@ -3030,134 +2965,17 @@ export class FeishuHarnessBridge {
 
   // ── Deferred delivery (MODEL_REPLY_TIMEOUT → late result push) ──────────
 
-  #deferredRegistry() {
-    this.#deferredRegistryInstance ??= createDeferredDeliveryRegistry({
-      listDeferred: async () => this.#state.deferredEntries?.() ?? [],
-      putDeferred: (entry) => this.#state.putDeferred(entry),
-      patchDeferred: (id, patch) => this.#state.patchDeferred(id, patch),
-      removeDeferred: (id) => this.#state.removeDeferred(id),
-    }, { logger: this.#logger });
-    return this.#deferredRegistryInstance;
-  }
-
-  /** Register a late-delivery entry after a reply timeout; hydrate immediately. */
-  async #registerDeferredDelivery(error, { key, chatId, messageId }) {
-    try {
-      if (error?.code !== 'harness-reply-timeout') return;
-      const sessionId = this.#state.sessionFor(key);
-      if (!sessionId) return;
-      const entry = await this.#deferredRegistry().register({
-        key,
-        chatId,
-        replyToMessageId: messageId,
-        sessionId,
-        turn: Number.isSafeInteger(error?.details?.turn) ? error.details.turn : null,
-        promptRpcId: error?.details?.promptRpcId ?? null,
-        afterSeq: Number.isSafeInteger(error?.details?.lastSeq) ? error.details.lastSeq : -1,
-      });
-      await this.#hydrateDeferredEntry(entry);
-    } catch (registrationError) {
-      if (!this.#signal?.aborted) {
-        this.#logger.warn?.(
-          '[dsh-feishu] deferred delivery registration failed:',
-          registrationError.message,
-        );
-      }
+  async #deliverDeferredOutcome(entry, outcome) {
+    this.#rememberTopicReply(entry.replyToMessageId, entry.key);
+    if (entry.key === managedGroupKey(entry.chatId, entry.replyToMessageId)) {
+      this.#rememberTopicRoot(entry.replyToMessageId);
     }
-  }
-
-  /** Hydrate one entry from durable history; returns the processing result. */
-  async #hydrateDeferredEntry(entry) {
-    const history = await this.#harness.rpc(
-      'session.history',
-      { sessionId: entry.sessionId, maxMessages: 50 },
-      30_000,
-      { signal: this.#signal },
-    );
-    const outcome = extractCompletedTurnAnswer(orderedHistoryEvents(history), {
-      turn: Number.isSafeInteger(entry.turn) ? entry.turn : undefined,
-    });
-    // Any terminal frame the ask loop never consumed (seq beyond afterSeq) is
-    // the delivery trigger: completed carries the answer, stopped/failed carry
-    // the status notice. No terminal frame yet → keep waiting. A persisted
-    // lastSeenEndSeq left by a crashed process is not a delivery receipt.
-    if (outcome.endSeq === -1 || outcome.endSeq <= entry.afterSeq) return 'waiting';
-    const result = await this.#processDeferredEntry(entry, {
-      endSeq: outcome.endSeq,
-      outcome: outcome.found ? outcome : { found: false, reason: outcome.reason },
-    });
-    if (result === 'delivered') await this.#deferredRegistry().remove(entry);
-    return result;
-  }
-
-  /**
-   * Gates + delivery for one deferred entry at one terminal point.
-   * Returns 'delivered' | 'gate-dropped' | 'retry' | 'abandoned' | 'duplicate'.
-   */
-  async #processDeferredEntry(entry, { endSeq, outcome }) {
-    const claimed = this.#deferredClaims.get(entry.id);
-    if (claimed !== undefined && endSeq <= claimed) return 'duplicate';
-    // Atomic check-and-claim with no await in between: overlapping processors
-    // (startup resume vs. live mux frames) cannot both pass this point. The
-    // claim is in-memory only — a claimed-but-unsent entry left behind by a
-    // crashed process must be re-delivered after restart, never skipped.
-    this.#deferredClaims.set(entry.id, endSeq);
-    try {
-      // A slower history RPC may still hold a snapshot already delivered by
-      // another processor. Re-read under the claim, and keep it through removal.
-      const current = (await this.#deferredRegistry().pendingForSession(entry.sessionId))
-        .find((candidate) => candidate.id === entry.id);
-      if (!current) return 'duplicate';
-      entry = current;
-      if (this.#state.sessionFor(entry.key) !== entry.sessionId) {
-        // 绑定闸门：会话切走后不再打扰，结果保留在 Session 历史（/history 可查）。
-        await this.#deferredRegistry().remove(entry);
-        return 'gate-dropped';
-      }
-      // Restore topic intent from the persisted key: the in-memory anchor
-      // cache does not survive restarts (mirrors the watch completion path).
-      this.#rememberTopicReply(entry.replyToMessageId ?? null, entry.key);
-      if (entry.key === managedGroupKey(entry.chatId, entry.replyToMessageId)) {
-        this.#rememberTopicRoot(entry.replyToMessageId);
-      }
-      const delivered = await this.#pushDeferredOutcome(entry, outcome);
-      if (!delivered) {
-        // Roll the claim back so a later retry can still push for this frame.
-        this.#deferredClaims.delete(entry.id);
-        const attempts = await this.#deferredRegistry().markFailedAttempt(entry);
-        return attempts >= 3 ? 'abandoned' : 'retry';
-      }
-      await this.#deferredRegistry().remove(entry);
-      return 'delivered';
-    } finally {
-      if (this.#deferredClaims.get(entry.id) === endSeq) this.#deferredClaims.delete(entry.id);
+    const text = deferredOutcomeText(outcome);
+    if (outcome.found) {
+      return this.#deliverDeferredText(entry.chatId, answerTextForDelivery(text, []), entry.replyToMessageId);
     }
-  }
-
-  async #pushDeferredOutcome(entry, outcome) {
-    if (outcome.found && outcome.text) {
-      return this.#deliverDeferredText(
-        entry.chatId,
-        answerTextForDelivery(outcome.text, []),
-        entry.replyToMessageId,
-      );
-    }
-    const status = outcome.reason ?? 'ended';
-    const reasonText = status === 'stopped' ? t('已停止')
-      : status === 'aborted' || status === 'cancelled' ? t('已中止')
-        : status === 'failed' ? t('任务失败')
-          : t('已结束');
-    try {
-      await this.#send(
-        entry.chatId,
-        t('后台任务已结束（{reason}），没有可推送的最终结果。', { reason: reasonText }),
-        entry.replyToMessageId ? { replyTo: entry.replyToMessageId } : {},
-      );
-      return true;
-    } catch (error) {
-      this.#logger.warn?.('[dsh-feishu] deferred status delivery failed:', error.message);
-      return false;
-    }
+    await this.#send(entry.chatId, text, { replyTo: entry.replyToMessageId });
+    return true;
   }
 
   async #deliverDeferredText(chatId, markdownText, replyToMessageId) {
@@ -3180,6 +2998,7 @@ export class FeishuHarnessBridge {
         });
         return true;
       } catch (error) {
+        if (error?.deliveryOutcome === 'unknown') throw error;
         this.#logger.warn?.(
           '[dsh-feishu] deferred stream delivery failed; falling back to text:',
           error.message,
@@ -3195,60 +3014,7 @@ export class FeishuHarnessBridge {
       return true;
     } catch (error) {
       this.#logger.warn?.('[dsh-feishu] deferred text delivery failed:', error.message);
-      return false;
-    }
-  }
-
-  /** Restart/reconnect compensation: re-hydrate every pending deferred entry. */
-  #resumeDeferredDeliveries() {
-    if (this.#signal?.aborted) return;
-    void (async () => {
-      const entries = await this.#deferredRegistry().allPending();
-      for (const entry of entries) {
-        if (this.#signal?.aborted) return;
-        try {
-          await this.#hydrateDeferredEntry(entry);
-        } catch (error) {
-          this.#logger.warn?.('[dsh-feishu] deferred resume failed:', error.message);
-        }
-      }
-    })();
-  }
-
-  /** Deliver deferred entries whose turn just reached its terminal state. */
-  async #processDeferredTurnEnd(sessionId, event, attempt = 0) {
-    const entries = await this.#deferredRegistry().pendingForSession(sessionId);
-    if (entries.length === 0) return;
-    const endTurn = Number.isSafeInteger(event.data?.turn) ? event.data.turn : null;
-    const history = await this.#harness.rpc(
-      'session.history',
-      { sessionId, maxMessages: 50 },
-      30_000,
-      { signal: this.#signal },
-    );
-    const events = orderedHistoryEvents(history);
-    for (const entry of entries) {
-      if (Number.isSafeInteger(entry.turn) && endTurn !== null && entry.turn !== endTurn) continue;
-      const targetTurn = endTurn ?? (Number.isSafeInteger(entry.turn) ? entry.turn : undefined);
-      const outcome = extractCompletedTurnAnswer(events, { turn: targetTurn });
-      if (!outcome.found && outcome.endSeq === -1) {
-        // The history projection lags the mux: keep the entry and re-check
-        // shortly instead of announcing a result that may still arrive.
-        if (attempt < 5) {
-          void this.#queueEventTask(sessionId, async () => {
-            await new Promise((resolve) => setTimeout(resolve, this.#deferredRetryDelayMs));
-            await this.#processDeferredTurnEnd(sessionId, event, attempt + 1);
-          });
-        }
-        continue;
-      }
-      const result = await this.#processDeferredEntry(entry, {
-        endSeq: event.seq,
-        outcome: outcome.found
-          ? outcome
-          : { found: false, reason: outcome.endSeq !== -1 ? outcome.reason : terminalOutcomeOf(event).kind },
-      });
-      if (result === 'delivered') await this.#deferredRegistry().remove(entry);
+      throw error;
     }
   }
 
@@ -3263,7 +3029,7 @@ export class FeishuHarnessBridge {
         onSessionEvent: (payload) => this.#onHarnessEvent(payload),
         onReconnect: () => {
           void this.#compensateMissedEvents();
-          void this.#resumeDeferredDeliveries();
+          void this.#deferred.resume();
         },
       });
       Promise.resolve(this.#eventWatcher).catch((error) => {
@@ -3622,7 +3388,7 @@ export class FeishuHarnessBridge {
         .some((key) => this.#failedWatchSeqs.has(`${key}\0${sessionId}`));
       if (needsBaseline || hasFailedDelivery) await this.#compensateSession(sessionId);
       await this.#deliverCompletion(sessionId, event);
-      await this.#processDeferredTurnEnd(sessionId, event);
+      await this.#deferred.onEvent({ sessionId, event });
     });
   }
 
@@ -3837,21 +3603,7 @@ export class FeishuHarnessBridge {
     };
   }
 
-  async #answerWithStream(event, key, message, options = {}) {
-    try {
-      return await this.#answerWithStreamInner(event, key, message, options);
-    } catch (error) {
-      // Fire-and-forget: registration must never alter the failure contract.
-      void this.#registerDeferredDelivery(error, {
-        key,
-        chatId: event.message.chat_id,
-        messageId: event.message.message_id,
-      });
-      throw error;
-    }
-  }
-
-  async #answerWithStreamInner(event, key, message, { onAskComplete } = {}) {
+  async #answerWithStream(event, key, message, { onAskComplete } = {}) {
     const chatId = event.message.chat_id;
     const messageId = event.message.message_id;
     const text = message.content;
@@ -3878,6 +3630,7 @@ export class FeishuHarnessBridge {
     }
     if (!this.#channel?.stream) {
       const { answer, artifacts = [] } = await askInWorkspaceSession({
+        deferredDelivery: () => ({ coordinator: this.#deferred, chatId, replyToMessageId: messageId }),
         harness: this.#harness,
         state: this.#state,
         key,
@@ -3948,6 +3701,7 @@ export class FeishuHarnessBridge {
             },
           };
           const completed = await askInWorkspaceSession({
+            deferredDelivery: () => ({ coordinator: this.#deferred, chatId, replyToMessageId: messageId }),
             harness: this.#harness,
             state: this.#state,
             key,
@@ -4017,6 +3771,7 @@ export class FeishuHarnessBridge {
 
       this.#logger.warn?.('[dsh-feishu] native stream unavailable; using text fallback:', error.message);
       const { answer, artifacts = [] } = await askInWorkspaceSession({
+        deferredDelivery: () => ({ coordinator: this.#deferred, chatId, replyToMessageId: messageId }),
         harness: this.#harness,
         state: this.#state,
         key,

@@ -1,3 +1,4 @@
+import { deferredStateAccess, normalizeDeferredState } from '../shared/deferred-state.mjs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -75,6 +76,7 @@ function normalizeState(value) {
   return {
     version: 1,
     sessions,
+    ...(value.deferred ? { deferred: normalizeDeferredState(value.deferred) } : {}),
     seenMessageIds: Array.isArray(value.seenMessageIds)
       ? value.seenMessageIds.filter((id) => typeof id === 'string').slice(-1_000)
       : [],
@@ -87,6 +89,7 @@ export class WeixinStateStore {
   #path;
   #state = structuredClone(EMPTY_STATE);
   #writeQueue = Promise.resolve();
+  #deferred = deferredStateAccess(() => this.#state, () => this.#persist());
 
   constructor(path) {
     this.#path = path;
@@ -102,6 +105,11 @@ export class WeixinStateStore {
     }
     return this;
   }
+
+  deferredEntries() { return this.#deferred.entries(); }
+  putDeferred(entry) { return this.#deferred.put(entry); }
+  patchDeferred(id, patch) { return this.#deferred.patch(id, patch); }
+  removeDeferred(id) { return this.#deferred.remove(id); }
 
   sessionFor(key) {
     return this.#state.sessions[key] ?? null;

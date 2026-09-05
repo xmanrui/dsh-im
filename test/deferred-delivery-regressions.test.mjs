@@ -65,14 +65,16 @@ test('V2: a slow compensation snapshot must not re-send an already consumed entr
   };
   f.listeners[0].onReconnect();
   await until(() => reads === 1);
-  // Reconnect has an entry snapshot, but its RPC is slower than the live path.
+  // Live events queue behind the slow reconnect, then re-read the pending row.
   f.listeners[0].onSessionEvent({ sessionId, event: end });
+  await sleep(10);
+  assert.equal(reads, 1);
+  assert.equal(f.sent.length, 0);
+  slowHistory.resolve();
   await f.bridge.waitForIdle();
   assert.equal(f.sent.length, 1);
   assert.equal(f.state.deferredEntries().length, 0);
-  slowHistory.resolve();
-  await sleep(40);
-  assert.equal(f.sent.length, 1, 'slow compensation must re-check whether its snapshot is still pending');
+  assert.equal(reads, 1, 'queued events must not re-read a consumed entry');
 });
 
 test('V2: /stop must not cancel a newer turn started between history and run-state checks', async (t) => {

@@ -62,6 +62,12 @@ Other IM platforms can be added through the same channel-adapter structure.
 
 All nine built-in channels can send JPEG, PNG, and WebP images, plus GIFs sent as image files, with optional captions to Harness. Each image is limited to 5 MB, and images in one message are limited to 20 MB in total. Downloading images or files from Feishu user messages requires the `im:message:readonly` tenant scope, shown on the confirmation page as **Read direct and group messages**; Feishu currently offers no narrower image-only scope for that download endpoint. Apps created through the built-in QR flow request it by default; for existing or manually connected apps, click **Complete permissions** on the IM Bot settings page and scan the QR code to incrementally add that scope, `im:resource` for uploading bot-sent images or files, `application:app_slash_command:read` / `write` for the native command panel, and the card callback.
 
+### Results after a reply timeout
+
+All nine channels share deferred task tracking. After a model reply timeout, the plugin keeps checking the original task and delivers its final text to the original chat or thread. Checks resume after a plugin restart or reconnection. `/stop` only stops the matching turn submitted by that chat; changing the bound Session prevents old results from being delivered there. No new setting is required, and normal replies keep their existing flow.
+
+Channel permissions and quotas still apply. Definite send failures allow up to three attempts; uncertain delivery is retained without automatic retries to avoid duplicate messages. Recovery covers final text and terminal notices, without replaying questions, approvals, or file-tool calls. See the [deferred delivery notes](docs/deferred-delivery.md).
+
 ### Result-file and image delivery
 
 All nine built-in channels can return any file readable by Harness as a native channel attachment. Existing files and files created by the current task can both be sent directly. The capability is available to every connected bot by default, with no switch or per-bot allowlist, while existing text, image, streaming, command, and Session behavior remains unchanged.
