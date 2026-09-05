@@ -850,11 +850,17 @@ test('WhatsApp open mode answers linked-account group messages without processin
 
   assert.equal(askCount, 1);
   const textSends = sent.filter(({ content }) => typeof content.text === 'string');
-  assert.equal(textSends.length, 1);
+  assert.equal(textSends.length, 2);
   assert.equal(textSends[0].jid, groupJid);
-  assert.equal(textSends[0].content.text, 'Harness group answer');
+  assert.equal(textSends[0].content.text, '正在处理…');
   assert.equal(textSends[0].options.quoted, inbound);
   assert.match(textSends[0].options.messageId, /^[0-9A-F]{20}$/);
+  assert.equal(textSends[1].jid, groupJid);
+  assert.equal(textSends[1].content.text, 'Harness group answer');
+  assert.deepEqual(textSends[1].content.edit, {
+    remoteJid: groupJid, fromMe: true, id: textSends[0].options.messageId,
+  });
+  assert.equal(textSends[1].options.quoted, undefined);
   const reactionSends = sent.filter(({ content }) => content.react);
   assert.deepEqual(reactionSends.map(({ content }) => content.react.text), ['👀', '']);
   assert.equal(reactionSends.every(({ jid }) => jid === groupJid), true);
@@ -1417,7 +1423,13 @@ test('WhatsApp runtime answers self-chat without processing its own reply echo',
   assert.equal(askCount, 1);
   assert.deepEqual(
     sent.filter(([, content]) => typeof content.text === 'string'),
-    [[ACCOUNT_JID, { text: 'Harness self-chat answer' }]],
+    [
+      [ACCOUNT_JID, { text: '正在处理…' }],
+      [ACCOUNT_JID, {
+        text: 'Harness self-chat answer',
+        edit: { remoteJid: ACCOUNT_JID, fromMe: true, id: 'bot-reply-1' },
+      }],
+    ],
   );
   const reactionSends = sent.filter(([, content]) => content.react);
   assert.deepEqual(reactionSends.map(([, content]) => content.react.text), ['👀', '']);
