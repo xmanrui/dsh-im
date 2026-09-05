@@ -1168,7 +1168,10 @@ test('a failed liveness probe does not renew a stalled turn', async () => {
       timeoutMs: 120,
       control: { owner: {}, key: 'route' },
     }),
-    (error) => error?.code === 'harness-reply-timeout',
+    (error) => error?.code === 'harness-reply-timeout'
+      // Deferred delivery needs the turn/lastSeq context on the error itself.
+      && error?.details?.turn === 1
+      && error?.details?.lastSeq === 2,
   );
   assert.equal(historyPolls, 2);
   assert.equal(sessionListPolls, 1);

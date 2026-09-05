@@ -6,6 +6,7 @@ const EMPTY_STATE = Object.freeze({
   sessions: {},
   seenMessageIds: [],
   watches: {},
+  deferred: {},
   includeArchivedSessions: false,
   topics: {},
 });
@@ -19,6 +20,17 @@ function validWatchEntry(value) {
     && typeof value === 'object'
     && typeof value.sessionId === 'string' && value.sessionId.length > 0
     && typeof value.chatId === 'string' && value.chatId.length > 0;
+}
+
+/** A persisted deferred-delivery entry (spec: feishu-timeout-deferred-delivery). */
+function validDeferredEntry(value) {
+  return value
+    && typeof value === 'object'
+    && typeof value.id === 'string' && value.id.length > 0
+    && typeof value.key === 'string' && value.key.length > 0
+    && typeof value.chatId === 'string' && value.chatId.length > 0
+    && typeof value.sessionId === 'string' && value.sessionId.length > 0
+    && (value.status === 'pending' || value.status === 'failed');
 }
 
 export class StateStore {
@@ -38,6 +50,7 @@ export class StateStore {
         sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
         seenMessageIds: Array.isArray(parsed.seenMessageIds) ? parsed.seenMessageIds.slice(-1000) : [],
         watches: parsed.watches && typeof parsed.watches === 'object' ? parsed.watches : {},
+        deferred: parsed.deferred && typeof parsed.deferred === 'object' ? parsed.deferred : {},
         includeArchivedSessions: typeof parsed.includeArchivedSessions === 'boolean'
           ? parsed.includeArchivedSessions
           : false,
@@ -136,6 +149,53 @@ export class StateStore {
       for (const entry of list) if (validWatchEntry(entry)) ids.add(entry.sessionId);
     }
     return [...ids];
+  }
+
+  // ── Deferred delivery (persisted: surviving restarts) ───────────────────
+
+  deferredEntries() {
+    const rows = [];
+    for (const list of Object.values(this.#state.deferred)) {
+      if (Array.isArray(list)) rows.push(...list.filter(validDeferredEntry));
+    }
+    return rows;
+  }
+
+  async putDeferred(entry) {
+    if (!validDeferredEntry(entry)) throw new TypeError('Invalid deferred delivery entry');
+    const list = this.#state.deferred[entry.key] ?? [];
+    const index = list.findIndex((existing) => existing.id === entry.id);
+    if (index === -1) list.push(entry);
+    else list[index] = entry;
+    this.#state.deferred[entry.key] = list;
+    await this.#persist();
+  }
+
+  async patchDeferred(id, patch) {
+    for (const [key, list] of Object.entries(this.#state.deferred)) {
+      if (!Array.isArray(list)) continue;
+      const index = list.findIndex((entry) => entry?.id === id);
+      if (index === -1) continue;
+      const next = { ...list[index], ...patch };
+      if (!validDeferredEntry(next)) throw new TypeError('Invalid deferred delivery patch');
+      list[index] = next;
+      this.#state.deferred[key] = list;
+      await this.#persist();
+      return { ...next };
+    }
+    return null;
+  }
+
+  async removeDeferred(id) {
+    for (const [key, list] of Object.entries(this.#state.deferred)) {
+      if (!Array.isArray(list)) continue;
+      const next = list.filter((entry) => entry?.id !== id);
+      if (next.length === list.length) continue;
+      if (next.length === 0) delete this.#state.deferred[key];
+      else this.#state.deferred[key] = next;
+      await this.#persist();
+      return;
+    }
   }
 
   // ── Managed Feishu topics (thread_id → root message, persisted) ────────
