@@ -261,7 +261,7 @@ IM 管理 RPC 默认仅接受回环浏览器。如果 Web profile 在受信任�
       <a href="mailto:longmanr307@gmail.com">longmanr307@gmail.com</a>
     </td>
     <td align="center" valign="top">
-      <a href="docs/images/wecom.png"><img src="docs/images/wecom.jpg" alt="dsh-im 企业微信群二维码" width="240"></a>
+      <a href="docs/images/wecom.png"><img src="docs/images/wecom.png" alt="dsh-im 企业微信群二维码" width="240"></a>
     </td>
     <td align="center" valign="top">
       <a href="docs/images/weixin.jpg"><img src="docs/images/weixin.jpg" alt="微信二维码" width="240"></a>
