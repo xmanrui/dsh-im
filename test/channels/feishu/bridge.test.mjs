@@ -7708,3 +7708,143 @@ test('reply timeout with an unfinished turn keeps a pending deferred entry', asy
   assert.equal(entry.chatId, 'oc_chat');
   assert.equal(sent.some((text) => text.includes('计算结果')), false);
 });
+
+function deferredEntryFixture({ key = 'p2p:ou_owner', sessionId = 'session-timeout', turn = 3 } = {}) {
+  return {
+    id: `${key} ${sessionId} ${turn ?? 'any'}`,
+    key,
+    chatId: 'oc_chat',
+    replyToMessageId: 'om_inbound',
+    sessionId,
+    turn,
+    afterSeq: 6,
+    lastSeenEndSeq: -1,
+    attempts: 0,
+    status: 'pending',
+    createdAt: 1,
+  };
+}
+
+const deferredAnswerHistory = [
+  { type: 'assistant/message', seq: 7, data: { turn: 3, message: { content: [{ type: 'text', text: '计算结果：42' }] } } },
+  { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } },
+];
+
+test('deferred entries deliver on live turn/end and dedupe repeated frames', async () => {
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-timeout']]);
+  const harness = watchHarness({ history: deferredAnswerHistory });
+  const sent = [];
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async ({ text }) => sent.push(text)),
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await bridge.waitForIdle();
+  await state.putDeferred(deferredEntryFixture());
+
+  const listener = harness._listeners.at(-1);
+  const turnEnd = { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } };
+  listener.onSessionEvent({ sessionId: 'session-timeout', event: turnEnd });
+  await bridge.waitForIdle();
+
+  assert.ok(sent.some((text) => text.includes('计算结果：42')), 'the final answer must be pushed');
+  assert.equal(state.deferredEntries().length, 0, 'the entry must be consumed after delivery');
+
+  listener.onSessionEvent({ sessionId: 'session-timeout', event: turnEnd });
+  await bridge.waitForIdle();
+  assert.equal(
+    sent.filter((text) => text.includes('计算结果：42')).length,
+    1,
+    'a repeated terminal frame must not push twice',
+  );
+});
+
+test('a deferred entry without a turn matches the first terminal frame', async () => {
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-timeout']]);
+  const history = [
+    { type: 'assistant/message', seq: 7, data: { turn: 9, message: { content: [{ type: 'text', text: '后台回答' }] } } },
+    { type: 'turn/end', seq: 8, data: { turn: 9, reason: 'completed' } },
+  ];
+  const harness = watchHarness({ history });
+  const sent = [];
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async ({ text }) => sent.push(text)),
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await bridge.waitForIdle();
+  await state.putDeferred(deferredEntryFixture({ turn: null }));
+
+  harness._listeners.at(-1).onSessionEvent({
+    sessionId: 'session-timeout',
+    event: { type: 'turn/end', seq: 8, data: { turn: 9, reason: 'completed' } },
+  });
+  await bridge.waitForIdle();
+
+  assert.ok(sent.some((text) => text.includes('后台回答')));
+  assert.equal(state.deferredEntries().length, 0);
+});
+
+test('the binding gate drops deferred delivery after the conversation rebinds', async () => {
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-rebound']]);
+  const harness = watchHarness({ history: deferredAnswerHistory });
+  const sent = [];
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async ({ text }) => sent.push(text)),
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await bridge.waitForIdle();
+  await state.putDeferred(deferredEntryFixture());
+
+  harness._listeners.at(-1).onSessionEvent({
+    sessionId: 'session-timeout',
+    event: { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } },
+  });
+  await bridge.waitForIdle();
+
+  assert.equal(sent.some((text) => text.includes('计算结果：42')), false, 'rebound chats must not be pushed');
+  assert.equal(state.deferredEntries().length, 0, 'the gated entry must be cleaned up');
+});
+
+test('a stopped deferred turn pushes a short status notice instead of an answer', async () => {
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-timeout']]);
+  const history = [
+    { type: 'assistant/message', seq: 7, data: { turn: 3, message: { content: [{ type: 'text', text: '半截回答' }] } } },
+    { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'stopped' } } },
+  ];
+  const harness = watchHarness({ history });
+  const sent = [];
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async ({ text }) => sent.push(text)),
+    channel: {},
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await bridge.waitForIdle();
+  await state.putDeferred(deferredEntryFixture());
+
+  harness._listeners.at(-1).onSessionEvent({
+    sessionId: 'session-timeout',
+    event: { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'stopped' } } },
+  });
+  await bridge.waitForIdle();
+
+  assert.ok(
+    sent.some((text) => text.includes('后台任务已结束（已停止）')),
+    'a stopped turn must push the short status notice',
+  );
+  assert.equal(sent.some((text) => text.includes('半截回答')), false, 'no partial answer may leak');
+  assert.equal(state.deferredEntries().length, 0);
+});

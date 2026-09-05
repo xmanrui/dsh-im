@@ -59,6 +59,7 @@ import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
 import {
   createDeferredDeliveryRegistry,
   extractCompletedTurnAnswer,
+  terminalOutcomeOf,
 } from '../shared/deferred-delivery.mjs';
 import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
 import { deliverOutboundArtifacts } from '../shared/semantic/artifact-delivery.mjs';
@@ -3087,6 +3088,32 @@ export class FeishuHarnessBridge {
     }
   }
 
+  /** Deliver deferred entries whose turn just reached its terminal state. */
+  async #processDeferredTurnEnd(sessionId, event) {
+    const entries = await this.#deferredRegistry().pendingForSession(sessionId);
+    if (entries.length === 0) return;
+    const endTurn = Number.isSafeInteger(event.data?.turn) ? event.data.turn : null;
+    const history = await this.#harness.rpc(
+      'session.history',
+      { sessionId, maxMessages: 50 },
+      30_000,
+      { signal: this.#signal },
+    );
+    const events = orderedHistoryEvents(history);
+    for (const entry of entries) {
+      if (Number.isSafeInteger(entry.turn) && endTurn !== null && entry.turn !== endTurn) continue;
+      const targetTurn = endTurn ?? (Number.isSafeInteger(entry.turn) ? entry.turn : undefined);
+      const outcome = extractCompletedTurnAnswer(events, { turn: targetTurn });
+      const result = await this.#processDeferredEntry(entry, {
+        endSeq: event.seq,
+        outcome: outcome.found
+          ? outcome
+          : { found: false, reason: terminalOutcomeOf(event).kind },
+      });
+      if (result === 'delivered') await this.#deferredRegistry().remove(entry);
+    }
+  }
+
   #ensureEventWatcher() {
     if (this.#eventWatcher) return;
     if (typeof this.#harness?.watchHarnessEvents !== 'function') return;
@@ -3456,6 +3483,7 @@ export class FeishuHarnessBridge {
         .some((key) => this.#failedWatchSeqs.has(`${key}\0${sessionId}`));
       if (needsBaseline || hasFailedDelivery) await this.#compensateSession(sessionId);
       await this.#deliverCompletion(sessionId, event);
+      await this.#processDeferredTurnEnd(sessionId, event);
     });
   }
 
