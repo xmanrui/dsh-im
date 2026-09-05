@@ -1,4 +1,8 @@
 import { generateReqId } from '@wecom/aibot-node-sdk';
+import { randomUUID } from 'node:crypto';
+import {
+  parseWecomMenu, wecomList, wecomMenu, wecomMenuText, wecomSettings, wecomTemplateCard,
+} from './wecom-cards.mjs';
 import {
   harnessAnswerForQuestion,
   harnessQuestionText,
@@ -25,7 +29,7 @@ import {
   isPresetCommand,
   runPresetCommand,
 } from '../shared/preset-command.mjs';
-import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
+import { runWorkspaceCommand, workspacePathSnapshot } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
 import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
 import {
@@ -68,6 +72,7 @@ function helpText() {
     t('企业微信机器人已连接 DeepSeek Harness。'),
     '',
     t('直接发送文字、图片或文件即可继续当前会话。'),
+    t('/menu 或 /m  打开可点击的功能菜单'),
     t('/new  开启一个全新会话'),
     t('/compact  压缩当前会话的较早上下文'),
     t('/history [数量]  查看最近历史消息（默认 3 条，最多 5 条）'),
@@ -554,6 +559,9 @@ export class WecomHarnessBridge {
   #approvals;
   #batchInputs = new BatchInputManager();
   #prefetchedImageCount = 0;
+  #menus = new Map();
+  #eventIds = new Set();
+  #cardFrames = new WeakSet();
 
   constructor({
     client,
@@ -593,6 +601,264 @@ export class WecomHarnessBridge {
     return structuredClone(this.#status);
   }
 
+  #mainMenu() {
+    return wecomMenu({
+      workspace: this.#harness.currentWorkspace?.(),
+      workspaces: [[t('更多选项…'), '/menu workspaces']],
+    });
+  }
+
+  async #showMain(frame, { welcome = false } = {}) {
+    const key = conversationKey(frame);
+    const workspace = this.#harness.currentWorkspace?.();
+    const sessionId = this.#state.sessionFor(key);
+    // The welcome reply has a five-second deadline. Show immediate controls,
+    // then load the selectors independently of that reply window.
+    if (welcome) await this.#sendMenu(frame, this.#mainMenu(), { welcome: true });
+    const options = { signal: this.#signal };
+    const settled = await Promise.allSettled([
+      workspacePathSnapshot(this.#harness, options),
+      this.#harness.listWorkspaceSessions?.(workspace, options),
+      (async () => {
+        const session = sessionId ? this.#harness.workspaceSession?.(sessionId) : null;
+        return typeof session?.models === 'function'
+          ? session.models(options) : this.#harness.listModels?.(options);
+      })(),
+      this.#harness.agentPresetSettings?.(options),
+    ]);
+    this.#signal?.throwIfAborted();
+    const [paths, listed, catalog, settings] = settled.map((result) => result.status === 'fulfilled' ? result.value : null);
+    const sessions = (listed?.sessions ?? []).map((item) => [item.title || t('暂无标题'), `/session ${item.sessionId}`]);
+    const models = (catalog?.groups ?? []).flatMap((group) => group.models.map((model) => [
+      `${model.name} (${group.id})`, `/model ${group.id}/${model.id}`,
+    ]));
+    const presets = [[t('跟随 Host 默认'), '/preset --default'], ...(settings?.agentPresetCatalog?.items ?? []).map((item) => [
+      item.label || item.id, `/preset ${/^\d+$/u.test(item.id) ? 'id:' : ''}${item.id}`,
+    ])];
+    const currentPreset = settings?.agentPreset;
+    const settingsMenu = wecomSettings({
+      sessions, models, presets, sessionId,
+      currentModel: catalog?.current ? `/model ${catalog.current.provider}/${catalog.current.model}` : null,
+      currentPreset: currentPreset ? `/preset ${/^\d+$/u.test(currentPreset) ? 'id:' : ''}${currentPreset}` : '/preset --default',
+      presetLabel: settings?.agentPresetCatalog?.items.find((item) => item.id === currentPreset)?.label,
+    });
+    await this.#sendMenu(frame, settingsMenu, { active: welcome });
+    if (welcome) return;
+    await this.#sendMenu(frame, wecomMenu({ workspace,
+      workspaces: (paths?.paths ?? (workspace ? [workspace] : [])).map((path) => [path, `/workspace ${path}`]),
+    }), { active: true });
+  }
+
+  #rememberMenu(frame, menu) {
+    const taskId = `menu_${randomUUID()}`;
+    const now = Date.now();
+    for (const [id, entry] of this.#menus) {
+      if (entry.expiresAt <= now) this.#menus.delete(id);
+    }
+    while (this.#menus.size >= 256) this.#menus.delete(this.#menus.keys().next().value);
+    this.#menus.set(taskId, {
+      menu, key: conversationKey(frame),
+      workspace: this.#harness.currentWorkspace?.(), expiresAt: now + 30 * 60_000,
+    });
+    return wecomTemplateCard(menu, taskId);
+  }
+
+  async #sendMenu(frame, menu, { welcome = false, active = false } = {}) {
+    this.#signal?.throwIfAborted();
+    const body = bodyOf(frame);
+    const chatId = body.chattype === 'group' ? body.chatid : body.from.userid;
+    const card = this.#rememberMenu(frame, menu);
+    try {
+      if (welcome) {
+        await this.#client.replyWelcome(frame, { msgtype: 'template_card', template_card: card });
+      } else if (active || this.#cardFrames.has(frame)) {
+        await this.#client.sendMessage(chatId, { msgtype: 'template_card', template_card: card });
+      } else {
+        await this.#client.replyTemplateCard(frame, card);
+      }
+    } catch (error) {
+      this.#menus.delete(card.task_id);
+      this.#logger.warn?.('[dsh-im:wecom] menu delivery failed; using text:', error);
+      if (welcome) {
+        await this.#client.replyWelcome(frame, { msgtype: 'text', text: { content: wecomMenuText(menu) } });
+      } else {
+        await this.#sendImmediate(frame, chatId, wecomMenuText(menu));
+      }
+    }
+  }
+
+  acceptEvent(frame) {
+    const body = bodyOf(frame);
+    const id = nonEmptyString(body.msgid);
+    if (this.#signal?.aborted || !id || this.#eventIds.has(id) || this.#state.hasSeen(id)) {
+      return Promise.resolve();
+    }
+    this.#eventIds.add(id);
+    let task;
+    task = this.#processEvent(frame).catch((error) => {
+      if (this.#signal?.aborted) return;
+      this.#status.lastError = error?.message ?? String(error);
+      this.#logger.warn?.('[dsh-im:wecom] menu event failed:', error);
+    }).finally(() => {
+      this.#eventIds.delete(id);
+      this.#commandTasks.delete(task);
+    });
+    this.#commandTasks.add(task);
+    return task;
+  }
+
+  async #processEvent(frame) {
+    const body = bodyOf(frame);
+    const senderId = nonEmptyString(body.from?.userid);
+    const type = body.event?.eventtype;
+    if (!senderId || !['enter_chat', 'template_card_event'].includes(type)) return;
+    const chattype = body.chattype ?? (body.chatid ? 'group' : 'single');
+    if (!['single', 'group'].includes(chattype) || (chattype === 'group' && !body.chatid)) return;
+    const normalized = { ...frame, body: { ...body, chattype } };
+    const chatId = chattype === 'group' ? body.chatid : senderId;
+    const access = evaluateInboundAccess(this.#accessPolicy, {
+      conversationType: chattype === 'single' ? 'direct' : 'group', senderIds: senderId, isCommand: true,
+    });
+    if (!access.allowed) {
+      if (type === 'template_card_event' && access.reason === 'command-not-allowed') {
+        await this.#sendActive(chatId, t(COMMAND_PERMISSION_DENIED_MESSAGE));
+      }
+      return;
+    }
+    await this.#state.markSeen(body.msgid);
+    const key = conversationKey(normalized);
+    if (type === 'enter_chat') {
+      if (chattype === 'single') await this.#showMain(normalized, { welcome: true });
+      return;
+    }
+    // Live callbacks nest these fields; older SDK examples show them flat.
+    const callback = body.event.template_card_event ?? body.event;
+    const entry = this.#menus.get(callback.task_id);
+    const choice = typeof callback.event_key === 'string' && /^\d+$/u.test(callback.event_key)
+      ? entry?.menu.entries[callback.event_key] : null;
+    if (!entry || entry.expiresAt <= Date.now() || !Array.isArray(choice)
+      || entry.key !== key) {
+      await this.#sendActive(chatId, t('这个菜单已过期，请回复 /m 重新打开。'));
+      return;
+    }
+    this.#menus.delete(callback.task_id);
+    // Acknowledge before Host RPC. Keep a valid button card: text_notice requires a URL.
+    const acknowledgedMenu = { title: choice[0], description: t('已收到操作，请查看下方结果。'),
+      entries: [[t('重新打开菜单'), '/menu']] };
+    await this.#client.updateTemplateCard(frame, wecomTemplateCard(acknowledgedMenu, callback.task_id), [senderId]).then(() => {
+      this.#menus.set(callback.task_id, { ...entry, menu: acknowledgedMenu });
+    }).catch((error) => {
+      this.#logger.warn?.('[dsh-im:wecom] menu acknowledgement failed:', error);
+    });
+    let commands = [choice[1]];
+    if (choice[1] === 'apply' || choice[1].startsWith('select:')) {
+      const selectors = (entry.menu.selectors ?? []).filter((item) => choice[1] === 'apply' || item.key === choice[1].slice(7));
+      const selectedItems = callback.selected_items?.selected_item ?? callback.selected_items ?? [];
+      if (!Array.isArray(selectedItems)) {
+        await this.#sendActive(chatId, t('请选择一个选项后再应用。'));
+        return;
+      }
+      commands = [];
+      for (const selector of selectors) {
+        const selected = selectedItems.find((item) => item?.question_key === selector.key);
+        const ids = selected?.option_ids?.option_id ?? selected?.option_ids ?? ['0'];
+        const id = ids[0];
+        if (!Array.isArray(ids) || ids.length !== 1 || !/^\d+$/u.test(id) || !selector.entries[Number(id)]) {
+          await this.#sendActive(chatId, t('请选择一个选项后再应用。'));
+          return;
+        }
+        const command = selector.entries[Number(id)][1];
+        if (command) commands.push(command);
+      }
+    }
+    const navigation = commands.find((command) => parseWecomMenu(command));
+    if (navigation) commands = [navigation];
+    if (!navigation && entry.workspace !== this.#harness.currentWorkspace?.()) {
+      await this.#sendActive(chatId, t('工作区已变化，请从新菜单重新选择。'));
+    } else {
+      for (const [index, command] of commands.entries()) {
+        const commandFrame = { ...normalized, body: { ...normalized.body,
+          msgid: `card:${body.msgid}:${index}`, msgtype: 'text', text: { content: command },
+        } };
+        this.#cardFrames.add(commandFrame);
+        await this.accept(commandFrame);
+      }
+      if (!commands.length) await this.#sendActive(chatId, t('设置未改变。'));
+    }
+    if (!navigation) {
+      this.#cardFrames.add(normalized);
+      await this.#showMain(normalized);
+    }
+  }
+
+  async #runMenuCommand(frame, text, _harness, _state, key) {
+    const menu = parseWecomMenu(text);
+    const options = { signal: this.#signal };
+    if (menu) {
+      let content;
+      if (menu.section === 'main') {
+        await this.#showMain(frame);
+        return { messages: [] };
+      }
+      else {
+        let title;
+        let entries;
+        let description = '';
+        if (menu.section === 'sessions') {
+          title = t('📋 会话列表');
+          const listed = await this.#harness.listWorkspaceSessions(this.#harness.currentWorkspace(), options);
+          entries = listed.sessions.map((session) => [
+            `${session.sessionId === this.#state.sessionFor(key) ? '✓ ' : ''}${session.title || t('暂无标题')}`,
+            `/session ${session.sessionId}`,
+          ]);
+        } else if (menu.section === 'workspaces') {
+          title = t('🗂 工作区列表');
+          const { paths, current } = await workspacePathSnapshot(this.#harness, options);
+          entries = paths.map((path) => [`${path === current ? '✓ ' : ''}${path}`, `/workspace ${path}`]);
+        } else if (menu.section === 'models') {
+          title = t('🧠 切换模型');
+          const sessionId = this.#state.sessionFor(key);
+          const session = sessionId ? this.#harness.workspaceSession?.(sessionId) : null;
+          const catalog = typeof session?.models === 'function'
+            ? await session.models(options) : await this.#harness.listModels(options);
+          entries = catalog.groups.flatMap((group) => group.models.map((model) => [
+            `${catalog.current?.provider === group.id && catalog.current?.model === model.id ? '✓ ' : ''}${model.name} (${group.id})`,
+            `/model ${group.id}/${model.id}`,
+          ]));
+          if (catalog.failures?.length) description = t('部分模型暂不可用，可稍后重试。');
+        } else {
+          title = t('🤖 切换预设');
+          const settings = await this.#harness.agentPresetSettings(options);
+          entries = [[t('🔄 跟随默认'), '/preset --default'], ...settings.agentPresetCatalog.items.map((item) => [
+            `${settings.agentPreset === item.id ? '✓ ' : ''}${item.label || item.id}`,
+            `/preset ${/^\d+$/u.test(item.id) ? 'id:' : ''}${item.id}`,
+          ])];
+          description = t('预设仅用于之后的新会话。');
+        }
+        this.#harness.assertWorkspaceScope?.();
+        content = wecomList({ title, entries, description, ...menu });
+      }
+      await this.#sendMenu(frame, content);
+      return { messages: [] };
+    }
+    const command = text.toLowerCase();
+    if (command === '/help') return { message: helpText() };
+    if (command === '/status') {
+      await this.#harness.ensureRunning(options);
+      return { message: t('企业微信机器人与 DeepSeek Harness 连接正常。') };
+    }
+    if (this.#queues.has(key) || this.#pendingInteractions.has(key) || this.#approvals.hasPending(key)
+      || this.#batchInputs.status(key).phase !== 'idle') {
+      return { message: t('当前任务仍在运行，请先停止任务或等待任务完成后再开启新会话。') };
+    }
+    if (command === '/new') {
+      await this.#state.clearSession(key);
+      return { message: t('已开启新会话。请发送你的问题。') };
+    }
+    return await runWorkspaceCommand(text, this.#harness, key)
+      ?? await runCompactCommand(text, this.#harness, this.#state, key, options);
+  }
+
   accept(frame) {
     if (this.#signal?.aborted) return Promise.resolve();
     const body = bodyOf(frame);
@@ -617,6 +883,8 @@ export class WecomHarnessBridge {
       text: commandText,
       hasImages: hasInboundImages(commandMessage),
       hasFiles: hasInboundFiles(commandMessage),
+      ...(parseWecomMenu(commandText) && !hasInboundImages(commandMessage) && !hasInboundFiles(commandMessage)
+        ? { isCommand: true } : {}),
     });
     if (!access.allowed) {
       this.#acceptedMessageIds.set(messageId, null);
@@ -663,12 +931,16 @@ export class WecomHarnessBridge {
         return this.#finishBatchResult(frame, messageId, chatId, result);
       }
     }
+    const menuCommand = !hasInboundImages(commandMessage) && !hasInboundFiles(commandMessage)
+      && (parseWecomMenu(commandText) || ['/help', '/status', '/new'].includes(commandText.toLowerCase())
+        || this.#cardFrames.has(frame));
     const commandRunner = isHistoryCommand(commandText) ? runHistoryCommand
       : hasInboundFiles(commandMessage) ? null : isControlCommand(commandText)
       ? runControlCommand
       : (isModelCommand(commandText)
           ? runModelCommand
-          : (isPresetCommand(commandText) ? runPresetCommand : null));
+          : (isPresetCommand(commandText) ? runPresetCommand : menuCommand
+            ? (...args) => this.#runMenuCommand(frame, ...args) : null));
     if (commandRunner) {
       let task;
       task = this.#processFastCommand(
@@ -904,6 +1176,7 @@ export class WecomHarnessBridge {
 
   async #sendImmediate(frame, chatId, text) {
     this.#signal?.throwIfAborted();
+    if (this.#cardFrames.has(frame)) return this.#sendActive(chatId, text);
     const chunks = splitUtf8(text);
     if (chunks.length === 0) return;
     try {

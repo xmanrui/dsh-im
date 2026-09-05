@@ -6,6 +6,26 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.12.0] - 2026-09-06
+
+### Added / 新增
+
+- 企业微信新增 `/menu`、`/m` 原生交互菜单，可通过下拉框选择会话、模型、Agent 预设和工作区，并使用新会话、停止、压缩、状态与帮助按钮；长列表支持分页，收到平台每日进入单聊事件时也会展示菜单。菜单操作沿用文字命令权限，30 分钟或插件重启后过期，卡片无法投递时提供文字命令降级。
+  Enterprise WeChat adds native `/menu` and `/m` menus with dropdowns for Sessions, models, Agent Presets, and workspaces, plus New, Stop, Compact, Status, and Help buttons. Long lists support pagination, and the platform's daily direct-chat entry event also opens the menu. Actions use existing text-command permissions; menus expire after 30 minutes or a plugin restart, with text-command fallback when cards cannot be delivered.
+
+- 九个 IM 渠道的账号卡片现在默认收起详细设置，点击账号标题或使用 Enter／空格即可展开与收起，便于管理多个机器人；折叠区域的控件不会继续占用键盘焦点，并尊重系统的减少动画设置。
+  Account cards across all nine IM channels now collapse their detailed settings by default. Click the account header or press Enter/Space to toggle them for easier multi-bot management. Collapsed controls are excluded from keyboard focus, and animations respect reduced-motion preferences.
+
+### Changed / 变更
+
+- WhatsApp 回复改为每秒编辑同一条消息，逐步显示工具进度和生成中的回答；最终回复原位定稿，长回复自动分段。创建或完成流式消息失败时回退为完整文字回复，断开机器人时会取消待发送的预览。
+  WhatsApp now edits the same message at one-second intervals to show tool progress and generated text, finalizes the answer in place, and splits long replies. Failed stream creation or finalization falls back to a complete text reply, and disconnecting the bot cancels queued previews.
+
+### Fixed / 修复
+
+- 删除首个账号后，其余账号的折叠样式与展开／收起操作现在会正常保留。
+  Removing the first account no longer removes the shared collapse styles or disrupts toggling for the remaining accounts.
+
 ## [4.11.0] - 2026-09-05
 
 ### Added / 新增
@@ -689,7 +709,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.11.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.12.0...HEAD
+[4.12.0]: https://github.com/xmanrui/dsh-im/compare/v4.11.0...v4.12.0
 [4.11.0]: https://github.com/xmanrui/dsh-im/compare/v4.10.0...v4.11.0
 [4.10.0]: https://github.com/xmanrui/dsh-im/compare/v4.9.1...v4.10.0
 [4.9.1]: https://github.com/xmanrui/dsh-im/compare/v4.9.0...v4.9.1

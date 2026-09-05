@@ -155,6 +155,7 @@ dsh web
 | 命令 | 作用 |
 | --- | --- |
 | `/help` | 显示机器人支持的命令和用法。 |
+| `/menu`、`/m` | 飞书和企业微信打开交互菜单。企微可直接下拉选择会话、模型、预设和工作区，点击应用，并提供新会话、停止、压缩、状态与帮助按钮；收到每日进入单聊事件时也会自动展示菜单。 |
 | `/new` | 解除当前聊天的会话绑定，让下一条普通消息开启全新 Harness 会话。 |
 | `/status` | 检查当前机器人与 DeepSeek Harness 的连接状态。 |
 | `/version` | 查看当前运行的 dsh-im 插件版本。 |
@@ -260,7 +261,7 @@ IM 管理 RPC 默认仅接受回环浏览器。如果 Web profile 在受信任�
       <a href="mailto:longmanr307@gmail.com">longmanr307@gmail.com</a>
     </td>
     <td align="center" valign="top">
-      <a href="docs/images/wecom.jpg"><img src="docs/images/wecom.jpg" alt="dsh-im 企业微信群二维码" width="240"></a>
+      <a href="docs/images/wecom.png"><img src="docs/images/wecom.jpg" alt="dsh-im 企业微信群二维码" width="240"></a>
     </td>
     <td align="center" valign="top">
       <a href="docs/images/weixin.jpg"><img src="docs/images/weixin.jpg" alt="微信二维码" width="240"></a>
