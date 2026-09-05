@@ -2,6 +2,7 @@ import * as React from "react";
 
 import { FeishuLogoGlyph } from "../../channel-logos.js";
 import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from "../../credential-binding.js";
+import { CollapsibleAccountSection } from "../shared/collapsible-account.js";
 import { h } from "../../i18n.js";
 import {
   FEISHU_ENDPOINTS,
@@ -506,42 +507,49 @@ export function BotCard({
     ref: cardRef,
   },
     h("div", { className: "bxf-cardBody dim-botCardBody" },
-      h("div", { className: "bxf-connectedTop dim-botCardTop" },
-        h("div", { className: "bxf-botIdentity dim-botIdentity" },
-          h("div", { className: "bxf-avatar dim-botAvatar", "aria-hidden": "true" },
-            h(FeishuLogoGlyph, { size: 34 })),
-          h("div", { className: "bxf-botName dim-botName" },
-            h("h3", { id: titleId, title: bot.name }, bot.name),
-            h("p", { title: bot.appIdMasked }, bot.appIdMasked ?? "应用标识已安全保存")),
-        ),
-        h("div", { className: "dim-botCardTools" },
-          h(BotStatusMeta, {
-            className: "bxf-healthPill",
-            dotClassName: "bxf-dot",
-            tone,
-            stateLabel: HEALTH_LABELS[stateForDisplay] ?? "状态未知",
-            lastCheckedAt: health.lastCheckedAt,
-            formatCheckedTime,
-            healthState: stateForDisplay,
-          }),
-          h(BotSettingsButton, {
-            channel: "feishu",
-            botId: connection.botId,
-            botName: bot.name,
-            connected,
-            accessPolicy: connection.accessPolicy,
-            channelSettings: {
-              groupResponseMode: connection.groupResponseMode,
-              groupTopicReply: connection.groupTopicReply,
-              groupMessagePermissionGranted: connection.groupMessagePermissionGranted,
-            },
-          })),
-      ),
-      h(WorkspaceEditor, {
-        workspace: connection.workspace,
-        disabled: Boolean(busy),
-        onSave: onWorkspaceSave,
-      }),
+      h(CollapsibleAccountSection, {
+        id: `bxf-settings-${connection.botId.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
+        header: h("div", { className: "bxf-connectedTop dim-botCardTop" },
+          h("div", { className: "bxf-botIdentity dim-botIdentity" },
+            h("div", { className: "bxf-avatar dim-botAvatar", "aria-hidden": "true" },
+              h(FeishuLogoGlyph, { size: 34 })),
+            h("div", { className: "bxf-botName dim-botName" },
+              h("h3", { id: titleId, title: bot.name }, bot.name),
+              h("p", { title: bot.appIdMasked }, bot.appIdMasked ?? "应用标识已安全保存")),
+          ),
+          h("div", {
+            className: "dim-botCardTools",
+            // The header is the collapse toggle; keep inner controls clickable.
+            onClick: (event) => { event.stopPropagation(); },
+            onKeyDown: (event) => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); },
+          },
+            h(BotStatusMeta, {
+              className: "bxf-healthPill",
+              dotClassName: "bxf-dot",
+              tone,
+              stateLabel: HEALTH_LABELS[stateForDisplay] ?? "状态未知",
+              lastCheckedAt: health.lastCheckedAt,
+              formatCheckedTime,
+              healthState: stateForDisplay,
+            }),
+            h(BotSettingsButton, {
+              channel: "feishu",
+              botId: connection.botId,
+              botName: bot.name,
+              connected,
+              accessPolicy: connection.accessPolicy,
+              channelSettings: {
+                groupResponseMode: connection.groupResponseMode,
+                groupTopicReply: connection.groupTopicReply,
+                groupMessagePermissionGranted: connection.groupMessagePermissionGranted,
+              },
+            }))),
+      },
+        h(WorkspaceEditor, {
+          workspace: connection.workspace,
+          disabled: Boolean(busy),
+          onSave: onWorkspaceSave,
+        }),
       h(ModelEditor, {
         model: connection.model,
         disabled: Boolean(busy),
@@ -605,6 +613,7 @@ export function BotCard({
             className: "bxf-healthSummary dim-cardFeedback",
             role: "status",
           }, testNotice) : null),
+        ),
       ),
     ),
     removing

@@ -227,6 +227,8 @@ const EN = Object.freeze({
   '手动接入': 'Manual setup',
   '收起凭据': 'Hide credentials',
   '收起接入': 'Hide setup',
+  '展开该账号的设置': "Expand this account's settings",
+  '收起该账号的设置': "Collapse this account's settings",
   '接入机器人': 'Connect bot',
   '开始接入': 'Start setup',
   '在线': 'online',

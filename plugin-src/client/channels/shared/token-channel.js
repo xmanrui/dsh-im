@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { CredentialActionIcon, CredentialBindingPanel } from '../../credential-binding.js';
+import { CollapsibleAccountSection } from './collapsible-account.js';
 import { h } from '../../i18n.js';
 import { installDingtalkStyles } from '../dingtalk/styles.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
@@ -88,33 +89,41 @@ export function createTokenChannelSettings(definition) {
     const identity = account.bot.username ? `@${account.bot.username}` : account.bot.idMasked;
     return h('article', { className: 'ddt-card dim-botCard', 'data-bot-id': account.botId },
       h('div', { className: 'ddt-cardBody dim-botCardBody' },
-        h('div', { className: 'ddt-accountTop dim-botCardTop' },
-          h('div', { className: 'ddt-accountIdentity dim-botIdentity' },
-            h('div', { className: `ddt-avatar dim-botAvatar ${avatarClass}`, 'aria-hidden': 'true' },
-              h(LogoGlyph, { size: 29 })),
-            h('div', { className: 'dim-botName' },
-              h('h3', null, account.bot.name), h('p', null, identity))),
-          h('div', { className: 'dim-botCardTools' },
-            h(BotStatusMeta, {
-              className: 'ddt-health',
-              dotClassName: 'ddt-dot',
-              tone,
-              stateLabel,
-              lastCheckedAt: account.health.lastCheckedAt,
-              formatCheckedTime: checkedTime,
-            }),
-            h(BotSettingsButton, {
-              channel: channel.toLowerCase(),
-              botId: account.botId,
-              botName: account.bot.name,
-              connected: account.connected,
-              accessPolicy: account.accessPolicy,
-            }))),
-        h(WorkspaceEditor, {
-          workspace: account.workspace,
-          disabled: Boolean(busy),
-          onSave: onWorkspaceSave,
-        }),
+        h(CollapsibleAccountSection, {
+          id: `tok-settings-${account.botId.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+          header: h('div', { className: 'ddt-accountTop dim-botCardTop' },
+            h('div', { className: 'ddt-accountIdentity dim-botIdentity' },
+              h('div', { className: `ddt-avatar dim-botAvatar ${avatarClass}`, 'aria-hidden': 'true' },
+                h(LogoGlyph, { size: 29 })),
+              h('div', { className: 'dim-botName' },
+                h('h3', null, account.bot.name), h('p', null, identity))),
+            h('div', {
+              className: 'dim-botCardTools',
+              // The header is the collapse toggle; keep inner controls clickable.
+              onClick: (event) => { event.stopPropagation(); },
+              onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); },
+            },
+              h(BotStatusMeta, {
+                className: 'ddt-health',
+                dotClassName: 'ddt-dot',
+                tone,
+                stateLabel,
+                lastCheckedAt: account.health.lastCheckedAt,
+                formatCheckedTime: checkedTime,
+              }),
+              h(BotSettingsButton, {
+                channel: channel.toLowerCase(),
+                botId: account.botId,
+                botName: account.bot.name,
+                connected: account.connected,
+                accessPolicy: account.accessPolicy,
+              }))),
+        },
+          h(WorkspaceEditor, {
+            workspace: account.workspace,
+            disabled: Boolean(busy),
+            onSave: onWorkspaceSave,
+          }),
         h(ModelEditor, {
           model: account.model,
           disabled: Boolean(busy),
@@ -157,7 +166,9 @@ export function createTokenChannelSettings(definition) {
             testNotice ? h('div', {
               className: 'ddt-summary dim-cardFeedback',
               role: 'status',
-            }, testNotice) : null))),
+            }, testNotice) : null)),
+        ),
+      ),
       removing ? h('div', { className: 'ddt-confirm dim-confirm', role: 'alertdialog' },
         h('strong', null, `从 DeepSeek Harness 移除“${account.bot.name}”？`),
         h('p', null, `这会停止消息连接，并删除本机保存的 ${credentialNoun}、机器人配置及会话映射。${platformLabel}中的机器人不会被自动删除。`),

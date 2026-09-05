@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { WeixinLogoGlyph } from '../../channel-logos.js';
 import { QrActionIcon } from '../../credential-binding.js';
+import { CollapsibleAccountSection } from '../shared/collapsible-account.js';
 import { h } from '../../i18n.js';
 import {
   WEIXIN_ENDPOINTS,
@@ -225,11 +226,18 @@ export function AccountCard({
   const summary = account.error?.message ?? (account.connected ? null : account.health.summary);
   return h('article', { className: 'dxw-card dim-botCard', tabIndex: -1, 'data-bot-id': account.botId },
     h('div', { className: 'dxw-cardBody dim-botCardBody' },
-      h('div', { className: 'dxw-accountTop dim-botCardTop' },
+      h(CollapsibleAccountSection, {
+        id: `dxw-settings-${account.botId.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+        header: h('div', { className: 'dxw-accountTop dim-botCardTop' },
         h('div', { className: 'dxw-accountIdentity dim-botIdentity' },
           h('div', { className: 'dxw-avatar dim-botAvatar', 'aria-hidden': 'true' }, h(WeixinLogoGlyph, { size: 27 })),
           h('div', { className: 'dim-botName' }, h('h3', null, account.bot.name), h('p', null, account.bot.accountIdMasked))),
-        h('div', { className: 'dim-botCardTools' },
+        h('div', {
+            className: 'dim-botCardTools',
+            // The header is the collapse toggle; keep inner controls clickable.
+            onClick: (event) => { event.stopPropagation(); },
+            onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); },
+          },
           h(BotStatusMeta, {
             className: 'dxw-health',
             dotClassName: 'dxw-dot',
@@ -244,8 +252,9 @@ export function AccountCard({
             botName: account.bot.name,
             connected: account.connected,
             accessPolicy: account.accessPolicy,
-          }))),
-      h(WorkspaceEditor, {
+          })))
+      },
+        h(WorkspaceEditor, {
         workspace: account.workspace,
         disabled: Boolean(busy),
         onSave: onWorkspaceSave,
@@ -281,7 +290,9 @@ export function AccountCard({
             className: 'dxw-summary dim-cardFeedback',
             role: 'status',
             'aria-live': 'polite',
-          }, feedback) : null))),
+          }, feedback) : null)),
+      ),
+    ),
     removing ? h('div', { className: 'dxw-confirm dim-confirm', role: 'alertdialog' },
       h('strong', null, '从此 Harness 移除这个微信账号？'),
       h('p', null, '这会停止消息连接，并删除本机保存的 bot_token、账号配置和会话映射。其他微信账号不受影响。'),
