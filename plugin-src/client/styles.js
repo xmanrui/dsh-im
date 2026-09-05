@@ -358,6 +358,17 @@ const CSS = String.raw`
 .dim-panel .dim-botCard { position: relative; min-width: 0; width: 100%; max-width: 100%; overflow: hidden; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); }
 .dim-panel .dim-botCard::before { display: none; }
 .dim-panel .dim-botCardBody { position: relative; min-width: 0; width: 100%; max-width: 100%; padding: 12px; }
+.dim-collapsibleAccount { min-width: 0; display: flex; flex-direction: column; }
+.dim-collapsibleHead { min-width: 0; display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.dim-collapsibleHead:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: 2px; border-radius: 8px; }
+.dim-collapsibleHeaderContent { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; }
+.dim-collapsibleChevron { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 9px; height: 9px; border-right: 1.6px solid var(--dsw-alias-label-tertiary, #8f959e); border-bottom: 1.6px solid var(--dsw-alias-label-tertiary, #8f959e); transform: rotate(-45deg); transition: transform .22s cubic-bezier(.4, 0, .2, 1); transform-origin: 50% 50%; }
+.dim-collapsibleAccount.is-open .dim-collapsibleChevron { transform: rotate(45deg); }
+/* Animate height without measuring content; hide collapsed controls from focus and accessibility. */
+.dim-collapsibleBody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s cubic-bezier(.4, 0, .2, 1); }
+.dim-collapsibleAccount.is-open > .dim-collapsibleBody { grid-template-rows: 1fr; }
+.dim-collapsibleBodyInner { min-height: 0; overflow: hidden; }
+.dim-collapsibleAccount:not(.is-open) .dim-collapsibleBodyInner { visibility: hidden; }
 .dim-panel .dim-botCardTop { min-width: 0; max-width: 100%; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .dim-panel .dim-botIdentity { min-width: 0; flex: 1 1 0; display: flex; align-items: center; gap: 10px; }
 .dim-panel .dim-botAvatar { flex: none; width: 38px; height: 38px; display: grid; place-items: center; overflow: hidden; border-radius: 11px; box-shadow: none; }
@@ -634,6 +645,7 @@ const CSS = String.raw`
 @media (prefers-reduced-motion: reduce) {
   .dim-page * { transition-duration: .01ms !important; }
   .dim-directoryPickerSpinner { animation-duration: 1.8s; }
+  .dim-collapsibleBody, .dim-collapsibleChevron { transition: none !important; }
 }
 `;
 

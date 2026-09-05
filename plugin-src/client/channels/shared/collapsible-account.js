@@ -14,84 +14,10 @@
  * - Full a11y: the header is a button-like region with aria-expanded /
  *   aria-controls; the details region keeps native semantics.
  * - Honors prefers-reduced-motion.
- * - Styles are injected once per document (data-plugin-css guard).
+ * - Styles are managed by the IM settings plugin, not individual accounts.
  */
 import * as React from 'react';
 import { h } from '../../i18n.js';
-
-const COLLAPSIBLE_STYLE_ID = 'xmanrui-dsh-im-collapsible-account';
-
-const CSS = String.raw`
-.dim-collapsibleAccount { min-width: 0; display: flex; flex-direction: column; }
-
-/* The header row is the toggle: fills the width, cursor hints it. */
-.dim-collapsibleHead {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-}
-.dim-collapsibleHead:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff);
-  outline-offset: 2px;
-  border-radius: 8px;
-}
-
-.dim-collapsibleHeaderContent { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; }
-
-/* Chevron affordance at the end of the header line. */
-.dim-collapsibleChevron {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 9px;
-  height: 9px;
-  border-right: 1.6px solid var(--dsw-alias-label-tertiary, #8f959e);
-  border-bottom: 1.6px solid var(--dsw-alias-label-tertiary, #8f959e);
-  transform: rotate(-45deg);
-  transition: transform .22s cubic-bezier(.4, 0, .2, 1);
-  transform-origin: 50% 50%;
-}
-.dim-collapsibleAccount.is-open .dim-collapsibleChevron { transform: rotate(45deg); }
-
-/* Pure CSS height animation: 0fr -> 1fr, no content measurement needed */
-.dim-collapsibleBody {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows .22s cubic-bezier(.4, 0, .2, 1);
-}
-.dim-collapsibleAccount.is-open > .dim-collapsibleBody { grid-template-rows: 1fr; }
-.dim-collapsibleBodyInner { min-height: 0; overflow: hidden; }
-
-/* Keep collapsed content out of the a11y tree and tab order. */
-.dim-collapsibleAccount:not(.is-open) .dim-collapsibleBodyInner { visibility: hidden; }
-
-@media (prefers-reduced-motion: reduce) {
-  .dim-collapsibleBody,
-  .dim-collapsibleChevron { transition: none !important; }
-}
-`;
-
-function injectCollapsibleStyles() {
-  if (typeof document === 'undefined') return () => {};
-  if (document.querySelector(`style[data-plugin-css="${COLLAPSIBLE_STYLE_ID}"]`)) return () => {};
-  const style = document.createElement('style');
-  style.dataset.plugin = '@xmanrui/dsh-im';
-  style.dataset.pluginCss = COLLAPSIBLE_STYLE_ID;
-  style.textContent = CSS;
-  document.head.appendChild(style);
-  return () => {
-    style.remove();
-  };
-}
-
-export function useCollapsibleAccountStyles() {
-  React.useEffect(() => injectCollapsibleStyles(), []);
-}
 
 /**
  * Collapsible account card.
@@ -110,7 +36,6 @@ export function CollapsibleAccountSection({
   className = '',
   children,
 }) {
-  useCollapsibleAccountStyles();
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
   const open = controlledOpen ?? uncontrolledOpen;
   const contentId = id ? `${id}-content` : undefined;
