@@ -7603,3 +7603,108 @@ test('a follow-up inside the auto-created topic continues the managed dsh sessio
   assert.equal(asked[1].sessionId, 'session-topic');
   assert.equal(replies[1].data.reply_in_thread, true);
 });
+
+function deferredAwareStateFixture(initialSessions = []) {
+  const fixture = stateFixture(initialSessions);
+  const deferredRows = new Map();
+  // Mirrors the StateStore deferred-delivery surface (Task 3).
+  Object.assign(fixture.state, {
+    deferredEntries: async () => [...deferredRows.values()],
+    putDeferred: async (entry) => { deferredRows.set(entry.id, { ...entry }); },
+    patchDeferred: async (id, patch) => {
+      deferredRows.set(id, { ...deferredRows.get(id), ...patch });
+    },
+    removeDeferred: async (id) => { deferredRows.delete(id); },
+  });
+  fixture.deferredRows = deferredRows;
+  return fixture;
+}
+
+function replyTimeoutHarness({ historyEvents }) {
+  const rpcCalls = [];
+  return {
+    rpcCalls,
+    harness: {
+      ensureRunning: async () => true,
+      rpc: async (method) => {
+        rpcCalls.push(method);
+        if (method === 'session.history') {
+          return { events: historyEvents.map((event) => ({ event })) };
+        }
+        throw new Error(`unexpected rpc ${method}`);
+      },
+      workspaceSession: () => ({
+        async sessionExists() { return true; },
+        async ask() {
+          const error = new Error('Harness stalled');
+          error.code = 'harness-reply-timeout';
+          error.details = { turn: 3, lastSeq: 6 };
+          throw error;
+        },
+        async stopActiveTurn() { return false; },
+        async steerActiveTurn() { return false; },
+      }),
+    },
+  };
+}
+
+test('reply timeout keeps the failure notice and immediately hydrates a completed turn', async () => {
+  const fixture = deferredAwareStateFixture([['p2p:ou_owner', 'session-timeout']]);
+  const sent = [];
+  const { harness } = replyTimeoutHarness({
+    historyEvents: [
+      { type: 'assistant/message', seq: 7, data: { turn: 3, message: { content: [{ type: 'text', text: '计算结果：42' }] } } },
+      { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } },
+    ],
+  });
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async (outgoing) => sent.push(outgoing.text)),
+    channel: {},
+    harness,
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+
+  await bridge.accept(event('timeout-completed', 'run a long task', { senderOpenId: 'ou_owner' }));
+
+  await eventually(
+    () => sent.some((text) => text.includes('等待模型回复超时')),
+    'the MODEL_REPLY_TIMEOUT failure notice is required',
+  );
+  await eventually(
+    () => sent.some((text) => text.includes('计算结果：42')),
+    'the completed turn answer must be delivered immediately',
+  );
+  await eventually(() => fixture.deferredRows.size === 0, 'the deferred entry must be consumed');
+  assert.ok(fixture.deferredRows.size === 0);
+});
+
+test('reply timeout with an unfinished turn keeps a pending deferred entry', async () => {
+  const fixture = deferredAwareStateFixture([['p2p:ou_owner', 'session-timeout']]);
+  const sent = [];
+  const { harness } = replyTimeoutHarness({ historyEvents: [] });
+  const bridge = new FeishuHarnessBridge({
+    client: textClient(async (outgoing) => sent.push(outgoing.text)),
+    channel: {},
+    harness,
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+
+  await bridge.accept(event('timeout-unfinished', 'run a long task', { senderOpenId: 'ou_owner' }));
+
+  await eventually(
+    () => sent.some((text) => text.includes('等待模型回复超时')),
+    'the MODEL_REPLY_TIMEOUT failure notice is required',
+  );
+  await bridge.waitForIdle();
+  assert.equal(fixture.deferredRows.size, 1);
+  const [entry] = [...fixture.deferredRows.values()];
+  assert.equal(entry.sessionId, 'session-timeout');
+  assert.equal(entry.turn, 3);
+  assert.equal(entry.afterSeq, 6);
+  assert.equal(entry.chatId, 'oc_chat');
+  assert.equal(sent.some((text) => text.includes('计算结果')), false);
+});

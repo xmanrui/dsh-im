@@ -56,6 +56,10 @@ import {
   workspacePathSnapshot,
 } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import {
+  createDeferredDeliveryRegistry,
+  extractCompletedTurnAnswer,
+} from '../shared/deferred-delivery.mjs';
 import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
 import { deliverOutboundArtifacts } from '../shared/semantic/artifact-delivery.mjs';
 import {
@@ -505,6 +509,8 @@ export class FeishuHarnessBridge {
   #cardKeys = new Map();
   /** The global event-mux watcher (one per bridge). */
   #eventWatcher = null;
+  /** Lazily built deferred-delivery registry over the state store. */
+  #deferredRegistryInstance = null;
   /** Serializes completion work per session without blocking unrelated sessions. */
   #eventTails = new Map();
   /** Coalesces baseline compensation and records whether a trailing pass is needed. */
@@ -2952,6 +2958,135 @@ export class FeishuHarnessBridge {
 
   // ── Watches: read-only session tracking + completion pushes ─────────────
 
+  // ── Deferred delivery (MODEL_REPLY_TIMEOUT → late result push) ──────────
+
+  #deferredRegistry() {
+    this.#deferredRegistryInstance ??= createDeferredDeliveryRegistry({
+      listDeferred: async () => this.#state.deferredEntries(),
+      putDeferred: (entry) => this.#state.putDeferred(entry),
+      patchDeferred: (id, patch) => this.#state.patchDeferred(id, patch),
+      removeDeferred: (id) => this.#state.removeDeferred(id),
+    }, { logger: this.#logger });
+    return this.#deferredRegistryInstance;
+  }
+
+  /** Register a late-delivery entry after a reply timeout; hydrate immediately. */
+  async #registerDeferredDelivery(error, { key, chatId, messageId }) {
+    try {
+      if (error?.code !== 'harness-reply-timeout') return;
+      const sessionId = this.#state.sessionFor(key);
+      if (!sessionId) return;
+      const entry = await this.#deferredRegistry().register({
+        key,
+        chatId,
+        replyToMessageId: messageId,
+        sessionId,
+        turn: Number.isSafeInteger(error?.details?.turn) ? error.details.turn : null,
+        afterSeq: Number.isSafeInteger(error?.details?.lastSeq) ? error.details.lastSeq : -1,
+      });
+      await this.#hydrateDeferredEntry(entry);
+    } catch (registrationError) {
+      if (!this.#signal?.aborted) {
+        this.#logger.warn?.(
+          '[dsh-feishu] deferred delivery registration failed:',
+          registrationError.message,
+        );
+      }
+    }
+  }
+
+  /** Push immediately when the timed-out turn already completed (lost-event case). */
+  async #hydrateDeferredEntry(entry) {
+    const history = await this.#harness.rpc(
+      'session.history',
+      { sessionId: entry.sessionId, maxMessages: 50 },
+      30_000,
+      { signal: this.#signal },
+    );
+    const outcome = extractCompletedTurnAnswer(orderedHistoryEvents(history), {
+      turn: Number.isSafeInteger(entry.turn) ? entry.turn : undefined,
+    });
+    if (!outcome.found || outcome.endSeq <= entry.afterSeq) return;
+    const result = await this.#processDeferredEntry(entry, {
+      endSeq: outcome.endSeq,
+      outcome,
+    });
+    if (result === 'delivered') await this.#deferredRegistry().remove(entry);
+  }
+
+  /**
+   * Gates + delivery for one deferred entry at one terminal point.
+   * Returns 'delivered' | 'gate-dropped' | 'retry' | 'abandoned' | 'duplicate'.
+   */
+  async #processDeferredEntry(entry, { endSeq, outcome }) {
+    if (Number.isSafeInteger(entry.lastSeenEndSeq)
+      && endSeq <= entry.lastSeenEndSeq) return 'duplicate';
+    if (this.#state.sessionFor(entry.key) !== entry.sessionId) {
+      // 绑定闸门：会话切走后不再打扰，结果保留在 Session 历史（/history 可查）。
+      await this.#deferredRegistry().remove(entry);
+      return 'gate-dropped';
+    }
+    const delivered = await this.#pushDeferredOutcome(entry, outcome);
+    if (delivered) return 'delivered';
+    const attempts = await this.#deferredRegistry().markFailedAttempt(entry);
+    return attempts >= 3 ? 'abandoned' : 'retry';
+  }
+
+  async #pushDeferredOutcome(entry, outcome) {
+    if (outcome.found && outcome.text) {
+      return this.#deliverDeferredText(
+        entry.chatId,
+        answerTextForDelivery(outcome.text, []),
+        entry.replyToMessageId,
+      );
+    }
+    const status = outcome.reason ?? 'ended';
+    const reasonText = status === 'stopped' ? t('已停止')
+      : status === 'aborted' || status === 'cancelled' ? t('已中止')
+        : status === 'failed' ? t('任务失败')
+          : t('已结束');
+    try {
+      await this.#send(
+        entry.chatId,
+        t('后台任务已结束（{reason}），没有可推送的最终结果。', { reason: reasonText }),
+        entry.replyToMessageId ? { replyTo: entry.replyToMessageId } : {},
+      );
+      return true;
+    } catch (error) {
+      this.#logger.warn?.('[dsh-feishu] deferred status delivery failed:', error.message);
+      return false;
+    }
+  }
+
+  async #deliverDeferredText(chatId, markdownText, replyToMessageId) {
+    if (this.#channel?.stream) {
+      try {
+        await this.#channel.stream(chatId, {
+          markdown: async (controller) => {
+            await controller.setContent(markdownText);
+          },
+        }, replyToMessageId ? { replyTo: replyToMessageId } : {});
+        return true;
+      } catch (error) {
+        this.#logger.warn?.(
+          '[dsh-feishu] deferred stream delivery failed; falling back to text:',
+          error.message,
+        );
+      }
+    }
+    try {
+      await this.#sendAnswerText(chatId, markdownText, {
+        deliveryId: `deferred-${Date.now()}`,
+        presentation: 'feishu-deferred-text',
+        ...(replyToMessageId ? { replyTo: replyToMessageId } : {}),
+      });
+      return true;
+    } catch (error) {
+      this.#logger.warn?.('[dsh-feishu] deferred text delivery failed:', error.message);
+      return false;
+    }
+  }
+
   #ensureEventWatcher() {
     if (this.#eventWatcher) return;
     if (typeof this.#harness?.watchHarnessEvents !== 'function') return;
@@ -3535,7 +3670,21 @@ export class FeishuHarnessBridge {
     };
   }
 
-  async #answerWithStream(event, key, message, { onAskComplete } = {}) {
+  async #answerWithStream(event, key, message, options = {}) {
+    try {
+      return await this.#answerWithStreamInner(event, key, message, options);
+    } catch (error) {
+      // Fire-and-forget: registration must never alter the failure contract.
+      void this.#registerDeferredDelivery(error, {
+        key,
+        chatId: event.message.chat_id,
+        messageId: event.message.message_id,
+      });
+      throw error;
+    }
+  }
+
+  async #answerWithStreamInner(event, key, message, { onAskComplete } = {}) {
     const chatId = event.message.chat_id;
     const messageId = event.message.message_id;
     const text = message.content;
