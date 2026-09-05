@@ -152,6 +152,7 @@ See the [Proactive Delivery Guide](PROACTIVE_DELIVERY.en.md) ([简体中文](PRO
 | Command | Description |
 | --- | --- |
 | `/help` | Show the commands and usage supported by the bot. |
+| `/menu`, `/m` | Open the Feishu or Enterprise WeChat interactive menu. WeCom provides native dropdowns for sessions, models, presets and workspaces, plus buttons for applying selections, new sessions, stop, compact, status and help. It also opens on the daily direct-chat entry event. |
 | `/new` | Unbind the current chat so its next ordinary message starts a new Harness Session. |
 | `/status` | Check the connection between the current bot and DeepSeek Harness. |
 | `/version` | Show the version of the running dsh-im plugin. |
