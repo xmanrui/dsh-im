@@ -50,6 +50,15 @@ describe('extractCompletedTurnAnswer', () => {
     assert.equal(r.text, '计算\n结果');
   });
 
+  test('无 step 的旧版最终消息替换前面的分步内容，与前台累积器一致', () => {
+    const events = [
+      ev(1, 'assistant/message', { turn: 3, step: 1, message: { content: [{ type: 'text', text: '中间结果' }] } }),
+      ev(2, 'assistant/message', { turn: 3, message: { content: [{ type: 'text', text: '完整结果' }] } }),
+      ev(3, 'turn/end', { turn: 3, reason: 'completed' }),
+    ];
+    assert.equal(extractCompletedTurnAnswer(events, { turn: 3 }).text, '完整结果');
+  });
+
   test('acceptAnyTerminal：历史缺 turn/end 时保持等待语义（endSeq=-1）', () => {
     // mux 已报 completed，但历史投影还没有 turn/end：不能当作已终态处理。
     const events = [

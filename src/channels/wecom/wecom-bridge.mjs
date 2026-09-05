@@ -1,3 +1,4 @@
+import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import { generateReqId } from '@wecom/aibot-node-sdk';
 import { randomUUID } from 'node:crypto';
 import {
@@ -541,6 +542,7 @@ export class WecomHarnessBridge {
   #client;
   #harness;
   #state;
+  #deferred;
   #contextEnhancement;
   #accessPolicy;
   #status;
@@ -594,6 +596,9 @@ export class WecomHarnessBridge {
     this.#generateReqId = generateStreamId;
     this.#fileUploadTimeoutMs = Math.min(fileUploadTimeoutMs, DEFAULT_FILE_UPLOAD_TIMEOUT_MS);
     this.#signal = signal;
+    this.#deferred = createDeferredDeliveryCoordinator({ harness, state, signal, logger,
+      deliver: (entry, outcome) => this.#deliverDeferredOutcome(entry, outcome),
+    });
     this.#approvals = new HarnessApprovalQueue({ label: 'wecom', logger });
   }
 
@@ -1122,6 +1127,11 @@ export class WecomHarnessBridge {
     return task;
   }
 
+  async #deliverDeferredOutcome(entry, outcome) {
+    await this.#sendActive(entry.target.chatId, deferredOutcomeText(outcome));
+    return true;
+  }
+
   async waitForIdle() {
     await Promise.allSettled([
       ...this.#queues.values(),
@@ -1131,6 +1141,7 @@ export class WecomHarnessBridge {
       ...this.#approvalTasks,
       ...this.#commandTasks,
     ]);
+    await this.#deferred.whenIdle();
   }
 
   async #processFastCommand(frame, messageId, chatId, key, message, runner) {
@@ -1147,6 +1158,7 @@ export class WecomHarnessBridge {
       pendingInteraction: this.#pendingInteractions.has(key)
         || this.#approvals.hasPending(key),
       control: { owner: this, key },
+      deferredDelivery: this.#deferred,
     });
     if (result?.stopped) {
       await Promise.allSettled([
@@ -1337,6 +1349,7 @@ export class WecomHarnessBridge {
       await this.#state.markSeen(messageId);
       promptRecorded = true;
       const { answer, artifacts = [] } = await askInWorkspaceSession({
+        deferredDelivery: () => ({ coordinator: this.#deferred, target: { chatId } }),
         harness: this.#harness,
         state: this.#state,
         key,

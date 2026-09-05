@@ -7867,6 +7867,11 @@ test('/stop cancels a pending deferred background session when no turn is active
     workspaceSession: () => ({
       async sessionExists() { return true; },
       async stopActiveTurn() { return false; },
+      async stopDeferredTurn(identity) {
+        assert.equal(identity.turn, 3);
+        cancelCalls.push({ sessionId: 'session-timeout', keepInbox: true });
+        return true;
+      },
       async steerActiveTurn() { return false; },
     }),
   };
@@ -8023,7 +8028,7 @@ test('overlapping live and compensation processors push the answer exactly once'
   const turnEnd = { type: 'turn/end', seq: 8, data: { turn: 3, reason: { kind: 'completed' } } };
   listener.onSessionEvent({ sessionId: 'session-timeout', event: turnEnd });
   listener.onReconnect();
-  await eventually(() => historyReads >= 2, 'both processors must reach the history read');
+  await eventually(() => historyReads === 1, 'the first processor must reach the history read');
   historyGate.resolve();
   await bridge.waitForIdle();
 
@@ -8042,7 +8047,7 @@ test('a failed deferred push rolls the claim back and allows a retry', async () 
   const failNow = { value: true };
   const client = {
     im: { v1: { message: { create: async (request) => {
-      if (failNow.value) throw new Error('rate limited');
+      if (failNow.value) throw Object.assign(new Error('rate limited'), { status: 429 });
       sent.push(JSON.parse(request.data.content).text);
       return { code: 0, data: { message_id: `om_${sent.length}` } };
     } } } },
@@ -8255,7 +8260,7 @@ test('restart compensation reports stopped background turns instead of waiting f
 });
 
 test('deferred card delivery keeps managed-topic routing (replyInThread + thread registration)', async () => {
-  const { state } = await watchStoreFixture([['group:oc_chat:managed:om_root', 'session-timeout']]);
+  const { state } = await watchStoreFixture([['group:oc_chat:managed:om_inbound', 'session-timeout']]);
   const harness = watchHarness({ history: deferredAnswerHistory });
   const cardWrites = [];
   const streamCalls = [];
@@ -8277,7 +8282,7 @@ test('deferred card delivery keeps managed-topic routing (replyInThread + thread
     groupTopicReply: true,
   });
   await bridge.waitForIdle();
-  await state.putDeferred(deferredEntryFixture({ key: 'group:oc_chat:managed:om_root' }));
+  await state.putDeferred(deferredEntryFixture({ key: 'group:oc_chat:managed:om_inbound' }));
 
   harness._listeners.at(-1).onSessionEvent({
     sessionId: 'session-timeout',

@@ -371,5 +371,6 @@ export default {
   '后台任务已结束（{reason}），没有可推送的最终结果。':
     'The background task has finished ({reason}); there is no final result to deliver.',
   '已请求停止后台任务。': 'Requested to stop the background task.',
+  '无法安全停止后台任务，请在 Harness 中查看并停止对应任务。': 'Unable to safely stop the background task. Please inspect and stop the matching task in Harness.',
   '任务失败': 'Failed',
 };

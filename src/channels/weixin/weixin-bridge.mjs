@@ -1,3 +1,4 @@
+import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import {
   DEFAULT_WEIXIN_MAX_MESSAGE_CHARS,
   extractWeixinFiles,
@@ -289,6 +290,7 @@ export class WeixinHarnessBridge {
   #ownerUserId;
   #harness;
   #state;
+  #deferred;
   #contextEnhancement;
   #accessPolicy;
   #status;
@@ -351,6 +353,9 @@ export class WeixinHarnessBridge {
     this.#maxMessageChars = maxMessageChars;
     this.#typingKeepaliveMs = typingKeepaliveMs;
     this.#signal = signal;
+    this.#deferred = createDeferredDeliveryCoordinator({ harness, state, signal, logger,
+      deliver: (entry, outcome) => this.#deliverDeferredOutcome(entry, outcome),
+    });
     this.#approvals = new HarnessApprovalQueue({ label: 'weixin', logger });
   }
 
@@ -642,6 +647,11 @@ export class WeixinHarnessBridge {
     return task;
   }
 
+  async #deliverDeferredOutcome(entry, outcome) {
+    await this.#send(entry.target.toUserId, deferredOutcomeText(outcome), undefined, undefined, { stopTyping: false });
+    return true;
+  }
+
   async waitForIdle() {
     await Promise.allSettled([
       ...this.#queues.values(),
@@ -652,9 +662,11 @@ export class WeixinHarnessBridge {
       ...this.#commandTasks,
       this.#typingTail,
     ]);
+    await this.#deferred.whenIdle();
   }
 
   async close() {
+    this.#deferred.close();
     this.#typingClosed = true;
     await this.#stopTyping({ signal: AbortSignal.timeout(5_000) });
   }
@@ -682,6 +694,7 @@ export class WeixinHarnessBridge {
       pendingInteraction: this.#pendingInteractions.has(key)
         || this.#approvals.hasPending(key),
       control: { owner: this, key },
+      deferredDelivery: this.#deferred,
     });
     if (result?.stopped) {
       await Promise.allSettled([
@@ -794,6 +807,7 @@ export class WeixinHarnessBridge {
         await this.#state.markSeen(messageId);
         promptRecorded = true;
         ({ answer, artifacts = [] } = await askInWorkspaceSession({
+          deferredDelivery: () => ({ coordinator: this.#deferred, target: { toUserId: sender } }),
           harness: this.#harness,
           state: this.#state,
           key,
@@ -1225,8 +1239,8 @@ export class WeixinHarnessBridge {
     ).catch(() => undefined);
   }
 
-  async #send(toUserId, text, contextToken, runId) {
-    await this.#stopTyping();
+  async #send(toUserId, text, contextToken, runId, { stopTyping = true } = {}) {
+    if (stopTyping) await this.#stopTyping();
     const providerMessageIds = [];
     const chunks = splitWeixinText(text, this.#maxMessageChars);
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {

@@ -1,3 +1,4 @@
+import { createDeferredDeliveryCoordinator, deferredOutcomeText } from './deferred-delivery-coordinator.mjs';
 import { t } from './i18n.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
@@ -135,6 +136,7 @@ export class TextHarnessBridge {
   #bot;
   #harness;
   #state;
+  #deferred;
   #contextEnhancement;
   #accessPolicy;
   #status;
@@ -176,6 +178,9 @@ export class TextHarnessBridge {
     this.#logger = logger;
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#signal = signal;
+    this.#deferred = createDeferredDeliveryCoordinator({ harness, state, signal, logger,
+      deliver: (entry, outcome) => this.#deliverDeferredOutcome(entry, outcome),
+    });
     this.#approvals = new HarnessApprovalQueue({
       label: descriptor.key,
       logger,
@@ -449,6 +454,13 @@ export class TextHarnessBridge {
     return current;
   }
 
+  async #deliverDeferredOutcome(entry, outcome) {
+    const text = deferredOutcomeText(outcome);
+    return typeof this.#bot.sendDelivery === 'function'
+      ? this.#bot.sendDelivery(entry.target, createTextDeliveryBlock(text, outcome.found ? 'markdown' : 'plain'))
+      : this.#bot.sendText(entry.target, text);
+  }
+
   async waitForIdle() {
     await Promise.allSettled([
       ...this.#queues.values(),
@@ -458,6 +470,7 @@ export class TextHarnessBridge {
       ...this.#approvalTasks,
       ...this.#commandTasks,
     ]);
+    await this.#deferred.whenIdle();
   }
 
   async #processFastCommand(message, messageId, key, runner) {
@@ -480,6 +493,7 @@ export class TextHarnessBridge {
           pendingInteraction: this.#pendingInteractions.has(key)
             || this.#approvals.hasPending(key),
           control: { owner: this, key },
+          deferredDelivery: this.#deferred,
         },
       );
       if (result?.stopped) {
@@ -696,6 +710,7 @@ export class TextHarnessBridge {
         contextEnhanced = content !== originalContent;
       }
       const { answer, artifacts = [] } = await askInWorkspaceSession({
+        deferredDelivery: () => ({ coordinator: this.#deferred, target: this.#descriptor.key === 'whatsapp' ? { jid: target.jid, selfChat: target.selfChat } : target }),
         harness: this.#harness,
         state: this.#state,
         key: conversationKey,

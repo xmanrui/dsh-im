@@ -1436,6 +1436,9 @@ export function createBotWorkspaceScope(
             stopActiveTurn(...args) {
               return invokeStartedSessionMutation('stopActiveTurn', args, 'turn stop');
             },
+            stopDeferredTurn(...args) {
+              return invokeStartedSessionMutation('stopDeferredTurn', args, 'deferred turn stop');
+            },
             steerActiveTurn(...args) {
               return invokeStartedSessionMutation('steerActiveTurn', args, 'turn steering');
             },

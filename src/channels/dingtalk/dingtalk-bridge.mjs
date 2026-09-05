@@ -1,3 +1,4 @@
+import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import {
   DINGTALK_DONE_REACTION_NAME,
   DINGTALK_ERROR_REACTION_NAME,
@@ -475,6 +476,7 @@ export class DingtalkHarnessBridge {
   #clientSecret;
   #harness;
   #state;
+  #deferred;
   #contextEnhancement;
   #accessPolicy;
   #status;
@@ -529,6 +531,9 @@ export class DingtalkHarnessBridge {
       : 5_000;
     this.#maxMessageChars = maxMessageChars;
     this.#signal = signal;
+    this.#deferred = createDeferredDeliveryCoordinator({ harness, state, signal, logger,
+      deliver: (entry, outcome) => this.#deliverDeferredOutcome(entry, outcome),
+    });
     ensureStats(this.#status);
     this.#refreshPendingSenders();
   }
@@ -936,6 +941,19 @@ export class DingtalkHarnessBridge {
     return { content: text };
   }
 
+  async #deliverDeferredOutcome(entry, outcome) {
+    const text = deferredOutcomeText(outcome);
+    if (outcome.found && ['createAiCard', 'updateAiCard', 'finishAiCard'].every((name) => typeof this.#api[name] === 'function')) {
+      const card = createDingTalkCardStream({ api: this.#api, clientId: this.#clientId,
+        clientSecret: this.#clientSecret, target: entry.target, signal: this.#signal, logger: this.#logger });
+      if (await card.start(t(CARD_INITIAL_TEXT)) && await card.finish(text)) return true;
+      this.#logger.warn?.('[dsh-dingtalk] deferred card unavailable; sending robot text');
+    }
+    await this.#api.sendRobotText({ clientId: this.#clientId, clientSecret: this.#clientSecret,
+      target: entry.target, text, signal: this.#signal });
+    return true;
+  }
+
   async waitForIdle() {
     await Promise.allSettled([
       ...this.#queues.values(),
@@ -945,6 +963,7 @@ export class DingtalkHarnessBridge {
       ...this.#interactionTasks,
       ...this.#commandTasks,
     ]);
+    await this.#deferred.whenIdle();
   }
 
   async #processFastCommand(message, messageId, key, sessionWebhook, prompt, runner) {
@@ -966,6 +985,7 @@ export class DingtalkHarnessBridge {
         pendingInteraction: this.#pendingInteractions.has(key)
           || this.#approvals.hasPending(key),
         control: { owner: this, key },
+        deferredDelivery: this.#deferred,
       },
     );
     if (result?.stopped) {
@@ -1157,6 +1177,7 @@ export class DingtalkHarnessBridge {
         if (cardStarted) cardStartedAt = startedAt;
       }
       const { answer, artifacts = [] } = await askInWorkspaceSession({
+        deferredDelivery: () => ({ coordinator: this.#deferred, target: { ...cardTarget(message, sender), robotCode: this.#clientId } }),
         harness: this.#harness,
         state: this.#state,
         key,
