@@ -1,12 +1,12 @@
 export const MAX_DEFERRED_PER_KEY = 4;
 
-/** Classify one turn/end event into a delivery outcome. */
+/** Classify one turn/end event into a terminal-reason label. */
 export function terminalOutcomeOf(turnEndEvent) {
   const raw = turnEndEvent?.data?.reason;
   const kind = typeof raw === 'string'
     ? raw
     : typeof raw?.kind === 'string' ? raw.kind : null;
-  return { kind: kind ?? 'other', pushFullAnswer: kind === 'completed' };
+  return { kind: kind ?? 'other' };
 }
 
 function eventOf(entry) {

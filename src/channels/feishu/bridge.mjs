@@ -1194,12 +1194,8 @@ export class FeishuHarnessBridge {
     // active turn — fall through to cancelling pending deferred sessions.
     if (runner === runControlCommand
       && result?.stopped !== true
-      && /^\/stop(?=$|\s)/iu.test(nonEmptyString(message.content) ?? '')) {
-      const deferredStopped = await this.#stopDeferredFor(key);
-      if (deferredStopped) {
-        const notice = t('已请求停止后台任务。');
-        result = { message: notice, messages: [notice], stopped: true };
-      }
+      && /^\/stop$/iu.test(nonEmptyString(message.content) ?? '')) {
+      if (await this.#stopDeferredFor(key)) result = this.#deferredStopResult();
     }
     if (result?.stopped) {
       await Promise.allSettled([
@@ -2847,6 +2843,11 @@ export class FeishuHarnessBridge {
     }
   }
 
+  #deferredStopResult() {
+    const notice = t('已请求停止后台任务。');
+    return { message: notice, messages: [notice], stopped: true };
+  }
+
   /** Cancel background sessions with pending deferred entries for one key. */
   async #stopDeferredFor(key) {
     if (typeof this.#state.deferredEntries !== 'function') return false;
@@ -2881,11 +2882,7 @@ export class FeishuHarnessBridge {
         },
       );
       if (result?.stopped !== true) {
-        const deferredStopped = await this.#stopDeferredFor(key);
-        if (deferredStopped) {
-          const notice = t('已请求停止后台任务。');
-          result = { message: notice, messages: [notice], stopped: true };
-        }
+        if (await this.#stopDeferredFor(key)) result = this.#deferredStopResult();
       }
       if (result?.stopped) {
         await Promise.allSettled([
@@ -3070,8 +3067,13 @@ export class FeishuHarnessBridge {
       await this.#deferredRegistry().remove(entry);
       return 'gate-dropped';
     }
+    // Claim the terminal frame before pushing so overlapping processors
+    // (startup resume vs. live mux frames) cannot double-push the answer.
+    await this.#deferredRegistry().markSeen(entry, endSeq);
     const delivered = await this.#pushDeferredOutcome(entry, outcome);
     if (delivered) return 'delivered';
+    // Roll the claim back so a later retry can still push for this frame.
+    await this.#deferredRegistry().markSeen(entry, Number.isSafeInteger(entry.lastSeenEndSeq) ? entry.lastSeenEndSeq : -1);
     const attempts = await this.#deferredRegistry().markFailedAttempt(entry);
     return attempts >= 3 ? 'abandoned' : 'retry';
   }

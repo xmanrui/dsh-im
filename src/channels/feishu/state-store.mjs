@@ -161,10 +161,6 @@ export class StateStore {
     return rows;
   }
 
-  deferredEntriesForSession(sessionId) {
-    return this.deferredEntries().filter((entry) => entry.sessionId === sessionId);
-  }
-
   async putDeferred(entry) {
     if (!validDeferredEntry(entry)) throw new TypeError('Invalid deferred delivery entry');
     const list = this.#state.deferred[entry.key] ?? [];

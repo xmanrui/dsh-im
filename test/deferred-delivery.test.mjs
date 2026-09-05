@@ -73,14 +73,14 @@ describe('extractCompletedTurnAnswer', () => {
 describe('terminalOutcomeOf', () => {
   test('分类 completed 与 stopped', () => {
     assert.deepEqual(terminalOutcomeOf(ev(1, 'turn/end', { reason: { kind: 'completed' } })),
-      { kind: 'completed', pushFullAnswer: true });
+      { kind: 'completed' });
     assert.deepEqual(terminalOutcomeOf(ev(2, 'turn/end', { reason: 'stopped' })),
-      { kind: 'stopped', pushFullAnswer: false });
+      { kind: 'stopped' });
   });
 
   test('缺失 reason 归为 other', () => {
     assert.deepEqual(terminalOutcomeOf(ev(3, 'turn/end', {})),
-      { kind: 'other', pushFullAnswer: false });
+      { kind: 'other' });
   });
 });
 

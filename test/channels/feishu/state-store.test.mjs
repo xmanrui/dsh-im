@@ -73,12 +73,11 @@ test('StateStore persists deferred delivery entries (round-trip and filters)', a
     turn: null, afterSeq: -1, lastSeenEndSeq: -1, attempts: 0, status: 'pending', createdAt: 2,
   });
 
-  assert.equal(store.deferredEntriesForSession('s1').length, 1);
   assert.equal(store.deferredEntries().length, 2);
 
   const patched = await store.patchDeferred('k s1 3', { lastSeenEndSeq: 9 });
   assert.equal(patched.lastSeenEndSeq, 9);
-  assert.equal(store.deferredEntriesForSession('s1')[0].lastSeenEndSeq, 9);
+  assert.equal(store.deferredEntries()[0].lastSeenEndSeq, 9);
 
   await store.removeDeferred('k s1 3');
   assert.deepEqual(store.deferredEntries().map((entry) => entry.sessionId), ['s2']);
