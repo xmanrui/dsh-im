@@ -9289,3 +9289,106 @@ test('step push on: context enhancement surfaces as an injection step', async ()
   );
   assert.equal(sent.at(-1), '完成。');
 });
+
+test('step push on: consecutive assistant notes flush on the larger step boundary', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient(async (text) => sent.push(text)),
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      await options.onUpdate({ type: 'assistant-message', step: 0, text: '第一步说明' });
+      await options.onUpdate({ type: 'assistant-message', step: 1, text: '第二步说明' });
+      return '第二步说明';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_flush', '连续两步说明'));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(
+    sent,
+    ['💬 第一步说明', '第二步说明'],
+    'the earlier note flushes when a larger step finalizes; the last stays as the answer post',
+  );
+});
+
+test('step push on: a long CJK answer splits into byte-budgeted posts', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const longAnswer = `${'飞书测速'.repeat(4000)}\n\n尾部内容。`;
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient(async (text) => sent.push(text)),
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async () => longAnswer),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_cjk', '长中文回答'));
+  await bridge.waitForIdle();
+
+  assert.ok(sent.length > 1, 'a CJK-heavy answer must split into multiple posts');
+  for (const text of sent) {
+    assert.ok(
+      Buffer.byteLength(text, 'utf8') <= 24_000,
+      'each post chunk must stay within the UTF-8 byte budget',
+    );
+  }
+  assert.equal(sent.at(-1), '尾部内容。');
+});
+
+test('step push on: a rate-limited post retries instead of leaking to plain text', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const attempts = [];
+  let attemptsReply = 0;
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: {
+      im: { v1: { message: {
+        reply: async (request) => {
+          attemptsReply += 1;
+          attempts.push(attemptsReply);
+          if (attemptsReply === 1) throw new Error('Feishu reply failed: 230020');
+          sent.push(stepPushMessageText(request));
+          return { code: 0, data: { message_id: `om_retry_${attemptsReply}` } };
+        },
+        create: async () => {
+          attempts.push('create');
+          return { code: 0, data: { message_id: 'om_create_leak' } };
+        },
+      } } },
+    },
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      return '重试成功。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_retry', '触发限流'));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(attempts, [1, 2, 3], 'the rate-limited reply is retried once and the final answer follows');
+  assert.ok(
+    !attempts.includes('create'),
+    'a rate-limited reply must not fall back to a plain main-chat message',
+  );
+  assert.deepEqual(sent, ['✅ bash — ls\n{"command":"ls"}', '重试成功。']);
+});

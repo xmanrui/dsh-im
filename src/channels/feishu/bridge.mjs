@@ -166,19 +166,37 @@ const STEP_PUSH_MAX_MESSAGES_PER_TURN = 200;
 const STEP_PUSH_SUMMARY_MAX_CHARS = 120;
 const STEP_PUSH_ARGUMENTS_MAX_CHARS = 400;
 const STEP_PUSH_ERROR_MAX_CHARS = 200;
-/** One post message carries at most this many markdown chars (30KB API cap). */
-const STEP_PUSH_POST_CHUNK_MAX_CHARS = 28_000;
+/** One post message carries at most this many UTF-8 bytes of markdown
+ *  (Feishu caps the post request body at 30KB; the budget leaves room for
+ *  the JSON wrapper and escape expansion). */
+const STEP_PUSH_POST_CHUNK_MAX_BYTES = 24_000;
 
-/** Split one markdown answer into post-sized chunks at paragraph bounds. */
-function splitStepPostMarkdown(text, limit = STEP_PUSH_POST_CHUNK_MAX_CHARS) {
+/** Split one markdown answer into post-sized chunks at paragraph bounds,
+ *  budgeted by UTF-8 byte length (CJK-heavy answers serialize to ~3 bytes
+ *  per char, so a char-based cut would blow the 30KB request cap). */
+function splitStepPostMarkdown(text, limit = STEP_PUSH_POST_CHUNK_MAX_BYTES) {
   const source = String(text ?? '');
-  if (source.length <= limit) return [source];
+  if (Buffer.byteLength(source, 'utf8') <= limit) return [source];
   const chunks = [];
   let remaining = source;
-  while (remaining.length > limit) {
-    let cut = remaining.lastIndexOf('\n\n', limit);
-    if (cut < Math.floor(limit * 0.5)) cut = remaining.lastIndexOf('\n', limit);
-    if (cut < Math.floor(limit * 0.5)) cut = limit;
+  while (Buffer.byteLength(remaining, 'utf8') > limit) {
+    let lo = 0;
+    let hi = remaining.length;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (Buffer.byteLength(remaining.slice(0, mid), 'utf8') <= limit) lo = mid;
+      else hi = mid - 1;
+    }
+    let cut = lo;
+    const preferFrom = Math.floor(cut * 0.6);
+    const softCut = remaining.lastIndexOf('\n\n', cut);
+    if (softCut >= preferFrom) {
+      cut = softCut;
+    } else {
+      const lineCut = remaining.lastIndexOf('\n', cut);
+      if (lineCut >= preferFrom) cut = lineCut;
+    }
+    if (cut <= 0) cut = lo;
     chunks.push(remaining.slice(0, cut));
     remaining = remaining.slice(cut).trimStart();
   }
@@ -3724,11 +3742,11 @@ export class FeishuHarnessBridge {
    * answer still follows. Send failures are logged, never thrown — a flaky
    * step message must never break the turn.
    */
-  async #sendStepMessage(chatId, key, paragraphs, fallbackText, replyToMessageId = null) {
+  async #sendStepMessage(chatId, key, paragraphs, fallbackText, replyToMessageId = null, { billable = true } = {}) {
     const state = this.#stepPushSendState.get(key)
       ?? { lastSentAt: 0, count: 0, breakerLogged: false };
     this.#stepPushSendState.set(key, state);
-    if (state.count >= STEP_PUSH_MAX_MESSAGES_PER_TURN) {
+    if (billable && state.count >= STEP_PUSH_MAX_MESSAGES_PER_TURN) {
       if (!state.breakerLogged) {
         state.breakerLogged = true;
         this.#logger.warn?.(
@@ -3744,7 +3762,7 @@ export class FeishuHarnessBridge {
     // message land after the teardown has begun.
     this.#signal?.throwIfAborted();
     state.lastSentAt = this.#stepPushClock.now();
-    state.count += 1;
+    if (billable) state.count += 1;
     this.#status.streamUpdates = (this.#status.streamUpdates ?? 0) + 1;
     await this.#sendStepPost(chatId, replyToMessageId, paragraphs, fallbackText);
   }
@@ -3849,12 +3867,14 @@ export class FeishuHarnessBridge {
     });
 
     // 上下文注入动作在详细级别下也体现为一条步骤（注入细节可忽略）。
+    // 不计入工具/助手消息的熔断计数（规格口径：熔断只管「工具 + 助手」）。
     if (contextEnhanced || content) {
       await this.#sendStepMessage(
         chatId, key,
         [[{ tag: 'text', text: t('📎 已注入会话上下文') }]],
         t('📎 已注入会话上下文'),
         messageId,
+        { billable: false },
       );
     }
 
