@@ -9541,3 +9541,59 @@ test('step push: rate-limit retries read structured codes, not just message text
   assert.equal(creates.length, 0, 'no message may leak to the main chat');
   assert.deepEqual(sent, ['✅ bash — ls\n{"command":"ls"}', '重试成功。']);
 });
+
+test('step push: manual topics stay threaded even with the group-topic switch off', async () => {
+  const fixture = stateFixture();
+  const creates = [];
+  const replies = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: { im: { v1: { message: {
+      reply: async (request) => {
+        replies.push({
+          msgType: request.data.msg_type,
+          replyInThread: request.data.reply_in_thread === true,
+          messageId: request.path.message_id,
+          text: stepPushMessageText(request),
+        });
+        return { code: 0, data: { message_id: `om_r_${replies.length}` } };
+      },
+      create: async (request) => {
+        creates.push(stepPushMessageText(request));
+        return { code: 0, data: { message_id: `om_c_${creates.length}` } };
+      },
+    } } } },
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      await options.onUpdate({ type: 'assistant-message', step: 0, text: '进入话题处理' });
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      return '话题内回答。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    // NOTE: groupTopicReply stays at its default (false) on purpose — a manual
+    // topic conversation must still thread its replies.
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_manual_topic', '处理话题任务', {
+    chat_type: 'group',
+    thread_id: 'omt_manual',
+    mentions: [{ id: { open_id: 'ou_bot' }, key: '@_user_1' }],
+  }));
+  await bridge.waitForIdle();
+
+  assert.ok(replies.length >= 3, 'steps plus the final answer must use the reply path');
+  for (const reply of replies) {
+    assert.equal(reply.replyInThread, true, 'manual-topic replies must carry reply_in_thread');
+    assert.equal(reply.msgType, 'post', 'each message is a rich-text post');
+    assert.equal(reply.messageId, 'om_manual_topic', 'anchored on the inbound message');
+  }
+  assert.equal(creates.length, 0, 'no message may leak to the main chat');
+  assert.deepEqual(
+    replies.map((reply) => reply.text),
+    ['💬 进入话题处理', '✅ bash — ls\n{"command":"ls"}', '话题内回答。'],
+  );
+});
