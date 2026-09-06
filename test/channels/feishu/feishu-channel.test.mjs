@@ -847,3 +847,16 @@ test('VerifiedFeishuChannel sends artifacts into a topic via reply_in_thread and
   assert.equal(calls.replies[0].data.msg_type, 'file');
   assert.deepEqual(threadIds, ['omt_file']);
 });
+
+test('recallMessage deletes through the message delete API and swallows failures', async () => {
+  const { client, calls } = fakeClient();
+  const channel = new VerifiedFeishuChannel({ client });
+
+  await channel.recallMessage('om_heartbeat');
+  assert.equal(calls.recalls.length, 1);
+  assert.equal(calls.recalls[0].path.message_id, 'om_heartbeat');
+
+  client.im.v1.message.delete = async () => { throw new Error('already gone'); };
+  await channel.recallMessage('om_gone');
+  assert.equal(calls.recalls.length, 1);
+});

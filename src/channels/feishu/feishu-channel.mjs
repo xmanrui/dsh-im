@@ -528,6 +528,11 @@ export class VerifiedFeishuChannel {
     return reactionId;
   }
 
+  /** Delete one previously sent message (step-push heartbeat cleanup). */
+  async recallMessage(messageId) {
+    await this.#recall(messageId);
+  }
+
   async removeReaction(messageId, reactionId) {
     assertApiSuccess('Feishu reaction.delete', await this.#client.im.v1.messageReaction.delete({
       path: { message_id: messageId, reaction_id: reactionId },
