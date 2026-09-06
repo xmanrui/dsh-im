@@ -3771,6 +3771,8 @@ export class FeishuHarnessBridge {
           `[dsh-feishu] step push hit ${STEP_PUSH_MAX_MESSAGES_PER_TURN} messages for this turn; staying silent until it ends`,
         );
       }
+      // 熔断静默期内同样刷新 silenceSince：避免每个真实事件后重建/撤回心跳。
+      state.silenceSince = state.lastSentAt;
       return;
     }
     this.#signal?.throwIfAborted();
@@ -3890,8 +3892,8 @@ export class FeishuHarnessBridge {
 
   /**
    * 思考中状态看门狗：直推回合内静默满阈值时推送/原地刷新一条「⏳ 正在思考中…」
-   * 心跳 post；真实事件或回合结束时撤回。tick 循环走可注入 stepPushClock（测试
-   * 确定性推进），生命周期归属当前回合（stop 后循环退出）。
+   * 心跳 post；真实事件或回合结束时撤回。轮询检查可注入 stepPushClock（测试
+   * 手动推进时钟），生命周期归属当前回合（stop 后循环退出）。
    */
   #startThinkingStatusWatchdog(key, chatId, replyToMessageId) {
     const state = this.#stepPushSendState.get(key);
@@ -3973,7 +3975,9 @@ export class FeishuHarnessBridge {
     return {
       stop: async () => {
         watchdog.stopped = true;
+        console.log('DEBUG-STOP entered, hb =', state.heartbeatMessageId);
         if (state.heartbeatMessageId) {
+          console.log('DEBUG-RECALL2 calling channel.recallMessage for', state.heartbeatMessageId, 'typeof:', typeof this.#channel?.recallMessage);
           const heartbeatId = state.heartbeatMessageId;
           state.heartbeatMessageId = null;
           try { await this.#channel?.recallMessage?.(heartbeatId); }

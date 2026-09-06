@@ -8429,7 +8429,7 @@ function stepPushClockFixture() {
   };
 }
 
-function stepPushChannel({ cardWrites, streamCalls, streamError = null } = {}) {
+function stepPushChannel({ cardWrites, streamCalls, streamError = null, recalls = [] } = {}) {
   const writes = cardWrites ?? [];
   const calls = streamCalls ?? [];
   return {
@@ -8439,6 +8439,7 @@ function stepPushChannel({ cardWrites, streamCalls, streamError = null } = {}) {
       await markdown({ setContent: async (content) => writes.push(content) });
       return { messageId: 'om_step_card' };
     },
+    recallMessage: async (messageId) => { recalls.push(messageId); },
   };
 }
 
@@ -9600,7 +9601,7 @@ test('step push: manual topics stay threaded even with the group-topic switch of
 
 // ── 思考中状态（静默期心跳）────────────────────────────────────────────────
 
-function stepPushPostClient({ onPost, onUpdateMessage }) {
+function stepPushPostClient({ onPost, onUpdateMessage, onDelete } = {}) {
   let sequence = 0;
   return {
     im: { v1: { message: {
@@ -9618,6 +9619,10 @@ function stepPushPostClient({ onPost, onUpdateMessage }) {
         onUpdateMessage(request);
         return { code: 0 };
       },
+      delete: async (request) => {
+        onDelete?.(request);
+        return { code: 0 };
+      },
     } } },
   };
 }
@@ -9625,6 +9630,7 @@ function stepPushPostClient({ onPost, onUpdateMessage }) {
 test('step push: silence over the threshold surfaces a thinking heartbeat, recalled at turn end', async () => {
   const fixture = stateFixture();
   const sent = [];
+  const order = [];
   const recalls = [];
   const clock = { now: 1_700_000_000_000 };
   const stepPushClock = {
@@ -9633,12 +9639,19 @@ test('step push: silence over the threshold surfaces a thinking heartbeat, recal
   };
   const bridge = new FeishuHarnessBridge({
     client: stepPushPostClient({
-      onPost: (request, messageId) => sent.push({ id: messageId, text: stepPushMessageText(request) }),
+      onPost: (request, messageId) => {
+        const entry = { kind: 'post', id: messageId, text: stepPushMessageText(request) };
+        order.push(entry);
+        sent.push(entry);
+      },
       onUpdateMessage: () => {},
     }),
     channel: {
       stream: async () => { throw new Error('not used'); },
-      recallMessage: async (messageId) => recalls.push(messageId),
+      recallMessage: async (messageId) => {
+        order.push({ kind: 'recall', id: messageId });
+        recalls.push(messageId);
+      },
     },
     harness: stepPushHarness(async () => {
       clock.now += 25_000;
@@ -9657,7 +9670,12 @@ test('step push: silence over the threshold surfaces a thinking heartbeat, recal
 
   const heartbeat = sent.find((entry) => entry.text.includes('⏳ 正在思考中…'));
   assert.ok(heartbeat, 'the thinking heartbeat must appear after the silence threshold');
+  console.log('DEBUG1 recalls:', JSON.stringify(recalls), 'sent:', JSON.stringify(sent));
   assert.deepEqual(recalls, [heartbeat.id], 'the heartbeat must be recalled when the turn ends');
+  const recallOrder = order.findIndex((entry) => entry.kind === 'recall');
+  const finalOrder = order.findIndex((entry) => entry.kind === 'post' && entry.text === '思考后的答案。');
+  assert.ok(recallOrder !== -1 && finalOrder !== -1, 'recall and final answer both delivered');
+  assert.ok(recallOrder < finalOrder, 'the heartbeat recall must precede the final answer post');
   assert.equal(sent.at(-1).text, '思考后的答案。');
 });
 
@@ -9696,6 +9714,9 @@ test('step push: the thinking heartbeat refreshes elapsed time in place', async 
   assert.ok(sent.some((entry) => entry.text.includes('⏳ 正在思考中…')), 'the heartbeat appears');
   assert.equal(updates.length, 1, 'one in-place refresh within the silence window');
   assert.match(updates[0].text, /已运行 \d+:\d\d/);
+  const heartbeatPostId = sent.find((entry) => entry.text.includes('⏳ 正在思考中…'))?.id;
+  assert.ok(heartbeatPostId, 'the heartbeat post id is captured');
+  assert.equal(updates[0].messageId, heartbeatPostId, 'the refresh must edit the same heartbeat message');
   assert.deepEqual(sent.at(-1).text, '思考后的答案。');
 });
 
@@ -9779,11 +9800,7 @@ test('thinking status: off mode never pushes a heartbeat', async () => {
     stepPushClock: think.stepPushClock,
   });
 
-  try {
-    await bridge.accept(event('om_hb_off', '关模式长任务'));
-  } catch (error) {
-    console.log('DEBUG-OFF accept error:', error?.code, error?.message);
-  }
+  await bridge.accept(event('om_hb_off', '关模式长任务'));
   await bridge.waitForIdle();
 
   assert.ok(
@@ -9908,6 +9925,45 @@ test('thinking status: heartbeat updates stop at the 30-update cap', async () =>
   await bridge.accept(event('om_hb_cap', '超长静默'));
   await bridge.waitForIdle();
 
-  assert.ok(updateCalls <= 31, 'the in-place refresh respects the 30-update cap');
+  assert.ok(updateCalls >= 10 && updateCalls <= 30, 'the in-place refresh respects the 30-update cap');
   assert.equal(sent.at(-1).text, '超长静默后的答案。');
+});
+
+test('thinking status: abort recalls the live heartbeat', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const recalls = [];
+  const controller = new AbortController();
+  const clock = { now: 1_700_000_000_000 };
+  const stepPushClock = {
+    now: () => clock.now,
+    delay: async (ms) => { clock.now += ms; },
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushPostClient({
+      onPost: (request, messageId) => sent.push({ id: messageId, text: stepPushMessageText(request) }),
+      onUpdateMessage: () => {},
+    }),
+    channel: stepPushChannel({ recalls }),
+    harness: stepPushHarness(async () => {
+      clock.now += 25_000;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return '中止后的说明。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    signal: controller.signal,
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_hb_abort', 'abort 场景'));
+  await bridge.waitForIdle();
+  console.log('DEBUG-ABORT sent:', JSON.stringify(sent), 'recalls:', JSON.stringify(recalls));
+
+  assert.deepEqual(recalls, ['om_post_1'], 'the live heartbeat must be recalled on abort');
+  assert.equal(sent.at(-1).text, '中止后的说明。');
 });

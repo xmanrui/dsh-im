@@ -507,14 +507,14 @@ export class VerifiedFeishuChannel {
     return messageId;
   }
 
-  async #recall(messageId) {
+  async #recall(messageId, label = 'streaming card') {
     try {
       const response = await this.#client.im.v1.message.delete({
         path: { message_id: messageId },
       });
       assertApiSuccess('Feishu message delete', response);
     } catch (error) {
-      console.warn('[bridge] unable to recall a failed streaming card:', error.message);
+      console.warn(`[bridge] unable to recall ${label}:`, error.message);
     }
   }
 
@@ -530,7 +530,7 @@ export class VerifiedFeishuChannel {
 
   /** Delete one previously sent message (step-push heartbeat cleanup). */
   async recallMessage(messageId) {
-    await this.#recall(messageId);
+    await this.#recall(messageId, 'thinking status heartbeat');
   }
 
   async removeReaction(messageId, reactionId) {
