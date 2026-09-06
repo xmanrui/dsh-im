@@ -9345,7 +9345,8 @@ test('step push on: a long CJK answer splits into byte-budgeted posts', async ()
       'each post chunk must stay within the UTF-8 byte budget',
     );
   }
-  assert.equal(sent.at(-1), '尾部内容。');
+  assert.equal(sent.join(''), longAnswer, 'splitting preserves the complete answer in order');
+  assert.ok(sent.at(-1).endsWith('尾部内容。'), 'the final paragraph stays at the end');
 });
 
 test('step push on: a rate-limited post retries instead of leaking to plain text', async () => {
@@ -9540,4 +9541,112 @@ test('step push: rate-limit retries read structured codes, not just message text
   );
   assert.equal(creates.length, 0, 'no message may leak to the main chat');
   assert.deepEqual(sent, ['✅ bash — ls\n{"command":"ls"}', '重试成功。']);
+});
+
+test('step push: a failed middle answer chunk retries only the undelivered suffix', async () => {
+  const fixture = stateFixture();
+  const delivered = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const longAnswer = [
+    '甲'.repeat(7_000),
+    '乙'.repeat(7_000),
+    '丙'.repeat(7_000),
+  ].join('\n\n');
+  let replyCalls = 0;
+  const bridge = new FeishuHarnessBridge({
+    client: { im: { v1: { message: {
+      reply: async (request) => {
+        replyCalls += 1;
+        // First post succeeds. The second post and its in-reply text fallback
+        // fail, then the outer final-answer fallback succeeds from that chunk.
+        if (replyCalls === 2 || replyCalls === 3) {
+          throw new Error('second chunk unavailable');
+        }
+        delivered.push(stepPushMessageText(request));
+        return { code: 0, data: { message_id: `om_partial_${replyCalls}` } };
+      },
+      create: async () => { throw new Error('main chat unavailable'); },
+    } } } },
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async () => longAnswer),
+    state: fixture.state,
+    status: bridgeStatus(),
+    logger: { debug() {}, error() {}, warn() {} },
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_partial_chunk', '长答案局部失败'));
+  await bridge.waitForIdle();
+
+  assert.equal(
+    delivered.filter((text) => text.startsWith('甲')).length,
+    1,
+    'the successful prefix must not be sent again',
+  );
+  assert.deepEqual(
+    delivered.map((text) => text[0]),
+    ['甲', '乙', '丙'],
+    'the fallback resumes at the failed chunk and preserves order',
+  );
+});
+
+test('step push: long-answer chunks never split an emoji surrogate pair', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const longAnswer = `${'a'.repeat(23_949)}😀Z`;
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient(async (text) => sent.push(text)),
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async () => longAnswer),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_emoji_boundary', 'emoji 边界'));
+  await bridge.waitForIdle();
+
+  assert.equal(sent.join(''), longAnswer, 'all source text is preserved');
+  assert.ok(sent.length > 1, 'the fixture crosses the encoded post budget');
+  assert.ok(sent.every((chunk) => (
+    !/[\uD800-\uDBFF]$/u.test(chunk) && !/^[\uDC00-\uDFFF]/u.test(chunk)
+  )), 'no message boundary may bisect a surrogate pair');
+});
+
+test('step push: post chunks include JSON escape expansion in the byte budget', async () => {
+  const fixture = stateFixture();
+  const requestSizes = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const longAnswer = '\\'.repeat(24_010);
+  const bridge = new FeishuHarnessBridge({
+    client: {
+      im: { v1: { message: {
+        reply: async (request) => {
+          requestSizes.push(Buffer.byteLength(request.data.content, 'utf8'));
+          return { code: 0, data: { message_id: `om_encoded_${requestSizes.length}` } };
+        },
+      } } },
+    },
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async () => longAnswer),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_json_bytes', 'JSON 转义边界'));
+  await bridge.waitForIdle();
+
+  assert.ok(requestSizes.length > 1, 'escape-heavy text must be split');
+  assert.ok(
+    requestSizes.every((size) => size <= 24_000),
+    `encoded post contents exceeded the byte budget: ${requestSizes.join(', ')}`,
+  );
 });

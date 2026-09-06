@@ -166,25 +166,27 @@ const STEP_PUSH_MAX_MESSAGES_PER_TURN = 200;
 const STEP_PUSH_SUMMARY_MAX_CHARS = 120;
 const STEP_PUSH_ARGUMENTS_MAX_CHARS = 400;
 const STEP_PUSH_ERROR_MAX_CHARS = 200;
-/** One post message carries at most this many UTF-8 bytes of markdown
- *  (Feishu caps the post request body at 30KB; the budget leaves room for
- *  the JSON wrapper and escape expansion). */
+/** One post message carries at most this many UTF-8 bytes after its rich-text
+ *  content has been JSON encoded (Feishu caps rich-text requests at 30KB). */
 const STEP_PUSH_POST_CHUNK_MAX_BYTES = 24_000;
 
 /** Split one markdown answer into post-sized chunks at paragraph bounds,
- *  budgeted by UTF-8 byte length (CJK-heavy answers serialize to ~3 bytes
- *  per char, so a char-based cut would blow the 30KB request cap). */
+ *  budgeted by the encoded rich-text content rather than the source string.
+ *  This accounts for both CJK bytes and JSON escape expansion. */
 function splitStepPostMarkdown(text, limit = STEP_PUSH_POST_CHUNK_MAX_BYTES) {
   const source = String(text ?? '');
-  if (Buffer.byteLength(source, 'utf8') <= limit) return [source];
+  const encodedBytes = (markdown) => Buffer.byteLength(JSON.stringify({
+    zh_cn: { content: [[{ tag: 'md', text: markdown }]] },
+  }), 'utf8');
+  if (encodedBytes(source) <= limit) return [source];
   const chunks = [];
   let remaining = source;
-  while (Buffer.byteLength(remaining, 'utf8') > limit) {
+  while (encodedBytes(remaining) > limit) {
     let lo = 0;
     let hi = remaining.length;
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1;
-      if (Buffer.byteLength(remaining.slice(0, mid), 'utf8') <= limit) lo = mid;
+      if (encodedBytes(remaining.slice(0, mid)) <= limit) lo = mid;
       else hi = mid - 1;
     }
     let cut = lo;
@@ -197,6 +199,17 @@ function splitStepPostMarkdown(text, limit = STEP_PUSH_POST_CHUNK_MAX_BYTES) {
       if (lineCut >= preferFrom) cut = lineCut;
     }
     if (cut <= 0) cut = lo;
+    // JavaScript indexes strings by UTF-16 code unit. Never split between a
+    // high and low surrogate, which would turn one emoji into two replacement
+    // characters across adjacent messages.
+    const before = remaining.charCodeAt(cut - 1);
+    const after = remaining.charCodeAt(cut);
+    if (before >= 0xD800 && before <= 0xDBFF && after >= 0xDC00 && after <= 0xDFFF) {
+      cut -= 1;
+    }
+    if (cut <= 0) {
+      throw new RangeError('Feishu step push post byte limit is too small');
+    }
     chunks.push(remaining.slice(0, cut));
     remaining = remaining.slice(cut).trimStart();
   }
@@ -3992,7 +4005,10 @@ export class FeishuHarnessBridge {
       // 任一分段失败都视为最终答案失败——进入 catch 阶梯上抛，
       // 决不允许「用户没收到答案、状态却记为已回复」。
       const providerMessageIds = [];
-      for (const chunk of splitStepPostMarkdown(deliveryText)) {
+      const chunks = splitStepPostMarkdown(deliveryText);
+      let failedChunkIndex = -1;
+      for (let index = 0; index < chunks.length; index += 1) {
+        const chunk = chunks[index];
         const result = await this.#sendStepPost(
           chatId,
           messageId,
@@ -4000,13 +4016,21 @@ export class FeishuHarnessBridge {
           chunk,
         );
         if (!result.ok) {
-          postDeliveryError ??= result.error
-            ?? new Error('step push post delivery failed');
-          continue;
+          postDeliveryError ??= new Error(
+            result.error?.message ?? 'step push post delivery failed',
+            { cause: result.error },
+          );
+          failedChunkIndex = index;
+          break;
         }
         if (result.messageId) providerMessageIds.push(result.messageId);
       }
-      if (postDeliveryError) throw postDeliveryError;
+      if (postDeliveryError) {
+        postDeliveryError.failedChunkIndex = failedChunkIndex;
+        postDeliveryError.providerMessageIds = providerMessageIds;
+        postDeliveryError.remainingChunks = chunks.slice(failedChunkIndex);
+        throw postDeliveryError;
+      }
       textReceipt = createDeliveryReceipt({
         deliveryId: messageId,
         presentation: 'feishu-step-push-post',
@@ -4017,19 +4041,36 @@ export class FeishuHarnessBridge {
       this.#status.streamErrors = (this.#status.streamErrors ?? 0) + 1;
       this.#logger.warn?.('[dsh-feishu] step push post failed; sending final text:', error.message);
       let textSendError = null;
-      try {
-        textReceipt = await this.#sendAnswerText(chatId, deliveryText, {
-          deliveryId: messageId,
-          presentation: 'feishu-step-push-text',
-          replyTo: messageId,
-        });
-      } catch (fallbackError) {
-        textSendError = channelDeliveryFailure(fallbackError);
-        this.#logger.warn?.(
-          '[dsh-feishu] fallback text delivery failed; continuing with result files:',
-          fallbackError,
-        );
+      const providerMessageIds = Array.isArray(error?.providerMessageIds)
+        ? [...error.providerMessageIds]
+        : [];
+      const remainingChunks = Array.isArray(error?.remainingChunks)
+        ? error.remainingChunks
+        : [deliveryText];
+      for (const chunk of remainingChunks) {
+        try {
+          const receipt = await this.#sendAnswerText(chatId, chunk, {
+            deliveryId: messageId,
+            presentation: 'feishu-step-push-text',
+            replyTo: messageId,
+          });
+          providerMessageIds.push(...receipt.providerMessageIds);
+        } catch (fallbackError) {
+          textSendError = channelDeliveryFailure(fallbackError);
+          this.#logger.warn?.(
+            '[dsh-feishu] fallback text delivery failed; continuing with result files:',
+            fallbackError,
+          );
+          break;
+        }
       }
+      textReceipt = providerMessageIds.length > 0
+        ? createDeliveryReceipt({
+            deliveryId: messageId,
+            presentation: 'feishu-step-push-post-and-text',
+            providerMessageIds,
+          })
+        : undefined;
       const delivery = await this.#deliverArtifacts(
         chatId,
         messageId,
