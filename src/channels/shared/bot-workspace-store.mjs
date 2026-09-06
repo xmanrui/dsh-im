@@ -161,7 +161,20 @@ function normalizeDeliveryTargets(value, { version } = {}) {
       if (!targets || typeof targets !== 'object' || Array.isArray(targets)) return null;
       const normalizedTargets = Object.create(null);
       for (const [targetId, target] of Object.entries(targets)) {
-        const normalized = normalizeDeliveryTarget(target, {
+        // Backward compatibility: some released builds persisted the target id
+        // inside the stored object as well. Accept a redundant targetId that
+        // matches the map key when loading a stored document; a mismatch stays
+        // invalid so a corrupted file still fails closed.
+        let candidate = target;
+        if (target && typeof target === 'object' && !Array.isArray(target)
+          && target.targetId !== undefined) {
+          if (target.targetId !== targetId) {
+            throw deliveryTargetError('invalid-target', 'Invalid target id');
+          }
+          const { targetId: _legacyTargetId, ...withoutLegacyId } = target;
+          candidate = withoutLegacyId;
+        }
+        const normalized = normalizeDeliveryTarget(candidate, {
           targetId,
           allowSessionSync: version >= CURRENT_DOCUMENT_VERSION,
         });
