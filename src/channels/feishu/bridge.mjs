@@ -157,6 +157,27 @@ const ARCHIVED_COMMAND = /^\/archived(?:\s+(on|off))?$/i;
 /** Matches fast card commands that should not be queued behind a running task. */
 const CARD_COMMAND = /^\/(?:m(?:enu)?|new|help|status|compact|(?:sessionlist|sessions)(?:\s|$)|workspacelist|workspaces|wsl|watchlist|archived(?:\s+(on|off))?)$/i;
 
+// ── Step push (分步直推) limits ──────────────────────────────────────────────
+/** Feishu allows 5 msg/s per chat; step push stays well below that. */
+const STEP_PUSH_MIN_INTERVAL_MS = 250;
+/** One turn never pushes more step messages than this (熔断阈值). */
+const STEP_PUSH_MAX_MESSAGES_PER_TURN = 200;
+/** Excerpt bounds for step push message rendering. */
+const STEP_PUSH_SUMMARY_MAX_CHARS = 120;
+const STEP_PUSH_ARGUMENTS_MAX_CHARS = 400;
+const STEP_PUSH_ERROR_MAX_CHARS = 200;
+/** Salient tool-argument fields for the intent summary, in priority order. */
+const STEP_PUSH_INTENT_FIELDS = [
+  'command', 'file_path', 'path', 'query', 'url', 'pattern', 'prompt', 'cmd',
+];
+/** Bounds the per-conversation step push send-state cache. */
+const MAX_STEP_PUSH_SEND_STATES = 512;
+/** Real clock used by step push throttling; tests inject a fake one. */
+const DEFAULT_STEP_PUSH_CLOCK = Object.freeze({
+  now: () => Date.now(),
+  delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+});
+
 /** Pretty-print a tool call's arguments for an approval card. */
 function operationArguments(toolCall) {
   const source = toolCall?.arguments;
@@ -245,6 +266,11 @@ function artifactFailureText(fileName, error) {
 function answerTextForDelivery(answer, artifacts) {
   if (typeof answer === 'string' && answer.trim()) return answer;
   return artifacts.length > 0 ? t('结果文件已生成。') : answer;
+}
+
+/** Collapse a step push excerpt into one tidy line. */
+function stepPushLine(value) {
+  return String(value ?? '').replace(/\s+/gu, ' ').trim();
 }
 
 function nonEmptyString(value) {
@@ -491,6 +517,10 @@ export class FeishuHarnessBridge {
   #groupTopicReply = false;
   /** When true, streaming turns push tool calls and interim notes as discrete messages. */
   #stepPush = false;
+  /** Per-conversation step push state: key → { lastSentAt, count, breakerLogged }. */
+  #stepPushSendState = new Map();
+  /** Injectable clock for step push throttling (tests pass a fake one). */
+  #stepPushClock;
   /** Group chats this bot has seen; only these may use topic replies. */
   #groupChatIds = new Set();
   /** Anchor message id → whether its replies should stay in a Feishu topic. */
@@ -536,6 +566,7 @@ export class FeishuHarnessBridge {
     groupResponseMode = FEISHU_GROUP_RESPONSE_MODES.ALL,
     groupTopicReply = false,
     stepPush = false,
+    stepPushClock = null,
     repair,
     repairPollIntervalMs = REPAIR_POLL_INTERVAL_MS,
     repairLinkWaitMs = REPAIR_LINK_WAIT_MS,
@@ -563,6 +594,12 @@ export class FeishuHarnessBridge {
       || !Number.isFinite(cardDataTimeoutMs) || cardDataTimeoutMs <= 0) {
       throw new TypeError('Feishu timing values must be positive numbers');
     }
+    if (stepPushClock !== null
+      && (typeof stepPushClock !== 'object' || Array.isArray(stepPushClock)
+        || typeof stepPushClock.now !== 'function'
+        || typeof stepPushClock.delay !== 'function')) {
+      throw new TypeError('Feishu step push clock requires now and delay functions');
+    }
     this.#client = client;
     this.#channel = channel;
     this.#harness = harness;
@@ -577,6 +614,7 @@ export class FeishuHarnessBridge {
     this.#groupResponseMode = normalizeFeishuGroupResponseMode(groupResponseMode);
     this.#groupTopicReply = groupTopicReply === true;
     this.#stepPush = stepPush === true;
+    this.#stepPushClock = stepPushClock ?? DEFAULT_STEP_PUSH_CLOCK;
     this.#repair = repair ?? null;
     this.#repairPollIntervalMs = repairPollIntervalMs;
     this.#repairLinkWaitMs = repairLinkWaitMs;
@@ -3611,6 +3649,237 @@ export class FeishuHarnessBridge {
     };
   }
 
+  // ── Step push (分步直推) ──────────────────────────────────────────────────
+
+  /** One-line intent summary built from a tool call's JSON arguments. */
+  #stepIntentSummary(argumentsText) {
+    if (typeof argumentsText !== 'string' || !argumentsText.trim()) return null;
+    let source = null;
+    try {
+      const parsed = JSON.parse(argumentsText);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const field of STEP_PUSH_INTENT_FIELDS) {
+          const value = parsed[field];
+          if (typeof value === 'string' && value.trim()) {
+            source = value;
+            break;
+          }
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            source = String(value);
+            break;
+          }
+        }
+      }
+    } catch {
+      source = argumentsText;
+    }
+    if (source === null) return null;
+    return stepPushLine(source).slice(0, STEP_PUSH_SUMMARY_MAX_CHARS) || null;
+  }
+
+  /** Render one tool call as an independent step push message. */
+  #formatStepToolMessage(update) {
+    const summary = this.#stepIntentSummary(update.arguments);
+    const name = stepPushLine(update.name) || t('工具');
+    const lines = [`✅ ${name}${summary ? ` — ${summary}` : ''}`];
+    if (typeof update.arguments === 'string' && update.arguments) {
+      lines.push(`▸ ${update.arguments.slice(0, STEP_PUSH_ARGUMENTS_MAX_CHARS)}`);
+    }
+    return lines.join('\n');
+  }
+
+  /**
+   * Push one step message through the conversation's serial step queue: the
+   * 250ms minimum interval guards Feishu's 5 QPS per-chat limit, and a turn
+   * past the message cap stays silent (circuit breaker) while the final
+   * answer still follows. Send failures are logged, never thrown — a flaky
+   * step message must never break the turn.
+   */
+  async #sendStepMessage(chatId, key, text) {
+    const state = this.#stepPushSendState.get(key)
+      ?? { lastSentAt: 0, count: 0, breakerLogged: false };
+    this.#stepPushSendState.set(key, state);
+    if (state.count >= STEP_PUSH_MAX_MESSAGES_PER_TURN) {
+      if (!state.breakerLogged) {
+        state.breakerLogged = true;
+        this.#logger.warn?.(
+          `[dsh-feishu] step push hit ${STEP_PUSH_MAX_MESSAGES_PER_TURN} messages for this turn; staying silent until it ends`,
+        );
+      }
+      return;
+    }
+    this.#signal?.throwIfAborted();
+    const wait = state.lastSentAt + STEP_PUSH_MIN_INTERVAL_MS - this.#stepPushClock.now();
+    if (wait > 0) await this.#stepPushClock.delay(wait);
+    state.lastSentAt = this.#stepPushClock.now();
+    state.count += 1;
+    try {
+      await this.#send(chatId, text);
+    } catch (error) {
+      this.#logger.warn?.('[dsh-feishu] step push send failed:', error?.message ?? String(error));
+    }
+  }
+
+  /**
+   * 分步直推：`#answerWithStream` 流式分支在开关开启时的完整替代路径。
+   * 过程（工具调用、助手中间说明）以独立文本消息逐条直推；最终答案仍由
+   * 流式卡定格，卡失败走既有纯文本降级。
+   */
+  async #answerWithStepPush(event, key, message, { onAskComplete } = {}) {
+    const chatId = event.message.chat_id;
+    const messageId = event.message.message_id;
+    const text = message.content;
+    let askCompleted = false;
+    const markAskComplete = () => {
+      if (askCompleted) return;
+      askCompleted = true;
+      onAskComplete?.();
+    };
+    // Identical prompt-content construction to the streaming branch: images
+    // and reply references become rich prompt content, and persisted context
+    // enhancement is replayed verbatim.
+    let content = hasInboundImages(message) || hasReplyReference(message)
+      ? await promptContentForInboundMessage(message, { signal: this.#signal })
+      : undefined;
+    const snapshot = this.#acceptedMessageIds.get(messageId);
+    let contextEnhanced = false;
+    if (snapshot) {
+      const originalContent = content ?? text;
+      content = enhanceContextContent(originalContent, snapshot, () => ({
+        channel: 'feishu',
+        senderId: senderOpenId(event),
+        chatId: event.message.chat_id,
+        threadId: event.message.thread_id,
+      }));
+      contextEnhanced = content !== originalContent;
+    }
+    // Every turn reopens the per-conversation circuit breaker.
+    const priorState = this.#stepPushSendState.get(key);
+    if (this.#stepPushSendState.size >= MAX_STEP_PUSH_SEND_STATES && !priorState) {
+      const oldest = this.#stepPushSendState.keys().next().value;
+      if (oldest !== undefined) this.#stepPushSendState.delete(oldest);
+    }
+    this.#stepPushSendState.set(key, {
+      lastSentAt: priorState?.lastSentAt ?? 0,
+      count: 0,
+      breakerLogged: false,
+    });
+
+    // 缓冲-确认策略：每步定稿的助手文本先进缓冲；工具调用或更大 step 的定稿
+    // 证明它是过程说明时才 flush 为 💬 消息。turn 结束时缓冲内剩余的即最终步
+    // ——不直推，改为定格卡内容，避免同一句话在气泡与卡内重复。
+    let pendingStep = null;
+    const flushPendingStep = async () => {
+      if (!pendingStep) return;
+      const note = pendingStep;
+      pendingStep = null;
+      await this.#sendStepMessage(chatId, key, `💬 ${note.text}`);
+    };
+    const completed = await askInWorkspaceSession({
+      deferredDelivery: () => ({ coordinator: this.#deferred, chatId, replyToMessageId: messageId }),
+      harness: this.#harness,
+      state: this.#state,
+      key,
+      text,
+      content,
+      contextEnhanced,
+      createOptions: { signal: this.#signal },
+      existsOptions: { signal: this.#signal },
+      askOptions: {
+        ...this.#interactionAskOptions(event, key, message.files),
+        progressMode: 'all',
+        onUpdate: async (update) => {
+          if (update.type === 'assistant-message') {
+            if (pendingStep && Number(update.step) > Number(pendingStep.step)) {
+              await flushPendingStep();
+            }
+            pendingStep = update;
+            return;
+          }
+          if (update.type === 'tool') {
+            await flushPendingStep();
+            await this.#sendStepMessage(chatId, key, this.#formatStepToolMessage(update));
+            return;
+          }
+          if (update.type === 'status' && update.error) {
+            const name = stepPushLine(update.toolName) || t('工具');
+            const excerpt = stepPushLine(update.error).slice(0, STEP_PUSH_ERROR_MAX_CHARS);
+            await this.#sendStepMessage(chatId, key, `⚠️ ${name} — ${excerpt}`);
+          }
+          // text / status（无错误）保持静默：详细级直推完全取代简略级进度行。
+        },
+      },
+    });
+    markAskComplete();
+    const finalStepText = pendingStep ? pendingStep.text : null;
+    pendingStep = null;
+    const finalText = (typeof finalStepText === 'string' && finalStepText.trim())
+      ? finalStepText
+      : completed.answer;
+    const deliveryText = answerTextForDelivery(finalText, completed.artifacts ?? []);
+    let textReceipt;
+    try {
+      // 步骤消息天然在前，最终答案定格在紧随其后的流式卡上。
+      const stream = await this.#channel.stream(chatId, {
+        markdown: async (controller) => {
+          await controller.setContent(deliveryText);
+        },
+      }, {
+        replyTo: messageId,
+        ...(this.#replyInThreadFor(messageId)
+          ? { replyInThread: true, onReplyThreadId: async (threadId) => this.#registerTopicThreadId(threadId, messageId, chatId) }
+          : {}),
+      });
+      textReceipt = createDeliveryReceipt({
+        deliveryId: messageId,
+        presentation: 'feishu-step-push',
+        providerMessageIds: providerMessageIdsFor(stream),
+      });
+      this.#status.streamResponses = (this.#status.streamResponses ?? 0) + 1;
+    } catch (error) {
+      this.#status.streamErrors = (this.#status.streamErrors ?? 0) + 1;
+      this.#logger.warn?.('[dsh-feishu] step push card failed; sending final text:', error.message);
+      let textSendError = null;
+      try {
+        textReceipt = await this.#sendAnswerText(chatId, deliveryText, {
+          deliveryId: messageId,
+          presentation: 'feishu-step-push-text',
+          replyTo: messageId,
+        });
+      } catch (fallbackError) {
+        textSendError = channelDeliveryFailure(fallbackError);
+        this.#logger.warn?.(
+          '[dsh-feishu] fallback text delivery failed; continuing with result files:',
+          fallbackError,
+        );
+      }
+      const delivery = await this.#deliverArtifacts(
+        chatId,
+        messageId,
+        completed.artifacts ?? [],
+        textReceipt,
+      );
+      const artifactDispatched = delivery.receipt.artifacts.some(
+        ({ outcome }) => outcome === 'sent' || outcome === 'unknown',
+      );
+      if (textSendError && !artifactDispatched && !delivery.failureNoticeVisible) {
+        throw textSendError;
+      }
+      if (textSendError && delivery.artifactSendErrors === 0) {
+        setLastMessageFailure(this.#status, textSendError);
+      }
+      this.#status.streamFallbacks = (this.#status.streamFallbacks ?? 0) + 1;
+      return { ...delivery, textDeliveryErrors: textSendError ? 1 : 0 };
+    }
+    const delivery = await this.#deliverArtifacts(
+      chatId,
+      messageId,
+      completed.artifacts ?? [],
+      textReceipt,
+    );
+    return { ...delivery, textDeliveryErrors: 0 };
+  }
+
   async #answerWithStream(event, key, message, { onAskComplete } = {}) {
     const chatId = event.message.chat_id;
     const messageId = event.message.message_id;
@@ -3681,6 +3950,11 @@ export class FeishuHarnessBridge {
       }
       this.#status.streamFallbacks = (this.#status.streamFallbacks ?? 0) + 1;
       return { ...delivery, textDeliveryErrors: textSendError ? 1 : 0 };
+    }
+
+    // 分步直推：开关开启时以完整替代路径呈现回合过程，关闭时与 main 零差异。
+    if (this.#stepPush) {
+      return this.#answerWithStepPush(event, key, message, { onAskComplete });
     }
 
     let promptStarted = false;
