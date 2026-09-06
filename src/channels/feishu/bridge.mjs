@@ -157,6 +157,64 @@ const ARCHIVED_COMMAND = /^\/archived(?:\s+(on|off))?$/i;
 /** Matches fast card commands that should not be queued behind a running task. */
 const CARD_COMMAND = /^\/(?:m(?:enu)?|new|help|status|compact|(?:sessionlist|sessions)(?:\s|$)|workspacelist|workspaces|wsl|watchlist|archived(?:\s+(on|off))?)$/i;
 
+// ── Step push (分步直推) limits ──────────────────────────────────────────────
+/** Feishu allows 5 msg/s per chat; step push stays well below that. */
+const STEP_PUSH_MIN_INTERVAL_MS = 250;
+/** One turn never pushes more step messages than this (熔断阈值). */
+const STEP_PUSH_MAX_MESSAGES_PER_TURN = 200;
+/** Excerpt bounds for step push message rendering. */
+const STEP_PUSH_SUMMARY_MAX_CHARS = 120;
+const STEP_PUSH_ARGUMENTS_MAX_CHARS = 400;
+const STEP_PUSH_ERROR_MAX_CHARS = 200;
+/** One post message carries at most this many UTF-8 bytes of markdown
+ *  (Feishu caps the post request body at 30KB; the budget leaves room for
+ *  the JSON wrapper and escape expansion). */
+const STEP_PUSH_POST_CHUNK_MAX_BYTES = 24_000;
+
+/** Split one markdown answer into post-sized chunks at paragraph bounds,
+ *  budgeted by UTF-8 byte length (CJK-heavy answers serialize to ~3 bytes
+ *  per char, so a char-based cut would blow the 30KB request cap). */
+function splitStepPostMarkdown(text, limit = STEP_PUSH_POST_CHUNK_MAX_BYTES) {
+  const source = String(text ?? '');
+  if (Buffer.byteLength(source, 'utf8') <= limit) return [source];
+  const chunks = [];
+  let remaining = source;
+  while (Buffer.byteLength(remaining, 'utf8') > limit) {
+    let lo = 0;
+    let hi = remaining.length;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (Buffer.byteLength(remaining.slice(0, mid), 'utf8') <= limit) lo = mid;
+      else hi = mid - 1;
+    }
+    let cut = lo;
+    const preferFrom = Math.floor(cut * 0.6);
+    const softCut = remaining.lastIndexOf('\n\n', cut);
+    if (softCut >= preferFrom) {
+      cut = softCut;
+    } else {
+      const lineCut = remaining.lastIndexOf('\n', cut);
+      if (lineCut >= preferFrom) cut = lineCut;
+    }
+    if (cut <= 0) cut = lo;
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut).trimStart();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+/** Salient tool-argument fields for the intent summary, in priority order. */
+const STEP_PUSH_INTENT_FIELDS = [
+  'command', 'file_path', 'path', 'query', 'url', 'pattern', 'prompt', 'cmd',
+];
+/** Bounds the per-conversation step push send-state cache. */
+const MAX_STEP_PUSH_SEND_STATES = 512;
+/** Real clock used by step push throttling; tests inject a fake one. */
+const DEFAULT_STEP_PUSH_CLOCK = Object.freeze({
+  now: () => Date.now(),
+  delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+});
+
 /** Pretty-print a tool call's arguments for an approval card. */
 function operationArguments(toolCall) {
   const source = toolCall?.arguments;
@@ -245,6 +303,11 @@ function artifactFailureText(fileName, error) {
 function answerTextForDelivery(answer, artifacts) {
   if (typeof answer === 'string' && answer.trim()) return answer;
   return artifacts.length > 0 ? t('结果文件已生成。') : answer;
+}
+
+/** Collapse a step push excerpt into one tidy line. */
+function stepPushLine(value) {
+  return String(value ?? '').replace(/\s+/gu, ' ').trim();
 }
 
 function nonEmptyString(value) {
@@ -489,6 +552,12 @@ export class FeishuHarnessBridge {
   #groupResponseMode;
   /** When true, group replies that belong to a Feishu topic ask reply_in_thread. */
   #groupTopicReply = false;
+  /** When true, streaming turns push tool calls and interim notes as discrete messages. */
+  #stepPush = false;
+  /** Per-conversation step push state: key → { lastSentAt, count, breakerLogged }. */
+  #stepPushSendState = new Map();
+  /** Injectable clock for step push throttling (tests pass a fake one). */
+  #stepPushClock;
   /** Group chats this bot has seen; only these may use topic replies. */
   #groupChatIds = new Set();
   /** Anchor message id → whether its replies should stay in a Feishu topic. */
@@ -533,6 +602,8 @@ export class FeishuHarnessBridge {
     botOpenId,
     groupResponseMode = FEISHU_GROUP_RESPONSE_MODES.ALL,
     groupTopicReply = false,
+    stepPush = false,
+    stepPushClock = null,
     repair,
     repairPollIntervalMs = REPAIR_POLL_INTERVAL_MS,
     repairLinkWaitMs = REPAIR_LINK_WAIT_MS,
@@ -560,6 +631,12 @@ export class FeishuHarnessBridge {
       || !Number.isFinite(cardDataTimeoutMs) || cardDataTimeoutMs <= 0) {
       throw new TypeError('Feishu timing values must be positive numbers');
     }
+    if (stepPushClock !== null
+      && (typeof stepPushClock !== 'object' || Array.isArray(stepPushClock)
+        || typeof stepPushClock.now !== 'function'
+        || typeof stepPushClock.delay !== 'function')) {
+      throw new TypeError('Feishu step push clock requires now and delay functions');
+    }
     this.#client = client;
     this.#channel = channel;
     this.#harness = harness;
@@ -573,6 +650,8 @@ export class FeishuHarnessBridge {
     this.#botOpenId = nonEmptyString(botOpenId);
     this.#groupResponseMode = normalizeFeishuGroupResponseMode(groupResponseMode);
     this.#groupTopicReply = groupTopicReply === true;
+    this.#stepPush = stepPush === true;
+    this.#stepPushClock = stepPushClock ?? DEFAULT_STEP_PUSH_CLOCK;
     this.#repair = repair ?? null;
     this.#repairPollIntervalMs = repairPollIntervalMs;
     this.#repairLinkWaitMs = repairLinkWaitMs;
@@ -602,6 +681,10 @@ export class FeishuHarnessBridge {
 
   setGroupTopicReply(value) {
     this.#groupTopicReply = value === true;
+  }
+
+  setStepPush(value) {
+    this.#stepPush = value === true;
   }
 
   #isAddressed(event) {
@@ -3603,6 +3686,377 @@ export class FeishuHarnessBridge {
     };
   }
 
+  // ── Step push (分步直推) ──────────────────────────────────────────────────
+
+  /** One-line intent summary built from a tool call's JSON arguments. */
+  #stepIntentSummary(argumentsText) {
+    if (typeof argumentsText !== 'string' || !argumentsText.trim()) return null;
+    let source = null;
+    try {
+      const parsed = JSON.parse(argumentsText);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const field of STEP_PUSH_INTENT_FIELDS) {
+          const value = parsed[field];
+          if (typeof value === 'string' && value.trim()) {
+            source = value;
+            break;
+          }
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            source = String(value);
+            break;
+          }
+        }
+      }
+    } catch {
+      source = argumentsText;
+    }
+    if (source === null) return null;
+    return stepPushLine(source).slice(0, STEP_PUSH_SUMMARY_MAX_CHARS) || null;
+  }
+
+  /** Render one tool call as a rich-text post: headline + folded code block. */
+  #formatStepToolPost(update) {
+    const summary = this.#stepIntentSummary(update.arguments);
+    const name = stepPushLine(update.name) || t('工具');
+    const headline = `✅ ${name}${summary ? ` — ${summary}` : ''}`;
+    const detail = typeof update.arguments === 'string' && update.arguments
+      ? update.arguments.slice(0, STEP_PUSH_ARGUMENTS_MAX_CHARS)
+      : '';
+    const paragraphs = [[{ tag: 'text', text: headline }]];
+    if (detail) {
+      const language = /^\s*[[{]/.test(detail) ? 'JSON' : undefined;
+      paragraphs.push(language
+        ? [{ tag: 'code_block', language, text: detail }]
+        : [{ tag: 'code_block', text: detail }]);
+    }
+    return {
+      paragraphs,
+      fallbackText: detail ? `${headline}\n▸ ${detail}` : headline,
+    };
+  }
+
+  /**
+   * Push one step message through the conversation's serial step queue: the
+   * 250ms minimum interval guards Feishu's 5 QPS per-chat limit, and a turn
+   * past the message cap stays silent (circuit breaker) while the final
+   * answer still follows. Send failures are logged, never thrown — a flaky
+   * step message must never break the turn.
+   */
+  async #sendStepMessage(chatId, key, paragraphs, fallbackText, replyToMessageId = null, { billable = true } = {}) {
+    const state = this.#stepPushSendState.get(key)
+      ?? { lastSentAt: 0, count: 0, breakerLogged: false };
+    this.#stepPushSendState.set(key, state);
+    if (billable && state.count >= STEP_PUSH_MAX_MESSAGES_PER_TURN) {
+      if (!state.breakerLogged) {
+        state.breakerLogged = true;
+        this.#logger.warn?.(
+          `[dsh-feishu] step push hit ${STEP_PUSH_MAX_MESSAGES_PER_TURN} messages for this turn; staying silent until it ends`,
+        );
+      }
+      return;
+    }
+    this.#signal?.throwIfAborted();
+    const wait = state.lastSentAt + STEP_PUSH_MIN_INTERVAL_MS - this.#stepPushClock.now();
+    if (wait > 0) await this.#stepPushClock.delay(wait);
+    // /stop or shutdown during the wait window must not let the queued
+    // message land after the teardown has begun.
+    this.#signal?.throwIfAborted();
+    state.lastSentAt = this.#stepPushClock.now();
+    if (billable) state.count += 1;
+    this.#status.streamUpdates = (this.#status.streamUpdates ?? 0) + 1;
+    await this.#sendStepPost(chatId, replyToMessageId, paragraphs, fallbackText);
+  }
+
+  /**
+   * Rich-text (post) delivery for step messages. Degradation ladder:
+   * post（限流重试 ×2）→ 同话题纯文本回复 → 主界面纯文本。Returns
+   * `{ ok, messageId?, error? }` — callers decide whether a failure is
+   * tolerable (process notes: log and continue) or fatal (final answer:
+   * surface it).
+   */
+  async #sendStepPost(chatId, replyToMessageId, paragraphs, fallbackText) {
+    const content = JSON.stringify({ zh_cn: { content: paragraphs } });
+    if (!replyToMessageId) {
+      const sentId = await this.#send(chatId, fallbackText);
+      return { ok: true, messageId: typeof sentId === 'string' ? sentId : null };
+    }
+    const replyInThread = this.#replyInThreadFor(replyToMessageId);
+    let lastError = null;
+    // 1) 富文本 post；限流/瞬时失败重试两次（结构化 code 感知）。
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const response = await this.#replyStepMessage(
+          chatId, replyToMessageId, 'post', content, replyInThread,
+        );
+        return {
+          ok: true,
+          messageId: nonEmptyString(response?.data?.message_id) ?? null,
+        };
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2 && this.#isRetriableSendError(error)) {
+          await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+          continue;
+        }
+        break;
+      }
+    }
+    // 2) 明确降级：仅富文本格式被拒时，话题内纯文本回复仍然可用——
+    //    优先留在话题内，而不是直接漏到主界面。
+    try {
+      const response = await this.#replyStepMessage(
+        chatId, replyToMessageId, 'text', JSON.stringify({ text: fallbackText }), replyInThread,
+      );
+      return {
+        ok: true,
+        messageId: nonEmptyString(response?.data?.message_id) ?? null,
+      };
+    } catch (error) {
+      lastError = lastError ?? error;
+    }
+    // 3) 最后兜底：主界面纯文本。
+    this.#logger.warn?.(
+      '[dsh-feishu] step push post failed; falling back to main chat text:',
+      lastError?.message ?? String(lastError),
+    );
+    try {
+      const sentId = await this.#send(chatId, fallbackText);
+      return { ok: true, messageId: typeof sentId === 'string' ? sentId : null };
+    } catch (fallbackError) {
+      this.#logger.warn?.(
+        '[dsh-feishu] step push send failed:',
+        fallbackError?.message ?? String(fallbackError),
+      );
+      return { ok: false, error: lastError ?? fallbackError };
+    }
+  }
+
+  /** Reply with one msg_type; throws errors carrying the structured Feishu code. */
+  async #replyStepMessage(chatId, messageId, msgType, contentString, replyInThread) {
+    const response = await this.#client.im.v1.message.reply({
+      path: { message_id: messageId },
+      data: {
+        msg_type: msgType,
+        content: contentString,
+        ...(replyInThread ? { reply_in_thread: true } : {}),
+      },
+    });
+    if (response?.code && response.code !== 0) {
+      const error = new Error(`Feishu reply failed: ${response.msg || response.code}`);
+      // Preserve the structured code: rate-limit detection must not depend on
+      // the human-readable message surviving.
+      error.code = response.code;
+      error.feishuCode = response.code;
+      throw error;
+    }
+    const threadId = nonEmptyString(response?.data?.thread_id);
+    if (threadId) {
+      await this.#registerTopicThreadId(threadId, messageId, chatId);
+    }
+    return response;
+  }
+
+  /** Rate-limit / transient send errors are worth one more attempt. */
+  #isRetriableSendError(error) {
+    const structured = [error?.code, error?.feishuCode, error?.response?.data?.code]
+      .map((value) => String(value ?? ''));
+    return structured.some((code) => code === '230020' || code === '230006')
+      || /230020|230006/.test(error?.message ?? '');
+  }
+
+  /**
+   * 分步直推：`#answerWithStream` 流式分支在开关开启时的完整替代路径。
+   * 过程（工具调用、助手中间说明）与最终答案均以富文本 post 逐条直推
+   * （工具参数折叠为代码块）；post 失败走既有纯文本降级。
+   */
+  async #answerWithStepPush(event, key, message, { onAskComplete } = {}) {
+    const chatId = event.message.chat_id;
+    const messageId = event.message.message_id;
+    const text = message.content;
+    let askCompleted = false;
+    const markAskComplete = () => {
+      if (askCompleted) return;
+      askCompleted = true;
+      onAskComplete?.();
+    };
+    // 与流式分支一致的提示内容构造：图片与回复引用展开为富提示内容，已接受
+    // 的上下文增强按原样重放。直推分流发生在 `#answerWithStream` 构造之前，
+    // 这里就是本回合唯一一次构造（无重复的 prompt 往返）。
+    let content = hasInboundImages(message) || hasReplyReference(message)
+      ? await promptContentForInboundMessage(message, { signal: this.#signal })
+      : undefined;
+    const snapshot = this.#acceptedMessageIds.get(messageId);
+    let contextEnhanced = false;
+    if (snapshot) {
+      const originalContent = content ?? text;
+      content = enhanceContextContent(originalContent, snapshot, () => ({
+        channel: 'feishu',
+        senderId: senderOpenId(event),
+        chatId: event.message.chat_id,
+        threadId: event.message.thread_id,
+      }));
+      contextEnhanced = content !== originalContent;
+    }
+    // Every turn reopens the per-conversation circuit breaker.
+    const priorState = this.#stepPushSendState.get(key);
+    if (this.#stepPushSendState.size >= MAX_STEP_PUSH_SEND_STATES && !priorState) {
+      const oldest = this.#stepPushSendState.keys().next().value;
+      if (oldest !== undefined) this.#stepPushSendState.delete(oldest);
+    }
+    this.#stepPushSendState.set(key, {
+      lastSentAt: priorState?.lastSentAt ?? 0,
+      count: 0,
+      breakerLogged: false,
+    });
+
+    // 上下文注入动作在详细级别下也体现为一条步骤（注入细节可忽略）。
+    // 不计入工具/助手消息的熔断计数（规格口径：熔断只管「工具 + 助手」）。
+    if (contextEnhanced || content) {
+      await this.#sendStepMessage(
+        chatId, key,
+        [[{ tag: 'text', text: t('📎 已注入会话上下文') }]],
+        t('📎 已注入会话上下文'),
+        messageId,
+        { billable: false },
+      );
+    }
+
+    // 缓冲-确认策略：每步定稿的助手文本先进缓冲；工具调用或更大 step 的定稿
+    // 证明它是过程说明时才 flush 为 💬 消息。turn 结束时缓冲内剩余的即最终步
+    // ——不直推，改为最终答案的富文本 post 内容，避免同一句话重复出现。
+    let pendingStep = null;
+    const flushPendingStep = async () => {
+      if (!pendingStep) return;
+      const note = pendingStep;
+      pendingStep = null;
+      await this.#sendStepMessage(
+        chatId, key,
+        [[{ tag: 'md', text: `💬 ${note.text}` }]],
+        `💬 ${note.text}`,
+        messageId,
+      );
+    };
+    const completed = await askInWorkspaceSession({
+      deferredDelivery: () => ({ coordinator: this.#deferred, chatId, replyToMessageId: messageId }),
+      harness: this.#harness,
+      state: this.#state,
+      key,
+      text,
+      content,
+      contextEnhanced,
+      createOptions: { signal: this.#signal },
+      existsOptions: { signal: this.#signal },
+      askOptions: {
+        ...this.#interactionAskOptions(event, key, message.files),
+        progressMode: 'all',
+        onUpdate: async (update) => {
+          if (update.type === 'assistant-message') {
+            if (pendingStep && Number(update.step) > Number(pendingStep.step)) {
+              await flushPendingStep();
+            }
+            pendingStep = update;
+            return;
+          }
+          if (update.type === 'tool') {
+            await flushPendingStep();
+            const { paragraphs, fallbackText } = this.#formatStepToolPost(update);
+            await this.#sendStepMessage(chatId, key, paragraphs, fallbackText, messageId);
+            return;
+          }
+          if (update.type === 'status' && update.error) {
+            const name = stepPushLine(update.toolName) || t('工具');
+            const excerpt = stepPushLine(update.error).slice(0, STEP_PUSH_ERROR_MAX_CHARS);
+            await this.#sendStepMessage(
+              chatId, key,
+              [[{ tag: 'md', text: `⚠️ **${name}** — ${excerpt}` }]],
+              `⚠️ ${name} — ${excerpt}`,
+              messageId,
+            );
+          }
+          // text / status（无错误）保持静默：详细级直推完全取代简略级进度行。
+        },
+      },
+    });
+    markAskComplete();
+    const finalStepText = pendingStep ? pendingStep.text : null;
+    pendingStep = null;
+    const finalText = (typeof finalStepText === 'string' && finalStepText.trim())
+      ? finalStepText
+      : completed.answer;
+    const deliveryText = answerTextForDelivery(finalText, completed.artifacts ?? []);
+    let textReceipt;
+    let postDeliveryError = null;
+    try {
+      // 分步直推模式下最终答案以富文本 post（md 标签，GFM 全语法）推送；
+      // 超长答案按段落边界切分为多条 post（单条 content 上限 30KB）。
+      // 任一分段失败都视为最终答案失败——进入 catch 阶梯上抛，
+      // 决不允许「用户没收到答案、状态却记为已回复」。
+      const providerMessageIds = [];
+      for (const chunk of splitStepPostMarkdown(deliveryText)) {
+        const result = await this.#sendStepPost(
+          chatId,
+          messageId,
+          [[{ tag: 'md', text: chunk }]],
+          chunk,
+        );
+        if (!result.ok) {
+          postDeliveryError ??= result.error
+            ?? new Error('step push post delivery failed');
+          continue;
+        }
+        if (result.messageId) providerMessageIds.push(result.messageId);
+      }
+      if (postDeliveryError) throw postDeliveryError;
+      textReceipt = createDeliveryReceipt({
+        deliveryId: messageId,
+        presentation: 'feishu-step-push-post',
+        providerMessageIds,
+      });
+      this.#status.streamResponses = (this.#status.streamResponses ?? 0) + 1;
+    } catch (error) {
+      this.#status.streamErrors = (this.#status.streamErrors ?? 0) + 1;
+      this.#logger.warn?.('[dsh-feishu] step push post failed; sending final text:', error.message);
+      let textSendError = null;
+      try {
+        textReceipt = await this.#sendAnswerText(chatId, deliveryText, {
+          deliveryId: messageId,
+          presentation: 'feishu-step-push-text',
+          replyTo: messageId,
+        });
+      } catch (fallbackError) {
+        textSendError = channelDeliveryFailure(fallbackError);
+        this.#logger.warn?.(
+          '[dsh-feishu] fallback text delivery failed; continuing with result files:',
+          fallbackError,
+        );
+      }
+      const delivery = await this.#deliverArtifacts(
+        chatId,
+        messageId,
+        completed.artifacts ?? [],
+        textReceipt,
+      );
+      const artifactDispatched = delivery.receipt.artifacts.some(
+        ({ outcome }) => outcome === 'sent' || outcome === 'unknown',
+      );
+      if (textSendError && !artifactDispatched && !delivery.failureNoticeVisible) {
+        throw textSendError;
+      }
+      if (textSendError && delivery.artifactSendErrors === 0) {
+        setLastMessageFailure(this.#status, textSendError);
+      }
+      this.#status.streamFallbacks = (this.#status.streamFallbacks ?? 0) + 1;
+      return { ...delivery, textDeliveryErrors: textSendError ? 1 : 0 };
+    }
+    const delivery = await this.#deliverArtifacts(
+      chatId,
+      messageId,
+      completed.artifacts ?? [],
+      textReceipt,
+    );
+    return { ...delivery, textDeliveryErrors: 0 };
+  }
+
   async #answerWithStream(event, key, message, { onAskComplete } = {}) {
     const chatId = event.message.chat_id;
     const messageId = event.message.message_id;
@@ -3613,6 +4067,13 @@ export class FeishuHarnessBridge {
       askCompleted = true;
       onAskComplete?.();
     };
+    // 分步直推：开关开启且通道支持流式卡时，在构造提示内容之前分流到完整替
+    // 代路径（`#answerWithStepPush` 自行构造一次，回复引用回合不做第二次
+    // promptContentForInboundMessage 往返）；关闭或无流式卡通道时与 main
+    // 零差异（含下方 `!this.#channel?.stream` 纯文本路径）。
+    if (this.#stepPush && this.#channel?.stream) {
+      return this.#answerWithStepPush(event, key, message, { onAskComplete });
+    }
     let content = hasInboundImages(message) || hasReplyReference(message)
       ? await promptContentForInboundMessage(message, { signal: this.#signal })
       : undefined;

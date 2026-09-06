@@ -60,6 +60,25 @@ test('PluginConfigStore defaults groupTopicReply off and only persists a literal
   await store.clear();
 });
 
+test('PluginConfigStore defaults stepPush off and only persists a literal true', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-feishu-config-step-push-'));
+  const path = join(dir, 'config.json');
+  const store = await new PluginConfigStore(path).load();
+
+  await store.save({
+    appId: 'cli_step_push',
+    ownerOpenId: 'ou_owner',
+    domain: 'feishu',
+    stepPush: 'yes', // must not be accepted as true
+  });
+  assert.equal(store.get().stepPush, false);
+
+  await store.save({ ...store.get(), stepPush: true });
+  assert.equal((await new PluginConfigStore(path).load()).get().stepPush, true);
+
+  await store.clear();
+});
+
 test('PluginConfigStore stays unconfigured after a failed write and can retry', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-feishu-config-retry-'));
   const blockedParent = join(dir, 'blocked');

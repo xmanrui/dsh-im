@@ -373,4 +373,6 @@ export default {
   '已请求停止后台任务。': 'Requested to stop the background task.',
   '无法安全停止后台任务，请在 Harness 中查看并停止对应任务。': 'Unable to safely stop the background task. Please inspect and stop the matching task in Harness.',
   '任务失败': 'Failed',
+  // feishu/bridge.mjs — step push context injection
+  '📎 已注入会话上下文': '📎 Context injected',
 };

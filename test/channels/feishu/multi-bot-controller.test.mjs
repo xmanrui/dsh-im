@@ -248,6 +248,31 @@ test('groupTopicReply persists and reaches the live runtime without reconnecting
   await fx.controller.close();
 });
 
+test('stepPush persists and reaches the live runtime without reconnecting', async () => {
+  const existing = bot('bot_step_push', 'step_push');
+  const fx = fixture({
+    bots: [existing],
+    secrets: { [existing.secretRef]: 'stable-secret' },
+  });
+  await fx.controller.initialize();
+
+  assert.equal(fx.controller.status().bots[0].stepPush, false);
+  const runtime = fx.runtimes.get(existing.id)[0];
+  const stepPushes = [];
+  runtime.setStepPush = (value) => stepPushes.push(value);
+  const updated = await fx.controller.updateStepPush(existing.id, true);
+
+  assert.equal(updated.bots[0].stepPush, true);
+  assert.equal(fx.configStore.getBot(existing.id).stepPush, true);
+  assert.deepEqual(stepPushes, [true]);
+  assert.equal(fx.runtimes.get(existing.id).length, 1);
+  await assert.rejects(
+    fx.controller.updateStepPush(existing.id, 'yes'),
+    /Invalid Feishu step push/,
+  );
+  await fx.controller.close();
+});
+
 test('all-message mode requires authorization before direct updates', async () => {
   const existing = bot('bot_response_permission_required', 'response_permission_required');
   const fx = fixture({

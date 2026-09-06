@@ -590,6 +590,9 @@ export class HarnessReplyTracker {
         const text = assistantMessageText(event);
         const step = Number.isSafeInteger(event.data?.step) ? event.data.step : null;
         this.#assistantText.setCanonical(step, text);
+        // canonical 定稿且非空时按 step 透出，供分步推送消费方使用；
+        // 先于 commitText 透出，保持 text 更新作为批次末尾的既有语义。
+        if (text) pushUpdate({ type: 'assistant-message', step, text });
         this.#commitText(this.#assistantText.text, pushUpdate);
         continue;
       }
@@ -600,7 +603,19 @@ export class HarnessReplyTracker {
           ?? nonEmptyText(event.data?.subCallId);
         if (callId) this.#toolNames.set(callId, name);
         this.#lastToolName = name;
-        pushUpdate({ type: 'tool', name, ...(callId ? { callId } : {}) });
+        let argsText = null;
+        if (event.data?.arguments !== undefined && event.data?.arguments !== null) {
+          if (typeof event.data.arguments === 'string') {
+            argsText = event.data.arguments;
+          } else {
+            try {
+              argsText = JSON.stringify(event.data.arguments);
+            } catch {
+              argsText = undefined;
+            }
+          }
+        }
+        pushUpdate({ type: 'tool', name, ...(argsText ? { arguments: argsText } : {}), ...(callId ? { callId } : {}) });
       } else if (event.type === 'tool/result') {
         const callId = nonEmptyText(event.data?.message?.source?.callId)
           ?? nonEmptyText(event.data?.callId)
@@ -1562,7 +1577,11 @@ export class HarnessClient {
           lastPollSeq = tracker.lastSeq;
           if (seqAdvanced) lastProgressAt = Date.now();
           if (onUpdate) {
-            const visibleUpdates = progressMode === 'all' ? updates : updates.slice(-1);
+            // latest 模式只投递一条最新进展；assistant-message 是分步推送专用更新，
+            // 且 canonical 去重后可能成为批次唯一变化，绝不能冒充进度投给全部渠道。
+            const visibleUpdates = progressMode === 'all'
+              ? updates
+              : updates.filter((update) => update.type !== 'assistant-message').slice(-1);
             for (const update of visibleUpdates) {
               try {
                 await onUpdate(update);

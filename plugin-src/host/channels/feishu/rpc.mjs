@@ -294,6 +294,7 @@ function publicBotEntry(entry) {
     accessPolicy: normalizeAccessPolicy(source.accessPolicy),
     groupResponseMode: normalizeFeishuGroupResponseMode(source.groupResponseMode),
     groupTopicReply: source.groupTopicReply === true,
+    stepPush: source.stepPush === true,
     groupMessagePermissionGranted: source.groupMessagePermissionGranted === true,
     bot: publicBot(source.bot),
     health: publicHealth(source, connected),
@@ -457,6 +458,13 @@ function validPayload(endpoint, payload) {
       && typeof payload.groupTopicReply === 'boolean'
       ? null
       : '请选择是否以话题方式回复。';
+  }
+  if (endpoint === FEISHU_ENDPOINTS.setStepPush) {
+    return hasOnlyKeys(payload, new Set(['botId', 'stepPush']))
+      && safeOpaqueId(payload.botId)
+      && typeof payload.stepPush === 'boolean'
+      ? null
+      : '请选择是否分步直推。';
   }
   return 'Unknown Feishu endpoint.';
 }
@@ -740,6 +748,14 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
         }
         value = await toPublicFeishuStatus(
           await controller.updateGroupTopicReply(payload.botId, payload.groupTopicReply),
+          { encodeQr: cachedEncodeQr },
+        );
+      } else if (endpoint === FEISHU_ENDPOINTS.setStepPush) {
+        if (typeof controller.updateStepPush !== 'function') {
+          throw new Error('Step push update is unavailable');
+        }
+        value = await toPublicFeishuStatus(
+          await controller.updateStepPush(payload.botId, payload.stepPush),
           { encodeQr: cachedEncodeQr },
         );
       } else {
