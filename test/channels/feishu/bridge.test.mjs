@@ -9157,3 +9157,58 @@ test('step push on: a channel without stream cards keeps the plain-text path (no
     'without a stream card the turn falls back to the main plain-text path',
   );
 });
+
+test('step push: in a thread group the step messages stay inside the topic thread', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const replies = [];
+  const cardWrites = [];
+  const streamCalls = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const client = {
+    im: { v1: { message: {
+      create: async (request) => {
+        sent.push(JSON.parse(request.data.content).text);
+        return { code: 0, data: { message_id: `om_create_${sent.length}` } };
+      },
+      reply: async (request) => {
+        replies.push({
+          messageId: request.path.message_id,
+          replyInThread: request.data.reply_in_thread === true,
+          text: JSON.parse(request.data.content).text,
+        });
+        return { code: 0, data: { message_id: `om_reply_${replies.length}` } };
+      },
+    } } },
+  };
+  const bridge = new FeishuHarnessBridge({
+    client,
+    channel: stepPushChannel({ cardWrites, streamCalls }),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      await options.onUpdate({ type: 'assistant-message', step: 0, text: '进入话题处理' });
+      await options.onUpdate({ type: 'tool', name: 'read_file', arguments: '{"file_path":"a.md"}' });
+      return '话题内回答。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    groupTopicReply: true,
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_thread_in_1', '处理话题任务', {
+    chat_type: 'group',
+    thread_id: 'omt_topic',
+    mentions: [{ id: { open_id: 'ou_bot' }, key: '@_user_1' }],
+  }));
+  await bridge.waitForIdle();
+
+  assert.ok(replies.length >= 2, 'step messages must use the reply path');
+  for (const reply of replies) {
+    assert.equal(reply.replyInThread, true, 'each step must carry reply_in_thread');
+    assert.equal(reply.messageId, 'om_thread_in_1', 'each step must anchor on the inbound message');
+  }
+  assert.equal(sent.length, 0, 'no step message may leak to the main chat');
+  assert.equal(streamCalls[0].options.replyInThread, true, 'the final card stays in the thread too');
+});

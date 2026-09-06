@@ -3695,7 +3695,7 @@ export class FeishuHarnessBridge {
    * answer still follows. Send failures are logged, never thrown — a flaky
    * step message must never break the turn.
    */
-  async #sendStepMessage(chatId, key, text) {
+  async #sendStepMessage(chatId, key, text, replyToMessageId = null) {
     const state = this.#stepPushSendState.get(key)
       ?? { lastSentAt: 0, count: 0, breakerLogged: false };
     this.#stepPushSendState.set(key, state);
@@ -3718,7 +3718,9 @@ export class FeishuHarnessBridge {
     state.count += 1;
     this.#status.streamUpdates = (this.#status.streamUpdates ?? 0) + 1;
     try {
-      await this.#send(chatId, text);
+      // Route the step through the same reply anchor as the final card: in
+      // topic groups this keeps every step inside the thread it belongs to.
+      await this.#send(chatId, text, replyToMessageId ? { replyTo: replyToMessageId } : {});
     } catch (error) {
       this.#logger.warn?.('[dsh-feishu] step push send failed:', error?.message ?? String(error));
     }
@@ -3777,7 +3779,7 @@ export class FeishuHarnessBridge {
       if (!pendingStep) return;
       const note = pendingStep;
       pendingStep = null;
-      await this.#sendStepMessage(chatId, key, `💬 ${note.text}`);
+      await this.#sendStepMessage(chatId, key, `💬 ${note.text}`, messageId);
     };
     const completed = await askInWorkspaceSession({
       deferredDelivery: () => ({ coordinator: this.#deferred, chatId, replyToMessageId: messageId }),
@@ -3802,13 +3804,13 @@ export class FeishuHarnessBridge {
           }
           if (update.type === 'tool') {
             await flushPendingStep();
-            await this.#sendStepMessage(chatId, key, this.#formatStepToolMessage(update));
+            await this.#sendStepMessage(chatId, key, this.#formatStepToolMessage(update), messageId);
             return;
           }
           if (update.type === 'status' && update.error) {
             const name = stepPushLine(update.toolName) || t('工具');
             const excerpt = stepPushLine(update.error).slice(0, STEP_PUSH_ERROR_MAX_CHARS);
-            await this.#sendStepMessage(chatId, key, `⚠️ ${name} — ${excerpt}`);
+            await this.#sendStepMessage(chatId, key, `⚠️ ${name} — ${excerpt}`, messageId);
           }
           // text / status（无错误）保持静默：详细级直推完全取代简略级进度行。
         },
