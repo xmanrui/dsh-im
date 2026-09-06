@@ -219,6 +219,36 @@ test('Host command executor never retries other gateway or business failures', a
   }
 });
 
+test('compact adapts to submittedAttachments descriptors and never retries dispatched failures', async () => {
+  const mismatch = () => legacyImagesArgumentError({ code: 'gateway/arguments-invalid', message:
+    'typert gateway: commands/execute: args fields do not match the descriptor: missing "submittedAttachments"; unexpected "images"' });
+  for (const failure of [null, new Error('compaction failed after starting')]) {
+    const requests = [];
+    let executions = 0;
+    const executor = createHarnessCommandExecutor({ typertGateway: { invoke: async (request) => {
+      requests.push(request);
+      if (Object.hasOwn(request.args, 'images')) throw mismatch();
+      assert.deepEqual(request.args, { agentId: 'session-one', line: '/compact', submittedAttachments: [] });
+      executions += 1;
+      if (failure) throw failure;
+      return { commandId: 'compact-one', result: { kind: 'success', text: 'Compacted 2 history items (~40 tokens).' } };
+    } } });
+    if (failure) await assert.rejects(executor('session-one', '/compact'), (error) => error === failure);
+    else assert.equal((await executor('session-one', '/compact')).result.kind, 'success');
+    assert.equal(executions, 1);
+    assert.equal(requests.length, 2);
+  }
+  const controller = new AbortController();
+  let attempts = 0;
+  const executor = createHarnessCommandExecutor({ typertGateway: { invoke: async () => {
+    attempts += 1;
+    controller.abort();
+    throw mismatch();
+  } } });
+  await assert.rejects(executor('session-one', '/compact', { signal: controller.signal }), (error) => error === controller.signal.reason);
+  assert.equal(attempts, 1);
+});
+
 test('Host command executor does not repeat a failed legacy invocation', async () => {
   let attempts = 0;
   const failure = new Error('compaction failed after starting');

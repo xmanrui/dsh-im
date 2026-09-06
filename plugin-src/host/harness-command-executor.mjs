@@ -22,19 +22,26 @@ export function createHarnessCommandExecutor(ctx, provided) {
     try {
       return await gateway.invoke(request);
     } catch (error) {
-      // Newer Hosts require images; older Hosts reject that field before
-      // invoking the command. Retry only that exact pre-dispatch failure so
+      // Host versions use no attachments, images, or submittedAttachments.
+      // Adapt only exact descriptor rejections before command dispatch, so
       // a business failure can never cause compaction to run twice.
       if (error?.name !== 'TypertGatewayError'
-        || error.code !== 'arguments-invalid'
-        || error.endpoint !== 'commands/execute'
-        || error.message !== 'typert gateway: commands/execute: args fields do not match the descriptor: unexpected "images"') {
+        || !['arguments-invalid', 'gateway/arguments-invalid'].includes(error.code)
+        || error.endpoint !== 'commands/execute') {
+        throw error;
+      }
+      let args;
+      if (error.message === 'typert gateway: commands/execute: args fields do not match the descriptor: unexpected "images"') {
+        args = { agentId: sessionId, line };
+      } else if (error.message === 'typert gateway: commands/execute: args fields do not match the descriptor: missing "submittedAttachments"; unexpected "images"') {
+        args = { agentId: sessionId, line, submittedAttachments: [] };
+      } else {
         throw error;
       }
       options.signal?.throwIfAborted();
       return gateway.invoke({
         ...request,
-        args: { agentId: sessionId, line },
+        args,
       });
     }
   };

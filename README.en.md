@@ -159,6 +159,7 @@ See the [Proactive Delivery Guide](PROACTIVE_DELIVERY.en.md) ([简体中文](PRO
 | --- | --- |
 | `/help` | Show the commands and usage supported by the bot. |
 | `/menu`, `/m` | Open the Feishu, DingTalk or Enterprise WeChat interactive menu. DingTalk arranges session, workspace, preset and model dropdowns in two columns; selections apply immediately and update the same card. WeCom requires Apply after selecting and also opens on the daily direct-chat entry event. Menus include new session, stop, compact, status and help buttons. |
+| QQ `/menu`, `/m` | Open a button and numbered menu for session selection, workspace, mode/preset, model, new session, session list, stop, compact, steering, archived-session visibility, status and help. Lists support pagination; reply with a number when buttons are unavailable. Menus are scoped to the chat and actor and expire after 15 minutes or restart. Ordinary messages exit number selection; questions, approvals and batch input retain priority. |
 | `/new` | Unbind the current chat so its next ordinary message starts a new Harness Session. |
 | `/status` | Check the connection between the current bot and DeepSeek Harness. |
 | `/version` | Show the version of the running dsh-im plugin. |
