@@ -62,6 +62,60 @@ async function takeFile(registry, sessionId = 'session-artifact', turn = 7) {
   return { artifact, file };
 }
 
+test('file return reads modern Session event snapshots', async (t) => {
+  const fx = await fixture(t);
+  const events = fx.agent.session.events;
+  fx.agent.session = {
+    header: fx.agent.session.header,
+    snapshotEvents: () => Object.freeze(events),
+  };
+  await writeFile(join(fx.workspace, 'modern.txt'), 'modern session');
+  const tool = createOutboundArtifactTool({ registry: fx.registry });
+
+  const result = await execute(tool, { path: 'modern.txt' }, execution(fx.agent, 'modern'));
+
+  assert.equal(result.artifactId, 'artifact-id-1');
+  assert.equal(result.fileName, 'modern.txt');
+  const { artifact, file } = await takeFile(fx.registry);
+  assert.equal(file.bytes.toString(), 'modern session');
+  releaseOutboundArtifact(artifact);
+});
+
+test('file return prefers snapshotEvents over a stale session.events array', async (t) => {
+  const fx = await fixture(t);
+  fx.agent.session.events = [];
+  fx.agent.session.snapshotEvents = () => Object.freeze([
+    { type: 'turn/start', data: { turn: 7 } },
+  ]);
+  await writeFile(join(fx.workspace, 'prefer.txt'), 'prefer snapshot');
+  const tool = createOutboundArtifactTool({ registry: fx.registry });
+
+  const result = await execute(tool, { path: 'prefer.txt' }, execution(fx.agent, 'prefer'));
+
+  assert.equal(result.fileName, 'prefer.txt');
+  const { artifact, file } = await takeFile(fx.registry);
+  assert.equal(file.bytes.toString(), 'prefer snapshot');
+  releaseOutboundArtifact(artifact);
+});
+
+test('file return still requires a live Session turn on modern snapshots', async (t) => {
+  const fx = await fixture(t);
+  fx.agent.session = {
+    header: fx.agent.session.header,
+    snapshotEvents: () => Object.freeze([
+      { type: 'turn/start', data: { turn: 7 } },
+      { type: 'turn/end', data: { turn: 7 } },
+    ]),
+  };
+  const tool = createOutboundArtifactTool({ registry: fx.registry });
+
+  await assert.rejects(
+    tool.definition.execute({ path: 'ended.txt' }, execution(fx.agent, 'ended')),
+    (error) => error.code === 'artifact-context-required'
+      && error.message === 'A live Harness Session is required to return a file.',
+  );
+});
+
 test('an existing file can be sent directly without recreation', async (t) => {
   const fx = await fixture(t);
   await writeFile(join(fx.workspace, 'existing.txt'), 'already here');

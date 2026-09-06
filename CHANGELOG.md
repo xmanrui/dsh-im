@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- `dsh_im_return_file` 在新版 DSH Session 使用 `snapshotEvents()` 时，现在可以再次识别当前 Turn 并回传文件；同时保留旧 `session.events` 路径。
+  `dsh_im_return_file` once again recognizes the current turn and returns files when running against modern DSH Sessions that expose `snapshotEvents()`, while retaining the legacy `session.events` path.
+
 ## [4.13.0] - 2026-09-06
 
 ### Added / 新增
