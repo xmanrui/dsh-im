@@ -46,7 +46,9 @@ function artifactError(code, message) {
 }
 
 function currentTurn(agent) {
-  const events = agent?.session?.events;
+  const events = typeof agent?.session?.snapshotEvents === 'function'
+    ? agent.session.snapshotEvents()
+    : agent?.session?.events;
   if (!Array.isArray(events)) return null;
   let turn = null;
   for (const event of events) {
