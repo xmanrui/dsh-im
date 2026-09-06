@@ -590,6 +590,9 @@ export class HarnessReplyTracker {
         const text = assistantMessageText(event);
         const step = Number.isSafeInteger(event.data?.step) ? event.data.step : null;
         this.#assistantText.setCanonical(step, text);
+        // canonical 定稿且非空时按 step 透出，供分步推送消费方使用；
+        // 先于 commitText 透出，保持 text 更新作为批次末尾的既有语义。
+        if (text) pushUpdate({ type: 'assistant-message', step, text });
         this.#commitText(this.#assistantText.text, pushUpdate);
         continue;
       }
@@ -600,7 +603,13 @@ export class HarnessReplyTracker {
           ?? nonEmptyText(event.data?.subCallId);
         if (callId) this.#toolNames.set(callId, name);
         this.#lastToolName = name;
-        pushUpdate({ type: 'tool', name, ...(callId ? { callId } : {}) });
+        let argsText = null;
+        if (event.data?.arguments !== undefined && event.data?.arguments !== null) {
+          argsText = typeof event.data.arguments === 'string'
+            ? event.data.arguments
+            : JSON.stringify(event.data.arguments);
+        }
+        pushUpdate({ type: 'tool', name, ...(argsText ? { arguments: argsText } : {}), ...(callId ? { callId } : {}) });
       } else if (event.type === 'tool/result') {
         const callId = nonEmptyText(event.data?.message?.source?.callId)
           ?? nonEmptyText(event.data?.callId)

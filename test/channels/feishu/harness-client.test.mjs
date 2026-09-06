@@ -975,6 +975,24 @@ test('HarnessReplyTracker keeps every frame of a batched turn in order', () => {
   assert.equal(tracker.answer, '先创建再观察：');
 });
 
+test('tracker exposes per-step assistant messages and tool arguments', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: 'rpc-1', afterSeq: 0 });
+  const updates = tracker.consumeAll([
+    { type: 'turn/start', seq: 1, data: { turn: 1 } },
+    { type: 'user/message', seq: 2, data: { turn: 1, source: { rpcId: 'rpc-1' } } },
+    { type: 'assistant/chunk', seq: 3, data: { turn: 1, step: 0, chunk: { type: 'text-delta', index: 0, text: '计算' } } },
+    { type: 'assistant/message', seq: 4, data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: '计算结果：42' }] } } },
+    { type: 'tool/call', seq: 5, data: { turn: 1, callId: 'c1', name: 'bash', arguments: { command: 'ls -la' } } },
+    { type: 'assistant/message', seq: 6, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '验证通过。' }] } } },
+  ]);
+  const assistantMessages = updates.filter((u) => u.type === 'assistant-message');
+  assert.deepEqual(assistantMessages.map((u) => [u.step, u.text]),
+    [[0, '计算结果：42'], [1, '验证通过。']]);
+  const tool = updates.find((u) => u.type === 'tool');
+  assert.equal(tool.name, 'bash');
+  assert.match(tool.arguments, /ls -la/);
+});
+
 test('new turn events renew the stall window beyond the original fixed deadline', async () => {
   const client = new HarnessClient({
     baseUrl: 'http://127.0.0.1:3080',
