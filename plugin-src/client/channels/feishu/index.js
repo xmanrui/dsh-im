@@ -464,6 +464,53 @@ function RemoveConfirmation({ bot, busy, onConfirm, onCancel }) {
   );
 }
 
+/** Toggle row for 分步直推, mirroring the group-topic reply toggle pattern. */
+function StepPushEditor({ value = false, disabled = false, onSave }) {
+  const titleId = React.useId();
+  const current = value === true ? "on" : "off";
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  const change = async (event) => {
+    const next = event.target.value === "on";
+    if ((next ? "on" : "off") === current || saving || disabled) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave?.(next);
+    } catch (cause) {
+      setError(cause?.message ?? "分步直推设置保存失败，请重试。");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return h("section", {
+    className: "dim-feishuGroupControl",
+    "aria-labelledby": titleId,
+  },
+  h("div", { className: "dim-feishuGroupControlHeader" },
+    h("h3", { id: titleId }, "分步直推"),
+    saving
+      ? h("span", { className: "dim-feishuGroupControlStatus", role: "status" }, "保存中…")
+      : null),
+  h("select", {
+    className: "dim-feishuGroupSelect",
+    value: current,
+    disabled: disabled || saving,
+    "aria-label": "分步直推",
+    onChange: (event) => { void change(event); },
+  },
+  h("option", { value: "off" }, "关闭（保持流式卡模式）"),
+  h("option", { value: "on" }, "开启（逐步推送工具调用与过程说明）")),
+  h("p", { className: "dim-feishuGroupHelp" },
+    "开启后逐步推送工具调用与过程说明"),
+  error ? h("p", {
+    className: "dim-feishuGroupError",
+    role: "alert",
+  }, error) : null);
+}
+
 export function BotCard({
   connection,
   busy,
@@ -479,6 +526,7 @@ export function BotCard({
   onModelSave,
   onAgentPresetSave,
   onContextEnhancementSave,
+  onStepPushSave,
   onRequestRemove,
   onConfirmRemove,
   onCancelRemove,
@@ -564,6 +612,11 @@ export function BotCard({
         config: connection.contextEnhancement,
         disabled: Boolean(busy),
         onSave: onContextEnhancementSave,
+      }),
+      h(StepPushEditor, {
+        value: connection.stepPush,
+        disabled: Boolean(busy),
+        onSave: onStepPushSave,
       }),
       provisionContent
         ? h("section", {
@@ -657,6 +710,7 @@ function BotList(props) {
           onModelSave: (model) => props.onModelSave(bot, model),
           onAgentPresetSave: (agentPreset) => props.onAgentPresetSave(bot, agentPreset),
           onContextEnhancementSave: (config) => props.onContextEnhancementSave(bot, config),
+          onStepPushSave: (stepPush) => props.onStepPushSave(bot, stepPush),
           onRequestRemove: () => props.onRequestRemove(bot),
           onConfirmRemove: () => props.onConfirmRemove(bot),
           onCancelRemove: props.onCancelRemove,
@@ -1430,6 +1484,9 @@ export function FeishuSettingsTab({ rpcCall }) {
                   ),
                   onContextEnhancementSave: (connection, config) => saveBotSetting(
                     connection, "context-enhancement", FEISHU_ENDPOINTS.setContextEnhancement, { config },
+                  ),
+                  onStepPushSave: (connection, stepPush) => saveBotSetting(
+                    connection, "step-push", FEISHU_ENDPOINTS.setStepPush, { stepPush },
                   ),
                   onRequestRemove: requestRemove,
                   onConfirmRemove: (bot) => void confirmRemove(bot),

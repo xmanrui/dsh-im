@@ -16,6 +16,7 @@ import {
 import { CredentialBindingPanel } from '../plugin-src/client/credential-binding.js';
 import { ChannelListHeading } from '../plugin-src/client/channel-card-meta.js';
 import { installImStyles } from '../plugin-src/client/styles.js';
+import { FEISHU_ENDPOINTS } from '../plugin-src/client/channels/feishu/api.js';
 import { DINGTALK_ENDPOINTS } from '../plugin-src/client/channels/dingtalk/api.js';
 import {
   AccountCard as DingtalkAccountCard,
@@ -110,6 +111,10 @@ const { act, create } = TestRenderer;
 async function flushMicrotasks() {
   for (let index = 0; index < 6; index += 1) await Promise.resolve();
 }
+
+// Drains every pending microtask and timer callback, like the Feishu channel
+// tests use, so multi-hop save chains settle before assertions.
+const flushTasks = () => new Promise((resolve) => setImmediate(resolve));
 
 function nodeText(node) {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -577,6 +582,99 @@ test('Feishu keeps its heading controls on one row without a plus icon', async (
   assert.match(styles, /\.bxf-headingTools \{[^}]*justify-content: space-between;[^}]*flex-wrap: nowrap;/);
   assert.match(styles, /@container \(max-width: 620px\)[^]*\.bxf-headingTools \{ gap: 6px; \}/);
   assert.doesNotMatch(styles, /\.bxf-headingTools \.bxf-button \{ margin-left: auto; \}/);
+});
+
+test('Feishu bot settings render the step push toggle and save through the bot setting pipeline', async (t) => {
+  const previousWindow = globalThis.window;
+  let nextTimer = 0;
+  const frames = new Map();
+  globalThis.window = {
+    setInterval() { return ++nextTimer; },
+    clearInterval() {},
+    setTimeout() { return ++nextTimer; },
+    clearTimeout() {},
+    requestAnimationFrame(callback) {
+      const id = ++nextTimer;
+      frames.set(id, callback);
+      queueMicrotask(() => {
+        const pending = frames.get(id);
+        if (!pending) return;
+        frames.delete(id);
+        pending();
+      });
+      return id;
+    },
+    cancelAnimationFrame(id) { frames.delete(id); },
+  };
+  t.after(() => {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  });
+
+  let stepPush = false;
+  const calls = [];
+  const snapshot = () => ({
+    schemaVersion: 2,
+    revision: calls.length + 1,
+    state: 'connected',
+    bots: [{
+      botId: 'bot_step_push',
+      state: 'connected',
+      connected: true,
+      groupResponseMode: 'mention',
+      groupTopicReply: false,
+      stepPush,
+      bot: { name: '分步直推机器人', appIdMasked: 'cli_step••••push' },
+      health: { status: 'healthy', summary: '长连接运行正常' },
+    }],
+  });
+  const rpcCall = async (endpoint, payload) => {
+    calls.push({ endpoint, payload });
+    if (endpoint === FEISHU_ENDPOINTS.status) return { ok: true, value: snapshot() };
+    if (endpoint === FEISHU_ENDPOINTS.setStepPush) {
+      stepPush = payload.stepPush;
+      return { ok: true, value: snapshot() };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  };
+
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(FeishuSettingsTab, { rpcCall }));
+    await flushTasks();
+  });
+
+  // Rendering: the toggle row shows the「分步直推」label, help description,
+  // and defaults to off.
+  const stepPushSelect = () => renderer.root.findByProps({ 'aria-label': '分步直推' });
+  assert.equal(stepPushSelect().type, 'select');
+  assert.equal(stepPushSelect().props.value, 'off');
+  assert.ok(renderer.root.findAllByType('h3')
+    .some((heading) => nodeText(heading) === '分步直推'));
+  const helpNodes = renderer.root.findAll(
+    (node) => node.props?.className === 'dim-feishuGroupHelp',
+  );
+  assert.equal(helpNodes.length, 1);
+  assert.match(nodeText(helpNodes[0]), /开启后逐步推送工具调用与过程说明/);
+  assert.deepEqual(
+    stepPushSelect().findAllByType('option').map((option) => option.props.value),
+    ['off', 'on'],
+  );
+
+  // Saving: switching the select calls the existing save pipeline with
+  // { botId, stepPush } on the step-push endpoint, then reflects the saved
+  // snapshot value.
+  await act(async () => {
+    stepPushSelect().props.onChange({ target: { value: 'on' } });
+    await flushTasks();
+  });
+  assert.ok(calls.some(({ endpoint, payload }) => (
+    endpoint === FEISHU_ENDPOINTS.setStepPush
+      && payload.botId === 'bot_step_push'
+      && payload.stepPush === true
+  )));
+  assert.equal(stepPushSelect().props.value, 'on');
+  await act(async () => renderer.unmount());
 });
 
 test('credential binding is a distinct secondary action beside QR binding in four channels', async () => {
