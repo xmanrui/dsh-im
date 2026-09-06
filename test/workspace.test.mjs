@@ -145,6 +145,65 @@ test('BotWorkspaceStore migrates v1 on the first delivery target and persists ta
   assert.equal(JSON.parse(await readFile(path, 'utf8')).version, 2);
 });
 
+test('BotWorkspaceStore loads legacy stored targets with a redundant targetId and normalizes them on the next write', async (t) => {
+  const { path, defaultWorkspace } = await fixture(t);
+  await writeFile(path, `${JSON.stringify({
+    version: 3,
+    workspaces: { bot_legacy: defaultWorkspace },
+    deliveryTargets: {
+      bot_legacy: {
+        'cron-push': {
+          targetId: 'cron-push',
+          name: 'cron push',
+          kind: 'user',
+          route: { toUserId: 'o_legacy' },
+        },
+      },
+    },
+  })}\n`);
+  const store = await new BotWorkspaceStore(path, { defaultWorkspace }).load();
+  assert.deepEqual(store.deliveryTargetFor('bot_legacy', 'cron-push'), {
+    targetId: 'cron-push',
+    name: 'cron push',
+    kind: 'user',
+    route: { toUserId: 'o_legacy' },
+  });
+
+  await store.updateDeliveryTarget('bot_legacy', 'cron-push', {
+    name: 'cron push renamed',
+    kind: 'user',
+    route: { toUserId: 'o_legacy' },
+  });
+  const saved = JSON.parse(await readFile(path, 'utf8'));
+  assert.deepEqual(saved.deliveryTargets.bot_legacy['cron-push'], {
+    name: 'cron push renamed',
+    kind: 'user',
+    route: { toUserId: 'o_legacy' },
+  });
+});
+
+test('BotWorkspaceStore fails closed when a stored target id does not match its map key', async (t) => {
+  const { path, defaultWorkspace } = await fixture(t);
+  await writeFile(path, `${JSON.stringify({
+    version: 3,
+    workspaces: { bot_legacy: defaultWorkspace },
+    deliveryTargets: {
+      bot_legacy: {
+        'cron-push': {
+          targetId: 'somewhere-else',
+          name: 'cron push',
+          kind: 'user',
+          route: { toUserId: 'o_legacy' },
+        },
+      },
+    },
+  })}\n`);
+  await assert.rejects(
+    new BotWorkspaceStore(path, { defaultWorkspace }).load(),
+    { message: 'dsh-im workspace config is invalid' },
+  );
+});
+
 test('BotWorkspaceStore persists private Session sync in v3 without exposing or losing other bot settings', async (t) => {
   const { path, defaultWorkspace } = await fixture(t);
   const accessPolicy = {
