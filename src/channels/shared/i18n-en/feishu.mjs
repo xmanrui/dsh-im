@@ -375,4 +375,7 @@ export default {
   '任务失败': 'Failed',
   // feishu/bridge.mjs — step push context injection
   '📎 已注入会话上下文': '📎 Context injected',
+  // feishu/bridge.mjs — thinking status heartbeat
+  '⏳ 正在思考中…（已运行 {elapsed}）': '⏳ Thinking… (elapsed {elapsed})',
+  '⏳ 正在思考中…': '⏳ Thinking…',
 };

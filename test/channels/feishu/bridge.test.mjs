@@ -9597,3 +9597,147 @@ test('step push: manual topics stay threaded even with the group-topic switch of
     ['💬 进入话题处理', '✅ bash — ls\n{"command":"ls"}', '话题内回答。'],
   );
 });
+
+// ── 思考中状态（静默期心跳）────────────────────────────────────────────────
+
+function stepPushPostClient({ onPost, onUpdateMessage }) {
+  let sequence = 0;
+  return {
+    im: { v1: { message: {
+      reply: async (request) => {
+        sequence += 1;
+        onPost(request, `om_post_${sequence}`);
+        return { code: 0, data: { message_id: `om_post_${sequence}` } };
+      },
+      create: async (request) => {
+        sequence += 1;
+        onPost(request, `om_post_${sequence}`);
+        return { code: 0, data: { message_id: `om_post_${sequence}` } };
+      },
+      update: async (request) => {
+        onUpdateMessage(request);
+        return { code: 0 };
+      },
+    } } },
+  };
+}
+
+test('step push: silence over the threshold surfaces a thinking heartbeat, recalled at turn end', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const recalls = [];
+  const clock = { now: 1_700_000_000_000 };
+  const stepPushClock = {
+    now: () => clock.now,
+    delay: async (ms) => { clock.now += ms; },
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushPostClient({
+      onPost: (request, messageId) => sent.push({ id: messageId, text: stepPushMessageText(request) }),
+      onUpdateMessage: () => {},
+    }),
+    channel: {
+      stream: async () => { throw new Error('not used'); },
+      recallMessage: async (messageId) => recalls.push(messageId),
+    },
+    harness: stepPushHarness(async () => {
+      clock.now += 25_000;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return '思考后的答案。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_hb_1', '想一想'));
+  await bridge.waitForIdle();
+
+  const heartbeat = sent.find((entry) => entry.text.includes('⏳ 正在思考中…'));
+  assert.ok(heartbeat, 'the thinking heartbeat must appear after the silence threshold');
+  assert.deepEqual(recalls, [heartbeat.id], 'the heartbeat must be recalled when the turn ends');
+  assert.equal(sent.at(-1).text, '思考后的答案。');
+});
+
+test('step push: the thinking heartbeat refreshes elapsed time in place', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const updates = [];
+  const clock = { now: 1_700_000_000_000 };
+  const stepPushClock = {
+    now: () => clock.now,
+    delay: async (ms) => { clock.now += ms; },
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushPostClient({
+      onPost: (request, messageId) => sent.push({ id: messageId, text: stepPushMessageText(request) }),
+      onUpdateMessage: (request) => updates.push({ messageId: request.path.message_id, text: stepPushMessageText(request) }),
+    }),
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async () => {
+      clock.now += 25_000;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      clock.now += 30_000;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return '思考后的答案。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_hb_2', '想一想'));
+  await bridge.waitForIdle();
+
+  assert.ok(sent.some((entry) => entry.text.includes('⏳ 正在思考中…')), 'the heartbeat appears');
+  assert.equal(updates.length, 1, 'one in-place refresh within the silence window');
+  assert.match(updates[0].text, /已运行 \d+:\d\d/);
+  assert.deepEqual(sent.at(-1).text, '思考后的答案。');
+});
+
+test('step push: a real event recalls the heartbeat before pushing the step', async () => {
+  const fixture = stateFixture();
+  const order = [];
+  const recalls = [];
+  const clock = { now: 1_700_000_000_000 };
+  const stepPushClock = {
+    now: () => clock.now,
+    delay: async (ms) => { clock.now += ms; },
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushPostClient({
+      onPost: (request, messageId) => order.push({ kind: 'post', id: messageId, text: stepPushMessageText(request) }),
+      onUpdateMessage: () => {},
+    }),
+    channel: {
+      stream: async () => { throw new Error('not used'); },
+      recallMessage: async (messageId) => { order.push({ kind: 'recall', id: messageId }); recalls.push(messageId); },
+    },
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      clock.now += 25_000;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      return '工具结果后的答案。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_hb_3', '想一想再查'));
+  await bridge.waitForIdle();
+
+  const heartbeat = order.find((entry) => entry.text?.includes('⏳ 正在思考中…'));
+  assert.ok(heartbeat, 'the heartbeat appeared');
+  const toolIndex = order.findIndex((entry) => entry.text?.includes('✅ bash — ls'));
+  const recallIndex = order.findIndex((entry) => entry.kind === 'recall');
+  assert.ok(recallIndex !== -1, 'the heartbeat must be recalled when a real event lands');
+  assert.ok(recallIndex < toolIndex, 'the recall must happen before the real step pushes');
+  assert.equal(recalls.length, 1, 'exactly one recall');
+});

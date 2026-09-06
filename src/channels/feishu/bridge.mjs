@@ -166,6 +166,14 @@ const STEP_PUSH_MAX_MESSAGES_PER_TURN = 200;
 const STEP_PUSH_SUMMARY_MAX_CHARS = 120;
 const STEP_PUSH_ARGUMENTS_MAX_CHARS = 400;
 const STEP_PUSH_ERROR_MAX_CHARS = 200;
+/** Silence threshold before the thinking status heartbeat appears. */
+const STEP_PUSH_HEARTBEAT_AFTER_MS = 20_000;
+/** The thinking heartbeat refreshes its elapsed time at this cadence. */
+const STEP_PUSH_HEARTBEAT_REFRESH_MS = 30_000;
+/** Watchdog tick: how often the silence threshold is re-checked. */
+const STEP_PUSH_HEARTBEAT_TICK_MS = 5_000;
+/** One turn never refreshes the thinking heartbeat more than this. */
+const STEP_PUSH_HEARTBEAT_MAX_UPDATES = 30;
 /** One post message carries at most this many UTF-8 bytes of markdown
  *  (Feishu caps the post request body at 30KB; the budget leaves room for
  *  the JSON wrapper and escape expansion). */
@@ -3751,6 +3759,13 @@ export class FeishuHarnessBridge {
     const state = this.#stepPushSendState.get(key)
       ?? { lastSentAt: 0, count: 0, breakerLogged: false };
     this.#stepPushSendState.set(key, state);
+    // 真实事件到达：先撤回思考中心跳再推真实消息。
+    if (state.heartbeatMessageId) {
+      const heartbeatId = state.heartbeatMessageId;
+      state.heartbeatMessageId = null;
+      try { await this.#channel?.recallMessage?.(heartbeatId); }
+      catch (error) { this.#logger.warn?.('[dsh-feishu] heartbeat recall failed:', error.message); }
+    }
     if (billable && state.count >= STEP_PUSH_MAX_MESSAGES_PER_TURN) {
       if (!state.breakerLogged) {
         state.breakerLogged = true;
@@ -3869,6 +3884,86 @@ export class FeishuHarnessBridge {
       || /230020|230006/.test(error?.message ?? '');
   }
 
+  #formatElapsed(ms) {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`;
+  }
+
+  /**
+   * 思考中状态看门狗：直推回合内静默满阈值时推送/原地刷新一条「⏳ 正在思考中…」
+   * 心跳 post；真实事件或回合结束时撤回。tick 循环走可注入 stepPushClock（测试
+   * 确定性推进），生命周期归属当前回合（stop 后循环退出）。
+   */
+  #startThinkingStatusWatchdog(key, chatId, replyToMessageId) {
+    const state = this.#stepPushSendState.get(key);
+    if (!state) return { stop: async () => {} };
+    state.heartbeatStopped = false;
+    const watchdog = { stopped: false };
+    void (async () => {
+      try {
+        // 轮询式看门狗：每 10ms 检查一次（真实时间），静默判定读取可注入
+        // 时钟——生产随真实时间自然触发；测试手动推进时钟即可确定性验证。
+        while (!watchdog.stopped && !this.#signal?.aborted) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          if (watchdog.stopped || this.#signal?.aborted) return;
+          const now = this.#stepPushClock.now();
+          // 静默基线 = 回合开始时刻（turnStartedAt），不受真实推送刷新影响。
+          const baseline = state.turnStartedAt ?? now;
+          if (state.heartbeatMessageId) {
+            if (now - (state.heartbeatUpdatedAt ?? 0) < STEP_PUSH_HEARTBEAT_REFRESH_MS) continue;
+            const elapsed = this.#formatElapsed(now - (state.heartbeatShownAt ?? state.heartbeatUpdatedAt));
+            state.heartbeatUpdatedAt = this.#stepPushClock.now();
+            state.heartbeatUpdates = (state.heartbeatUpdates ?? 0) + 1;
+            if (state.heartbeatUpdates > STEP_PUSH_HEARTBEAT_MAX_UPDATES) {
+              state.heartbeatStopped = true;
+              continue;
+            }
+            await this.#client.im.v1.message.update({
+              path: { message_id: state.heartbeatMessageId },
+              data: {
+                msg_type: 'post',
+                content: JSON.stringify({
+                  zh_cn: { content: [[{ tag: 'text', text: t('⏳ 正在思考中…（已运行 {elapsed}）', { elapsed }) }]] },
+                }),
+              },
+            });
+            continue;
+          }
+          const dueAt = baseline + STEP_PUSH_HEARTBEAT_AFTER_MS;
+          if (now < dueAt) continue;
+          const result = await this.#sendStepPost(
+            chatId, replyToMessageId,
+            [[{ tag: 'text', text: t('⏳ 正在思考中…（已运行 {elapsed}）', { elapsed: this.#formatElapsed(0) }) }]],
+            t('⏳ 正在思考中…'),
+          );
+          if (result.ok && result.messageId) {
+            state.heartbeatMessageId = result.messageId;
+            state.heartbeatShownAt = this.#stepPushClock.now();
+            state.heartbeatUpdatedAt = state.heartbeatShownAt;
+          } else {
+            // 发送失败：静默基线前移，避免每个轮询都重试造成堆积。
+            state.lastSentAt = this.#stepPushClock.now();
+          }
+        }
+      } catch (error) {
+        if (!this.#signal?.aborted) {
+          this.#logger.warn?.('[dsh-feishu] thinking status watchdog failed:', error.message);
+        }
+      }
+    })();
+    return {
+      stop: async () => {
+        watchdog.stopped = true;
+        if (state.heartbeatMessageId) {
+          const heartbeatId = state.heartbeatMessageId;
+          state.heartbeatMessageId = null;
+          try { await this.#channel?.recallMessage?.(heartbeatId); }
+          catch (error) { this.#logger.warn?.('[dsh-feishu] heartbeat recall failed:', error.message); }
+        }
+      },
+    };
+  }
+
   /**
    * 分步直推：`#answerWithStream` 流式分支在开关开启时的完整替代路径。
    * 过程（工具调用、助手中间说明）与最终答案均以富文本 post 逐条直推
@@ -3909,6 +4004,9 @@ export class FeishuHarnessBridge {
       if (oldest !== undefined) this.#stepPushSendState.delete(oldest);
     }
     this.#stepPushSendState.set(key, {
+      // 思考中状态的静默基线 = 回合开始时刻；lastSentAt 仅供真实推送刷新，
+      // 不参与心跳判定（否则首个真实步骤的节流等待会被误判/误伤）。
+      turnStartedAt: this.#stepPushClock.now(),
       lastSentAt: priorState?.lastSentAt ?? 0,
       count: 0,
       breakerLogged: false,
@@ -3941,7 +4039,10 @@ export class FeishuHarnessBridge {
         messageId,
       );
     };
-    const completed = await askInWorkspaceSession({
+    const watchdog = this.#startThinkingStatusWatchdog(key, chatId, messageId);
+    let completed;
+    try {
+      completed = await askInWorkspaceSession({
       deferredDelivery: () => ({ coordinator: this.#deferred, chatId, replyToMessageId: messageId }),
       harness: this.#harness,
       state: this.#state,
@@ -3982,6 +4083,10 @@ export class FeishuHarnessBridge {
         },
       },
     });
+    } finally {
+      // 回合结束（成功/失败/中断）：停看门狗并撤回残留思考中心跳。
+      await watchdog.stop();
+    }
     markAskComplete();
     const finalStepText = pendingStep ? pendingStep.text : null;
     pendingStep = null;
