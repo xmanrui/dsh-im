@@ -735,10 +735,13 @@ export class FeishuHarnessBridge {
   /**
    * Record whether replies anchored on `messageId` should stay in a topic.
    * `asRoot` marks a main-feed question this bot will auto-open as a topic.
+   * The flag is keyed on the conversation shape alone: once a conversation is
+   * happening inside a topic, its replies belong to that topic whether the
+   * bot auto-opens topics (群话题回复) or the user maintains them manually.
    */
   #rememberTopicReply(messageId, key) {
     if (!nonEmptyString(messageId)) return;
-    this.#anchorTopicReply.set(messageId, this.#groupTopicReply && isTopicGroupKey(key));
+    this.#anchorTopicReply.set(messageId, isTopicGroupKey(key));
     if (this.#anchorTopicReply.size > 2048) {
       const oldest = this.#anchorTopicReply.keys().next().value;
       if (oldest !== undefined) this.#anchorTopicReply.delete(oldest);
@@ -751,8 +754,10 @@ export class FeishuHarnessBridge {
 
   /** Whether a reply anchored on `replyTo` must ask Feishu to keep it in a topic. */
   #replyInThreadFor(replyTo) {
-    return this.#groupTopicReply
-      && nonEmptyString(replyTo)
+    // Topic membership is decided by the conversation shape alone (see
+    // #rememberTopicReply): a manual-topic chat threads its replies even
+    // when the 群话题回复 switch is off.
+    return nonEmptyString(replyTo)
       && this.#anchorTopicReply.get(replyTo) === true;
   }
 
