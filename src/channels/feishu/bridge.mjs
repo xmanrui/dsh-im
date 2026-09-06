@@ -170,8 +170,6 @@ const STEP_PUSH_ERROR_MAX_CHARS = 200;
 const STEP_PUSH_HEARTBEAT_AFTER_MS = 20_000;
 /** The thinking heartbeat refreshes its elapsed time at this cadence. */
 const STEP_PUSH_HEARTBEAT_REFRESH_MS = 30_000;
-/** Watchdog tick: how often the silence threshold is re-checked. */
-const STEP_PUSH_HEARTBEAT_TICK_MS = 5_000;
 /** One turn never refreshes the thinking heartbeat more than this. */
 const STEP_PUSH_HEARTBEAT_MAX_UPDATES = 30;
 /** One post message carries at most this many UTF-8 bytes of markdown
@@ -3782,6 +3780,7 @@ export class FeishuHarnessBridge {
     // message land after the teardown has begun.
     this.#signal?.throwIfAborted();
     state.lastSentAt = this.#stepPushClock.now();
+    state.silenceSince = state.lastSentAt;
     if (billable) state.count += 1;
     this.#status.streamUpdates = (this.#status.streamUpdates ?? 0) + 1;
     await this.#sendStepPost(chatId, replyToMessageId, paragraphs, fallbackText);
@@ -3898,17 +3897,19 @@ export class FeishuHarnessBridge {
     const state = this.#stepPushSendState.get(key);
     if (!state) return { stop: async () => {} };
     state.heartbeatStopped = false;
+    state.heartbeatMessageId = null;
+    state.heartbeatNextAttemptAt = 0;
     const watchdog = { stopped: false };
     void (async () => {
       try {
         // 轮询式看门狗：每 10ms 检查一次（真实时间），静默判定读取可注入
         // 时钟——生产随真实时间自然触发；测试手动推进时钟即可确定性验证。
-        while (!watchdog.stopped && !this.#signal?.aborted) {
+        while (!watchdog.stopped && !this.#signal?.aborted && !state.heartbeatStopped) {
           await new Promise((resolve) => setTimeout(resolve, 10));
-          if (watchdog.stopped || this.#signal?.aborted) return;
+          if (watchdog.stopped || this.#signal?.aborted || state.heartbeatStopped) return;
           const now = this.#stepPushClock.now();
-          // 静默基线 = 回合开始时刻（turnStartedAt），不受真实推送刷新影响。
-          const baseline = state.turnStartedAt ?? now;
+          // 静默基线 = silenceSince（回合开始播种，每次真实推送刷新）。
+          const silentFor = now - (state.silenceSince ?? state.turnStartedAt ?? now);
           if (state.heartbeatMessageId) {
             if (now - (state.heartbeatUpdatedAt ?? 0) < STEP_PUSH_HEARTBEAT_REFRESH_MS) continue;
             const elapsed = this.#formatElapsed(now - (state.heartbeatShownAt ?? state.heartbeatUpdatedAt));
@@ -3918,31 +3919,49 @@ export class FeishuHarnessBridge {
               state.heartbeatStopped = true;
               continue;
             }
-            await this.#client.im.v1.message.update({
-              path: { message_id: state.heartbeatMessageId },
-              data: {
-                msg_type: 'post',
-                content: JSON.stringify({
-                  zh_cn: { content: [[{ tag: 'text', text: t('⏳ 正在思考中…（已运行 {elapsed}）', { elapsed }) }]] },
-                }),
-              },
-            });
+            try {
+              const response = await this.#client.im.v1.message.update({
+                path: { message_id: state.heartbeatMessageId },
+                data: {
+                  msg_type: 'post',
+                  content: JSON.stringify({
+                    zh_cn: { content: [[{ tag: 'text', text: t('⏳ 正在思考中…（已运行 {elapsed}）', { elapsed }) }]] },
+                  }),
+                },
+              });
+              if (response?.code && response.code !== 0) {
+                this.#logger.warn?.('[dsh-feishu] heartbeat update failed:', response.msg || response.code);
+              }
+            } catch (error) {
+              // 更新失败：放弃该心跳（置空），下个静默周期重新创建；绝不影响回合。
+              this.#logger.warn?.('[dsh-feishu] heartbeat update failed:', error.message);
+              state.heartbeatMessageId = null;
+            }
             continue;
           }
-          const dueAt = baseline + STEP_PUSH_HEARTBEAT_AFTER_MS;
-          if (now < dueAt) continue;
+          if (now < (state.heartbeatNextAttemptAt ?? 0)) continue;
+          if (silentFor < STEP_PUSH_HEARTBEAT_AFTER_MS) continue;
+          const shownAt = now;
           const result = await this.#sendStepPost(
             chatId, replyToMessageId,
             [[{ tag: 'text', text: t('⏳ 正在思考中…（已运行 {elapsed}）', { elapsed: this.#formatElapsed(0) }) }]],
             t('⏳ 正在思考中…'),
           );
-          if (result.ok && result.messageId) {
-            state.heartbeatMessageId = result.messageId;
-            state.heartbeatShownAt = this.#stepPushClock.now();
-            state.heartbeatUpdatedAt = state.heartbeatShownAt;
+          if (watchdog.stopped || this.#signal?.aborted) {
+            // 创建期间回合已结束：立即撤回刚发出的心跳，避免残留。
+            if (result.ok && result.messageId) {
+              await this.#channel?.recallMessage?.(result.messageId)
+                .catch((recallError) => this.#logger.warn?.('[dsh-feishu] late heartbeat recall failed:', recallError.message));
+            }
+            return;
+          }
+          if (result.ok) {
+            state.heartbeatMessageId = result.messageId ?? null;
+            state.heartbeatShownAt = shownAt;
+            state.heartbeatUpdatedAt = shownAt;
           } else {
-            // 发送失败：静默基线前移，避免每个轮询都重试造成堆积。
-            state.lastSentAt = this.#stepPushClock.now();
+            // 发送失败：退避后再试，避免每个轮询都重试造成堆积。
+            state.heartbeatNextAttemptAt = now + 5_000;
           }
         }
       } catch (error) {
@@ -4006,6 +4025,7 @@ export class FeishuHarnessBridge {
     this.#stepPushSendState.set(key, {
       // 思考中状态的静默基线 = 回合开始时刻；lastSentAt 仅供真实推送刷新，
       // 不参与心跳判定（否则首个真实步骤的节流等待会被误判/误伤）。
+      silenceSince: this.#stepPushClock.now(),
       turnStartedAt: this.#stepPushClock.now(),
       lastSentAt: priorState?.lastSentAt ?? 0,
       count: 0,

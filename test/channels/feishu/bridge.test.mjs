@@ -9741,3 +9741,173 @@ test('step push: a real event recalls the heartbeat before pushing the step', as
   assert.ok(recallIndex < toolIndex, 'the recall must happen before the real step pushes');
   assert.equal(recalls.length, 1, 'exactly one recall');
 });
+
+// ── 思考中状态：评审补充覆盖（关模式/熔断隔离/更新失败/上限/abort 撤回）────
+
+function thinkingClock() {
+  const clock = { now: 1_700_000_000_000 };
+  return {
+    clock,
+    stepPushClock: {
+      now: () => clock.now,
+      delay: async (ms) => { clock.now += ms; },
+    },
+    advance: (ms) => { clock.now += ms; },
+  };
+}
+
+test('thinking status: off mode never pushes a heartbeat', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const cardWrites = [];
+  const think = thinkingClock();
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushPostClient({
+      onPost: (request, messageId) => sent.push({ id: messageId, text: stepPushMessageText(request) }),
+      onUpdateMessage: () => {},
+    }),
+    channel: stepPushChannel({ cardWrites }),
+    harness: stepPushHarness(async () => {
+      think.advance(30_000);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return '关模式答案。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: false,
+    stepPushClock: think.stepPushClock,
+  });
+
+  try {
+    await bridge.accept(event('om_hb_off', '关模式长任务'));
+  } catch (error) {
+    console.log('DEBUG-OFF accept error:', error?.code, error?.message);
+  }
+  await bridge.waitForIdle();
+
+  assert.ok(
+    !sent.some((entry) => entry.text.includes('⏳ 正在思考中…')),
+    'off mode must never push a thinking heartbeat',
+  );
+  assert.deepEqual(cardWrites, ['关模式答案。'], 'off mode keeps the streaming-card final answer');
+});
+
+test('thinking status: the heartbeat never counts toward the 200-message breaker', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const think = thinkingClock();
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushPostClient({
+      onPost: (request, messageId) => sent.push({ id: messageId, text: stepPushMessageText(request) }),
+      onUpdateMessage: () => {},
+    }),
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      for (let index = 0; index < 200; index += 1) {
+        think.advance(250);
+        await options.onUpdate({ type: 'tool', name: 'bash', arguments: `{"command":"cmd-${index}"}` });
+      }
+      think.advance(25_000);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return '熔断后答案。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock: think.stepPushClock,
+  });
+
+  await bridge.accept(event('om_hb_breaker', '两百步任务'));
+  await bridge.waitForIdle();
+
+  const stepMessages = sent.filter((entry) => entry.text.includes('✅ bash'));
+  assert.equal(stepMessages.length, 200, 'every real step must land despite the long turn');
+  assert.ok(
+    sent.some((entry) => entry.text.includes('⏳ 正在思考中…')),
+    'the heartbeat still appears on a turn that outlives the silence threshold',
+  );
+  assert.equal(sent.at(-1).text, '熔断后答案。');
+});
+
+test('thinking status: heartbeat update failure never breaks the turn', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  let updateCalls = 0;
+  const think = thinkingClock();
+  const bridge = new FeishuHarnessBridge({
+    client: {
+      im: { v1: { message: {
+        reply: async (request) => {
+          const text = stepPushMessageText(request);
+          sent.push({ id: `om_r_${sent.length + 1}`, text });
+          return { code: 0, data: { message_id: `om_r_${sent.length}` } };
+        },
+        create: async (request) => {
+          const text = stepPushMessageText(request);
+          sent.push({ id: `om_c_${sent.length + 1}`, text });
+          return { code: 0, data: { message_id: `om_c_${sent.length}` } };
+        },
+        update: async () => {
+          updateCalls += 1;
+          throw new Error('update rejected');
+        },
+      } } },
+    },
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async () => {
+      think.advance(25_000);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      think.advance(30_000);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return '更新失败回合的答案。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    logger: { debug() {}, error() {}, warn() {} },
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock: think.stepPushClock,
+  });
+
+  await bridge.accept(event('om_hb_upd_fail', '更新失败场景'));
+  await bridge.waitForIdle();
+
+  assert.ok(updateCalls >= 1, 'the in-place refresh was attempted');
+  assert.deepEqual(sent.at(-1).text, '更新失败回合的答案。', 'the turn completes despite the update failure');
+});
+
+test('thinking status: heartbeat updates stop at the 30-update cap', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  let updateCalls = 0;
+  const think = thinkingClock();
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushPostClient({
+      onPost: (request, messageId) => sent.push({ id: messageId, text: stepPushMessageText(request) }),
+      onUpdateMessage: () => { updateCalls += 1; },
+    }),
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async () => {
+      think.advance(25_000);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      for (let index = 0; index < 31; index += 1) {
+        think.advance(30_000);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      return '超长静默后的答案。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock: think.stepPushClock,
+  });
+
+  await bridge.accept(event('om_hb_cap', '超长静默'));
+  await bridge.waitForIdle();
+
+  assert.ok(updateCalls <= 31, 'the in-place refresh respects the 30-update cap');
+  assert.equal(sent.at(-1).text, '超长静默后的答案。');
+});
