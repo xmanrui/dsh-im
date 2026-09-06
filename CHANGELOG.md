@@ -6,7 +6,15 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.13.0] - 2026-09-06
+
 ### Added / 新增
+
+- 九个 IM 渠道新增统一的超时任务结果补发：前台等待超时后继续跟踪原 Harness 回合，完成后向原聊天或线程补发最终文字或终态通知，支持 Host 重启和连接恢复后继续检查。`/stop` 可精确停止当前聊天的待完成回合，换绑会话后不再补发旧结果；明确发送失败最多尝试三次，结果不确定时停止自动重试。此机制不重放文件产物、问题或审批，仍受平台发送权限与配额限制。
+  All nine IM channels now share deferred task delivery: after the foreground reply wait times out, the original Harness turn remains tracked and its final text or terminal notification is delivered to the original chat or thread, including after Host restarts or reconnection. `/stop` can precisely cancel the chat's pending turn, and rebinding the Session prevents delivery of old results. Definite send failures allow up to three attempts; uncertain outcomes stop automatic retries. Files, questions, and approvals are not replayed, and platform permissions and quotas still apply.
+
+- 钉钉新增 `/m`、`/menu` 原生下拉菜单，支持会话、工作区、Agent 预设和模型选择，以及新会话、历史、停止、压缩、状态与帮助按钮；选择后立即生效并更新原卡片。使用插件内置共享模板，无需为每个机器人配置模板；菜单 30 分钟或 Host 重启后失效。
+  DingTalk adds native `/m` and `/menu` dropdown menus for Sessions, workspaces, Agent Presets, and models, with New, History, Stop, Compact, Status, and Help buttons. Selections apply immediately and update the original card. The bundled shared template requires no per-bot template configuration; menus expire after 30 minutes or a Host restart.
 
 - QQ 新增 `/m`、`/menu` 按钮与数字菜单，覆盖会话、工作区、模式／预设、模型、新会话、停止、压缩、补充指令、归档显示切换、状态与帮助。长列表按快照分页，菜单按聊天和操作者隔离并沿用命令权限；按钮被平台明确拒绝时回退数字选择。旧菜单、重复点击和已变化的会话／工作区不会执行操作，审批、提问和批量输入保留原有优先级。
   QQ adds `/m` and `/menu` button and numbered menus for sessions, workspaces, modes/presets, models, new sessions, stop, compact, steering, archived-session visibility, status and help. Lists paginate over stable snapshots; menus are scoped to the chat and actor and use existing command permissions. Definite platform rejections fall back to numbered text. Stale menus, repeated clicks and changed session/workspace contexts cannot execute actions; questions, approvals and batch input retain priority.
@@ -18,6 +26,12 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 - 微信主动投递、连接测试和延迟任务结果现在复用对应用户最近的 `context_token`，并在 Host 重启后恢复；上下文按机器人登录与用户隔离，更换登录凭据后清理，补齐原先遗漏的会话上下文。主动发送失败会在账号状态中保留脱敏诊断与恢复建议，健康轮询不会覆盖发送错误。升级后需收到一次用户消息建立缓存，此修复不能解除 iLink 的发送额度和会话时效限制。
   WeChat proactive delivery, connection tests, and deferred task results now reuse the recipient's latest `context_token` and restore it after Host restarts. Context is isolated by bot login and recipient and cleared when login credentials change, supplying conversation context that was previously omitted. Proactive failures retain sanitized diagnostics and recovery guidance in account status, even while polling remains healthy. An inbound user message is needed to populate the cache after upgrading; this does not remove iLink sending quotas or conversation lifetime limits.
+
+- 企业微信流式回复在完成、停止或失败后会清除临时思考与工具进度文字，保留最终回答或结果提示。
+  Enterprise WeChat clears transient thinking and tool-progress text when a streamed reply completes, stops, or fails, preserving the final answer or outcome message.
+
+- 机器人账号卡片收起时，标题栏的帮助提示不再被卡片边缘裁切。
+  Help tooltips in collapsed bot-card headers are no longer clipped by the card edges.
 
 ## [4.12.0] - 2026-09-06
 
@@ -722,7 +736,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.12.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.13.0...HEAD
+[4.13.0]: https://github.com/xmanrui/dsh-im/compare/v4.12.0...v4.13.0
 [4.12.0]: https://github.com/xmanrui/dsh-im/compare/v4.11.0...v4.12.0
 [4.11.0]: https://github.com/xmanrui/dsh-im/compare/v4.10.0...v4.11.0
 [4.10.0]: https://github.com/xmanrui/dsh-im/compare/v4.9.1...v4.10.0
