@@ -983,14 +983,35 @@ test('tracker exposes per-step assistant messages and tool arguments', () => {
     { type: 'assistant/chunk', seq: 3, data: { turn: 1, step: 0, chunk: { type: 'text-delta', index: 0, text: '计算' } } },
     { type: 'assistant/message', seq: 4, data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: '计算结果：42' }] } } },
     { type: 'tool/call', seq: 5, data: { turn: 1, callId: 'c1', name: 'bash', arguments: { command: 'ls -la' } } },
-    { type: 'assistant/message', seq: 6, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '验证通过。' }] } } },
+    // 字符串 arguments 原样透传，不再二次序列化。
+    { type: 'tool/call', seq: 6, data: { turn: 1, callId: 'c2', name: 'echo', arguments: '{"a":1}' } },
+    // 纯空白的 canonical 定稿不透出 assistant-message。
+    { type: 'assistant/message', seq: 7, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '  \n\t ' }] } } },
+    { type: 'assistant/message', seq: 8, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '验证通过。' }] } } },
   ]);
   const assistantMessages = updates.filter((u) => u.type === 'assistant-message');
   assert.deepEqual(assistantMessages.map((u) => [u.step, u.text]),
     [[0, '计算结果：42'], [1, '验证通过。']]);
-  const tool = updates.find((u) => u.type === 'tool');
-  assert.equal(tool.name, 'bash');
-  assert.match(tool.arguments, /ls -la/);
+  assert.deepEqual(updates.filter((u) => u.type === 'tool').map((u) => [u.name, u.arguments]), [
+    ['bash', '{"command":"ls -la"}'],
+    ['echo', '{"a":1}'],
+  ]);
+});
+
+test('a canonical message equal to committed text dedupes the trailing text update', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: 'rpc-dedupe', afterSeq: 0 });
+  tracker.consumeAll([
+    { type: 'turn/start', seq: 1, data: { turn: 1 } },
+    { type: 'user/message', seq: 2, data: { turn: 1, source: { rpcId: 'rpc-dedupe' } } },
+    { type: 'assistant/chunk', seq: 3, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: '最终答案' } } },
+  ]);
+
+  const updates = tracker.consumeAll([
+    { type: 'assistant/message', seq: 4, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '最终答案' }] } } },
+  ]);
+  assert.deepEqual(updates, [
+    { type: 'assistant-message', step: 1, text: '最终答案' },
+  ]);
 });
 
 test('new turn events renew the stall window beyond the original fixed deadline', async () => {
@@ -1048,6 +1069,69 @@ test('new turn events renew the stall window beyond the original fixed deadline'
   assert.equal(answer, '最终结果');
   assert.equal(historyPolls, 3);
   assert.equal(sessionListPolls, 0);
+});
+
+test('latest-mode ask() filters assistant-message updates out of delivered progress', async () => {
+  const client = new HarnessClient({
+    baseUrl: 'http://127.0.0.1:3080',
+    workspace: '/tmp/dsh-feishu-workspace',
+  });
+  client.ensureRunning = async () => undefined;
+  let promptRpcId;
+  let prompted = false;
+  let seq = 0;
+  let historyPolls = 0;
+  let sessionListPolls = 0;
+  const events = [];
+  client.rpc = async (method, _payload, _timeoutMs, options) => {
+    if (method === 'session.history') {
+      if (!prompted) return { events: [] };
+      historyPolls += 1;
+      if (historyPolls === 1) {
+        events.push(
+          { type: 'turn/start', seq: ++seq, data: { turn: 1 } },
+          { type: 'user/message', seq: ++seq, data: { turn: 1, source: { rpcId: promptRpcId } } },
+          { type: 'assistant/chunk', seq: ++seq, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: '第一段' } } },
+        );
+      } else if (historyPolls === 2) {
+        // 本轮唯一变化是 canonical 定稿等于已提交文本：批次只含 assistant-message 更新。
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '第一段' }] } } },
+        );
+      } else if (historyPolls === 3) {
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '最终结果' }] } } },
+          { type: 'turn/end', seq: ++seq, data: { turn: 1, reason: { kind: 'completed' } } },
+        );
+      }
+      return { events: events.map((event) => ({ event })) };
+    }
+    if (method === 'session.prompt') {
+      prompted = true;
+      promptRpcId = options.rpcId;
+      return {};
+    }
+    if (method === 'session.list') {
+      sessionListPolls += 1;
+      return { items: [{ sessionId: 'session-latest-mode-filter', running: false }] };
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  };
+
+  const delivered = [];
+  const answer = await client.ask('session-latest-mode-filter', 'long task', {
+    timeoutMs: 450,
+    control: { owner: {}, key: 'route' },
+    onUpdate: async (update) => { delivered.push(update); },
+  });
+  assert.equal(answer, '最终结果');
+  assert.equal(historyPolls, 3);
+  assert.equal(sessionListPolls, 0);
+  // latest 模式下 assistant-message 更新不进入 onUpdate；流式 text 与最终 text 照常透出。
+  assert.deepEqual(delivered, [
+    { type: 'text', text: '第一段' },
+    { type: 'text', text: '最终结果' },
+  ]);
 });
 
 test('a production-owned turn that starts and then stalls still times out', async () => {

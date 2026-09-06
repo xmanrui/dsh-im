@@ -605,9 +605,15 @@ export class HarnessReplyTracker {
         this.#lastToolName = name;
         let argsText = null;
         if (event.data?.arguments !== undefined && event.data?.arguments !== null) {
-          argsText = typeof event.data.arguments === 'string'
-            ? event.data.arguments
-            : JSON.stringify(event.data.arguments);
+          if (typeof event.data.arguments === 'string') {
+            argsText = event.data.arguments;
+          } else {
+            try {
+              argsText = JSON.stringify(event.data.arguments);
+            } catch {
+              argsText = undefined;
+            }
+          }
         }
         pushUpdate({ type: 'tool', name, ...(argsText ? { arguments: argsText } : {}), ...(callId ? { callId } : {}) });
       } else if (event.type === 'tool/result') {
@@ -1571,7 +1577,11 @@ export class HarnessClient {
           lastPollSeq = tracker.lastSeq;
           if (seqAdvanced) lastProgressAt = Date.now();
           if (onUpdate) {
-            const visibleUpdates = progressMode === 'all' ? updates : updates.slice(-1);
+            // latest 模式只投递一条最新进展；assistant-message 是分步推送专用更新，
+            // 且 canonical 去重后可能成为批次唯一变化，绝不能冒充进度投给全部渠道。
+            const visibleUpdates = progressMode === 'all'
+              ? updates
+              : updates.filter((update) => update.type !== 'assistant-message').slice(-1);
             for (const update of visibleUpdates) {
               try {
                 await onUpdate(update);
