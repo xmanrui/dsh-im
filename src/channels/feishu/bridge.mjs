@@ -3768,57 +3768,100 @@ export class FeishuHarnessBridge {
   }
 
   /**
-   * Rich-text (post) delivery for step messages: thread-routed via the reply
-   * anchor, with bounded retries on rate-limit errors so a busy turn never
-   * silently leaks steps to the main chat through the plain-text fallback.
+   * Rich-text (post) delivery for step messages. Degradation ladder:
+   * post（限流重试 ×2）→ 同话题纯文本回复 → 主界面纯文本。Returns
+   * `{ ok, messageId?, error? }` — callers decide whether a failure is
+   * tolerable (process notes: log and continue) or fatal (final answer:
+   * surface it).
    */
   async #sendStepPost(chatId, replyToMessageId, paragraphs, fallbackText) {
     const content = JSON.stringify({ zh_cn: { content: paragraphs } });
     if (!replyToMessageId) {
       const sentId = await this.#send(chatId, fallbackText);
-      return typeof sentId === 'string' ? sentId : null;
+      return { ok: true, messageId: typeof sentId === 'string' ? sentId : null };
     }
     const replyInThread = this.#replyInThreadFor(replyToMessageId);
-    for (let attempt = 0; ; attempt += 1) {
+    let lastError = null;
+    // 1) 富文本 post；限流/瞬时失败重试两次（结构化 code 感知）。
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        const response = await this.#client.im.v1.message.reply({
-          path: { message_id: replyToMessageId },
-          data: {
-            msg_type: 'post',
-            content,
-            ...(replyInThread ? { reply_in_thread: true } : {}),
-          },
-        });
-        if (response?.code && response.code !== 0) {
-          throw new Error(`Feishu reply failed: ${response.msg || response.code}`);
-        }
-        const threadId = nonEmptyString(response?.data?.thread_id);
-        if (threadId) {
-          await this.#registerTopicThreadId(threadId, replyToMessageId, chatId);
-        }
-        return nonEmptyString(response?.data?.message_id) ?? null;
+        const response = await this.#replyStepMessage(
+          chatId, replyToMessageId, 'post', content, replyInThread,
+        );
+        return {
+          ok: true,
+          messageId: nonEmptyString(response?.data?.message_id) ?? null,
+        };
       } catch (error) {
-        // 限流/瞬时失败先重试，避免回退成主界面普通消息（「遗漏到话题外」）。
-        const retriable = attempt < 2 && /230020|230006/.test(error?.message ?? '');
-        if (!retriable) {
-          this.#logger.warn?.(
-            '[dsh-feishu] step push post failed; falling back to plain text:',
-            error?.message ?? String(error),
-          );
-          try {
-            const sentId = await this.#send(chatId, fallbackText);
-            return typeof sentId === 'string' ? sentId : null;
-          } catch (fallbackError) {
-            this.#logger.warn?.(
-              '[dsh-feishu] step push send failed:',
-              fallbackError?.message ?? String(fallbackError),
-            );
-            return null;
-          }
+        lastError = error;
+        if (attempt < 2 && this.#isRetriableSendError(error)) {
+          await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+          continue;
         }
-        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        break;
       }
     }
+    // 2) 明确降级：仅富文本格式被拒时，话题内纯文本回复仍然可用——
+    //    优先留在话题内，而不是直接漏到主界面。
+    try {
+      const response = await this.#replyStepMessage(
+        chatId, replyToMessageId, 'text', JSON.stringify({ text: fallbackText }), replyInThread,
+      );
+      return {
+        ok: true,
+        messageId: nonEmptyString(response?.data?.message_id) ?? null,
+      };
+    } catch (error) {
+      lastError = lastError ?? error;
+    }
+    // 3) 最后兜底：主界面纯文本。
+    this.#logger.warn?.(
+      '[dsh-feishu] step push post failed; falling back to main chat text:',
+      lastError?.message ?? String(lastError),
+    );
+    try {
+      const sentId = await this.#send(chatId, fallbackText);
+      return { ok: true, messageId: typeof sentId === 'string' ? sentId : null };
+    } catch (fallbackError) {
+      this.#logger.warn?.(
+        '[dsh-feishu] step push send failed:',
+        fallbackError?.message ?? String(fallbackError),
+      );
+      return { ok: false, error: lastError ?? fallbackError };
+    }
+  }
+
+  /** Reply with one msg_type; throws errors carrying the structured Feishu code. */
+  async #replyStepMessage(chatId, messageId, msgType, contentString, replyInThread) {
+    const response = await this.#client.im.v1.message.reply({
+      path: { message_id: messageId },
+      data: {
+        msg_type: msgType,
+        content: contentString,
+        ...(replyInThread ? { reply_in_thread: true } : {}),
+      },
+    });
+    if (response?.code && response.code !== 0) {
+      const error = new Error(`Feishu reply failed: ${response.msg || response.code}`);
+      // Preserve the structured code: rate-limit detection must not depend on
+      // the human-readable message surviving.
+      error.code = response.code;
+      error.feishuCode = response.code;
+      throw error;
+    }
+    const threadId = nonEmptyString(response?.data?.thread_id);
+    if (threadId) {
+      await this.#registerTopicThreadId(threadId, messageId, chatId);
+    }
+    return response;
+  }
+
+  /** Rate-limit / transient send errors are worth one more attempt. */
+  #isRetriableSendError(error) {
+    const structured = [error?.code, error?.feishuCode, error?.response?.data?.code]
+      .map((value) => String(value ?? ''));
+    return structured.some((code) => code === '230020' || code === '230006')
+      || /230020|230006/.test(error?.message ?? '');
   }
 
   /**
@@ -3942,19 +3985,28 @@ export class FeishuHarnessBridge {
       : completed.answer;
     const deliveryText = answerTextForDelivery(finalText, completed.artifacts ?? []);
     let textReceipt;
+    let postDeliveryError = null;
     try {
       // 分步直推模式下最终答案以富文本 post（md 标签，GFM 全语法）推送；
       // 超长答案按段落边界切分为多条 post（单条 content 上限 30KB）。
+      // 任一分段失败都视为最终答案失败——进入 catch 阶梯上抛，
+      // 决不允许「用户没收到答案、状态却记为已回复」。
       const providerMessageIds = [];
       for (const chunk of splitStepPostMarkdown(deliveryText)) {
-        const sentId = await this.#sendStepPost(
+        const result = await this.#sendStepPost(
           chatId,
           messageId,
           [[{ tag: 'md', text: chunk }]],
           chunk,
         );
-        if (sentId) providerMessageIds.push(sentId);
+        if (!result.ok) {
+          postDeliveryError ??= result.error
+            ?? new Error('step push post delivery failed');
+          continue;
+        }
+        if (result.messageId) providerMessageIds.push(result.messageId);
       }
+      if (postDeliveryError) throw postDeliveryError;
       textReceipt = createDeliveryReceipt({
         deliveryId: messageId,
         presentation: 'feishu-step-push-post',

@@ -9392,3 +9392,152 @@ test('step push on: a rate-limited post retries instead of leaking to plain text
   );
   assert.deepEqual(sent, ['✅ bash — ls\n{"command":"ls"}', '重试成功。']);
 });
+
+// ── Review round 2 (PR #157): send/fallback failure-ladder scenarios ──────
+
+test('step push: a fully failed final answer must fail the turn instead of fake success', async () => {
+  const fixture = stateFixture();
+  const createTexts = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: { im: { v1: { message: {
+      reply: async () => { throw new Error('post api down'); },
+      create: async (request) => {
+        createTexts.push(stepPushMessageText(request));
+        throw new Error('main chat down');
+      },
+    } } } },
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      return '答案正文。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    logger: { debug() {}, error() {}, warn() {} },
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_fatal', '彻底失败'));
+  await bridge.waitForIdle();
+
+  assert.ok(
+    createTexts.some((text) => text.includes('回复发送结果未能确认')),
+    'a delivery-failure notice must be surfaced to the user',
+  );
+});
+
+test('step push: post failure degrades to a threaded plain-text reply inside the topic', async () => {
+  const fixture = stateFixture();
+  const creates = [];
+  const replies = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: { im: { v1: { message: {
+      reply: async (request) => {
+        if (request.data.msg_type === 'post') throw new Error('post format rejected');
+        replies.push({
+          msgType: request.data.msg_type,
+          replyInThread: request.data.reply_in_thread === true,
+          messageId: request.path.message_id,
+          text: stepPushMessageText(request),
+        });
+        return { code: 0, data: { message_id: `om_r_${replies.length}` } };
+      },
+      create: async (request) => {
+        creates.push(stepPushMessageText(request));
+        return { code: 0, data: { message_id: `om_c_${creates.length}` } };
+      },
+    } } } },
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      return '答案正文。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    groupTopicReply: true,
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_thread_fb', '处理话题任务', {
+    chat_type: 'group',
+    thread_id: 'omt_topic',
+    mentions: [{ id: { open_id: 'ou_bot' }, key: '@_user_1' }],
+  }));
+  await bridge.waitForIdle();
+
+  assert.ok(replies.length >= 2, 'the degraded plain text must stay in the topic thread');
+  for (const reply of replies) {
+    assert.equal(reply.msgType, 'text', 'the degraded reply is plain text');
+    assert.equal(reply.replyInThread, true, 'the degraded reply stays inside the thread');
+    assert.equal(reply.messageId, 'om_thread_fb', 'the degraded reply anchors on the inbound message');
+  }
+  assert.equal(creates.length, 0, 'the main chat must not receive the degraded steps');
+});
+
+test('step push: rate-limit retries read structured codes, not just message text', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const creates = [];
+  const attempts = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const script = [
+    () => {
+      // 形式一：结构化 code，错误文案不含数字。
+      const error = new Error('This operation triggers the frequency limit.');
+      error.code = 230020;
+      throw error;
+    },
+    () => {
+      // 形式二：SDK HTTP 异常把 code 藏在 response.data.code。
+      const error = new Error('Feishu reply failed');
+      error.response = { data: { code: 230020 } };
+      throw error;
+    },
+    (request) => {
+      attempts.push('ok');
+      sent.push(stepPushMessageText(request));
+      return { code: 0, data: { message_id: `om_retry_${sent.length}` } };
+    },
+  ];
+  let call = 0;
+  const bridge = new FeishuHarnessBridge({
+    client: { im: { v1: { message: {
+      reply: async (request) => {
+        call += 1;
+        attempts.push(`attempt-${call}`);
+        return script[Math.min(call - 1, script.length - 1)](request);
+      },
+      create: async (request) => {
+        creates.push(stepPushMessageText(request));
+        return { code: 0, data: { message_id: `om_c_${creates.length}` } };
+      },
+    } } } },
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      return '重试成功。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_structured', '触发限流'));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(
+    attempts.filter((entry) => entry.startsWith('attempt')),
+    ['attempt-1', 'attempt-2', 'attempt-3', 'attempt-4'],
+    'both structured rate-limit forms must be retried (tool step + final answer)',
+  );
+  assert.equal(creates.length, 0, 'no message may leak to the main chat');
+  assert.deepEqual(sent, ['✅ bash — ls\n{"command":"ls"}', '重试成功。']);
+});
