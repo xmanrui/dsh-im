@@ -17,6 +17,7 @@ function normalizeState(value) {
   return {
     version: 1,
     sessions,
+    includeArchivedSessions: value.includeArchivedSessions === true,
     ...(value.deferred ? { deferred: normalizeDeferredState(value.deferred) } : {}),
     seenMessageIds: Array.isArray(value.seenMessageIds)
       ? value.seenMessageIds.filter((id) => typeof id === 'string').slice(-1_000)
@@ -49,6 +50,13 @@ export class QqStateStore {
   putDeferred(entry) { return this.#deferred.put(entry); }
   patchDeferred(id, patch) { return this.#deferred.patch(id, patch); }
   removeDeferred(id) { return this.#deferred.remove(id); }
+
+  includesArchivedSessions() { return this.#state.includeArchivedSessions === true; }
+
+  async setIncludeArchivedSessions(include) {
+    this.#state.includeArchivedSessions = include === true;
+    await this.#persist();
+  }
 
   sessionFor(key) {
     return this.#state.sessions[key] ?? null;

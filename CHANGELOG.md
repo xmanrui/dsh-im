@@ -6,7 +6,15 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- QQ 新增 `/m`、`/menu` 按钮与数字菜单，覆盖会话、工作区、模式／预设、模型、新会话、停止、压缩、补充指令、归档显示切换、状态与帮助。长列表按快照分页，菜单按聊天和操作者隔离并沿用命令权限；按钮被平台明确拒绝时回退数字选择。旧菜单、重复点击和已变化的会话／工作区不会执行操作，审批、提问和批量输入保留原有优先级。
+  QQ adds `/m` and `/menu` button and numbered menus for sessions, workspaces, modes/presets, models, new sessions, stop, compact, steering, archived-session visibility, status and help. Lists paginate over stable snapshots; menus are scoped to the chat and actor and use existing command permissions. Definite platform rejections fall back to numbered text. Stale menus, repeated clicks and changed session/workspace contexts cannot execute actions; questions, approvals and batch input retain priority.
+
 ### Fixed / 修复
+
+- 兼容新版 Harness 命令接口的 `submittedAttachments` 参数，修复 QQ 菜单实测中发现的压缩失败；保留旧版无附件参数及 `images` 接口，仅在明确的调用前参数校验失败时适配重试。
+  Support the newer Harness command descriptor's `submittedAttachments` argument, fixing compaction discovered during QQ menu testing. Older argument-free and `images` descriptors remain supported; adaptation retries only exact argument validation failures before command dispatch.
 
 - 微信主动投递、连接测试和延迟任务结果现在复用对应用户最近的 `context_token`，并在 Host 重启后恢复；上下文按机器人登录与用户隔离，更换登录凭据后清理，补齐原先遗漏的会话上下文。主动发送失败会在账号状态中保留脱敏诊断与恢复建议，健康轮询不会覆盖发送错误。升级后需收到一次用户消息建立缓存，此修复不能解除 iLink 的发送额度和会话时效限制。
   WeChat proactive delivery, connection tests, and deferred task results now reuse the recipient's latest `context_token` and restore it after Host restarts. Context is isolated by bot login and recipient and cleared when login credentials change, supplying conversation context that was previously omitted. Proactive failures retain sanitized diagnostics and recovery guidance in account status, even while polling remains healthy. An inbound user message is needed to populate the cache after upgrading; this does not remove iLink sending quotas or conversation lifetime limits.

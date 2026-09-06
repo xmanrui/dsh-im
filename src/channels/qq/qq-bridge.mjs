@@ -63,6 +63,11 @@ import {
   evaluateInboundAccess,
 } from '../shared/inbound-access.mjs';
 import { sendMarkdownReply } from './markdown-reply.mjs';
+import {
+  isQqMenuCommand, parseQqMenuCommand, QqMenuStore,
+  qqMenuPage, qqMenuView, sendQqMenu,
+} from './qq-menu.mjs';
+import { withSessionBindingLock } from '../shared/session-binding-lock.mjs';
 import { t } from '../shared/i18n.mjs';
 
 function interactionResolvedText() {
@@ -86,6 +91,7 @@ function helpText() {
     t('QQ 机器人已连接 DeepSeek Harness。'),
     '',
     t('直接发送文字、图片或文件即可继续当前会话。'),
+    t('/menu 或 /m  打开可点击的功能菜单'),
     t('/new  开启一个全新会话'),
     t('/compact  压缩当前会话的较早上下文'),
     t('/history [数量]  查看最近历史消息（默认 3 条，最多 5 条）'),
@@ -437,6 +443,8 @@ export class QqHarnessBridge {
   #commandTasks = new Set();
   #approvals;
   #batchInputs = new BatchInputManager();
+  #menus = new QqMenuStore();
+  #menuTasks = new Map();
 
   constructor({
     bot,
@@ -493,6 +501,15 @@ export class QqHarnessBridge {
     const addressed = message.kind !== 'group'
       || message.rawEventType === 'GROUP_AT_MESSAGE_CREATE';
     const commandText = safeText(message);
+    const menuTextOnly = !hasQqImageAttachments(message) && !hasQqFileAttachments(message)
+      && !qqReplyReference(message);
+    const explicitMenu = menuTextOnly && isQqMenuCommand(commandText);
+    const numericMenu = menuTextOnly && /^\d{1,2}$/u.test(commandText)
+      && this.#menus.has(key, sender)
+      && !this.#pendingInteractions.has(key) && !this.#approvals.hasPending(key)
+      && this.#batchInputs.status(key).phase === 'idle';
+    const menuInput = numericMenu
+      ? `/m pick ${this.#menus.tokenFor(key, sender)} ${commandText}` : commandText;
     if (addressed) {
       const access = this.#accessPolicy
         ? evaluateInboundAccess(this.#accessPolicy, {
@@ -501,6 +518,7 @@ export class QqHarnessBridge {
             text: commandText,
             hasImages: hasQqImageAttachments(message),
             hasFiles: hasQqFileAttachments(message),
+            ...(explicitMenu || numericMenu ? { isCommand: true } : {}),
           })
         : senderAllowed(message, this.#ownerUserOpenid)
           ? { allowed: true, reason: 'legacy-owner' }
@@ -523,6 +541,9 @@ export class QqHarnessBridge {
     const pending = this.#pendingInteractions.get(key);
     const batchCommand = isBatchInputCommand(commandText);
     const batchStatus = this.#batchInputs.status(key);
+    // Ordinary prompts and other commands end number selection. A pending
+    // question/approval or batch keeps its existing interpretation of digits.
+    if (addressed && !explicitMenu && !numericMenu) this.#menus.clear(key, sender);
     if (batchCommand && addressed && message.kind === 'group') {
       return this.#finishBatchResult(
         message,
@@ -532,6 +553,9 @@ export class QqHarnessBridge {
     }
     if (message.kind === 'c2c'
       && (batchCommand || batchStatus.phase === 'collecting')) {
+      if (explicitMenu) return this.#finishBatchResult(message, messageId, {
+        message: t('当前正在批量输入，请先发送 /send 或 /cancel，再打开菜单。'),
+      });
       const exactBatchStart = /^\/batch$/iu.test(commandText);
       const result = exactBatchStart
         && batchStatus.phase === 'idle'
@@ -555,7 +579,9 @@ export class QqHarnessBridge {
         return this.#finishBatchResult(message, messageId, result);
       }
     }
-    const commandRunner = isHistoryCommand(commandText) ? runHistoryCommand
+    const commandRunner = explicitMenu || numericMenu
+      ? () => this.#runMenuCommand(message, menuInput, key)
+      : isHistoryCommand(commandText) ? runHistoryCommand
       : hasQqFileAttachments(message) ? null : isControlCommand(commandText)
       ? runControlCommand
       : (isModelCommand(commandText)
@@ -673,6 +699,87 @@ export class QqHarnessBridge {
   async #deliverDeferredOutcome(entry, outcome) {
     await sendMarkdownReply(this.#bot, entry.target, deferredOutcomeText(outcome), { logger: this.#logger });
     return true;
+  }
+
+  #menuContext(key) {
+    return { workspace: this.#harness.currentWorkspace?.(), sessionId: this.#state.sessionFor(key) };
+  }
+
+  async #showMenu(message, key, name, pageView = null) {
+    const actor = message.senderId;
+    const context = this.#menuContext(key);
+    const entry = this.#menus.begin(key, actor, context);
+    const view = pageView ?? await qqMenuView(name, this.#harness, this.#state, key, {
+      signal: this.#signal, busy: this.#queues.has(key)
+        || this.#pendingInteractions.has(key) || this.#approvals.hasPending(key),
+    });
+    this.#signal?.throwIfAborted();
+    this.#harness.assertWorkspaceScope?.();
+    const current = this.#menuContext(key);
+    if (current.workspace !== context.workspace || current.sessionId !== context.sessionId) {
+      return { message: t('会话或工作区已变化，请重新发送 /m。') };
+    }
+    if (!this.#menus.publish(key, actor, entry, view)) return { messages: [] };
+    await sendQqMenu(this.#bot, message.replyTarget, view, entry.token, { logger: this.#logger });
+    this.#status.messagesReplied += 1;
+    this.#status.lastReplyAt = new Date().toISOString();
+    return { messages: [] };
+  }
+
+  async #runMenuCommand(message, text, key) {
+    const parsed = isQqMenuCommand(text) ? parseQqMenuCommand(text) : { number: Number(text) };
+    if (parsed.error) return { message: t('菜单命令无效，请发送 /m 重新打开。') };
+    if (parsed.name) return this.#showMenu(message, key, parsed.name);
+    const choice = this.#menus.take(key, message.senderId, parsed.number, parsed.token, this.#menuContext(key));
+    if (choice.error) return { message: choice.error };
+    const action = choice.action;
+    if (action.kind === 'section') return this.#showMenu(message, key, action.name);
+    if (action.kind === 'page') return this.#showMenu(message, key, '', qqMenuPage(action.list, action.page));
+    if (action.kind === 'archive') {
+      await this.#state.setIncludeArchivedSessions(action.include);
+      return this.#showMenu(message, key, 'main');
+    }
+    const command = action.text;
+    const pendingInteraction = this.#pendingInteractions.has(key) || this.#approvals.hasPending(key);
+    const isBusy = () => this.#queues.has(key) || this.#pendingInteractions.has(key)
+      || this.#approvals.hasPending(key) || this.#batchInputs.status(key).phase !== 'idle';
+    const needsIdle = /^\/(?:new|session|workspace|compact)(?:\s|$)/u.test(command);
+    if (isBusy() && needsIdle) {
+      return { message: t('当前任务仍在运行，请先停止任务或等待任务完成后再执行此操作。') };
+    }
+    const options = { signal: this.#signal, isDirect: message.kind === 'c2c', pendingInteraction,
+      control: { owner: this, key }, deferredDelivery: this.#deferred };
+    // Existing runners own all Host mutations and control authorization.
+    const execute = async () => {
+      this.#signal?.throwIfAborted();
+      const current = this.#menuContext(key);
+      if (current.workspace !== choice.context.workspace || current.sessionId !== choice.context.sessionId) {
+        return { message: t('会话或工作区已变化，请重新发送 /m。') };
+      }
+      // A prompt may have started while this action waited for a prior menu command.
+      if (needsIdle && isBusy()) return { message: t('当前任务仍在运行，请先停止任务或等待任务完成后再执行此操作。') };
+      if (isControlCommand(command)) return runControlCommand(command, this.#harness, this.#state, key, options);
+      if (isModelCommand(command)) return runModelCommand(command, this.#harness, this.#state, key, options);
+      if (isPresetCommand(command)) return runPresetCommand(command, this.#harness, this.#state, key, options);
+      if (command === '/new') return withSessionBindingLock(this.#state, key, async () => {
+        if (isBusy()) return { message: t('当前任务仍在运行，请先停止任务或等待任务完成后再执行此操作。') };
+        const locked = this.#menuContext(key);
+        if (locked.workspace !== choice.context.workspace || locked.sessionId !== choice.context.sessionId) {
+          return { message: t('会话或工作区已变化，请重新发送 /m。') };
+        }
+        await this.#state.clearSession(key);
+        return { message: t('已开启新会话。请发送你的问题。') };
+      });
+      if (command === '/compact') return runCompactCommand(command, this.#harness, this.#state, key, options);
+      return runWorkspaceCommand(command, this.#harness, key);
+    };
+    // Stop/steer must stay available while a slower menu mutation is pending.
+    if (isControlCommand(command)) return execute();
+    const previous = this.#menuTasks.get(key) ?? Promise.resolve();
+    const task = previous.catch(() => undefined).then(execute);
+    this.#menuTasks.set(key, task);
+    try { return await task; }
+    finally { if (this.#menuTasks.get(key) === task) this.#menuTasks.delete(key); }
   }
 
   async waitForIdle() {
