@@ -3711,8 +3711,12 @@ export class FeishuHarnessBridge {
     this.#signal?.throwIfAborted();
     const wait = state.lastSentAt + STEP_PUSH_MIN_INTERVAL_MS - this.#stepPushClock.now();
     if (wait > 0) await this.#stepPushClock.delay(wait);
+    // /stop or shutdown during the wait window must not let the queued
+    // message land after the teardown has begun.
+    this.#signal?.throwIfAborted();
     state.lastSentAt = this.#stepPushClock.now();
     state.count += 1;
+    this.#status.streamUpdates = (this.#status.streamUpdates ?? 0) + 1;
     try {
       await this.#send(chatId, text);
     } catch (error) {
@@ -3735,9 +3739,9 @@ export class FeishuHarnessBridge {
       askCompleted = true;
       onAskComplete?.();
     };
-    // Identical prompt-content construction to the streaming branch: images
-    // and reply references become rich prompt content, and persisted context
-    // enhancement is replayed verbatim.
+    // 与流式分支一致的提示内容构造：图片与回复引用展开为富提示内容，已接受
+    // 的上下文增强按原样重放。直推分流发生在 `#answerWithStream` 构造之前，
+    // 这里就是本回合唯一一次构造（无重复的 prompt 往返）。
     let content = hasInboundImages(message) || hasReplyReference(message)
       ? await promptContentForInboundMessage(message, { signal: this.#signal })
       : undefined;
@@ -3890,6 +3894,13 @@ export class FeishuHarnessBridge {
       askCompleted = true;
       onAskComplete?.();
     };
+    // 分步直推：开关开启且通道支持流式卡时，在构造提示内容之前分流到完整替
+    // 代路径（`#answerWithStepPush` 自行构造一次，回复引用回合不做第二次
+    // promptContentForInboundMessage 往返）；关闭或无流式卡通道时与 main
+    // 零差异（含下方 `!this.#channel?.stream` 纯文本路径）。
+    if (this.#stepPush && this.#channel?.stream) {
+      return this.#answerWithStepPush(event, key, message, { onAskComplete });
+    }
     let content = hasInboundImages(message) || hasReplyReference(message)
       ? await promptContentForInboundMessage(message, { signal: this.#signal })
       : undefined;
@@ -3950,11 +3961,6 @@ export class FeishuHarnessBridge {
       }
       this.#status.streamFallbacks = (this.#status.streamFallbacks ?? 0) + 1;
       return { ...delivery, textDeliveryErrors: textSendError ? 1 : 0 };
-    }
-
-    // 分步直推：开关开启时以完整替代路径呈现回合过程，关闭时与 main 零差异。
-    if (this.#stepPush) {
-      return this.#answerWithStepPush(event, key, message, { onAskComplete });
     }
 
     let promptStarted = false;

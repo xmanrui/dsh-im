@@ -8473,6 +8473,7 @@ test('step push: tools and assistant notes push as discrete messages, final answ
   const sent = [];
   const cardWrites = [];
   const streamCalls = [];
+  const status = bridgeStatus();
   const { stepPushClock } = stepPushClockFixture();
   const bridge = new FeishuHarnessBridge({
     client: stepPushTextClient(async (text) => sent.push(text)),
@@ -8484,7 +8485,7 @@ test('step push: tools and assistant notes push as discrete messages, final answ
       return '我先看目录\n验证通过。';
     }),
     state: fixture.state,
-    status: bridgeStatus(),
+    status,
     allowedSenderOpenIds: new Set(['ou_user']),
     stepPush: true,
     stepPushClock,
@@ -8504,6 +8505,11 @@ test('step push: tools and assistant notes push as discrete messages, final answ
     cardWrites,
     ['验证通过。'],
     'the buffered final step becomes the card content without duplication',
+  );
+  assert.equal(
+    status.streamUpdates,
+    2,
+    'every pushed step message is counted once in the streamUpdates telemetry',
   );
 });
 
@@ -8543,10 +8549,12 @@ test('step push off: behavior identical to main', async () => {
   const sent = [];
   const cardWrites = [];
   const streamCalls = [];
+  const askOptionsSeen = [];
   const bridge = new FeishuHarnessBridge({
     client: stepPushTextClient(async (text) => sent.push(text)),
     channel: stepPushChannel({ cardWrites, streamCalls }),
     harness: stepPushHarness(async (_sessionId, _text, options) => {
+      askOptionsSeen.push(options);
       await options.onUpdate({ type: 'assistant-message', step: 0, text: '我先看目录' });
       await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls -la"}' });
       await options.onUpdate({ type: 'assistant-message', step: 1, text: '验证通过。' });
@@ -8568,6 +8576,17 @@ test('step push off: behavior identical to main', async () => {
     'the card keeps the full accumulated answer exactly like main',
   );
   assert.ok(!sent.some((text) => text.includes('💬')), 'no 💬 note may appear');
+  assert.equal(askOptionsSeen.length, 1);
+  assert.equal(
+    askOptionsSeen[0].progressMode,
+    undefined,
+    'off mode must not ask for progressMode all',
+  );
+  assert.equal(
+    typeof askOptionsSeen[0].onUpdate,
+    'function',
+    'off mode keeps the streaming progress onUpdate',
+  );
 });
 
 test('step push: 250ms throttle and 200-message circuit breaker', async () => {
@@ -8706,5 +8725,435 @@ test('step push: card failure falls back to plain text (明确降级)', async ()
     fallback.text,
     '答案正文。',
     'the last message is the plain-text final answer',
+  );
+});
+
+test('step push on: question and approval present independently and coexist with step messages', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const cardWrites = [];
+  const streamCalls = [];
+  const rotations = [];
+  const questionAnswered = deferred();
+  const approvalDecided = deferred();
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient(async (text) => sent.push(text)),
+    channel: {
+      stream: async (chatId, { markdown }, options) => {
+        streamCalls.push({ chatId, options });
+        await markdown({
+          setContent: async (content) => cardWrites.push(content),
+          rotate: async () => rotations.push('rotate'),
+        });
+        return { messageId: 'om_step_coexist_card' };
+      },
+    },
+    harness: stepPushHarness(async (sessionId, _text, options) => {
+      await options.onUpdate({ type: 'assistant-message', step: 0, text: '先查看目录' });
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"pwd"}' });
+      await options.onInteraction({
+        kind: 'question',
+        interactionId: 'question-coexist',
+        rpcId: 'question-coexist',
+        sessionId,
+        payload: {
+          type: 'question/requested',
+          sessionId,
+          questions: [{
+            id: 'environment',
+            header: '测试环境',
+            question: '请选择测试环境',
+            options: [{ label: '测试环境' }, { label: '生产环境' }],
+          }],
+        },
+        respond: async (result) => {
+          questionAnswered.resolve(result);
+          return { accepted: true };
+        },
+      });
+      await questionAnswered.promise;
+      // Let the question bookkeeping (pending-state cleanup) finish before the
+      // approval is presented, mirroring a real ask timeline.
+      await new Promise((resolve) => setImmediate(resolve));
+      await options.onInteraction({
+        kind: 'approval',
+        interactionId: 'approval-coexist',
+        rpcId: 'rpc-approval-coexist',
+        sessionId,
+        payload: {
+          type: 'approval/requested',
+          sessionId,
+          approvalId: 'approval-coexist',
+          toolName: 'bash',
+          callId: 'call-coexist',
+          reason: '运行一项构建操作',
+        },
+        toolCall: { callId: 'call-coexist', name: 'bash', arguments: '{"command":"pwd"}' },
+        respond: async (result) => {
+          approvalDecided.resolve(result);
+          return { accepted: true };
+        },
+      });
+      await approvalDecided.promise;
+      await new Promise((resolve) => setImmediate(resolve));
+      await options.onUpdate({ type: 'assistant-message', step: 1, text: '验证通过。' });
+      return '已选择测试环境。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    // Pin the plain-text question/approval presentation (official behaviour).
+    interactionCards: false,
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  const turn = bridge.accept(event('om_step_coexist', '跑一个需要确认的回合'));
+  await eventually(
+    () => sent.some((text) => text.includes('请选择测试环境')),
+    'the question must present while the turn is running',
+  );
+  await bridge.accept(event('om_step_coexist_answer', '1'));
+  const submitted = await questionAnswered.promise;
+  await eventually(
+    () => sent.some((text) => text.includes('运行一项构建操作')),
+    'the approval must present after the question is answered',
+  );
+  await bridge.accept(event('om_step_coexist_approve', '批准'));
+  const approvalDecision = await approvalDecided.promise;
+  await turn;
+  await bridge.waitForIdle();
+
+  const toolIndex = sent.indexOf('✅ bash — pwd\n▸ {"command":"pwd"}');
+  const questionIndex = sent.findIndex((text) => text.includes('请选择测试环境'));
+  const approvalIndex = sent.findIndex((text) => text.includes('运行一项构建操作'));
+  assert.equal(sent[0], '💬 先查看目录', 'the buffered note flushes at the tool boundary');
+  assert.equal(toolIndex, 1, 'the tool intent is pushed as its own message');
+  assert.ok(questionIndex > toolIndex, 'the question presents after the pushed steps');
+  assert.ok(approvalIndex > questionIndex, 'the approval presents after the question');
+  assert.deepEqual(submitted, {
+    ok: true,
+    value: {
+      sessionId: 'session-step-push',
+      answer: { answers: [{ id: 'environment', selected: ['测试环境'] }] },
+    },
+  });
+  assert.deepEqual(approvalDecision, {
+    ok: true,
+    value: {
+      sessionId: 'session-step-push',
+      approvalId: 'approval-coexist',
+      outcome: 'allowed-once',
+    },
+  });
+  assert.deepEqual(
+    cardWrites,
+    ['验证通过。'],
+    'the final step still becomes the card content after both interactions',
+  );
+  assert.equal(streamCalls.length, 1, 'the final answer card is created once, after the turn');
+  assert.deepEqual(
+    rotations,
+    [],
+    'step push never rotates a placeholder card for interactions',
+  );
+});
+
+test('step push on: /watch pushes and artifact delivery are unaffected', async (t) => {
+  const artifact = await committedArtifact(t, 'coexist-result.txt', 'coexist result', 'coexist');
+  const { state } = await watchStoreFixture([['p2p:ou_owner', 'session-step-watch']]);
+  const harness = watchHarness({
+    sessionsByWorkspace: {
+      'C:/work': [{ sessionId: 'watched-session', title: 'Watched', lastSeq: -1 }],
+    },
+  });
+  harness.sessionExists = async () => true;
+  harness.createSession = async () => 'session-step-watch';
+  harness.ask = async (_sessionId, _text, options) => {
+    await options.onArtifact(artifact);
+    return '';
+  };
+  const outgoingTexts = [];
+  const completionCards = [];
+  const files = [];
+  const cardWrites = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: cardClient(async (outgoing) => {
+      if (outgoing.msgType === 'interactive') completionCards.push(outgoing.content);
+      else outgoingTexts.push(JSON.parse(outgoing.content).text);
+    }),
+    channel: {
+      stream: async (_chatId, { markdown }) => {
+        await markdown({ setContent: async (content) => cardWrites.push(content) });
+        return { messageId: 'om_step_watch_card' };
+      },
+      sendFile: async (_chatId, file) => {
+        files.push(file.fileName);
+        return {
+          schemaVersion: 1,
+          deliveryId: file.deliveryKey,
+          presentation: 'feishu-file',
+          providerMessageIds: ['om-step-watch-file'],
+          artifacts: [{ artifactId: file.artifactId, outcome: 'sent' }],
+        };
+      },
+    },
+    harness,
+    state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_watch', '/watch 1', { senderOpenId: 'ou_owner' }));
+  await bridge.waitForIdle();
+  assert.match(
+    outgoingTexts.at(-1),
+    /已关注会话「Watched」/,
+    'the /watch reply keeps its normal push',
+  );
+  assert.ok(
+    state.watchEntry('p2p:ou_owner', 'watched-session'),
+    'the watch entry persisted normally',
+  );
+  await eventually(() => harness._listeners.length === 1);
+  const entry = state.watchEntry('p2p:ou_owner', 'watched-session');
+  harness._listeners[0].onSessionEvent({
+    sessionId: 'watched-session',
+    event: {
+      type: 'turn/end',
+      seq: (entry.lastSeq ?? 0) + 1,
+      time: Date.now(),
+      data: { turn: 'live', reason: { kind: 'completed' } },
+    },
+  });
+  await bridge.waitForIdle();
+  assert.equal(completionCards.length, 1, 'the /watch completion push still arrives');
+
+  await bridge.accept(event('om_step_artifact', '生成结果文件并发给我', { senderOpenId: 'ou_owner' }));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(
+    cardWrites,
+    ['结果文件已生成。'],
+    'the artifacts turn keeps the neutral final-card convention',
+  );
+  assert.deepEqual(files, ['coexist-result.txt'], 'the result file is still delivered');
+  assert.ok(
+    !outgoingTexts.some((text) => text.includes('💬') || text.includes('✅')),
+    'no step messages may leak into watch pushes or the artifacts turn',
+  );
+});
+
+test('step push on: every tool update in one progressMode-all batch pushes without frame loss', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const cardWrites = [];
+  const { stepPushClock } = stepPushClockFixture();
+  let capturedAskOptions = null;
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient(async (text) => sent.push(text)),
+    channel: stepPushChannel({ cardWrites }),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      capturedAskOptions = options;
+      // One progress batch hands the bridge three tool updates back to back,
+      // delivered sequentially exactly like the shared tracker does.
+      for (const command of ['one', 'two', 'three']) {
+        await options.onUpdate({
+          type: 'tool',
+          name: 'bash',
+          arguments: JSON.stringify({ command }),
+        });
+      }
+      return '全部完成。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_batch', '连续跑三个命令'));
+  await bridge.waitForIdle();
+
+  assert.equal(
+    capturedAskOptions.progressMode,
+    'all',
+    'the ask must request every progress update (progressMode all)',
+  );
+  assert.deepEqual(
+    sent,
+    [
+      '✅ bash — one\n▸ {"command":"one"}',
+      '✅ bash — two\n▸ {"command":"two"}',
+      '✅ bash — three\n▸ {"command":"three"}',
+    ],
+    'concurrent updates from one batch must all land, in order',
+  );
+  assert.deepEqual(cardWrites, ['全部完成。']);
+});
+
+test('step push on: intent summary and arguments excerpt clamp at their bounds', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const cardWrites = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const longCommand = 'c'.repeat(300);
+  const argsText = JSON.stringify({ command: longCommand, padding: 'p'.repeat(200) });
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient(async (text) => sent.push(text)),
+    channel: stepPushChannel({ cardWrites }),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: argsText });
+      return '完成。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_bounds', '参数超长一点'));
+  await bridge.waitForIdle();
+
+  assert.ok(argsText.length > 400, 'the raw arguments fixture exceeds the excerpt bound');
+  assert.equal(sent.length, 1);
+  const [summaryLine, excerptLine] = sent[0].split('\n');
+  assert.equal(
+    summaryLine,
+    `✅ bash — ${'c'.repeat(120)}`,
+    'the intent summary clamps at 120 characters',
+  );
+  assert.ok(excerptLine.startsWith('▸ '), 'the raw arguments stay on the excerpt line');
+  assert.equal(
+    excerptLine.slice(2),
+    argsText.slice(0, 400),
+    'the raw arguments excerpt clamps at 400 characters',
+  );
+  assert.deepEqual(cardWrites, ['完成。']);
+});
+
+test('step push on: abort during the throttle wait keeps the queued step message unsent', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const cardWrites = [];
+  const controller = new AbortController();
+  const clock = { now: 1_700_000_000_000 };
+  const stepPushClock = {
+    now: () => clock.now,
+    delay: async (ms) => {
+      // /stop lands while a step message is waiting for its send window.
+      controller.abort();
+      clock.now += Math.max(ms, 0);
+    },
+  };
+  let queuedError = null;
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient(async (text) => sent.push(text)),
+    channel: stepPushChannel({ cardWrites }),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"first"}' });
+      try {
+        await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"second"}' });
+      } catch (error) {
+        queuedError = error;
+      }
+      return '收尾答案。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    logger: { debug() {}, error() {}, warn() {} },
+    allowedSenderOpenIds: new Set(['ou_user']),
+    signal: controller.signal,
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_abort', '慢慢跑'));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(
+    sent,
+    ['✅ bash — first\n▸ {"command":"first"}'],
+    'only the message sent before the abort may land',
+  );
+  assert.equal(
+    queuedError?.name,
+    'AbortError',
+    'the queued message must be dropped with an abort error',
+  );
+  assert.deepEqual(cardWrites, ['收尾答案。'], 'the final answer still finalizes');
+});
+
+test('step push on: a reply-referenced turn reaches the harness with rich prompt content', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const cardWrites = [];
+  const { stepPushClock } = stepPushClockFixture();
+  let askPrompt = null;
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient(async (text) => sent.push(text)),
+    channel: stepPushChannel({ cardWrites }),
+    harness: stepPushHarness(async (_sessionId, content, options) => {
+      askPrompt = content;
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      return '引用回答。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_reply', '基于引用回答', { parent_id: 'om_quoted' }));
+  await bridge.waitForIdle();
+
+  assert.ok(
+    Array.isArray(askPrompt),
+    'the reply reference must reach the harness as rich prompt content',
+  );
+  assert.equal(
+    askPrompt.filter((block) => (
+      typeof block?.text === 'string' && block.text.includes('<dsh_im_reply_to>')
+    )).length,
+    1,
+    'exactly one reply-reference block is built for the turn',
+  );
+  assert.deepEqual(sent, ['✅ bash — ls\n▸ {"command":"ls"}']);
+  assert.deepEqual(cardWrites, ['引用回答。']);
+});
+
+test('step push on: a channel without stream cards keeps the plain-text path (no step push)', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient(async (text) => sent.push(text)),
+    channel: {},
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      // The plain-text path passes no onUpdate (pinned by the off-mode test).
+      await options.onUpdate?.({ type: 'tool', name: 'bash', arguments: '{"command":"ls -la"}' });
+      return '纯文本答案。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_step_nostream', '没有流式卡的通道'));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(
+    sent,
+    ['纯文本答案。'],
+    'without a stream card the turn falls back to the main plain-text path',
   );
 });
