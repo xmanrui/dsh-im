@@ -22,6 +22,7 @@ test('multi-bot endpoints are bot-scoped and keep legacy operations separate', (
   assert.equal(FEISHU_ENDPOINTS.deleteBot, 'bot.delete');
   assert.equal(FEISHU_ENDPOINTS.setGroupResponseMode, 'bot.group-response-mode.set');
   assert.equal(FEISHU_ENDPOINTS.setGroupTopicReply, 'bot.group-topic-reply.set');
+  assert.equal(FEISHU_ENDPOINTS.setStepPush, 'bot.step-push.set');
   assert.equal(FEISHU_ENDPOINTS.testConnection, 'connection.test');
 });
 
@@ -38,6 +39,7 @@ test('client normalizes multiple independent bots and derives authoritative tota
         configured: true,
         groupResponseMode: 'all',
         groupTopicReply: true,
+        stepPush: true,
         groupMessagePermissionGranted: true,
         bot: {
           name: '销售助手',
@@ -54,6 +56,7 @@ test('client normalizes multiple independent bots and derives authoritative tota
         connected: false,
         configured: true,
         groupTopicReply: 'stale-truthy', // must normalize to false
+        stepPush: 'stale-truthy', // must normalize to false
         bot: { name: '研发助手', domain: 'lark' },
         health: { status: 'offline', summary: '等待重连' },
         error: { code: 'connection_failed', message: '连接失败' },
@@ -67,9 +70,11 @@ test('client normalizes multiple independent bots and derives authoritative tota
   assert.equal(snapshot.bots[0].state, 'connected');
   assert.equal(snapshot.bots[0].groupResponseMode, 'all');
   assert.equal(snapshot.bots[0].groupTopicReply, true);
+  assert.equal(snapshot.bots[0].stepPush, true);
   assert.equal(snapshot.bots[0].groupMessagePermissionGranted, true);
   assert.equal(snapshot.bots[1].groupResponseMode, 'mention');
   assert.equal(snapshot.bots[1].groupTopicReply, false);
+  assert.equal(snapshot.bots[1].stepPush, false);
   assert.equal(snapshot.bots[1].groupMessagePermissionGranted, false);
   assert.equal(snapshot.bots[1].state, 'connecting');
   assert.equal(snapshot.bots[1].bot.domain, 'lark');

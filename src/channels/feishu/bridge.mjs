@@ -489,6 +489,8 @@ export class FeishuHarnessBridge {
   #groupResponseMode;
   /** When true, group replies that belong to a Feishu topic ask reply_in_thread. */
   #groupTopicReply = false;
+  /** When true, streaming turns push tool calls and interim notes as discrete messages. */
+  #stepPush = false;
   /** Group chats this bot has seen; only these may use topic replies. */
   #groupChatIds = new Set();
   /** Anchor message id → whether its replies should stay in a Feishu topic. */
@@ -533,6 +535,7 @@ export class FeishuHarnessBridge {
     botOpenId,
     groupResponseMode = FEISHU_GROUP_RESPONSE_MODES.ALL,
     groupTopicReply = false,
+    stepPush = false,
     repair,
     repairPollIntervalMs = REPAIR_POLL_INTERVAL_MS,
     repairLinkWaitMs = REPAIR_LINK_WAIT_MS,
@@ -573,6 +576,7 @@ export class FeishuHarnessBridge {
     this.#botOpenId = nonEmptyString(botOpenId);
     this.#groupResponseMode = normalizeFeishuGroupResponseMode(groupResponseMode);
     this.#groupTopicReply = groupTopicReply === true;
+    this.#stepPush = stepPush === true;
     this.#repair = repair ?? null;
     this.#repairPollIntervalMs = repairPollIntervalMs;
     this.#repairLinkWaitMs = repairLinkWaitMs;
@@ -602,6 +606,10 @@ export class FeishuHarnessBridge {
 
   setGroupTopicReply(value) {
     this.#groupTopicReply = value === true;
+  }
+
+  setStepPush(value) {
+    this.#stepPush = value === true;
   }
 
   #isAddressed(event) {

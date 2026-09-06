@@ -91,6 +91,7 @@ function configuredBotFingerprint(config) {
     activated: config.activated,
     groupResponseMode: normalizeFeishuGroupResponseMode(config.groupResponseMode),
     groupTopicReply: config.groupTopicReply === true,
+    stepPush: config.stepPush === true,
     groupMessagePermissionGranted: config.groupMessagePermissionGranted === true,
     deletionPending: config.deletionPending === true,
     connectedAt: config.connectedAt ?? null,
@@ -599,6 +600,20 @@ export class MultiBotDshFeishuController {
     }));
   }
 
+  async updateStepPush(botId, stepPush) {
+    this.#assertOpen();
+    if (typeof stepPush !== 'boolean') {
+      throw new TypeError('Invalid Feishu step push flag');
+    }
+    return this.#serializeConfig(() => this.#withBotTransition(botId, async () => {
+      const config = this.#requireBot(botId);
+      const saved = await this.#configStore.saveBot({ ...config, stepPush });
+      this.#runtimes.get(botId)?.setStepPush?.(saved.stepPush);
+      this.#touch();
+      return this.status(botId);
+    }));
+  }
+
   async deleteBot(botId) {
     this.#assertOpen();
     return this.#serializeConfig(() => this.#withBotTransition(botId, async () => {
@@ -662,6 +677,7 @@ export class MultiBotDshFeishuController {
         configured: true,
         groupResponseMode: normalizeFeishuGroupResponseMode(config.groupResponseMode),
         groupTopicReply: config.groupTopicReply === true,
+        stepPush: config.stepPush === true,
         groupMessagePermissionGranted: config.groupMessagePermissionGranted === true,
         bot: publicBot(config),
         connection,
