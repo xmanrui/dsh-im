@@ -9670,7 +9670,6 @@ test('step push: silence over the threshold surfaces a thinking heartbeat, recal
 
   const heartbeat = sent.find((entry) => entry.text.includes('⏳ 正在思考中…'));
   assert.ok(heartbeat, 'the thinking heartbeat must appear after the silence threshold');
-  console.log('DEBUG1 recalls:', JSON.stringify(recalls), 'sent:', JSON.stringify(sent));
   assert.deepEqual(recalls, [heartbeat.id], 'the heartbeat must be recalled when the turn ends');
   const recallOrder = order.findIndex((entry) => entry.kind === 'recall');
   const finalOrder = order.findIndex((entry) => entry.kind === 'post' && entry.text === '思考后的答案。');
@@ -9962,8 +9961,42 @@ test('thinking status: abort recalls the live heartbeat', async () => {
 
   await bridge.accept(event('om_hb_abort', 'abort 场景'));
   await bridge.waitForIdle();
-  console.log('DEBUG-ABORT sent:', JSON.stringify(sent), 'recalls:', JSON.stringify(recalls));
 
   assert.deepEqual(recalls, ['om_post_1'], 'the live heartbeat must be recalled on abort');
   assert.equal(sent.at(-1).text, '中止后的说明。');
+});
+
+test('thinking status: breaker-tripped events do not cause heartbeat churn', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const think = thinkingClock();
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushPostClient({
+      onPost: (request, messageId) => sent.push({ id: messageId, text: stepPushMessageText(request) }),
+      onUpdateMessage: () => {},
+    }),
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      // 250 events at 250ms virtual spacing (over the 200 breaker): the
+      // silence window restarts per event, so no heartbeat should appear
+      // mid-stretch and none should be create/recall churned.
+      for (let index = 0; index < 250; index += 1) {
+        think.advance(250);
+        await options.onUpdate({ type: 'tool', name: 'bash', arguments: `{"command":"cmd-${index}"}` });
+      }
+      return '超限回合的答案。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushClock: think.stepPushClock,
+  });
+
+  await bridge.accept(event('om_hb_churn', '超限回合'));
+  await bridge.waitForIdle();
+
+  const heartbeats = sent.filter((entry) => entry.text.includes('⏳ 正在思考中…'));
+  assert.equal(heartbeats.length, 0, 'breaker-tripped events must not churn heartbeats');
+  assert.equal(sent.at(-1).text, '超限回合的答案。');
 });

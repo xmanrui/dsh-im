@@ -3771,8 +3771,9 @@ export class FeishuHarnessBridge {
           `[dsh-feishu] step push hit ${STEP_PUSH_MAX_MESSAGES_PER_TURN} messages for this turn; staying silent until it ends`,
         );
       }
-      // 熔断静默期内同样刷新 silenceSince：避免每个真实事件后重建/撤回心跳。
-      state.silenceSince = state.lastSentAt;
+      // 熔断静默期内同样刷新 silenceSince：用户仍在活动，静默窗口重新计时，
+      // 避免看门狗在每个被拦截的事件后重建/撤回心跳。
+      state.silenceSince = this.#stepPushClock.now();
       return;
     }
     this.#signal?.throwIfAborted();
@@ -3975,9 +3976,7 @@ export class FeishuHarnessBridge {
     return {
       stop: async () => {
         watchdog.stopped = true;
-        console.log('DEBUG-STOP entered, hb =', state.heartbeatMessageId);
         if (state.heartbeatMessageId) {
-          console.log('DEBUG-RECALL2 calling channel.recallMessage for', state.heartbeatMessageId, 'typeof:', typeof this.#channel?.recallMessage);
           const heartbeatId = state.heartbeatMessageId;
           state.heartbeatMessageId = null;
           try { await this.#channel?.recallMessage?.(heartbeatId); }
