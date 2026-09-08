@@ -19,6 +19,7 @@ import {
 } from './access-policy.mjs';
 import { CONNECTION_TEST_STATE_IDENTITY } from './connection-test.mjs';
 import {
+  CONTEXT_ENHANCEMENT_GUIDANCE_MAX_LENGTH,
   DEFAULT_CONTEXT_ENHANCEMENT_CONFIG,
   normalizeContextEnhancementConfig,
   validateContextEnhancementConfig,
@@ -190,6 +191,71 @@ function normalizeDeliveryTargets(value, { version } = {}) {
   return deliveryTargets;
 }
 
+function normalizeIsolateConversationWorkspaces(value) {
+  const flags = Object.create(null);
+  if (value === undefined) return flags;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return flags;
+  for (const [botId, enabled] of Object.entries(value)) {
+    if (/^[A-Za-z0-9_-]{1,128}$/.test(botId) && enabled === true) flags[botId] = true;
+  }
+  return flags;
+}
+
+function normalizeConversationWorkspaces(value) {
+  const conversationWorkspaces = Object.create(null);
+  if (value === undefined) return conversationWorkspaces;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return conversationWorkspaces;
+  }
+  for (const [botId, conversations] of Object.entries(value)) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(botId)
+      || !conversations || typeof conversations !== 'object' || Array.isArray(conversations)) {
+      continue;
+    }
+    const normalized = Object.create(null);
+    for (const [conversationKey, workspace] of Object.entries(conversations)) {
+      try {
+        conversationKeyOf(conversationKey);
+      } catch {
+        continue;
+      }
+      if (typeof workspace !== 'string' || !isAbsolute(workspace)) continue;
+      normalized[conversationKey] = resolve(workspace);
+    }
+    if (Object.keys(normalized).length > 0) conversationWorkspaces[botId] = normalized;
+  }
+  return conversationWorkspaces;
+}
+
+function normalizeConversationGuidances(value) {
+  const conversationGuidances = Object.create(null);
+  if (value === undefined) return conversationGuidances;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return conversationGuidances;
+  }
+  for (const [botId, conversations] of Object.entries(value)) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(botId)
+      || !conversations || typeof conversations !== 'object' || Array.isArray(conversations)) {
+      continue;
+    }
+    const normalized = Object.create(null);
+    for (const [conversationKey, guidance] of Object.entries(conversations)) {
+      try {
+        conversationKeyOf(conversationKey);
+      } catch {
+        continue;
+      }
+      if (typeof guidance !== 'string'
+        || guidance.length > CONTEXT_ENHANCEMENT_GUIDANCE_MAX_LENGTH) {
+        continue;
+      }
+      normalized[conversationKey] = guidance;
+    }
+    if (Object.keys(normalized).length > 0) conversationGuidances[botId] = normalized;
+  }
+  return conversationGuidances;
+}
+
 function normalizeAccessPolicies(value, workspaces) {
   const accessPolicies = Object.create(null);
   if (value === undefined) return accessPolicies;
@@ -265,6 +331,14 @@ function normalizeDocument(value) {
   const deliveryTargets = normalizeDeliveryTargets(value.deliveryTargets, { version: value.version });
   if (!deliveryTargets) return null;
   const accessPolicies = normalizeAccessPolicies(value.accessPolicies, workspaces);
+  const conversationWorkspaces = normalizeConversationWorkspaces(value.conversationWorkspaces);
+  const isolateConversationWorkspaces = normalizeIsolateConversationWorkspaces(
+    value.isolateConversationWorkspaces,
+  );
+  const conversationGuidances = normalizeConversationGuidances(value.conversationGuidances);
+  const isolateConversationGuidances = normalizeIsolateConversationWorkspaces(
+    value.isolateConversationGuidances,
+  );
   const version = Math.max(
     value.version,
     value.accessPolicies === undefined ? 1 : DELIVERY_DOCUMENT_VERSION,
@@ -279,6 +353,10 @@ function normalizeDocument(value) {
     contextEnhancement,
     deliveryTargets,
     accessPolicies,
+    conversationWorkspaces,
+    isolateConversationWorkspaces,
+    conversationGuidances,
+    isolateConversationGuidances,
   };
 }
 
@@ -290,6 +368,10 @@ function storedDocument({
   contextEnhancement,
   deliveryTargets,
   accessPolicies,
+  conversationWorkspaces,
+  isolateConversationWorkspaces,
+  conversationGuidances,
+  isolateConversationGuidances,
 }) {
   const document = { version, workspaces };
   if (Object.keys(agentPresets).length > 0) document.agentPresets = agentPresets;
@@ -302,6 +384,18 @@ function storedDocument({
   }
   if (version >= DELIVERY_DOCUMENT_VERSION && Object.keys(accessPolicies).length > 0) {
     document.accessPolicies = accessPolicies;
+  }
+  if (conversationWorkspaces && Object.keys(conversationWorkspaces).length > 0) {
+    document.conversationWorkspaces = conversationWorkspaces;
+  }
+  if (isolateConversationWorkspaces && Object.keys(isolateConversationWorkspaces).length > 0) {
+    document.isolateConversationWorkspaces = isolateConversationWorkspaces;
+  }
+  if (conversationGuidances && Object.keys(conversationGuidances).length > 0) {
+    document.conversationGuidances = conversationGuidances;
+  }
+  if (isolateConversationGuidances && Object.keys(isolateConversationGuidances).length > 0) {
+    document.isolateConversationGuidances = isolateConversationGuidances;
   }
   return document;
 }
@@ -349,7 +443,12 @@ export class BotWorkspaceStore {
   #contextEnhancement = {};
   #deliveryTargets = Object.create(null);
   #accessPolicies = Object.create(null);
+  #conversationWorkspaces = Object.create(null);
+  #isolateConversationWorkspaces = Object.create(null);
+  #conversationGuidances = Object.create(null);
+  #isolateConversationGuidances = Object.create(null);
   #generations = new Map();
+  #conversationGenerations = new Map();
   #nextGeneration = 1;
   #incarnations = new Map();
   #nextIncarnation = 1;
@@ -376,6 +475,10 @@ export class BotWorkspaceStore {
       this.#contextEnhancement = normalized.contextEnhancement;
       this.#deliveryTargets = normalized.deliveryTargets;
       this.#accessPolicies = normalized.accessPolicies;
+      this.#conversationWorkspaces = normalized.conversationWorkspaces;
+      this.#isolateConversationWorkspaces = normalized.isolateConversationWorkspaces;
+      this.#conversationGuidances = normalized.conversationGuidances;
+      this.#isolateConversationGuidances = normalized.isolateConversationGuidances;
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
       this.#version = 1;
@@ -385,8 +488,13 @@ export class BotWorkspaceStore {
       this.#contextEnhancement = {};
       this.#deliveryTargets = Object.create(null);
       this.#accessPolicies = Object.create(null);
+      this.#conversationWorkspaces = Object.create(null);
+      this.#isolateConversationWorkspaces = Object.create(null);
+      this.#conversationGuidances = Object.create(null);
+      this.#isolateConversationGuidances = Object.create(null);
     }
     this.#generations.clear();
+    this.#conversationGenerations.clear();
     this.#nextGeneration = 1;
     this.#incarnations.clear();
     this.#nextIncarnation = 1;
@@ -414,8 +522,37 @@ export class BotWorkspaceStore {
     return this.#incarnations.get(botIdOf(botId)) ?? null;
   }
 
-  workspaceFor(botId) {
-    return this.#workspaces[botIdOf(botId)] ?? this.#defaultWorkspace;
+  isolateConversationWorkspaceFor(botId) {
+    return this.#isolateConversationWorkspaces[botIdOf(botId)] === true;
+  }
+
+  isolateConversationGuidanceFor(botId) {
+    return this.#isolateConversationGuidances[botIdOf(botId)] === true;
+  }
+
+  workspaceFor(botId, conversationKey) {
+    const id = botIdOf(botId);
+    if (this.isolateConversationWorkspaceFor(id)
+      && conversationKey !== undefined && conversationKey !== null && conversationKey !== '') {
+      try {
+        const key = conversationKeyOf(conversationKey);
+        const override = this.#conversationWorkspaces[id]?.[key];
+        if (override) return override;
+      } catch {
+        // Invalid keys cannot identify a chat, so they fall back to the bot default.
+      }
+    }
+    return this.#workspaces[id] ?? this.#defaultWorkspace;
+  }
+
+  hasConversationWorkspace(botId, conversationKey) {
+    const id = botIdOf(botId);
+    try {
+      const key = conversationKeyOf(conversationKey);
+      return Object.hasOwn(this.#conversationWorkspaces[id] ?? {}, key);
+    } catch {
+      return false;
+    }
   }
 
   agentPresetFor(botId) {
@@ -432,6 +569,28 @@ export class BotWorkspaceStore {
     return this.has(id) && Object.hasOwn(this.#contextEnhancement, id)
       ? this.#contextEnhancement[id]
       : DEFAULT_CONTEXT_ENHANCEMENT_CONFIG;
+  }
+
+  conversationGuidanceFor(botId, conversationKey) {
+    const id = botIdOf(botId);
+    try {
+      const key = conversationKeyOf(conversationKey);
+      const map = this.#conversationGuidances[id];
+      if (!map || !Object.hasOwn(map, key)) return undefined;
+      return map[key];
+    } catch {
+      return undefined;
+    }
+  }
+
+  hasConversationGuidance(botId, conversationKey) {
+    const id = botIdOf(botId);
+    try {
+      const key = conversationKeyOf(conversationKey);
+      return Object.hasOwn(this.#conversationGuidances[id] ?? {}, key);
+    } catch {
+      return false;
+    }
   }
 
   accessPolicyFor(botId) {
@@ -573,8 +732,19 @@ export class BotWorkspaceStore {
     });
   }
 
-  generationFor(botId) {
-    return this.#generations.get(botIdOf(botId)) ?? null;
+  generationFor(botId, conversationKey) {
+    const id = botIdOf(botId);
+    if (this.isolateConversationWorkspaceFor(id)
+      && conversationKey !== undefined && conversationKey !== null && conversationKey !== '') {
+      try {
+        const key = conversationKeyOf(conversationKey);
+        const conversationGeneration = this.#conversationGenerations.get(id)?.get(key);
+        if (conversationGeneration !== undefined) return conversationGeneration;
+      } catch {
+        // Invalid keys cannot identify a chat generation.
+      }
+    }
+    return this.#generations.get(id) ?? null;
   }
 
   async whenIdle() {
@@ -683,6 +853,56 @@ export class BotWorkspaceStore {
     });
   }
 
+  async setConversationWorkspace(botId, conversationKey, value, {
+    clearSession,
+    clearSessions,
+    incarnation,
+  } = {}) {
+    const id = botIdOf(botId);
+    const key = conversationKeyOf(conversationKey);
+    if (!this.has(id)
+      || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+      const error = new Error('找不到要修改的机器人。');
+      error.code = 'workspace-bot-not-found';
+      throw error;
+    }
+    const workspace = await validateWorkspacePath(value);
+    return this.#enqueue(id, async () => {
+      if (!this.has(id)
+        || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      if (workspace === this.workspaceFor(id, key)) return workspace;
+      const previousBotMap = this.#conversationWorkspaces[id];
+      const previousGeneration = this.#conversationGenerations.get(id)?.get(key);
+      this.#bumpConversationGeneration(id, key);
+      if (typeof clearSession === 'function') await clearSession();
+      else await clearSessions?.();
+      const next = {
+        ...this.#conversationWorkspaces,
+        [id]: { ...(this.#conversationWorkspaces[id] ?? {}), [key]: workspace },
+      };
+      try {
+        await this.#persist(
+          this.#contextEnhancement,
+          this.#deliveryTargets,
+          this.#version,
+          this.#accessPolicies,
+          next,
+        );
+      } catch (error) {
+        if (previousBotMap) this.#conversationWorkspaces[id] = previousBotMap;
+        else delete this.#conversationWorkspaces[id];
+        this.#restoreConversationGeneration(id, key, previousGeneration);
+        throw error;
+      }
+      this.#conversationWorkspaces = next;
+      return workspace;
+    });
+  }
+
   async setAgentPreset(botId, value, { incarnation } = {}) {
     const id = botIdOf(botId);
     if (!this.has(id)
@@ -787,9 +1007,170 @@ export class BotWorkspaceStore {
     });
   }
 
+  async setIsolateConversationWorkspace(botId, enabled, { incarnation, clearSessions } = {}) {
+    const id = botIdOf(botId);
+    const isolate = enabled === true;
+    if (!this.has(id)
+      || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+      const error = new Error('找不到要修改的机器人。');
+      error.code = 'workspace-bot-not-found';
+      throw error;
+    }
+    return this.#enqueue(id, async () => {
+      if (!this.has(id)
+        || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const previous = this.#isolateConversationWorkspaces[id] === true;
+      if (previous === isolate) return isolate;
+      const previousConversationWorkspaces = this.#conversationWorkspaces[id];
+      const previousConversationGenerations = this.#conversationGenerations.get(id);
+      if (isolate) this.#isolateConversationWorkspaces[id] = true;
+      else delete this.#isolateConversationWorkspaces[id];
+      if (!isolate) {
+        this.#generations.set(id, this.#freshGeneration());
+        this.#conversationGenerations.delete(id);
+        delete this.#conversationWorkspaces[id];
+        await clearSessions?.();
+      }
+      try {
+        await this.#persist();
+      } catch (error) {
+        if (previous) this.#isolateConversationWorkspaces[id] = true;
+        else delete this.#isolateConversationWorkspaces[id];
+        if (previousConversationWorkspaces) {
+          this.#conversationWorkspaces[id] = previousConversationWorkspaces;
+        } else {
+          delete this.#conversationWorkspaces[id];
+        }
+        if (previousConversationGenerations) {
+          this.#conversationGenerations.set(id, previousConversationGenerations);
+        } else {
+          this.#conversationGenerations.delete(id);
+        }
+        throw error;
+      }
+      return isolate;
+    });
+  }
+
+  async setIsolateConversationGuidance(botId, enabled, { incarnation } = {}) {
+    const id = botIdOf(botId);
+    const isolate = enabled === true;
+    if (!this.has(id)
+      || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+      const error = new Error('找不到要修改的机器人。');
+      error.code = 'workspace-bot-not-found';
+      throw error;
+    }
+    return this.#enqueue(id, async () => {
+      if (!this.has(id)
+        || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const previous = this.#isolateConversationGuidances[id] === true;
+      if (previous === isolate) return isolate;
+      const previousConversationGuidances = this.#conversationGuidances[id];
+      if (isolate) this.#isolateConversationGuidances[id] = true;
+      else delete this.#isolateConversationGuidances[id];
+      if (!isolate) delete this.#conversationGuidances[id];
+      try {
+        await this.#persist();
+      } catch (error) {
+        if (previous) this.#isolateConversationGuidances[id] = true;
+        else delete this.#isolateConversationGuidances[id];
+        if (previousConversationGuidances) {
+          this.#conversationGuidances[id] = previousConversationGuidances;
+        } else {
+          delete this.#conversationGuidances[id];
+        }
+        throw error;
+      }
+      return isolate;
+    });
+  }
+
+  async setConversationGuidance(botId, conversationKey, value, { incarnation } = {}) {
+    const id = botIdOf(botId);
+    const key = conversationKeyOf(conversationKey);
+    if (typeof value !== 'string' || value.length > CONTEXT_ENHANCEMENT_GUIDANCE_MAX_LENGTH) {
+      const error = new TypeError(`增强提示词不得超过 ${CONTEXT_ENHANCEMENT_GUIDANCE_MAX_LENGTH} 个字符。`);
+      error.code = 'context-enhancement-invalid';
+      throw error;
+    }
+    if (!this.has(id)
+      || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+      const error = new Error('找不到要修改的机器人。');
+      error.code = 'workspace-bot-not-found';
+      throw error;
+    }
+    return this.#enqueue(id, async () => {
+      if (!this.has(id)
+        || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const previous = this.#conversationGuidances[id];
+      if (previous && Object.hasOwn(previous, key) && previous[key] === value) return value;
+      const next = {
+        ...this.#conversationGuidances,
+        [id]: { ...(previous ?? {}), [key]: value },
+      };
+      this.#conversationGuidances = next;
+      try {
+        await this.#persist();
+      } catch (error) {
+        if (previous) this.#conversationGuidances[id] = previous;
+        else delete this.#conversationGuidances[id];
+        throw error;
+      }
+      return value;
+    });
+  }
+
+  async clearConversationGuidance(botId, conversationKey, { incarnation } = {}) {
+    const id = botIdOf(botId);
+    const key = conversationKeyOf(conversationKey);
+    if (!this.has(id)
+      || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+      const error = new Error('找不到要修改的机器人。');
+      error.code = 'workspace-bot-not-found';
+      throw error;
+    }
+    return this.#enqueue(id, async () => {
+      if (!this.has(id)
+        || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const previous = this.#conversationGuidances[id];
+      if (!previous || !Object.hasOwn(previous, key)) return false;
+      const nextBot = { ...previous };
+      delete nextBot[key];
+      const next = { ...this.#conversationGuidances };
+      if (Object.keys(nextBot).length > 0) next[id] = nextBot;
+      else delete next[id];
+      this.#conversationGuidances = next;
+      try {
+        await this.#persist();
+      } catch (error) {
+        this.#conversationGuidances[id] = previous;
+        throw error;
+      }
+      return true;
+    });
+  }
+
   async bindWorkspaceSession(botId, value, {
     conversationKey,
     sessionId,
+    clearSession,
     clearSessions,
     setSession,
     incarnation,
@@ -800,7 +1181,12 @@ export class BotWorkspaceStore {
       || typeof sessionId !== 'string' || !sessionId) {
       throw new TypeError('conversationKey and sessionId are required');
     }
-    if (typeof clearSessions !== 'function' || typeof setSession !== 'function') {
+    const key = conversationKeyOf(conversationKey);
+    const isolated = this.isolateConversationWorkspaceFor(id);
+    if (typeof setSession !== 'function'
+      || (isolated
+        ? typeof clearSession !== 'function' && typeof clearSessions !== 'function'
+        : typeof clearSessions !== 'function')) {
       throw new TypeError('session state callbacks are required');
     }
     if (!this.has(id)
@@ -818,37 +1204,69 @@ export class BotWorkspaceStore {
         throw error;
       }
       if (expectedGeneration !== undefined
-        && expectedGeneration !== this.generationFor(id)) {
+        && expectedGeneration !== this.generationFor(id, key)) {
         throw workspaceSessionStale(
           'The bot workspace changed before the session binding could be committed.',
         );
       }
 
-      if (!(await sameWorkspacePath(workspace, this.workspaceFor(id)))) {
-        const previous = this.#workspaces[id];
-        // Fence every session resolved before this transition, then remove
-        // the old workspace mappings before publishing the new workspace.
-        this.#generations.set(id, this.#freshGeneration());
-        await clearSessions();
-        this.#workspaces[id] = workspace;
-        try {
-          await this.#persist();
-        } catch (error) {
-          // Session mappings stay cleared and the advanced generation stays
-          // fenced. Restoring either could pair an old session with a state
-          // transition whose durable outcome is unknown.
-          this.#workspaces[id] = previous;
-          throw error;
+      if (!(await sameWorkspacePath(workspace, this.workspaceFor(id, key)))) {
+        if (this.isolateConversationWorkspaceFor(id)) {
+          const previousBotMap = this.#conversationWorkspaces[id];
+          const previousGeneration = this.#conversationGenerations.get(id)?.get(key);
+          // Fence only this conversation so other chats keep their workspace.
+          this.#bumpConversationGeneration(id, key);
+          if (typeof clearSession === 'function') await clearSession();
+          else await clearSessions();
+          const next = {
+            ...this.#conversationWorkspaces,
+            [id]: { ...(this.#conversationWorkspaces[id] ?? {}), [key]: workspace },
+          };
+          try {
+            await this.#persist(
+              this.#contextEnhancement,
+              this.#deliveryTargets,
+              this.#version,
+              this.#accessPolicies,
+              next,
+            );
+          } catch (error) {
+            // Session mapping for this chat stays cleared and the advanced
+            // conversation generation stays fenced. Restoring either could pair
+            // an old session with a state transition whose durable outcome is
+            // unknown.
+            if (previousBotMap) this.#conversationWorkspaces[id] = previousBotMap;
+            else delete this.#conversationWorkspaces[id];
+            this.#restoreConversationGeneration(id, key, previousGeneration);
+            throw error;
+          }
+          this.#conversationWorkspaces = next;
+        } else {
+          const previous = this.#workspaces[id];
+          // Fence every session resolved before this transition, then remove
+          // the old workspace mappings before publishing the new workspace.
+          this.#generations.set(id, this.#freshGeneration());
+          await clearSessions();
+          this.#workspaces[id] = workspace;
+          try {
+            await this.#persist();
+          } catch (error) {
+            // Session mappings stay cleared and the advanced generation stays
+            // fenced. Restoring either could pair an old session with a state
+            // transition whose durable outcome is unknown.
+            this.#workspaces[id] = previous;
+            throw error;
+          }
         }
       }
 
       // This write remains inside the same bot transition as the workspace
       // mutation, so another switch or bind cannot interleave between them.
-      await setSession(conversationKey, sessionId);
+      await setSession(key, sessionId);
       return {
         workspace,
         sessionId,
-        generation: this.#generations.get(id),
+        generation: this.generationFor(id, key),
       };
     });
   }
@@ -948,6 +1366,10 @@ export class BotWorkspaceStore {
       ...Object.keys(this.#contextEnhancement),
       ...Object.keys(this.#deliveryTargets),
       ...Object.keys(this.#accessPolicies),
+      ...Object.keys(this.#conversationWorkspaces),
+      ...Object.keys(this.#isolateConversationWorkspaces),
+      ...Object.keys(this.#conversationGuidances),
+      ...Object.keys(this.#isolateConversationGuidances),
       ...this.#dirtyRemovals,
     ]);
     for (const botId of candidates) {
@@ -966,6 +1388,8 @@ export class BotWorkspaceStore {
           agentPreset: this.agentPresetFor(bot.botId),
           model: this.modelFor(bot.botId),
           contextEnhancement: this.contextEnhancementFor(bot.botId),
+          isolateConversationWorkspace: this.isolateConversationWorkspaceFor(bot.botId),
+          isolateConversationGuidance: this.isolateConversationGuidanceFor(bot.botId),
           accessPolicy: this.accessPolicyFor(bot.botId),
         }
         : bot),
@@ -976,6 +1400,23 @@ export class BotWorkspaceStore {
     const generation = this.#nextGeneration;
     this.#nextGeneration += 1;
     return generation;
+  }
+
+  #bumpConversationGeneration(botId, conversationKey) {
+    let generations = this.#conversationGenerations.get(botId);
+    if (!generations) {
+      generations = new Map();
+      this.#conversationGenerations.set(botId, generations);
+    }
+    generations.set(conversationKey, this.#freshGeneration());
+  }
+
+  #restoreConversationGeneration(botId, conversationKey, previousGeneration) {
+    const generations = this.#conversationGenerations.get(botId);
+    if (!generations) return;
+    if (previousGeneration === undefined) generations.delete(conversationKey);
+    else generations.set(conversationKey, previousGeneration);
+    if (generations.size === 0) this.#conversationGenerations.delete(botId);
   }
 
   #freshIncarnation() {
@@ -1000,15 +1441,27 @@ export class BotWorkspaceStore {
     const hadContextEnhancement = Object.hasOwn(this.#contextEnhancement, id);
     const hadDeliveryTargets = Object.hasOwn(this.#deliveryTargets, id);
     const hadAccessPolicy = Object.hasOwn(this.#accessPolicies, id);
+    const hadConversationWorkspaces = Object.hasOwn(this.#conversationWorkspaces, id);
+    const hadIsolateConversationWorkspace = Object.hasOwn(this.#isolateConversationWorkspaces, id);
+    const hadConversationGuidances = Object.hasOwn(this.#conversationGuidances, id);
+    const hadIsolateConversationGuidance = Object.hasOwn(this.#isolateConversationGuidances, id);
     const needsCleanup = hadWorkspace || hadPreset || hadModel || hadContextEnhancement
-      || hadDeliveryTargets || hadAccessPolicy || this.#dirtyRemovals.has(id);
+      || hadDeliveryTargets || hadAccessPolicy || hadConversationWorkspaces
+      || hadIsolateConversationWorkspace || hadConversationGuidances
+      || hadIsolateConversationGuidance
+      || this.#dirtyRemovals.has(id);
     delete this.#workspaces[id];
     delete this.#agentPresets[id];
     delete this.#models[id];
     delete this.#contextEnhancement[id];
     delete this.#deliveryTargets[id];
     delete this.#accessPolicies[id];
+    delete this.#conversationWorkspaces[id];
+    delete this.#isolateConversationWorkspaces[id];
+    delete this.#conversationGuidances[id];
+    delete this.#isolateConversationGuidances[id];
     this.#generations.delete(id);
+    this.#conversationGenerations.delete(id);
     this.#incarnations.delete(id);
     if (!needsCleanup) return {
       removed: false, persisted: true, error: null, stale: false,
@@ -1042,6 +1495,10 @@ export class BotWorkspaceStore {
     deliveryTargets = this.#deliveryTargets,
     version = this.#version,
     accessPolicies = this.#accessPolicies,
+    conversationWorkspaces = this.#conversationWorkspaces,
+    isolateConversationWorkspaces = this.#isolateConversationWorkspaces,
+    conversationGuidances = this.#conversationGuidances,
+    isolateConversationGuidances = this.#isolateConversationGuidances,
   ) {
     await writeStoredDocument(this.#path, storedDocument({
       version,
@@ -1051,6 +1508,10 @@ export class BotWorkspaceStore {
       contextEnhancement,
       deliveryTargets,
       accessPolicies,
+      conversationWorkspaces,
+      isolateConversationWorkspaces,
+      conversationGuidances,
+      isolateConversationGuidances,
     }));
     this.#dirtyRemovals.clear();
   }
@@ -1061,7 +1522,11 @@ export class BotWorkspaceStore {
       || Object.keys(this.#models).length > 0
       || Object.keys(this.#contextEnhancement).length > 0
       || Object.keys(this.#deliveryTargets).length > 0
-      || Object.keys(this.#accessPolicies).length > 0) {
+      || Object.keys(this.#accessPolicies).length > 0
+      || Object.keys(this.#conversationWorkspaces).length > 0
+      || Object.keys(this.#isolateConversationWorkspaces).length > 0
+      || Object.keys(this.#conversationGuidances).length > 0
+      || Object.keys(this.#isolateConversationGuidances).length > 0) {
       await this.#persist();
       return;
     }
@@ -1173,6 +1638,15 @@ export function observeBotWorkspaceRemovals(
   });
 }
 
+export function createContextEnhancementProvider(workspaces, botId) {
+  return {
+    botId,
+    getSettings: () => workspaces.contextEnhancementFor(botId),
+    isolateConversationGuidance: () => workspaces.isolateConversationGuidanceFor(botId),
+    conversationGuidance: (key) => workspaces.conversationGuidanceFor(botId, key),
+  };
+}
+
 export function createBotWorkspaceScope(
   harness,
   { botId, workspaces, state, agentPresetCatalog } = {},
@@ -1197,6 +1671,31 @@ export function createBotWorkspaceScope(
     };
   };
   const sessionGenerations = new Map();
+  const rememberSession = (sessionId, conversationKey) => {
+    sessionGenerations.set(sessionId, {
+      generation: workspaces.generationFor(botId, conversationKey),
+      conversationKey: conversationKey ?? null,
+    });
+  };
+  const recordedSession = (sessionId) => {
+    const recorded = sessionGenerations.get(sessionId);
+    if (!recorded) return null;
+    if (typeof recorded === 'number') return { generation: recorded, conversationKey: null };
+    return recorded;
+  };
+  const isLiveRecordedSession = (recorded) => isCurrentScope()
+    && recorded.generation === workspaces.generationFor(botId, recorded.conversationKey);
+  const clearUnoverriddenSessions = async () => {
+    if (typeof state.sessionKeys === 'function' && typeof state.clearSession === 'function') {
+      for (const key of state.sessionKeys()) {
+        if (!workspaces.hasConversationWorkspace(botId, key)) {
+          await state.clearSession(key);
+        }
+      }
+      return;
+    }
+    await state.clearSessions?.();
+  };
   const scopedHarness = new Proxy(harness, {
     get(target, property) {
       if (property === 'agentPresetSettings') {
@@ -1242,13 +1741,86 @@ export function createBotWorkspaceScope(
         };
       }
       if (property === 'currentWorkspace') {
+        return (conversationKey) => {
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          return workspaces.workspaceFor(botId, conversationKey);
+        };
+      }
+      if (property === 'isolateConversationWorkspace') {
         return () => {
           if (!isCurrentScope()) {
             const error = new Error('找不到要修改的机器人。');
             error.code = 'workspace-bot-not-found';
             throw error;
           }
-          return workspaces.workspaceFor(botId);
+          return workspaces.isolateConversationWorkspaceFor(botId);
+        };
+      }
+      if (property === 'isolateConversationGuidance') {
+        return () => {
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          return workspaces.isolateConversationGuidanceFor(botId);
+        };
+      }
+      if (property === 'contextEnhancement') {
+        return () => {
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          return workspaces.contextEnhancementFor(botId);
+        };
+      }
+      if (property === 'conversationGuidance') {
+        return (conversationKey) => {
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          return workspaces.conversationGuidanceFor(botId, conversationKey);
+        };
+      }
+      if (property === 'setConversationGuidance') {
+        return async (conversationKey, text, conversationType) => {
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          if (conversationKey && workspaces.isolateConversationGuidanceFor(botId)) {
+            return workspaces.setConversationGuidance(botId, conversationKey, text, { incarnation });
+          }
+          const type = conversationType === 'direct' ? 'direct' : 'group';
+          const current = workspaces.contextEnhancementFor(botId);
+          await workspaces.setContextEnhancement(botId, {
+            group: { ...current.group },
+            direct: { ...current.direct },
+            [type]: { ...current[type], guidance: text },
+          }, { incarnation });
+          return text;
+        };
+      }
+      if (property === 'clearConversationGuidance') {
+        return async (conversationKey) => {
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          if (!conversationKey || !workspaces.isolateConversationGuidanceFor(botId)) {
+            return false;
+          }
+          return workspaces.clearConversationGuidance(botId, conversationKey, { incarnation });
         };
       }
       if (property === 'assertWorkspaceScope') {
@@ -1280,14 +1852,25 @@ export function createBotWorkspaceScope(
         };
       }
       if (property === 'switchWorkspace') {
-        return (workspace) => {
+        return (workspace, conversationKey) => {
           if (!isCurrentScope()) {
             const error = new Error('找不到要修改的机器人。');
             error.code = 'workspace-bot-not-found';
             return Promise.reject(error);
           }
+          if (conversationKey && workspaces.isolateConversationWorkspaceFor(botId)) {
+            return workspaces.setConversationWorkspace(botId, conversationKey, workspace, {
+              clearSession: typeof state.clearSession === 'function'
+                ? () => state.clearSession(conversationKey)
+                : undefined,
+              clearSessions: () => state.clearSessions(),
+              incarnation,
+            });
+          }
           return workspaces.setWorkspace(botId, workspace, {
-            clearSessions: () => state.clearSessions(),
+            clearSessions: workspaces.isolateConversationWorkspaceFor(botId)
+              ? () => clearUnoverriddenSessions()
+              : () => state.clearSessions(),
             incarnation,
           });
         };
@@ -1306,14 +1889,14 @@ export function createBotWorkspaceScope(
           if (typeof target.adoptWorkspaceSession !== 'function') {
             throw new TypeError('Harness does not support adopting workspace sessions');
           }
-          const expectedGeneration = workspaces.generationFor(botId);
+          const expectedGeneration = workspaces.generationFor(botId, conversationKey);
           const adopted = await target.adoptWorkspaceSession(sessionId);
           if (!isCurrentScope()) {
             const error = new Error('找不到要修改的机器人。');
             error.code = 'workspace-bot-not-found';
             throw error;
           }
-          if (expectedGeneration !== workspaces.generationFor(botId)) {
+          if (expectedGeneration !== workspaces.generationFor(botId, conversationKey)) {
             throw workspaceSessionStale(
               'The bot workspace changed while the session was being adopted.',
             );
@@ -1325,8 +1908,11 @@ export function createBotWorkspaceScope(
           const bound = await workspaces.bindWorkspaceSession(botId, adopted.workspace, {
             conversationKey,
             sessionId,
+            clearSession: typeof state.clearSession === 'function'
+              ? () => state.clearSession(conversationKey)
+              : undefined,
             clearSessions: () => state.clearSessions(),
-            setSession: (key, selectedSessionId) => state.setSession(key, selectedSessionId),
+            setSession: (mappedKey, selectedSessionId) => state.setSession(mappedKey, selectedSessionId),
             incarnation,
             expectedGeneration,
           });
@@ -1335,12 +1921,12 @@ export function createBotWorkspaceScope(
             error.code = 'workspace-bot-not-found';
             throw error;
           }
-          if (bound.generation !== workspaces.generationFor(botId)) {
+          if (bound.generation !== workspaces.generationFor(botId, conversationKey)) {
             throw workspaceSessionStale(
               'The bot workspace changed before the session binding completed.',
             );
           }
-          sessionGenerations.set(sessionId, bound.generation);
+          rememberSession(sessionId, conversationKey);
           return {
             ...adopted,
             workspace: bound.workspace,
@@ -1356,12 +1942,13 @@ export function createBotWorkspaceScope(
             error.code = 'workspace-bot-not-found';
             throw error;
           }
-          const generation = workspaces.generationFor(botId);
+          const { conversationKey, ...harnessOptions } = options;
+          const generation = workspaces.generationFor(botId, conversationKey);
           const agentPreset = workspaces.agentPresetFor(botId);
           const model = workspaces.modelFor(botId);
           const sessionId = await target.createSession({
-            ...options,
-            workspace: workspaces.workspaceFor(botId),
+            ...harnessOptions,
+            workspace: workspaces.workspaceFor(botId, conversationKey),
             ...(agentPreset == null ? {} : { agentPreset }),
           });
           if (model) {
@@ -1379,7 +1966,7 @@ export function createBotWorkspaceScope(
               throw error;
             }
           }
-          sessionGenerations.set(sessionId, generation);
+          rememberSession(sessionId, conversationKey);
           return sessionId;
         };
       }
@@ -1388,14 +1975,15 @@ export function createBotWorkspaceScope(
           if (typeof sessionId !== 'string' || !sessionId) {
             throw new TypeError('sessionId is required');
           }
-          const generation = sessionGenerations.get(sessionId)
-            ?? workspaces.generationFor(botId);
+          const recorded = recordedSession(sessionId) ?? {
+            generation: workspaces.generationFor(botId),
+            conversationKey: null,
+          };
           // Transfer the mutable provenance entry into this immutable handle.
           // A later handle for the same id captures its own generation instead
           // of sharing deletion or rebinding state with this call.
           sessionGenerations.delete(sessionId);
-          const isCurrentSession = () => isCurrentScope()
-            && generation === workspaces.generationFor(botId);
+          const isCurrentSession = () => isLiveRecordedSession(recorded);
           const invokeCurrentSession = async (method, args, action) => {
             if (!isCurrentSession()) {
               throw workspaceSessionStale(
@@ -1470,8 +2058,8 @@ export function createBotWorkspaceScope(
       if (property === 'sessionExists') {
         return (sessionId, ...args) => {
           if (!isCurrentScope()) return false;
-          const generation = sessionGenerations.get(sessionId);
-          if (generation !== undefined && generation !== workspaces.generationFor(botId)) {
+          const recorded = recordedSession(sessionId);
+          if (recorded && !isLiveRecordedSession(recorded)) {
             sessionGenerations.delete(sessionId);
             return false;
           }
@@ -1480,10 +2068,9 @@ export function createBotWorkspaceScope(
       }
       if (property === 'ask') {
         return (sessionId, ...args) => {
-          const generation = sessionGenerations.get(sessionId);
+          const recorded = recordedSession(sessionId);
           sessionGenerations.delete(sessionId);
-          if (!isCurrentScope()
-            || (generation !== undefined && generation !== workspaces.generationFor(botId))) {
+          if (!isCurrentScope() || (recorded && !isLiveRecordedSession(recorded))) {
             const error = new Error('The bot workspace changed before this prompt started.');
             error.code = WORKSPACE_SESSION_STALE;
             throw error;
@@ -1493,10 +2080,9 @@ export function createBotWorkspaceScope(
       }
       if (property === 'executeCommand' && typeof target.executeCommand === 'function') {
         return (sessionId, ...args) => {
-          const generation = sessionGenerations.get(sessionId);
+          const recorded = recordedSession(sessionId);
           sessionGenerations.delete(sessionId);
-          if (!isCurrentScope()
-            || (generation !== undefined && generation !== workspaces.generationFor(botId))) {
+          if (!isCurrentScope() || (recorded && !isLiveRecordedSession(recorded))) {
             const error = new Error('The bot workspace changed before this command started.');
             error.code = WORKSPACE_SESSION_STALE;
             throw error;
@@ -1516,16 +2102,15 @@ export function createBotWorkspaceScope(
           if (!isCurrentScope()) return null;
           const sessionId = target.sessionFor(key, ...args);
           if (sessionId && !sessionGenerations.has(sessionId)) {
-            sessionGenerations.set(sessionId, workspaces.generationFor(botId));
+            rememberSession(sessionId, key);
           }
           return sessionId;
         };
       }
       if (property === 'setSession') {
         return (key, sessionId, ...args) => {
-          const generation = sessionGenerations.get(sessionId);
-          if (!isCurrentScope()
-            || (generation !== undefined && generation !== workspaces.generationFor(botId))) {
+          const recorded = recordedSession(sessionId);
+          if (!isCurrentScope() || (recorded && !isLiveRecordedSession(recorded))) {
             sessionGenerations.delete(sessionId);
             return false;
           }
@@ -1581,7 +2166,19 @@ export function createWorkspaceAwareController(controller, {
       }
       const state = await stateFor(botId);
       await workspaces.setWorkspace(botId, workspace, {
-        clearSessions: () => state.clearSessions(),
+        clearSessions: async () => {
+          if (workspaces.isolateConversationWorkspaceFor(botId)
+            && typeof state.sessionKeys === 'function'
+            && typeof state.clearSession === 'function') {
+            for (const key of state.sessionKeys()) {
+              if (!workspaces.hasConversationWorkspace(botId, key)) {
+                await state.clearSession(key);
+              }
+            }
+            return;
+          }
+          await state.clearSessions();
+        },
         incarnation,
       });
       return decorate(await controller.status());
@@ -1703,6 +2300,58 @@ export function createWorkspaceAwareController(controller, {
       return result;
     });
   };
+  const updateIsolateConversationWorkspace = (botId, enabled, projectStatus) => {
+    const incarnation = workspaces.incarnationFor(botId);
+    const isolate = enabled === true;
+    return withBotTransition(botId, async () => {
+      const snapshot = await controller.status();
+      if (!snapshot?.bots?.some((bot) => bot?.botId === botId)) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const state = await stateFor(botId);
+      const [catalog, models] = await Promise.all([
+        resolveAgentPresetCatalog(agentPresetCatalog),
+        resolveModelCatalog(modelCatalog),
+      ]);
+      await workspaces.setIsolateConversationWorkspace(botId, isolate, {
+        incarnation,
+        clearSessions: isolate ? undefined : () => state.clearSessions(),
+      });
+      const decorated = workspaces.decorateStatus(await controller.status());
+      const updated = {
+        ...decorated,
+        ...(catalog ? { agentPresetCatalog: catalog } : {}),
+        ...(models ? { modelCatalog: models } : {}),
+      };
+      return projectStatus ? await projectStatus(updated) : updated;
+    });
+  };
+  const updateIsolateConversationGuidance = (botId, enabled, projectStatus) => {
+    const incarnation = workspaces.incarnationFor(botId);
+    const isolate = enabled === true;
+    return withBotTransition(botId, async () => {
+      const snapshot = await controller.status();
+      if (!snapshot?.bots?.some((bot) => bot?.botId === botId)) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const [catalog, models] = await Promise.all([
+        resolveAgentPresetCatalog(agentPresetCatalog),
+        resolveModelCatalog(modelCatalog),
+      ]);
+      await workspaces.setIsolateConversationGuidance(botId, isolate, { incarnation });
+      const decorated = workspaces.decorateStatus(await controller.status());
+      const updated = {
+        ...decorated,
+        ...(catalog ? { agentPresetCatalog: catalog } : {}),
+        ...(models ? { modelCatalog: models } : {}),
+      };
+      return projectStatus ? await projectStatus(updated) : updated;
+    });
+  };
   const deleteWithWorkspace = (botId, invokeDelete) => withBotTransition(botId, async () => {
     // Fence the old runtime without changing the durable mapping. A crash
     // before the controller removes its config therefore keeps the bot's
@@ -1745,6 +2394,8 @@ export function createWorkspaceAwareController(controller, {
       if (property === 'updateModel') return updateModel;
       if (property === 'updateContextEnhancement') return updateContextEnhancement;
       if (property === 'updateAccessPolicy') return updateAccessPolicy;
+      if (property === 'updateIsolateConversationWorkspace') return updateIsolateConversationWorkspace;
+      if (property === 'updateIsolateConversationGuidance') return updateIsolateConversationGuidance;
       const value = Reflect.get(target, property, target);
       if (typeof value !== 'function') return value;
       if (property === 'deleteBot') {

@@ -5,7 +5,11 @@ import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { publicConnectionTestResult } from '../../../../src/channels/shared/connection-test.mjs';
 import {
   publicWorkspaceError,
+  SET_ISOLATE_GUIDANCE_ENDPOINT,
+  SET_ISOLATE_WORKSPACE_ENDPOINT,
   SET_WORKSPACE_ENDPOINT,
+  validIsolateGuidancePayload,
+  validIsolateWorkspacePayload,
   validWorkspacePayload,
 } from './workspace-rpc.mjs';
 import {
@@ -20,6 +24,8 @@ export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   reconnectBot: 'bot.reconnect',
   deleteBot: 'bot.delete',
   setWorkspace: SET_WORKSPACE_ENDPOINT,
+  setIsolateConversationWorkspace: SET_ISOLATE_WORKSPACE_ENDPOINT,
+  setIsolateConversationGuidance: SET_ISOLATE_GUIDANCE_ENDPOINT,
   setModel: SET_MODEL_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
@@ -73,6 +79,14 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === TOKEN_BOT_ENDPOINTS.setWorkspace) {
     return validWorkspacePayload(payload)
       ? null : '请输入工作区绝对路径。';
+  }
+  if (endpoint === TOKEN_BOT_ENDPOINTS.setIsolateConversationWorkspace) {
+    return validIsolateWorkspacePayload(payload)
+      ? null : '请提交有效的工作区隔离设置。';
+  }
+  if (endpoint === TOKEN_BOT_ENDPOINTS.setIsolateConversationGuidance) {
+    return validIsolateGuidancePayload(payload)
+      ? null : '请提交有效的提示词隔离设置。';
   }
   if (endpoint === TOKEN_BOT_ENDPOINTS.setModel) {
     return validModelPayload(payload)
@@ -171,6 +185,22 @@ export function createTokenBotRpcHandler(controller, { channel }) {
       } else if (endpoint === TOKEN_BOT_ENDPOINTS.setWorkspace) {
         if (typeof controller.updateWorkspace !== 'function') throw new Error('Workspace update is unavailable');
         value = await controller.updateWorkspace(payload.botId, payload.workspace);
+      } else if (endpoint === TOKEN_BOT_ENDPOINTS.setIsolateConversationWorkspace) {
+        if (typeof controller.updateIsolateConversationWorkspace !== 'function') {
+          throw new Error('Workspace isolation update is unavailable');
+        }
+        value = await controller.updateIsolateConversationWorkspace(
+          payload.botId,
+          payload.isolateConversationWorkspace,
+        );
+      } else if (endpoint === TOKEN_BOT_ENDPOINTS.setIsolateConversationGuidance) {
+        if (typeof controller.updateIsolateConversationGuidance !== 'function') {
+          throw new Error('Guidance isolation update is unavailable');
+        }
+        value = await controller.updateIsolateConversationGuidance(
+          payload.botId,
+          payload.isolateConversationGuidance,
+        );
       } else if (endpoint === TOKEN_BOT_ENDPOINTS.setModel) {
         if (typeof controller.updateModel !== 'function') throw new Error('Model update is unavailable');
         value = await controller.updateModel(payload.botId, payload.model);

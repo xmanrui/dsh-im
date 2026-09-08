@@ -23,6 +23,7 @@ import { StateStore } from '../../../../src/channels/feishu/state-store.mjs';
 import {
   BotWorkspaceStore,
   createBotWorkspaceScope,
+  createContextEnhancementProvider,
   createWorkspaceAwareController,
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
@@ -223,7 +224,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         ownerOpenIds: botConfig.ownerOpenIds ?? [botConfig.ownerOpenId],
         harness: workspaceScope.harness,
         state: workspaceScope.state,
-        contextEnhancement: { botId: id, getSettings: () => workspaces.contextEnhancementFor(id) },
+        contextEnhancement: createContextEnhancementProvider(workspaces, id),
         accessPolicy: accessPolicyProvider(workspaces, id, {
           channel: 'feishu', config: botConfig,
         }),

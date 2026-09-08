@@ -85,10 +85,39 @@ export default {
     'Usage: /workspace Workspace index or absolute path',
   '当前机器人暂不支持切换工作区。': 'This bot does not support switching Workspaces yet.',
   '工作区已切换为：{workspace}': 'Workspace switched to: {workspace}',
+  '当前聊天的工作区已切换为：{workspace}': 'This chat\'s workspace is now: {workspace}',
   '{message}\n用法：/workspace 工作区序号或绝对路径':
     '{message}\nUsage: /workspace Workspace index or absolute path',
   '机器人正在移除或已重新接入，无法切换原会话的工作区。':
     'The bot is being removed or has been reconnected; cannot switch the Workspace of the original Session.',
+
+  // guidance-command.mjs
+  '用法：\n/guidance  查看当前增强提示词\n/guidance 提示词正文  设置增强提示词\n/guidance --clear  清除覆盖，跟随默认\n/guidance --none  当前聊天不附加增强提示词':
+    'Usage:\n/guidance  Show current enhancement guidance\n/guidance <text>  Set enhancement guidance\n/guidance --clear  Drop the override and follow the default\n/guidance --none  Do not attach enhancement guidance in this chat',
+  '当前没有增强提示词。': 'There is no enhancement guidance right now.',
+  '当前聊天的增强提示词（本聊天覆盖）：\n{guidance}':
+    'Enhancement guidance for this chat (chat override):\n{guidance}',
+  '当前聊天的增强提示词（跟随机器人默认）：\n{guidance}':
+    'Enhancement guidance for this chat (bot default):\n{guidance}',
+  '整台机器人的{scope}增强提示词：\n{guidance}':
+    'Bot-wide {scope} enhancement guidance:\n{guidance}',
+  '当前机器人暂不支持设置增强提示词。':
+    'This bot does not support setting enhancement guidance yet.',
+  '当前聊天已改回跟随默认增强提示词。':
+    'This chat now follows the default enhancement guidance again.',
+  '已清除整台机器人的{scope}增强提示词。开启「按聊天隔离提示词」后，/guidance 只影响当前聊天。':
+    'Cleared the bot-wide {scope} enhancement guidance. Enable Isolate guidance per chat so /guidance affects only this chat.',
+  '增强提示词不得超过 {max} 个字符。':
+    'Enhancement guidance must not exceed {max} characters.',
+  '当前聊天的增强提示词已更新。': 'This chat’s enhancement guidance has been updated.',
+  '当前聊天已改为不附加增强提示词。':
+    'This chat will no longer attach enhancement guidance.',
+  '已更新整台机器人的{scope}增强提示词。开启「按聊天隔离提示词」后，/guidance 只影响当前聊天。':
+    'Updated the bot-wide {scope} enhancement guidance. Enable Isolate guidance per chat so /guidance affects only this chat.',
+  '机器人正在移除或已重新接入，无法修改原会话的增强提示词。':
+    'The bot is being removed or has been reconnected; cannot change enhancement guidance of the original Session.',
+  '私聊': 'direct chat',
+  '群聊': 'group chat',
 
   // preset-command.mjs
   '用法：/presetlist（不带参数）': 'Usage: /presetlist (no arguments)',

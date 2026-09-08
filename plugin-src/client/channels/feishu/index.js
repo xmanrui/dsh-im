@@ -16,6 +16,8 @@ import {
 } from "./api.js";
 import { useAnimationFrameScheduler } from "../../lifecycle.js";
 import { WorkspaceEditor } from "../../workspace-editor.js";
+import { IsolateWorkspaceEditor } from "../../isolate-workspace-editor.js";
+import { IsolateGuidanceEditor } from "../../isolate-guidance-editor.js";
 import { ContextEnhancementEditor } from "../../context-enhancement.js";
 import {
   AgentPresetCatalogContext,
@@ -560,6 +562,8 @@ export function BotCard({
   onReconnect,
   onRepairCallback,
   onWorkspaceSave,
+  onIsolateWorkspaceSave,
+  onIsolateGuidanceSave,
   onModelSave,
   onAgentPresetSave,
   onContextEnhancementSave,
@@ -635,6 +639,16 @@ export function BotCard({
           workspace: connection.workspace,
           disabled: Boolean(busy),
           onSave: onWorkspaceSave,
+        }),
+        h(IsolateWorkspaceEditor, {
+          enabled: connection.isolateConversationWorkspace === true,
+          disabled: Boolean(busy),
+          onSave: onIsolateWorkspaceSave,
+        }),
+        h(IsolateGuidanceEditor, {
+          enabled: connection.isolateConversationGuidance === true,
+          disabled: Boolean(busy),
+          onSave: onIsolateGuidanceSave,
         }),
       h(ModelEditor, {
         model: connection.model,
@@ -747,6 +761,8 @@ function BotList(props) {
           onReconnect: () => props.onReconnect(bot),
           onRepairCallback: () => props.onRepairCallback(bot),
           onWorkspaceSave: (workspace) => props.onWorkspaceSave(bot, workspace),
+          onIsolateWorkspaceSave: (enabled) => props.onIsolateWorkspaceSave(bot, enabled),
+          onIsolateGuidanceSave: (enabled) => props.onIsolateGuidanceSave(bot, enabled),
           onModelSave: (model) => props.onModelSave(bot, model),
           onAgentPresetSave: (agentPreset) => props.onAgentPresetSave(bot, agentPreset),
           onContextEnhancementSave: (config) => props.onContextEnhancementSave(bot, config),
@@ -1517,6 +1533,18 @@ export function FeishuSettingsTab({ rpcCall }) {
                   onReconnect: (bot) => void reconnectOneBot(bot),
                   onRepairCallback: repairCallback,
                   onWorkspaceSave: saveWorkspace,
+                  onIsolateWorkspaceSave: (connection, isolateConversationWorkspace) => saveBotSetting(
+                    connection,
+                    "workspace-isolate",
+                    FEISHU_ENDPOINTS.setIsolateConversationWorkspace,
+                    { isolateConversationWorkspace },
+                  ),
+                  onIsolateGuidanceSave: (connection, isolateConversationGuidance) => saveBotSetting(
+                    connection,
+                    "guidance-isolate",
+                    FEISHU_ENDPOINTS.setIsolateConversationGuidance,
+                    { isolateConversationGuidance },
+                  ),
                   onModelSave: (connection, selectedModel) => saveBotSetting(
                     connection, "model", FEISHU_ENDPOINTS.setModel, { model: selectedModel },
                   ),

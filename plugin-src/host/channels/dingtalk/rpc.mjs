@@ -3,7 +3,15 @@ import QRCode from 'qrcode';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
-import { publicWorkspaceError, SET_WORKSPACE_ENDPOINT, validWorkspacePayload } from '../shared/workspace-rpc.mjs';
+import {
+  publicWorkspaceError,
+  SET_ISOLATE_GUIDANCE_ENDPOINT,
+  SET_ISOLATE_WORKSPACE_ENDPOINT,
+  SET_WORKSPACE_ENDPOINT,
+  validIsolateGuidancePayload,
+  validIsolateWorkspacePayload,
+  validWorkspacePayload,
+} from '../shared/workspace-rpc.mjs';
 import { SET_AGENT_PRESET_ENDPOINT, validAgentPresetPayload } from '../shared/agent-preset-rpc.mjs';
 import { SET_MODEL_ENDPOINT, validModelPayload } from '../shared/model-setting-rpc.mjs';
 import {
@@ -21,6 +29,8 @@ export const DINGTALK_ENDPOINTS = Object.freeze({
   reconnectBot: 'bot.reconnect',
   deleteBot: 'bot.delete',
   setWorkspace: SET_WORKSPACE_ENDPOINT,
+  setIsolateConversationWorkspace: SET_ISOLATE_WORKSPACE_ENDPOINT,
+  setIsolateConversationGuidance: SET_ISOLATE_GUIDANCE_ENDPOINT,
   setModel: SET_MODEL_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
@@ -96,6 +106,14 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === DINGTALK_ENDPOINTS.setWorkspace) {
     return validWorkspacePayload(payload)
       ? null : '请输入工作区绝对路径。';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.setIsolateConversationWorkspace) {
+    return validIsolateWorkspacePayload(payload)
+      ? null : '请提交有效的工作区隔离设置。';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.setIsolateConversationGuidance) {
+    return validIsolateGuidancePayload(payload)
+      ? null : '请提交有效的提示词隔离设置。';
   }
   if (endpoint === DINGTALK_ENDPOINTS.setModel) {
     return validModelPayload(payload) ? null : '请选择有效模型。';
@@ -289,6 +307,24 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
         value = await publicStatus(
           await controller.updateWorkspace(payload.botId, payload.workspace),
           cachedEncode,
+        );
+      } else if (endpoint === DINGTALK_ENDPOINTS.setIsolateConversationWorkspace) {
+        if (typeof controller.updateIsolateConversationWorkspace !== 'function') {
+          throw new Error('Workspace isolation update is unavailable');
+        }
+        value = await controller.updateIsolateConversationWorkspace(
+          payload.botId,
+          payload.isolateConversationWorkspace,
+          (status) => publicStatus(status, cachedEncode),
+        );
+      } else if (endpoint === DINGTALK_ENDPOINTS.setIsolateConversationGuidance) {
+        if (typeof controller.updateIsolateConversationGuidance !== 'function') {
+          throw new Error('Guidance isolation update is unavailable');
+        }
+        value = await controller.updateIsolateConversationGuidance(
+          payload.botId,
+          payload.isolateConversationGuidance,
+          (status) => publicStatus(status, cachedEncode),
         );
       } else if (endpoint === DINGTALK_ENDPOINTS.setModel) {
         if (typeof controller.updateModel !== 'function') throw new Error('Model update is unavailable');

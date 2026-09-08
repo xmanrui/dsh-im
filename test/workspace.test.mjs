@@ -101,6 +101,74 @@ test('BotWorkspaceStore persists the creation default and keeps bots isolated', 
   assert.equal(reloaded.workspaceFor('bot_two'), defaultWorkspace);
 });
 
+test('conversation workspace isolation is off by default and can be toggled per bot', async (t) => {
+  const { path, defaultWorkspace, alternateWorkspace } = await fixture(t);
+  const store = await new BotWorkspaceStore(path, { defaultWorkspace }).load();
+  await store.ensure('bot_iso');
+  const state = {
+    sessions: { 'group:a': 'session-a', 'group:b': 'session-b' },
+    sessionFor(key) { return this.sessions[key] ?? null; },
+    sessionKeys() { return Object.keys(this.sessions); },
+    async clearSession(key) { delete this.sessions[key]; },
+    async clearSessions() { this.sessions = {}; },
+    async setSession(key, sessionId) { this.sessions[key] = sessionId; },
+  };
+  const scope = createBotWorkspaceScope({}, { botId: 'bot_iso', workspaces: store, state });
+
+  assert.equal(store.isolateConversationWorkspaceFor('bot_iso'), false);
+  assert.equal(scope.harness.isolateConversationWorkspace(), false);
+  assert.equal(store.decorateStatus({
+    bots: [{ botId: 'bot_iso' }],
+  }).bots[0].isolateConversationWorkspace, false);
+
+  await scope.harness.switchWorkspace(alternateWorkspace, 'group:b');
+  assert.equal(store.workspaceFor('bot_iso'), alternateWorkspace);
+  assert.equal(store.workspaceFor('bot_iso', 'group:a'), alternateWorkspace);
+  assert.deepEqual(state.sessions, {});
+  assert.equal('conversationWorkspaces' in JSON.parse(await readFile(path, 'utf8')), false);
+
+  await store.setWorkspace('bot_iso', defaultWorkspace, {
+    clearSessions: () => state.clearSessions(),
+  });
+  state.sessions = { 'group:a': 'session-a', 'group:b': 'session-b' };
+  await store.setIsolateConversationWorkspace('bot_iso', true);
+  assert.equal(store.isolateConversationWorkspaceFor('bot_iso'), true);
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).isolateConversationWorkspaces.bot_iso, true);
+
+  await scope.harness.switchWorkspace(alternateWorkspace, 'group:b');
+  assert.equal(store.workspaceFor('bot_iso'), defaultWorkspace);
+  assert.equal(store.workspaceFor('bot_iso', 'group:a'), defaultWorkspace);
+  assert.equal(store.workspaceFor('bot_iso', 'group:b'), alternateWorkspace);
+  assert.deepEqual(state.sessions, { 'group:a': 'session-a' });
+
+  const isolatedCommand = await runWorkspaceCommand(
+    `/workspace ${alternateWorkspace}`,
+    scope.harness,
+    'group:a',
+  );
+  assert.match(isolatedCommand.message, /当前聊天的工作区已切换为/);
+  assert.equal(store.workspaceFor('bot_iso', 'group:a'), alternateWorkspace);
+
+  await store.setIsolateConversationWorkspace('bot_iso', false, {
+    clearSessions: () => state.clearSessions(),
+  });
+  const saved = JSON.parse(await readFile(path, 'utf8'));
+  assert.equal(store.isolateConversationWorkspaceFor('bot_iso'), false);
+  assert.equal(store.workspaceFor('bot_iso', 'group:a'), defaultWorkspace);
+  assert.equal(store.workspaceFor('bot_iso', 'group:b'), defaultWorkspace);
+  assert.equal('isolateConversationWorkspaces' in saved, false);
+  assert.equal('conversationWorkspaces' in saved, false);
+  assert.deepEqual(state.sessions, {});
+
+  const sharedCommand = await runWorkspaceCommand(
+    `/workspace ${alternateWorkspace}`,
+    scope.harness,
+    'group:a',
+  );
+  assert.match(sharedCommand.message, /^工作区已切换为：/);
+  assert.equal(store.workspaceFor('bot_iso', 'group:b'), alternateWorkspace);
+});
+
 test('BotWorkspaceStore migrates v1 on the first delivery target and persists target CRUD', async (t) => {
   const { path, defaultWorkspace } = await fixture(t);
   await writeFile(path, `${JSON.stringify({
@@ -1638,6 +1706,45 @@ test('workspace RPC validates payloads and returns the updated public status', a
   });
   assert.equal(missing.error.code, 'workspace-not-found');
   assert.match(missing.error.message, /不存在/);
+});
+
+test('workspace isolation RPC toggles the public bot flag', async (t) => {
+  const { path, defaultWorkspace } = await fixture(t);
+  const workspaces = await new BotWorkspaceStore(path, { defaultWorkspace }).load();
+  await workspaces.ensure('bot_one');
+  let cleared = 0;
+  const controller = createWorkspaceAwareController({
+    status() { return { bots: [{ botId: 'bot_one', connected: true }] }; },
+    bindCredentials() { return this.status(); },
+    reconnectBot() { return this.status(); },
+    deleteBot() { return { bots: [] }; },
+  }, {
+    workspaces,
+    stateFor: async () => ({
+      async clearSessions() { cleared += 1; },
+    }),
+  });
+  const handler = createTokenBotRpcHandler(controller, { channel: 'Telegram' });
+
+  const enabled = await handler(TOKEN_BOT_ENDPOINTS.setIsolateConversationWorkspace, {
+    botId: 'bot_one', isolateConversationWorkspace: true,
+  });
+  assert.equal(enabled.ok, true);
+  assert.equal(enabled.value.bots[0].isolateConversationWorkspace, true);
+  assert.equal(cleared, 0);
+
+  const invalid = await handler(TOKEN_BOT_ENDPOINTS.setIsolateConversationWorkspace, {
+    botId: 'bot_one', isolateConversationWorkspace: 'yes',
+  });
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.error.code, 'bad-request');
+
+  const disabled = await handler(TOKEN_BOT_ENDPOINTS.setIsolateConversationWorkspace, {
+    botId: 'bot_one', isolateConversationWorkspace: false,
+  });
+  assert.equal(disabled.ok, true);
+  assert.equal(disabled.value.bots[0].isolateConversationWorkspace, false);
+  assert.equal(cleared, 1);
 });
 
 test('Telegram RPC explains network and proxy failures without exposing credentials', async () => {

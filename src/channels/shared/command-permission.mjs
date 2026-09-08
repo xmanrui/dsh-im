@@ -4,6 +4,7 @@ import { isControlCommand } from './control-command.mjs';
 import { isHistoryCommand } from './history-command.mjs';
 import { isModelCommand } from './model-command.mjs';
 import { isPresetCommand } from './preset-command.mjs';
+import { isGuidanceCommand } from './guidance-command.mjs';
 import { isWorkspaceCommand } from './workspace-command.mjs';
 
 const SIMPLE_TEXT_COMMANDS = new Set(['/help', '/status', '/new']);
@@ -28,5 +29,6 @@ export function isSharedLocalCommand(text, {
   if (hasImages || hasFiles) return false;
   return SIMPLE_TEXT_COMMANDS.has(command.toLowerCase())
     || isWorkspaceCommand(command)
+    || isGuidanceCommand(command)
     || isCompactCommand(command);
 }

@@ -853,6 +853,7 @@ export class DiscordRuntime {
       const contextSnapshot = captureContextEnhancement(
         this.#contextEnhancement,
         message.guild_id ? 'group' : 'direct',
+        `${message.guild_id ? 'group' : 'direct'}:${message.channel_id}`,
       );
       const pendingRoute = resolveDiscordMessageRoute(message, this.#config.platformId, {
         api: this.#api,

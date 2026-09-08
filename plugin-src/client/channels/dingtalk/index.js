@@ -4,6 +4,8 @@ import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from '../.
 import { CollapsibleAccountSection } from '../shared/collapsible-account.js';
 import { h } from '../../i18n.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
+import { IsolateWorkspaceEditor } from '../../isolate-workspace-editor.js';
+import { IsolateGuidanceEditor } from '../../isolate-guidance-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
 import {
   AgentPresetCatalogContext,
@@ -244,6 +246,8 @@ export function AccountCard({
   removing,
   onReconnect,
   onWorkspaceSave,
+  onIsolateWorkspaceSave,
+  onIsolateGuidanceSave,
   onModelSave,
   onAgentPresetSave,
   onContextEnhancementSave,
@@ -291,6 +295,16 @@ export function AccountCard({
         workspace: account.workspace,
         disabled: Boolean(busy),
         onSave: onWorkspaceSave,
+      }),
+      h(IsolateWorkspaceEditor, {
+        enabled: account.isolateConversationWorkspace === true,
+        disabled: Boolean(busy),
+        onSave: onIsolateWorkspaceSave,
+      }),
+      h(IsolateGuidanceEditor, {
+        enabled: account.isolateConversationGuidance === true,
+        disabled: Boolean(busy),
+        onSave: onIsolateGuidanceSave,
       }),
       h(ModelEditor, {
         model: account.model,
@@ -349,6 +363,8 @@ function AccountList(props) {
         removing: props.removeTarget === account.botId,
         onReconnect: () => props.onReconnect(account),
         onWorkspaceSave: (workspace) => props.onWorkspaceSave(account, workspace),
+        onIsolateWorkspaceSave: (enabled) => props.onIsolateWorkspaceSave(account, enabled),
+        onIsolateGuidanceSave: (enabled) => props.onIsolateGuidanceSave(account, enabled),
         onModelSave: (model) => props.onModelSave(account, model),
         onAgentPresetSave: (agentPreset) => props.onAgentPresetSave(account, agentPreset),
         onContextEnhancementSave: (config) => props.onContextEnhancementSave(account, config),
@@ -928,6 +944,18 @@ export function DingtalkSettingsTab({ rpcCall }) {
                   removeTarget,
                   onReconnect: (account) => void reconnect(account),
                   onWorkspaceSave: saveWorkspace,
+                  onIsolateWorkspaceSave: (account, isolateConversationWorkspace) => saveBotSetting(
+                    account,
+                    'workspace-isolate',
+                    DINGTALK_ENDPOINTS.setIsolateConversationWorkspace,
+                    { isolateConversationWorkspace },
+                  ),
+                  onIsolateGuidanceSave: (account, isolateConversationGuidance) => saveBotSetting(
+                    account,
+                    'guidance-isolate',
+                    DINGTALK_ENDPOINTS.setIsolateConversationGuidance,
+                    { isolateConversationGuidance },
+                  ),
                   onModelSave: (account, selectedModel) => saveBotSetting(
                     account, 'model', DINGTALK_ENDPOINTS.setModel, { model: selectedModel },
                   ),

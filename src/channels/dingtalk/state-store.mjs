@@ -162,6 +162,10 @@ export class DingtalkStateStore {
     return this.#state.sessions[key] ?? null;
   }
 
+  sessionKeys() {
+    return Object.keys(this.#state.sessions);
+  }
+
   async setSession(key, sessionId) {
     const normalizedKey = nonEmptyString(key);
     const normalizedSession = nonEmptyString(sessionId);

@@ -1516,6 +1516,171 @@ test('group messages require an explicit bot mention before Harness work', async
   assert.equal(fixture.sessions.get('group:group-one'), 'session-group');
 });
 
+test('DingTalk group file without @ is held and attached to the same sender’s next @', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('group:group-files', 'session-group-files');
+  const bytes = Buffer.from('dingtalk-group-pending-file');
+  const downloads = [];
+  const prompts = [];
+  const sent = [];
+  const bridge = new DingtalkHarnessBridge({
+    api: {
+      downloadFile: async (request) => {
+        downloads.push(request);
+        return bytes;
+      },
+      sendText: async (request) => sent.push(request.text),
+    },
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_sessionId, prompt, options) => {
+        const file = options.files?.[0];
+        prompts.push({
+          prompt,
+          name: file?.name,
+          bytes: file ? await file.load({ signal: options.signal }) : undefined,
+        });
+        return file ? '文件已分析' : '群聊回答';
+      },
+    },
+    state: fixture.state,
+  });
+  const group = { conversationType: '2', conversationId: 'group-files' };
+
+  await bridge.accept(message('group-file', '', {
+    ...group,
+    isInAtList: false,
+    msgtype: 'file',
+    text: undefined,
+    robotCode: 'robot-from-callback',
+    content: { fileName: '报告.pdf', downloadCode: 'pending-file-code' },
+  }));
+  assert.equal(downloads.length, 0);
+  assert.equal(prompts.length, 0);
+  assert.equal(bridge.status.messagesIgnored, 1);
+
+  await bridge.accept(message('other-sender', '请分析这个文件', {
+    ...group,
+    isInAtList: true,
+    senderStaffId: 'staff-other',
+  }));
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].name, undefined);
+  assert.equal(downloads.length, 0);
+
+  await bridge.accept(message('owner-help', '/help', { ...group, isInAtList: true }));
+  assert.equal(prompts.length, 1);
+  assert.match(sent.at(-1), /群聊里点文件会直接发出/);
+
+  await bridge.accept(message('owner-ask', '请分析这个文件', { ...group, isInAtList: true }));
+  assert.equal(downloads.length, 1);
+  assert.equal(downloads[0].downloadCode, 'pending-file-code');
+  assert.equal(prompts.length, 2);
+  assert.equal(prompts[1].prompt, '请分析这个文件');
+  assert.equal(prompts[1].name, '报告.pdf');
+  assert.deepEqual(prompts[1].bytes, bytes);
+  assert.equal(sent.at(-1), '文件已分析');
+});
+
+test('DingTalk expired pending group files are not attached to a later @', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('group:group-files-ttl', 'session-group-files-ttl');
+  let now = 1_000;
+  const downloads = [];
+  const prompts = [];
+  const bridge = new DingtalkHarnessBridge({
+    api: {
+      downloadFile: async (request) => {
+        downloads.push(request);
+        return Buffer.from('expired');
+      },
+      sendText: async () => {},
+    },
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_sessionId, prompt, options) => {
+        prompts.push({ prompt, files: options.files?.length ?? 0 });
+        return '已收到';
+      },
+    },
+    state: fixture.state,
+    pendingInboundTtlMs: 100,
+    now: () => now,
+  });
+  const group = { conversationType: '2', conversationId: 'group-files-ttl' };
+
+  await bridge.accept(message('ttl-file', '', {
+    ...group,
+    isInAtList: false,
+    msgtype: 'file',
+    text: undefined,
+    content: { fileName: '过期.pdf', downloadCode: 'expired-file-code' },
+  }));
+  now = 1_200;
+  await bridge.accept(message('ttl-ask', '还在吗', { ...group, isInAtList: true }));
+  assert.equal(downloads.length, 0);
+  assert.deepEqual(prompts, [{ prompt: '还在吗', files: 0 }]);
+});
+
+test('DingTalk reply-to-file @mention downloads the quoted file', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('group:group-quote-file', 'session-group-quote-file');
+  const bytes = Buffer.from('quoted-dingtalk-file');
+  const downloads = [];
+  const prompts = [];
+  const bridge = new DingtalkHarnessBridge({
+    api: {
+      downloadFile: async (request) => {
+        downloads.push(request);
+        return bytes;
+      },
+      sendText: async () => {},
+    },
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_sessionId, prompt, options) => {
+        prompts.push({
+          prompt,
+          name: options.files[0].name,
+          bytes: await options.files[0].load({ signal: options.signal }),
+        });
+        return '引用文件已分析';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('quote-file-ask', '请分析这个文件', {
+    conversationType: '2',
+    conversationId: 'group-quote-file',
+    isInAtList: true,
+    robotCode: 'robot-from-callback',
+    text: {
+      content: '请分析这个文件',
+      isReplyMsg: true,
+      repliedMsg: {
+        msgType: 'file',
+        msgId: 'quoted-file',
+        content: { fileName: '引用.pdf', downloadCode: 'quoted-file-code' },
+      },
+    },
+  }));
+
+  assert.equal(downloads.length, 1);
+  assert.equal(downloads[0].downloadCode, 'quoted-file-code');
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].name, '引用.pdf');
+  assert.deepEqual(prompts[0].bytes, bytes);
+  assert.equal(Array.isArray(prompts[0].prompt), true);
+  assert.match(prompts[0].prompt[0].text, /<dsh_im_reply_to>/);
+});
+
 test('bridge streams one AI Card and mentions only the group sender without an extra text reply', async (t) => {
   for (const scenario of [
     {

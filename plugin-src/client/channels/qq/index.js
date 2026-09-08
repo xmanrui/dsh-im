@@ -5,6 +5,8 @@ import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from '../.
 import { CollapsibleAccountSection } from '../shared/collapsible-account.js';
 import { h } from '../../i18n.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
+import { IsolateWorkspaceEditor } from '../../isolate-workspace-editor.js';
+import { IsolateGuidanceEditor } from '../../isolate-guidance-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
 import {
   AgentPresetCatalogContext,
@@ -173,6 +175,8 @@ export function AccountCard({
   removing,
   onReconnect,
   onWorkspaceSave,
+  onIsolateWorkspaceSave,
+  onIsolateGuidanceSave,
   onModelSave,
   onAgentPresetSave,
   onContextEnhancementSave,
@@ -218,6 +222,16 @@ export function AccountCard({
         workspace: account.workspace,
         disabled: Boolean(busy),
         onSave: onWorkspaceSave,
+      }),
+      h(IsolateWorkspaceEditor, {
+        enabled: account.isolateConversationWorkspace === true,
+        disabled: Boolean(busy),
+        onSave: onIsolateWorkspaceSave,
+      }),
+      h(IsolateGuidanceEditor, {
+        enabled: account.isolateConversationGuidance === true,
+        disabled: Boolean(busy),
+        onSave: onIsolateGuidanceSave,
       }),
       h(ModelEditor, {
         model: account.model,
@@ -503,6 +517,18 @@ export function QqSettingsTab({ rpcCall }) {
               'workspace',
               QQ_ENDPOINTS.setWorkspace,
               { botId: account.botId, workspace },
+            ),
+            onIsolateWorkspaceSave: (isolateConversationWorkspace) => botAction(
+              account,
+              'workspace-isolate',
+              QQ_ENDPOINTS.setIsolateConversationWorkspace,
+              { botId: account.botId, isolateConversationWorkspace },
+            ),
+            onIsolateGuidanceSave: (isolateConversationGuidance) => botAction(
+              account,
+              'guidance-isolate',
+              QQ_ENDPOINTS.setIsolateConversationGuidance,
+              { botId: account.botId, isolateConversationGuidance },
             ),
             onModelSave: (selectedModel) => botAction(
               account,

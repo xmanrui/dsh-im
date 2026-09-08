@@ -14,6 +14,7 @@ import { createWhatsappWebSession } from '../../../../src/channels/whatsapp/what
 import {
   BotWorkspaceStore,
   createBotWorkspaceScope,
+  createContextEnhancementProvider,
   createWorkspaceAwareController,
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
@@ -132,7 +133,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         authDir,
         harness: workspaceScope.harness,
         state: workspaceScope.state,
-        contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
+        contextEnhancement: createContextEnhancementProvider(workspaces, botId),
         accessPolicy: accessPolicyProvider(workspaces, botId, {
           channel: 'whatsapp', config: botConfig, equals: whatsappAccessPolicyIdsEqual,
         }),

@@ -115,6 +115,8 @@ export default {
   '直接发送文字或图片即可继续当前会话。': 'Send text or an image directly to continue the current session.',
   '直接发送文字、图片或文件即可继续当前会话。':
     'Send text, an image, or a file directly to continue the current session.',
+  '群聊里点文件会直接发出：先发文件，再 @机器人 说明要做什么；也可以回复该文件后 @机器人。':
+    'In group chats, picking a file sends it immediately: send the file first, then @the bot with what to do; or reply to that file and @the bot.',
   '直接发送文字、图片、文件或带文字识别结果的语音即可继续当前会话。':
     'Send text, an image, a file, or a voice message already transcribed to text to continue the current session.',
   '{label}机器人已连接 DeepSeek Harness。': 'The {label} bot is connected to DeepSeek Harness.',
@@ -127,6 +129,8 @@ export default {
     '/workspace <workspace index or absolute path>  Switch workspace',
   '/workspacelist  列出工作区绝对路径': '/workspacelist  List absolute workspace paths',
   '/ws、/wsl、/workspaces  工作区命令别名': '/ws, /wsl, /workspaces  Workspace command aliases',
+  '/guidance [提示词 | --clear]  查看或设置当前聊天的增强提示词':
+    '/guidance [text | --clear]  Show or set this chat’s enhancement guidance',
   '/sessionlist [工作区序号或绝对路径]  列出会话 ID 和标题':
     '/sessionlist [workspace index or absolute path]  List session IDs and titles',
   '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题':

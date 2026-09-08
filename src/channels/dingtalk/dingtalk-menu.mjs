@@ -18,9 +18,9 @@ const presetCommand = (id) => `/preset ${/^\d+$/u.test(id) ? 'id:' : ''}${id}`;
 // Keep exact commands alongside the displayed options. Never interpret a callback
 // as a command supplied by the client or as a prompt for the model.
 export async function dingtalkMenuSnapshot(harness, state, key, signal) {
-  const workspace = harness.currentWorkspace?.();
+  const workspace = harness.currentWorkspace?.(key);
   const sessionId = state.sessionFor(key);
-  const options = { signal };
+  const options = { signal, conversationKey: key };
   const results = await Promise.allSettled([
     workspacePathSnapshot(harness, options),
     harness.listWorkspaceSessions?.(workspace, options),
@@ -32,7 +32,7 @@ export async function dingtalkMenuSnapshot(harness, state, key, signal) {
     harness.agentPresetSettings?.(options),
   ]);
   signal?.throwIfAborted();
-  if (harness.currentWorkspace?.() !== workspace || state.sessionFor(key) !== sessionId) {
+  if (harness.currentWorkspace?.(key) !== workspace || state.sessionFor(key) !== sessionId) {
     throw new Error(t('会话或工作区已变化，请重新发送 /m。'));
   }
   const [paths, listed, catalog, settings] = results.map((r) => r.status === 'fulfilled' ? r.value : null);

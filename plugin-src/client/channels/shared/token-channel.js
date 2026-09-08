@@ -5,6 +5,8 @@ import { CollapsibleAccountSection } from './collapsible-account.js';
 import { h } from '../../i18n.js';
 import { installDingtalkStyles } from '../dingtalk/styles.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
+import { IsolateWorkspaceEditor } from '../../isolate-workspace-editor.js';
+import { IsolateGuidanceEditor } from '../../isolate-guidance-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
 import {
   AgentPresetCatalogContext,
@@ -81,7 +83,7 @@ export function createTokenChannelSettings(definition) {
     accountSettingsEndpoint = null,
   } = definition;
 
-  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onModelSave, onAgentPresetSave, onContextEnhancementSave, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove }) {
+  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onIsolateWorkspaceSave, onIsolateGuidanceSave, onModelSave, onAgentPresetSave, onContextEnhancementSave, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove }) {
     const state = busy === 'reconnect' ? 'connecting' : account.state;
     const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
     const stateLabel = account.connected ? '运行正常' : state === 'connecting' ? '正在连接' : '连接未就绪';
@@ -123,6 +125,16 @@ export function createTokenChannelSettings(definition) {
             workspace: account.workspace,
             disabled: Boolean(busy),
             onSave: onWorkspaceSave,
+          }),
+          h(IsolateWorkspaceEditor, {
+            enabled: account.isolateConversationWorkspace === true,
+            disabled: Boolean(busy),
+            onSave: onIsolateWorkspaceSave,
+          }),
+          h(IsolateGuidanceEditor, {
+            enabled: account.isolateConversationGuidance === true,
+            disabled: Boolean(busy),
+            onSave: onIsolateGuidanceSave,
           }),
         h(ModelEditor, {
           model: account.model,
@@ -342,6 +354,18 @@ export function createTokenChannelSettings(definition) {
                 'workspace',
                 endpoints.setWorkspace,
                 { botId: account.botId, workspace },
+              ),
+              onIsolateWorkspaceSave: (isolateConversationWorkspace) => botAction(
+                account,
+                'workspace-isolate',
+                endpoints.setIsolateConversationWorkspace,
+                { botId: account.botId, isolateConversationWorkspace },
+              ),
+              onIsolateGuidanceSave: (isolateConversationGuidance) => botAction(
+                account,
+                'guidance-isolate',
+                endpoints.setIsolateConversationGuidance,
+                { botId: account.botId, isolateConversationGuidance },
               ),
               onModelSave: (selectedModel) => botAction(
                 account,

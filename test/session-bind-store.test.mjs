@@ -63,12 +63,18 @@ async function within(promise, timeoutMs, message) {
 function memoryState(initial = {}) {
   let sessions = { ...initial };
   let clears = 0;
+  let sessionClears = 0;
   let sets = 0;
   return {
     sessionFor(key) { return sessions[key] ?? null; },
+    sessionKeys() { return Object.keys(sessions); },
     async setSession(key, sessionId) {
       sets += 1;
       sessions[key] = sessionId;
+    },
+    async clearSession(key) {
+      sessionClears += 1;
+      delete sessions[key];
     },
     async clearSessions() {
       clears += 1;
@@ -76,14 +82,39 @@ function memoryState(initial = {}) {
     },
     snapshot() { return { ...sessions }; },
     get clears() { return clears; },
+    get sessionClears() { return sessionClears; },
     get sets() { return sets; },
   };
 }
 
-test('binding across workspaces clears old mappings, fences the generation, and binds one conversation', async (t) => {
+test('binding across workspaces is bot-wide unless isolation is enabled', async (t) => {
+  const { path, defaultWorkspace, alternateWorkspace } = await fixture(t);
+  const workspaces = await new BotWorkspaceStore(path, { defaultWorkspace }).load();
+  await workspaces.ensure('bot_shared');
+  const previousGeneration = workspaces.generationFor('bot_shared');
+  const state = memoryState({ 'direct:one': 'old-one', 'group:two': 'old-two' });
+  const scope = createBotWorkspaceScope({
+    async adoptWorkspaceSession(sessionId) {
+      return { sessionId, workspace: alternateWorkspace };
+    },
+  }, { botId: 'bot_shared', workspaces, state });
+
+  await scope.harness.bindWorkspaceSession('direct:one', 'session-target');
+
+  assert.equal(workspaces.workspaceFor('bot_shared'), alternateWorkspace);
+  assert.equal(workspaces.workspaceFor('bot_shared', 'group:two'), alternateWorkspace);
+  assert.notEqual(workspaces.generationFor('bot_shared'), previousGeneration);
+  assert.deepEqual(state.snapshot(), { 'direct:one': 'session-target' });
+  assert.equal(state.clears, 1);
+  assert.equal(state.sessionClears, 0);
+  assert.equal('conversationWorkspaces' in JSON.parse(await readFile(path, 'utf8')), false);
+});
+
+test('binding across workspaces overrides only the selected conversation', async (t) => {
   const { path, defaultWorkspace, alternateWorkspace } = await fixture(t);
   const workspaces = await new BotWorkspaceStore(path, { defaultWorkspace }).load();
   await workspaces.ensure('bot_bind');
+  await workspaces.setIsolateConversationWorkspace('bot_bind', true);
   const previousGeneration = workspaces.generationFor('bot_bind');
   const state = memoryState({ 'direct:one': 'old-one', 'group:two': 'old-two' });
   const calls = [];
@@ -109,14 +140,25 @@ test('binding across workspaces clears old mappings, fences the generation, and 
     title: 'Existing conversation',
     archived: true,
   });
-  assert.equal(workspaces.workspaceFor('bot_bind'), alternateWorkspace);
-  assert.notEqual(workspaces.generationFor('bot_bind'), previousGeneration);
-  assert.deepEqual(state.snapshot(), { 'direct:one': 'session-target' });
-  assert.equal(state.clears, 1);
+  assert.equal(workspaces.workspaceFor('bot_bind'), defaultWorkspace);
+  assert.equal(workspaces.workspaceFor('bot_bind', 'direct:one'), alternateWorkspace);
+  assert.equal(workspaces.workspaceFor('bot_bind', 'group:two'), defaultWorkspace);
+  assert.equal(workspaces.generationFor('bot_bind'), previousGeneration);
+  assert.notEqual(workspaces.generationFor('bot_bind', 'direct:one'), previousGeneration);
+  assert.deepEqual(state.snapshot(), {
+    'direct:one': 'session-target',
+    'group:two': 'old-two',
+  });
+  assert.equal(state.clears, 0);
+  assert.equal(state.sessionClears, 1);
   assert.equal(state.sets, 1);
   assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), {
     version: 1,
-    workspaces: { bot_bind: alternateWorkspace },
+    workspaces: { bot_bind: defaultWorkspace },
+    conversationWorkspaces: {
+      bot_bind: { 'direct:one': alternateWorkspace },
+    },
+    isolateConversationWorkspaces: { bot_bind: true },
   });
 });
 

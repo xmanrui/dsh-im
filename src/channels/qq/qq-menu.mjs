@@ -86,9 +86,9 @@ async function catalogFor(harness, sessionId, options) {
 }
 
 export async function qqMenuView(name, harness, state, key, { signal, busy = false } = {}) {
-  const workspace = harness.currentWorkspace?.();
+  const workspace = harness.currentWorkspace?.(key);
   const sessionId = state.sessionFor(key);
-  const options = { signal };
+  const options = { signal, conversationKey: key };
   const archived = state.includesArchivedSessions?.() === true;
   const visibleSessions = (listed) => (listed?.sessions ?? []).filter((item) => archived || item.archived !== true);
   if (name === 'main' || name === 'status') {

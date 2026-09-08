@@ -55,9 +55,14 @@ import {
   runWorkspaceCommand,
   workspacePathSnapshot,
 } from '../shared/workspace-command.mjs';
+import { runGuidanceCommand } from '../shared/guidance-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
-import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  enhanceContextContent,
+  overlayConversationGuidance,
+} from '../shared/context-enhancement.mjs';
 import { deliverOutboundArtifacts } from '../shared/semantic/artifact-delivery.mjs';
 import {
   createDeliveryReceipt,
@@ -300,6 +305,7 @@ const WORKSPACE_HELP_LINES = [
   '/workspacelist  列出工作区绝对路径',
   '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题',
   '/sessionlist --limit N  仅列出当前工作区前 N 个会话',
+  '/guidance [提示词 | --clear]  查看或设置当前聊天的增强提示词',
 ];
 
 /** Safe user-facing text for bind/workspace failures (no raw messages). */
@@ -932,9 +938,10 @@ export class FeishuHarnessBridge {
       if (chatId) rememberConnectionTestTarget(this.#state, { chatId });
     }
 
-    this.#acceptedMessageIds.set(messageId, captureContextEnhancement(
+    this.#acceptedMessageIds.set(messageId, overlayConversationGuidance(
+      captureContextEnhancement(this.#contextEnhancement, conversationType, key),
       this.#contextEnhancement,
-      conversationType,
+      key,
     ));
     const processingReaction = this.#beginReaction(messageId);
     const batchText = event.message.message_type === 'text'
@@ -1484,6 +1491,15 @@ export class FeishuHarnessBridge {
       : await runWorkspaceCommand(text, this.#harness, key);
     if (workspaceCommand) {
       for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
+        await this.#send(event.message.chat_id, reply, { replyTo: event.message.message_id });
+      }
+      return;
+    }
+    const guidanceCommand = commandText === null
+      ? null
+      : await runGuidanceCommand(text, this.#harness, key);
+    if (guidanceCommand) {
+      for (const reply of guidanceCommand.messages ?? [guidanceCommand.message]) {
         await this.#send(event.message.chat_id, reply, { replyTo: event.message.message_id });
       }
       return;
@@ -2612,7 +2628,7 @@ export class FeishuHarnessBridge {
     try {
       const { current, paths } = await workspacePathSnapshot(
         this.#harness,
-        { signal: this.#cardDataSignal() },
+        { signal: this.#cardDataSignal(), conversationKey: key },
       );
       this.#rememberMenu(key, { kind: 'workspaces', paths });
       await this.#sendCard(
@@ -2645,7 +2661,7 @@ export class FeishuHarnessBridge {
 
   async #switchWorkspace(key, chatId, workspace, { updateMessageId = null, replyTo = null } = {}) {
     try {
-      const current = await this.#harness.switchWorkspace(workspace);
+      const current = await this.#harness.switchWorkspace(workspace, key);
       await this.#send(chatId, t('工作区已切换为：{workspace}', { workspace: current }), { replyTo });
       await this.#sendMenuCard(key, chatId, { updateMessageId, replyTo });
     } catch (error) {
@@ -2778,16 +2794,19 @@ export class FeishuHarnessBridge {
     const dataSignal = this.#cardDataSignal();
     // Independent sections start together. Each one degrades on its own so a
     // slow preset/model RPC cannot force redundant session-list scans.
-    const workspaceTask = workspacePathSnapshot(this.#harness, { signal: dataSignal })
+    const workspaceTask = workspacePathSnapshot(this.#harness, {
+      signal: dataSignal,
+      conversationKey: key,
+    })
       .catch(() => {
         const current = typeof this.#harness.currentWorkspace === 'function'
-          ? this.#harness.currentWorkspace()
+          ? this.#harness.currentWorkspace(key)
           : null;
         return { current, paths: current ? [current] : [] };
       });
     const sessionTask = (async () => {
       const current = typeof this.#harness.currentWorkspace === 'function'
-        ? this.#harness.currentWorkspace()
+        ? this.#harness.currentWorkspace(key)
         : null;
       if (!current || typeof this.#harness.listWorkspaceSessions !== 'function') return [];
       try {
@@ -2878,7 +2897,7 @@ export class FeishuHarnessBridge {
       }
       // Fallback: scan the current workspace session list for this id
       const current = typeof this.#harness.currentWorkspace === 'function'
-        ? this.#harness.currentWorkspace()
+        ? this.#harness.currentWorkspace(key)
         : null;
       if (current && typeof this.#harness.listWorkspaceSessions === 'function') {
         const listed = await this.#harness.listWorkspaceSessions(current);
@@ -2943,7 +2962,7 @@ export class FeishuHarnessBridge {
       await this.#harness.ensureRunning({ signal: this.#signal });
       const lines = [t('连接正常')];
       const ws = typeof this.#harness.currentWorkspace === 'function'
-        ? this.#harness.currentWorkspace()
+        ? this.#harness.currentWorkspace(key)
         : null;
       if (ws) lines.push(t('工作区：{workspace}', { workspace: ws }));
       const settings = typeof this.#harness.agentPresetSettings === 'function'
@@ -2972,7 +2991,7 @@ export class FeishuHarnessBridge {
       // Current workspace
       try {
         const ws = typeof this.#harness.currentWorkspace === 'function'
-          ? this.#harness.currentWorkspace()
+          ? this.#harness.currentWorkspace(key)
           : null;
         info.workspace = ws || t('未知');
       } catch { /* ignore */ }
@@ -3001,7 +3020,7 @@ export class FeishuHarnessBridge {
       // Session count
       try {
         const ws = typeof this.#harness.currentWorkspace === 'function'
-          ? this.#harness.currentWorkspace()
+          ? this.#harness.currentWorkspace(key)
           : null;
         if (ws) {
           const listed = await this.#harness.listWorkspaceSessions(ws, { signal });
@@ -3331,13 +3350,17 @@ export class FeishuHarnessBridge {
    * the registered workspaces' listings, an index against the current
    * workspace. Nothing is bound and no workspace is switched.
    */
-  async #resolveWatchTarget(target, { workspaceHint = null, signal = this.#signal } = {}) {
+  async #resolveWatchTarget(target, {
+    workspaceHint = null,
+    signal = this.#signal,
+    conversationKey = null,
+  } = {}) {
     if (typeof target !== 'string' || target === '') {
       return { error: t('用法：/watch <Session ID 或当前工作区序号>') };
     }
     const numeric = /^\d{1,4}$/.test(target) ? Number(target) : null;
     const currentPath = typeof this.#harness?.currentWorkspace === 'function'
-      ? this.#harness.currentWorkspace()
+      ? this.#harness.currentWorkspace(conversationKey)
       : null;
     const listSessions = async (workspace) => {
       const listed = await this.#harness.listWorkspaceSessions(workspace, { signal });
@@ -3452,6 +3475,7 @@ export class FeishuHarnessBridge {
         ? validatedTarget
         : await this.#resolveWatchTarget(target, {
           workspaceHint,
+          conversationKey: key,
           signal: workspaceHint ? this.#cardDataSignal() : this.#signal,
         });
     } catch (error) {
@@ -3543,7 +3567,7 @@ export class FeishuHarnessBridge {
     let currentWorkspace = null;
     try {
       currentWorkspace = typeof this.#harness?.currentWorkspace === 'function'
-        ? this.#harness.currentWorkspace()
+        ? this.#harness.currentWorkspace(key)
         : null;
       if (currentWorkspace && typeof this.#harness?.listWorkspaceSessions === 'function') {
         const listed = await this.#harness.listWorkspaceSessions(
