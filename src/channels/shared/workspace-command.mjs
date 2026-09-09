@@ -110,7 +110,7 @@ async function selectedWorkspacePath(value) {
 export async function workspacePathSnapshot(harness, options = {}) {
   const listed = await harness.listWorkspaces(options);
   const currentValue = typeof harness?.currentWorkspace === 'function'
-    ? harness.currentWorkspace()
+    ? harness.currentWorkspace(options.conversationKey)
     : null;
   const [current] = currentValue ? await existingWorkspacePaths([currentValue]) : [];
   const registered = await existingWorkspacePaths(Array.isArray(listed) ? listed : []);
@@ -141,13 +141,13 @@ export function splitWorkspaceCommandMessage(message) {
   return messages;
 }
 
-async function runWorkspaceListCommand(match, harness) {
+async function runWorkspaceListCommand(match, harness, conversationKey) {
   if (match[1]?.trim()) return commandResult(t('用法：/workspacelist'));
   if (typeof harness?.listWorkspaces !== 'function') {
     return commandResult(t('当前机器人暂不支持列出工作区。'));
   }
   try {
-    const { current, paths } = await workspacePathSnapshot(harness);
+    const { current, paths } = await workspacePathSnapshot(harness, { conversationKey });
     if (paths.length === 0) {
       return commandResult(t('当前 Harness Host 上没有仍然存在的已登记工作区。'));
     }
@@ -175,7 +175,9 @@ export async function resolveSessionListWorkspace(selector, harness, options = {
     if (typeof harness?.currentWorkspace !== 'function') {
       return { error: t('当前机器人没有可用的工作区。') };
     }
-    const selected = await selectedWorkspacePath(harness.currentWorkspace());
+    const selected = await selectedWorkspacePath(
+      harness.currentWorkspace(options.conversationKey),
+    );
     harness.assertWorkspaceScope?.();
     return selected;
   }
@@ -242,21 +244,25 @@ function sessionListMessage(workspace, sessions, { currentWorkspace = false } = 
   ].join('\n');
 }
 
-async function currentSessionListWorkspace(harness) {
+async function currentSessionListWorkspace(harness, conversationKey) {
   if (typeof harness?.currentWorkspace !== 'function') return null;
-  const [current] = await existingWorkspacePaths([harness.currentWorkspace()]);
+  const [current] = await existingWorkspacePaths([
+    harness.currentWorkspace(conversationKey),
+  ]);
   harness.assertWorkspaceScope?.();
   return current ?? null;
 }
 
-async function runSessionListCommand(match, harness) {
+async function runSessionListCommand(match, harness, conversationKey) {
   const request = parseSessionListArgument(match[1]);
   if (request.error) return commandResult(request.error);
   if (typeof harness?.listWorkspaceSessions !== 'function') {
     return commandResult(t('当前机器人暂不支持列出工作区会话。'));
   }
   try {
-    const resolved = await resolveSessionListWorkspace(request.selector, harness);
+    const resolved = await resolveSessionListWorkspace(request.selector, harness, {
+      conversationKey,
+    });
     if (resolved.error) return commandResult(resolved.error);
     const listed = await harness.listWorkspaceSessions(resolved.workspace);
     if (!listed || !Array.isArray(listed.sessions)) {
@@ -264,7 +270,7 @@ async function runSessionListCommand(match, harness) {
     }
     harness.assertWorkspaceScope?.();
     const workspace = normalizedWorkspacePath(listed.workspace) ?? resolved.workspace;
-    const currentWorkspace = await currentSessionListWorkspace(harness);
+    const currentWorkspace = await currentSessionListWorkspace(harness, conversationKey);
     const sessions = request.limit === null
       ? listed.sessions
       : listed.sessions.slice(0, request.limit);
@@ -317,7 +323,7 @@ async function runSessionBindCommand(command, harness, conversationKey) {
       return commandResult(t('当前机器人暂不支持按序号绑定，请使用 /session Session ID。'));
     }
     try {
-      const selected = await selectedWorkspacePath(harness.currentWorkspace());
+      const selected = await selectedWorkspacePath(harness.currentWorkspace(conversationKey));
       if (selected.error) return commandResult(selected.error);
       const listed = await harness.listWorkspaceSessions(selected.workspace);
       if (!listed || !Array.isArray(listed.sessions)) {
@@ -378,9 +384,9 @@ export async function runWorkspaceCommand(text, harness, conversationKey) {
     return runSessionBindCommand(command, harness, conversationKey);
   }
   const sessionListMatch = SESSION_LIST_COMMAND.exec(command);
-  if (sessionListMatch) return runSessionListCommand(sessionListMatch, harness);
+  if (sessionListMatch) return runSessionListCommand(sessionListMatch, harness, conversationKey);
   const listMatch = WORKSPACE_LIST_COMMAND.exec(command);
-  if (listMatch) return runWorkspaceListCommand(listMatch, harness);
+  if (listMatch) return runWorkspaceListCommand(listMatch, harness, conversationKey);
   const match = WORKSPACE_COMMAND.exec(command);
   if (!match) return null;
   const workspace = match[1]?.trim();
@@ -396,15 +402,19 @@ export async function runWorkspaceCommand(text, harness, conversationKey) {
       if (typeof harness?.listWorkspaces !== 'function') {
         return commandResult(t('当前机器人暂不支持按序号选择工作区。'));
       }
-      const { paths } = await workspacePathSnapshot(harness);
+      const { paths } = await workspacePathSnapshot(harness, { conversationKey });
       const position = Number(workspace);
       if (!Number.isSafeInteger(position) || position < 1 || position > paths.length) {
         return commandResult(t('工作区序号不存在，请先执行 /workspacelist。'));
       }
       selected = paths[position - 1];
     }
-    const current = await harness.switchWorkspace(selected);
-    return commandResult(t('工作区已切换为：{workspace}', { workspace: current }));
+    const current = await harness.switchWorkspace(selected, conversationKey);
+    const isolated = typeof harness.isolateConversationWorkspace === 'function'
+      && harness.isolateConversationWorkspace();
+    return commandResult(isolated
+      ? t('当前聊天的工作区已切换为：{workspace}', { workspace: current })
+      : t('工作区已切换为：{workspace}', { workspace: current }));
   } catch (error) {
     if (['workspace-not-absolute', 'workspace-not-found', 'workspace-not-directory'].includes(error?.code)) {
       return commandResult(t(`{message}

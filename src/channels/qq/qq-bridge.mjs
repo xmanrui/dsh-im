@@ -1,4 +1,5 @@
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
+import { runGuidanceCommand } from '../shared/guidance-command.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
@@ -22,7 +23,11 @@ import {
   runPresetCommand,
 } from '../shared/preset-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
-import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  enhanceContextContent,
+  overlayConversationGuidance,
+} from '../shared/context-enhancement.mjs';
 import {
   BatchInputManager,
   batchInputBusyMessage,
@@ -98,6 +103,7 @@ function helpText() {
     t('/workspace 工作区序号或绝对路径  切换工作区'),
     t('/workspacelist  列出工作区绝对路径'),
     t('/ws、/wsl、/workspaces  工作区命令别名'),
+    t('/guidance [提示词 | --clear]  查看或设置当前聊天的增强提示词'),
     t('/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题'),
     t('/sessionlist --limit N  仅列出当前工作区前 N 个会话'),
     t('/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话'),
@@ -528,9 +534,14 @@ export class QqHarnessBridge {
         return this.#finishAccessDecision(message, messageId, access);
       }
     }
-    this.#acceptedMessageIds.set(messageId, captureContextEnhancement(
+    this.#acceptedMessageIds.set(messageId, overlayConversationGuidance(
+      captureContextEnhancement(
+        this.#contextEnhancement,
+        message.kind === 'c2c' ? 'direct' : 'group',
+        key,
+      ),
       this.#contextEnhancement,
-      message.kind === 'c2c' ? 'direct' : 'group',
+      key,
     ));
     if (message.kind === 'c2c'
       && (this.#ownerUserOpenid === '*' || sender === this.#ownerUserOpenid)
@@ -702,7 +713,7 @@ export class QqHarnessBridge {
   }
 
   #menuContext(key) {
-    return { workspace: this.#harness.currentWorkspace?.(), sessionId: this.#state.sessionFor(key) };
+    return { workspace: this.#harness.currentWorkspace?.(key), sessionId: this.#state.sessionFor(key) };
   }
 
   async #showMenu(message, key, name, pageView = null) {
@@ -771,7 +782,8 @@ export class QqHarnessBridge {
         return { message: t('已开启新会话。请发送你的问题。') };
       });
       if (command === '/compact') return runCompactCommand(command, this.#harness, this.#state, key, options);
-      return runWorkspaceCommand(command, this.#harness, key);
+      return await runWorkspaceCommand(command, this.#harness, key)
+        ?? await runGuidanceCommand(command, this.#harness, key);
     };
     // Stop/steer must stay available while a slower menu mutation is pending.
     if (isControlCommand(command)) return execute();
@@ -979,6 +991,16 @@ export class QqHarnessBridge {
         : await runWorkspaceCommand(text, this.#harness, key);
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
+          await this.#bot.sendText(target, reply);
+        }
+        await markMessageSeen();
+        return;
+      }
+      const guidanceCommand = hasImages || hasFiles
+        ? null
+        : await runGuidanceCommand(text, this.#harness, key);
+      if (guidanceCommand) {
+        for (const reply of guidanceCommand.messages ?? [guidanceCommand.message]) {
           await this.#bot.sendText(target, reply);
         }
         await markMessageSeen();

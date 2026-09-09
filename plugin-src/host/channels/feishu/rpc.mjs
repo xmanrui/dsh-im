@@ -12,7 +12,12 @@ import {
 } from '../../../../src/channels/shared/model-setting.mjs';
 import { normalizeAccessPolicy } from '../../../../src/channels/shared/access-policy.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
-import { publicWorkspaceError, validWorkspacePayload } from '../shared/workspace-rpc.mjs';
+import {
+  publicWorkspaceError,
+  validIsolateGuidancePayload,
+  validIsolateWorkspacePayload,
+  validWorkspacePayload,
+} from '../shared/workspace-rpc.mjs';
 import { validAgentPresetPayload } from '../shared/agent-preset-rpc.mjs';
 import { validModelPayload } from '../shared/model-setting-rpc.mjs';
 import { validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
@@ -436,6 +441,14 @@ function validPayload(endpoint, payload) {
     return validWorkspacePayload(payload)
       ? null : '请输入工作区绝对路径。';
   }
+  if (endpoint === FEISHU_ENDPOINTS.setIsolateConversationWorkspace) {
+    return validIsolateWorkspacePayload(payload)
+      ? null : '请提交有效的工作区隔离设置。';
+  }
+  if (endpoint === FEISHU_ENDPOINTS.setIsolateConversationGuidance) {
+    return validIsolateGuidancePayload(payload)
+      ? null : '请提交有效的提示词隔离设置。';
+  }
   if (endpoint === FEISHU_ENDPOINTS.setModel) {
     return validModelPayload(payload) ? null : '请选择有效模型。';
   }
@@ -722,6 +735,24 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
         value = await toPublicFeishuStatus(
           await controller.updateWorkspace(payload.botId, payload.workspace),
           { encodeQr: cachedEncodeQr },
+        );
+      } else if (endpoint === FEISHU_ENDPOINTS.setIsolateConversationWorkspace) {
+        if (typeof controller.updateIsolateConversationWorkspace !== 'function') {
+          throw new Error('Workspace isolation update is unavailable');
+        }
+        value = await controller.updateIsolateConversationWorkspace(
+          payload.botId,
+          payload.isolateConversationWorkspace,
+          (status) => toPublicFeishuStatus(status, { encodeQr: cachedEncodeQr }),
+        );
+      } else if (endpoint === FEISHU_ENDPOINTS.setIsolateConversationGuidance) {
+        if (typeof controller.updateIsolateConversationGuidance !== 'function') {
+          throw new Error('Guidance isolation update is unavailable');
+        }
+        value = await controller.updateIsolateConversationGuidance(
+          payload.botId,
+          payload.isolateConversationGuidance,
+          (status) => toPublicFeishuStatus(status, { encodeQr: cachedEncodeQr }),
         );
       } else if (endpoint === FEISHU_ENDPOINTS.setModel) {
         if (typeof controller.updateModel !== 'function') throw new Error('Model update is unavailable');

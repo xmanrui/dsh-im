@@ -11,6 +11,7 @@ test('isSharedLocalCommand matches existing local command families', () => {
     '/workspacelist', '/sessionlist', '/sessions /tmp', '/session 2',
     '/compact', '/models', '/model 2', '/reasonings', '/reasoning high',
     '/presetlist', '/preset default',
+    '/guidance', '/guidance 只对这个群严肃', '/prompt --clear',
   ]) {
     assert.equal(isSharedLocalCommand(command), true, command);
   }

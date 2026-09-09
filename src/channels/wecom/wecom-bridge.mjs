@@ -32,8 +32,13 @@ import {
   runPresetCommand,
 } from '../shared/preset-command.mjs';
 import { runWorkspaceCommand, workspacePathSnapshot } from '../shared/workspace-command.mjs';
+import { runGuidanceCommand } from '../shared/guidance-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
-import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  enhanceContextContent,
+  overlayConversationGuidance,
+} from '../shared/context-enhancement.mjs';
 import {
   hasInboundImages,
   ImagePromptError,
@@ -80,6 +85,7 @@ function helpText() {
     t('/workspace 工作区序号或绝对路径  切换工作区'),
     t('/workspacelist  列出工作区绝对路径'),
     t('/ws、/wsl、/workspaces  工作区命令别名'),
+    t('/guidance [提示词 | --clear]  查看或设置当前聊天的增强提示词'),
     t('/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题'),
     t('/sessionlist --limit N  仅列出当前工作区前 N 个会话'),
     t('/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话'),
@@ -608,9 +614,9 @@ export class WecomHarnessBridge {
     return structuredClone(this.#status);
   }
 
-  #mainMenu() {
+  #mainMenu(key) {
     return wecomMenu({
-      workspace: this.#harness.currentWorkspace?.(),
+      workspace: this.#harness.currentWorkspace?.(key),
       workspaces: [[t('更多选项…'), '/menu workspaces']],
     });
   }
@@ -618,12 +624,12 @@ export class WecomHarnessBridge {
   async #showMain(frame, { welcome = false } = {}) {
     const previousFailure = this.#status.lastMessageError;
     const key = conversationKey(frame);
-    const workspace = this.#harness.currentWorkspace?.();
+    const workspace = this.#harness.currentWorkspace?.(key);
     const sessionId = this.#state.sessionFor(key);
     // The welcome reply has a five-second deadline. Show immediate controls,
     // then load the selectors independently of that reply window.
-    if (welcome) await this.#sendMenu(frame, this.#mainMenu(), { welcome: true });
-    const options = { signal: this.#signal };
+    if (welcome) await this.#sendMenu(frame, this.#mainMenu(key), { welcome: true });
+    const options = { signal: this.#signal, conversationKey: key };
     const settled = await Promise.allSettled([
       workspacePathSnapshot(this.#harness, options),
       this.#harness.listWorkspaceSessions?.(workspace, options),
@@ -677,7 +683,7 @@ export class WecomHarnessBridge {
     while (this.#menus.size >= 256) this.#menus.delete(this.#menus.keys().next().value);
     this.#menus.set(taskId, {
       menu, key: conversationKey(frame),
-      workspace: this.#harness.currentWorkspace?.(), expiresAt: now + 30 * 60_000,
+      workspace: this.#harness.currentWorkspace?.(conversationKey(frame)), expiresAt: now + 30 * 60_000,
     });
     return wecomTemplateCard(menu, taskId);
   }
@@ -806,7 +812,7 @@ export class WecomHarnessBridge {
     }
     const navigation = commands.find((command) => parseWecomMenu(command));
     if (navigation) commands = [navigation];
-    if (!navigation && entry.workspace !== this.#harness.currentWorkspace?.()) {
+    if (!navigation && entry.workspace !== this.#harness.currentWorkspace?.(key)) {
       await this.#sendActive(chatId, t('工作区已变化，请从新菜单重新选择。'));
     } else {
       for (const [index, command] of commands.entries()) {
@@ -826,7 +832,7 @@ export class WecomHarnessBridge {
 
   async #runMenuCommand(frame, text, _harness, _state, key) {
     const menu = parseWecomMenu(text);
-    const options = { signal: this.#signal };
+    const options = { signal: this.#signal, conversationKey: key };
     if (menu) {
       const previousFailure = this.#status.lastMessageError;
       let content;
@@ -840,7 +846,10 @@ export class WecomHarnessBridge {
         let description = '';
         if (menu.section === 'sessions') {
           title = t('📋 会话列表');
-          const listed = await this.#harness.listWorkspaceSessions(this.#harness.currentWorkspace(), options);
+          const listed = await this.#harness.listWorkspaceSessions(
+            this.#harness.currentWorkspace(key),
+            options,
+          );
           entries = listed.sessions.map((session) => [
             `${session.sessionId === this.#state.sessionFor(key) ? '✓ ' : ''}${session.title || t('暂无标题')}`,
             `/session ${session.sessionId}`,
@@ -891,6 +900,7 @@ export class WecomHarnessBridge {
       return { message: t('已开启新会话。请发送你的问题。') };
     }
     return await runWorkspaceCommand(text, this.#harness, key)
+      ?? await runGuidanceCommand(text, this.#harness, key)
       ?? await runCompactCommand(text, this.#harness, this.#state, key, options);
   }
 
@@ -925,9 +935,10 @@ export class WecomHarnessBridge {
       this.#acceptedMessageIds.set(messageId, null);
       return this.#finishAccessDecision(frame, messageId, chatId, access);
     }
-    this.#acceptedMessageIds.set(messageId, captureContextEnhancement(
+    this.#acceptedMessageIds.set(messageId, overlayConversationGuidance(
+      captureContextEnhancement(this.#contextEnhancement, conversationType, key),
       this.#contextEnhancement,
-      conversationType,
+      key,
     ));
     if (body.chattype === 'single') {
       rememberConnectionTestTarget(this.#state, { chatId });
@@ -1342,6 +1353,16 @@ export class WecomHarnessBridge {
         : await runWorkspaceCommand(text, this.#harness, key);
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
+          await this.#sendImmediate(frame, chatId, reply);
+        }
+        await this.#state.markSeen(messageId);
+        return;
+      }
+      const guidanceCommand = hasImages || hasFiles
+        ? null
+        : await runGuidanceCommand(text, this.#harness, key);
+      if (guidanceCommand) {
+        for (const reply of guidanceCommand.messages ?? [guidanceCommand.message]) {
           await this.#sendImmediate(frame, chatId, reply);
         }
         await this.#state.markSeen(messageId);

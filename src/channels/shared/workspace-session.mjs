@@ -70,7 +70,9 @@ export async function askInWorkspaceSession({
         let sessionId = state.sessionFor(key);
         let session = sessionId ? workspaceSession(harness, sessionId) : null;
         if (!session || !(await sessionExists(session, existsOptions))) {
-          sessionId = await createSession(harness, createOptions);
+          sessionId = await createSession(harness, createOptions === undefined
+            ? { conversationKey: key }
+            : { ...createOptions, conversationKey: key });
           if (await state.setSession(key, sessionId) === false) return null;
           session = workspaceSession(harness, sessionId);
           if (initialTitle && typeof session.renameTitle === 'function') {

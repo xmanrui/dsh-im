@@ -9,6 +9,7 @@ import {
   captureContextEnhancement,
   enhanceContextContent,
   normalizeContextEnhancementConfig,
+  overlayConversationGuidance,
   validateContextEnhancementConfig,
 } from '../src/channels/shared/context-enhancement.mjs';
 
@@ -309,4 +310,25 @@ test('enhancement-only source failures leave the original message processable', 
   const content = [{ type: 'text', text: 'still send me' }];
   assert.equal(enhanceContextContent(content, snapshot(), () => { throw new Error('broken source'); }), content);
   assert.equal(enhanceContextContent(content, snapshot(), () => ({ get channel() { throw new Error('broken getter'); } })), content);
+});
+
+test('conversation guidance overlay applies only when isolation is on', () => {
+  const settings = config({ groupEnabled: true, fields: ['senderId'], guidance: 'bot default' });
+  const provider = {
+    botId: 'bot_overlay',
+    getSettings: () => settings,
+    isolateConversationGuidance: () => true,
+    conversationGuidance: (key) => (key === 'group:a' ? 'chat a' : undefined),
+  };
+  const captured = captureContextEnhancement(provider, 'group', 'group:a');
+  assert.equal(captured.config.guidance, 'chat a');
+  const frozen = captureContextEnhancement({ botId: 'bot_overlay', getSettings: () => settings }, 'group');
+  assert.equal(frozen.config.guidance, 'bot default');
+  assert.equal(overlayConversationGuidance(frozen, provider, 'group:a').config.guidance, 'chat a');
+  assert.equal(overlayConversationGuidance(frozen, provider, 'group:b').config.guidance, 'bot default');
+  const off = {
+    ...provider,
+    isolateConversationGuidance: () => false,
+  };
+  assert.equal(captureContextEnhancement(off, 'group', 'group:a').config.guidance, 'bot default');
 });

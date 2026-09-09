@@ -968,7 +968,18 @@ export class TelegramRuntime {
           update,
           contextSnapshot: captureContextEnhancement(this.#contextEnhancement,
             chatType === 'private' ? 'direct'
-              : chatType === 'group' || chatType === 'supergroup' ? 'group' : null),
+              : chatType === 'group' || chatType === 'supergroup' ? 'group' : null,
+            (() => {
+              const chatId = update?.message?.chat?.id;
+              if (chatId === undefined || chatId === null) return undefined;
+              const threadId = Number.isSafeInteger(update?.message?.message_thread_id)
+                ? update.message.message_thread_id : undefined;
+              const conversationId = threadId === undefined
+                ? String(chatId) : `${chatId}:${threadId}`;
+              const kind = chatType === 'private' ? 'direct'
+                : chatType === 'group' || chatType === 'supergroup' ? 'group' : null;
+              return kind ? `${kind}:${conversationId}` : undefined;
+            })()),
         };
       });
       for (const { update, contextSnapshot } of received) {

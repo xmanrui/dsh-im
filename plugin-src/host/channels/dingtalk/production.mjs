@@ -11,6 +11,7 @@ import { DingtalkStateStore } from '../../../../src/channels/dingtalk/state-stor
 import {
   BotWorkspaceStore,
   createBotWorkspaceScope,
+  createContextEnhancementProvider,
   createWorkspaceAwareController,
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
@@ -132,7 +133,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         clientSecret,
         harness: workspaceScope.harness,
         state: workspaceScope.state,
-        contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
+        contextEnhancement: createContextEnhancementProvider(workspaces, botId),
         accessPolicy: accessPolicyProvider(workspaces, botId, {
           channel: 'dingtalk', config: botConfig,
         }),

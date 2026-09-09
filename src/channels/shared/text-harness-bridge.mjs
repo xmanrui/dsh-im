@@ -5,7 +5,12 @@ import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
 } from './inbound-access.mjs';
-import { captureContextEnhancement, enhanceContextContent } from './context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  enhanceContextContent,
+  overlayConversationGuidance,
+} from './context-enhancement.mjs';
+import { runGuidanceCommand } from './guidance-command.mjs';
 import { runWorkspaceCommand } from './workspace-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from './history-command.mjs';
@@ -237,9 +242,14 @@ export class TextHarnessBridge {
         );
       }
     }
-    this.#acceptedMessageIds.set(messageId, contextSnapshot === undefined
-      ? captureContextEnhancement(this.#contextEnhancement, message?.kind)
-      : contextSnapshot);
+    const conversationKey = `${kind}:${conversationId}`;
+    this.#acceptedMessageIds.set(messageId, overlayConversationGuidance(
+      contextSnapshot === undefined
+        ? captureContextEnhancement(this.#contextEnhancement, kind, conversationKey)
+        : contextSnapshot,
+      this.#contextEnhancement,
+      conversationKey,
+    ));
     const statusReaction = beginStatusReaction({
       adapter: this.#bot,
       target: normalized.kind === 'direct' || normalized.addressed === true
@@ -620,6 +630,15 @@ export class TextHarnessBridge {
         : null;
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
+          await this.#bot.sendText(target, reply);
+        }
+        return;
+      }
+      const guidanceCommand = !hasImages && !hasFiles
+        ? await runGuidanceCommand(text, this.#harness, conversationKey)
+        : null;
+      if (guidanceCommand) {
+        for (const reply of guidanceCommand.messages ?? [guidanceCommand.message]) {
           await this.#bot.sendText(target, reply);
         }
         return;

@@ -39,6 +39,9 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
     '/workspacelist  列出工作区绝对路径',
     '/ws、/wsl、/workspaces  工作区命令别名',
   ], { aliases: ['workspaces', 'wsl'] }),
+  defineCatalogCommand('guidance', '查看或设置增强提示词', [
+    '/guidance [提示词 | --clear]  查看或设置当前聊天的增强提示词',
+  ], { aliases: ['prompt'] }),
   defineCatalogCommand('sessionlist', '列出会话 ID 和标题', [
     '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题',
     '/sessionlist --limit N  仅列出当前工作区前 N 个会话',

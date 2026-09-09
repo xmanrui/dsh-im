@@ -46,6 +46,8 @@ export const SLASH_COMMAND_MANIFEST = Object.freeze([
   { command: 'workspaces', icon: 'folder_outlined', default: '列出工作区', en_us: 'List workspaces' },
   { command: 'wsl', icon: 'folder_outlined', default: '列出工作区', en_us: 'List workspaces' },
   { command: 'ws', icon: 'folder_outlined', default: '切换工作区', en_us: 'Switch workspace' },
+  { command: 'guidance', icon: 'promptword_outlined', default: '查看或设置当前聊天的增强提示词', en_us: 'Show or set this chat’s enhancement guidance' },
+  { command: 'prompt', icon: 'promptword_outlined', default: '查看或设置当前聊天的增强提示词', en_us: 'Show or set this chat’s enhancement guidance' },
   { command: 'watch', icon: 'flag_outlined', default: '关注一个会话', en_us: 'Watch a session' },
   { command: 'unwatch', icon: 'clear_outlined', default: '取消关注会话', en_us: 'Unwatch a session' },
   { command: 'watchlist', icon: 'flag_outlined', default: '查看关注列表', en_us: 'List watched sessions' },

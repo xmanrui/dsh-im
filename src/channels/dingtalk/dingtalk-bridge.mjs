@@ -28,9 +28,14 @@ import {
   isPresetCommand,
   runPresetCommand,
 } from '../shared/preset-command.mjs';
+import { runGuidanceCommand } from '../shared/guidance-command.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
-import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  enhanceContextContent,
+  overlayConversationGuidance,
+} from '../shared/context-enhancement.mjs';
 import {
   BatchInputManager,
   batchInputBusyMessage,
@@ -69,15 +74,20 @@ import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
 } from '../shared/inbound-access.mjs';
+import { isSharedLocalCommand } from '../shared/command-permission.mjs';
 import { t } from '../shared/i18n.mjs';
 
 const CARD_INITIAL_TEXT = '已连接 DeepSeek Harness，正在思考…';
 const INTERACTION_RESOLVED_TEXT = '这个问题已在其他客户端处理，无需再次回答。';
+const PENDING_INBOUND_TTL_MS = 10 * 60 * 1000;
+const PENDING_INBOUND_MAX_IMAGES = 5;
+const PENDING_INBOUND_MAX_FILES = 5;
 
 const HELP_TEXT_LINES = [
   '钉钉机器人已连接 DeepSeek Harness。',
   '',
   '直接发送文字、图片或文件即可继续当前会话。',
+  '群聊里点文件会直接发出：先发文件，再 @机器人 说明要做什么；也可以回复该文件后 @机器人。',
   '/m 或 /menu  打开下拉操作菜单',
   '/new  开启一个全新会话',
   '/compact  压缩当前会话的较早上下文',
@@ -85,6 +95,7 @@ const HELP_TEXT_LINES = [
   '/workspace 工作区序号或绝对路径  切换工作区',
   '/workspacelist  列出工作区绝对路径',
   '/ws、/wsl、/workspaces  工作区命令别名',
+  '/guidance [提示词 | --clear]  查看或设置当前聊天的增强提示词',
   '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题',
   '/sessionlist --limit N  仅列出当前工作区前 N 个会话',
   '/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话',
@@ -278,6 +289,33 @@ function dingtalkReplyReference(message, options) {
   };
 }
 
+function quotedInboundMedia(message, options) {
+  const replyEnvelope = message?.text;
+  if (replyEnvelope?.isReplyMsg !== true) return { images: [], files: [] };
+  const replied = replyEnvelope?.repliedMsg;
+  if (!replied || typeof replied !== 'object') return { images: [], files: [] };
+  const quoted = dingtalkInboundMessage({
+    msgtype: nonEmptyString(replied.msgType ?? replied.msgtype) ?? '',
+    text: {
+      content: nonEmptyString(parsedMessageContent({ content: replied.content })?.text) ?? '',
+    },
+    content: parsedMessageContent({ content: replied.content }) ?? {},
+    robotCode: message?.robotCode,
+  }, options);
+  return {
+    images: Array.isArray(quoted.images) ? quoted.images : [],
+    files: Array.isArray(quoted.files) ? quoted.files : [],
+  };
+}
+
+function isReservedLocalCommand(text) {
+  if (typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return isDingtalkMenuCommand(trimmed)
+    || isSharedLocalCommand(trimmed, { hasImages: false, hasFiles: false });
+}
+
 /** Normalize DingTalk picture and richText callbacks into lazy image references. */
 export function dingtalkInboundMessage(message, {
   api,
@@ -309,39 +347,46 @@ export function dingtalkInboundMessage(message, {
     clientSecret,
     loadReplyContent,
   });
+  const quoted = quotedInboundMedia(message, { api, clientId, clientSecret });
   return {
     content: text,
-    images: imageCodes.map((downloadCode, index) => ({
-      name: index === 0 ? 'image' : `image-${index + 1}`,
-      load: ({ signal, maxBytes }) => {
-        if (typeof api?.downloadImage !== 'function') {
-          throw new Error('DingTalk API does not support image downloads');
-        }
-        return api.downloadImage({
-          clientId,
-          clientSecret,
-          robotCode: message?.robotCode,
-          downloadCode,
-          signal,
-          maxBytes,
-        });
-      },
-    })),
-    files: fileCode ? [{
-      name: nonEmptyString(content?.fileName ?? content?.file_name) ?? 'file',
-      load: ({ signal } = {}) => {
-        if (typeof api?.downloadFile !== 'function') {
-          throw new Error('DingTalk API does not support file downloads');
-        }
-        return api.downloadFile({
-          clientId,
-          clientSecret,
-          robotCode: message?.robotCode,
-          downloadCode: fileCode,
-          signal,
-        });
-      },
-    }] : [],
+    images: [
+      ...imageCodes.map((downloadCode, index) => ({
+        name: index === 0 ? 'image' : `image-${index + 1}`,
+        load: ({ signal, maxBytes }) => {
+          if (typeof api?.downloadImage !== 'function') {
+            throw new Error('DingTalk API does not support image downloads');
+          }
+          return api.downloadImage({
+            clientId,
+            clientSecret,
+            robotCode: message?.robotCode,
+            downloadCode,
+            signal,
+            maxBytes,
+          });
+        },
+      })),
+      ...quoted.images,
+    ],
+    files: [
+      ...(fileCode ? [{
+        name: nonEmptyString(content?.fileName ?? content?.file_name) ?? 'file',
+        load: ({ signal } = {}) => {
+          if (typeof api?.downloadFile !== 'function') {
+            throw new Error('DingTalk API does not support file downloads');
+          }
+          return api.downloadFile({
+            clientId,
+            clientSecret,
+            robotCode: message?.robotCode,
+            downloadCode: fileCode,
+            signal,
+          });
+        },
+      }] : []),
+      ...quoted.files,
+    ],
     ...(replyTo ? { replyTo } : {}),
   };
 }
@@ -497,6 +542,9 @@ export class DingtalkHarnessBridge {
   #acceptedMessageIds = new Map();
   #approvals;
   #batchInputs = new BatchInputManager();
+  #pendingInbound = new Map();
+  #pendingInboundTtlMs = PENDING_INBOUND_TTL_MS;
+  #now = Date.now;
 
   constructor({
     api,
@@ -511,6 +559,8 @@ export class DingtalkHarnessBridge {
     replyTimeoutMs = 600_000,
     reactionTimeoutMs = 5_000,
     maxMessageChars = 4_000,
+    pendingInboundTtlMs = PENDING_INBOUND_TTL_MS,
+    now = Date.now,
     signal,
   }) {
     if (!api || typeof api.sendText !== 'function') throw new TypeError('DingTalk API is required');
@@ -533,6 +583,10 @@ export class DingtalkHarnessBridge {
       ? Math.floor(reactionTimeoutMs)
       : 5_000;
     this.#maxMessageChars = maxMessageChars;
+    this.#pendingInboundTtlMs = Number.isFinite(pendingInboundTtlMs) && pendingInboundTtlMs > 0
+      ? Math.floor(pendingInboundTtlMs)
+      : PENDING_INBOUND_TTL_MS;
+    this.#now = typeof now === 'function' ? now : Date.now;
     this.#signal = signal;
     this.#deferred = createDeferredDeliveryCoordinator({ harness, state, signal, logger,
       deliver: (entry, outcome) => this.#deliverDeferredOutcome(entry, outcome),
@@ -589,10 +643,13 @@ export class DingtalkHarnessBridge {
         return this.#finishAccessDecision(message, messageId, sessionWebhook, access);
       }
     }
-    this.#acceptedMessageIds.set(messageId, contextSnapshot === undefined ? captureContextEnhancement(
+    this.#acceptedMessageIds.set(messageId, overlayConversationGuidance(
+      contextSnapshot === undefined
+        ? captureContextEnhancement(this.#contextEnhancement, conversationType, key)
+        : contextSnapshot,
       this.#contextEnhancement,
-      conversationType,
-    ) : contextSnapshot);
+      key,
+    ));
     if (sessionWebhook && direct) {
       rememberConnectionTestTarget(this.#state, { sessionWebhook });
     }
@@ -852,7 +909,7 @@ export class DingtalkHarnessBridge {
       });
       return;
     }
-    if (entry.workspace !== this.#harness.currentWorkspace?.()
+    if (entry.workspace !== this.#harness.currentWorkspace?.(key)
       || entry.sessionId !== this.#state.sessionFor(key)) {
       result = { message: t('会话或工作区已变化，菜单已刷新，请重新选择。') };
     } else if ((this.#queues.has(key) || options.pendingInteraction || this.#batchInputs.status(key).phase !== 'idle')
@@ -868,6 +925,7 @@ export class DingtalkHarnessBridge {
       result = { message: helpText() };
     } else {
       result = await runWorkspaceCommand(command, this.#harness, key)
+        ?? await runGuidanceCommand(command, this.#harness, key)
         ?? await runCompactCommand(command, this.#harness, this.#state, key, options)
         ?? await runControlCommand(command, this.#harness, this.#state, key, options)
         ?? await runHistoryCommand(command, this.#harness, this.#state, key, options)
@@ -990,8 +1048,14 @@ export class DingtalkHarnessBridge {
       // Keep the existing rejection path without downloading an unusable file.
     }
     const addressed = String(message.conversationType) !== '2' || message.isInAtList === true;
+    let inbound = this.#inboundMessage(message, key);
+    if (!addressed) {
+      this.#stashPendingInbound(key, sender, inbound);
+    } else if (!isReservedLocalCommand(inbound.content)) {
+      inbound = this.#consumePendingInbound(inbound, key, sender);
+    }
     const preparedMessage = hasSafeReplyRoute && addressed
-      ? prefetchInboundFiles(this.#inboundMessage(message, key), { signal: this.#signal })
+      ? prefetchInboundFiles(inbound, { signal: this.#signal })
       : undefined;
     const previous = this.#queues.get(key) ?? Promise.resolve();
     const current = previous
@@ -1017,6 +1081,40 @@ export class DingtalkHarnessBridge {
       clientSecret: this.#clientSecret,
       loadReplyContent: (reference, options) => this.#loadReplyContent(key, reference, options),
     });
+  }
+
+  #pendingInboundKey(key, sender) {
+    return `${key}\0${sender}`;
+  }
+
+  #stashPendingInbound(key, sender, inbound) {
+    const images = Array.isArray(inbound?.images) ? inbound.images.filter(Boolean) : [];
+    const files = Array.isArray(inbound?.files) ? inbound.files.filter(Boolean) : [];
+    if (images.length === 0 && files.length === 0) return;
+    const id = this.#pendingInboundKey(key, sender);
+    const now = this.#now();
+    const existing = this.#pendingInbound.get(id);
+    const base = existing && (now - existing.storedAt) < this.#pendingInboundTtlMs
+      ? existing
+      : { images: [], files: [], storedAt: now };
+    this.#pendingInbound.set(id, {
+      images: [...base.images, ...images].slice(-PENDING_INBOUND_MAX_IMAGES),
+      files: [...base.files, ...files].slice(-PENDING_INBOUND_MAX_FILES),
+      storedAt: now,
+    });
+  }
+
+  #consumePendingInbound(inbound, key, sender) {
+    const id = this.#pendingInboundKey(key, sender);
+    const pending = this.#pendingInbound.get(id);
+    if (!pending) return inbound;
+    this.#pendingInbound.delete(id);
+    if (this.#now() - pending.storedAt >= this.#pendingInboundTtlMs) return inbound;
+    return {
+      ...inbound,
+      images: [...(inbound.images ?? []), ...pending.images],
+      files: [...(inbound.files ?? []), ...pending.files],
+    };
   }
 
   async #loadReplyContent(key, reference, { signal } = {}) {
@@ -1240,6 +1338,15 @@ export class DingtalkHarnessBridge {
         : null;
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
+          await this.#send(sessionWebhook, reply, this.#atUsersFor(message));
+        }
+        return;
+      }
+      const guidanceCommand = isPlainText && !hasImages && !hasFiles
+        ? await runGuidanceCommand(text, this.#harness, key)
+        : null;
+      if (guidanceCommand) {
+        for (const reply of guidanceCommand.messages ?? [guidanceCommand.message]) {
           await this.#send(sessionWebhook, reply, this.#atUsersFor(message));
         }
         return;

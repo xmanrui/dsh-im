@@ -6,6 +6,19 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Changed / 变更
+
+- 设置页机器人卡片新增「按聊天隔离工作区」开关（默认关闭）。开启后，`/workspace`、菜单工作区选择和跨工作区 `/session` 只作用于当前聊天：A 群切换工作区不再改写 B 群。关闭时仍整台机器人共用一个工作区。
+  Bot cards now include **Isolate workspace per chat** (off by default). When enabled, `/workspace`, menu workspace selectors, and cross-workspace `/session` binds apply only to the current chat, so switching workspace in group A no longer rewrites group B. When disabled, every chat of the bot still shares one workspace.
+
+- 设置页机器人卡片新增「按聊天隔离提示词」开关（默认关闭）。开启后，群聊或私聊里的 `/guidance`（别名 `/prompt`）只改当前聊天的增强提示词，不会改掉同一机器人的其他群；设置页仍编辑整台机器人的群聊/私聊默认提示词。关闭时 `/guidance` 仍按群聊或私聊整台机器人共用一份。群聊/私聊的启用开关与来源字段仍是机器人级设置。
+  Bot cards now include **Isolate guidance per chat** (off by default). When enabled, `/guidance` (alias `/prompt`) in a group or direct chat changes only that chat’s enhancement guidance. The settings card still edits the bot-wide group/direct defaults. When disabled, `/guidance` still writes the bot-wide group or direct guidance. Group/direct enable switches and source fields remain bot-wide.
+
+### Fixed / 修复
+
+- 钉钉群聊点选文件会立即发出，无法在同一条消息里 @ 机器人。现在同一发送者在约 10 分钟内 @ 机器人，或回复该文件后再 @，会把刚才暂存的文件或图片交给模型；`/help` 等本地命令不会误收附件。
+  DingTalk group chats send a file as soon as it is picked, so the bot cannot be @mentioned in the same message. The same sender can now @the bot within about 10 minutes, or reply to that file and @the bot, and the held file or image is attached to the model turn. Local commands such as `/help` do not consume the pending attachment.
+
 ## [4.17.1] - 2026-09-09
 
 ### Fixed / 修复

@@ -63,7 +63,7 @@ test('real catalog preserves existing aliases and excludes channel-specific comm
   const names = telegramCommandMenu().map((item) => item.command);
   assert.deepEqual(names, [
     'new', 'compact', 'history', 'workspace', 'ws', 'workspacelist', 'workspaces', 'wsl',
-    'sessionlist', 'sessions', 'session', 'models', 'reasoninglist', 'reasonings',
+    'guidance', 'prompt', 'sessionlist', 'sessions', 'session', 'models', 'reasoninglist', 'reasonings',
     'reasoning', 'model', 'presetlist', 'presets', 'preset', 'stop', 'steer',
     'batch', 'send', 'cancel', 'status', 'version', 'help',
   ]);

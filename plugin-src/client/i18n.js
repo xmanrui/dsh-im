@@ -266,6 +266,16 @@ const EN = Object.freeze({
   '错误码': 'Code',
   '参考号': 'Reference',
   '当前工作区': 'Current workspace',
+  '按聊天隔离工作区': 'Isolate workspace per chat',
+  '查看按聊天隔离工作区说明': 'View isolate-workspace-per-chat help',
+  '开启后，群聊或私聊里的 /workspace、菜单切换和跨工作区 /session 只影响当前聊天，不会改掉同一机器人的其他群。关闭后仍整台机器人共用一个工作区。':
+    'When enabled, /workspace, menu switches, and cross-workspace /session in a group or direct chat affect only that chat, not other chats of the same bot. When disabled, every chat of the bot still shares one workspace.',
+  '工作区隔离设置保存失败，请重试。': 'Could not save workspace isolation. Try again.',
+  '按聊天隔离提示词': 'Isolate guidance per chat',
+  '查看按聊天隔离提示词说明': 'View isolate-guidance-per-chat help',
+  '开启后，群聊或私聊里的 /guidance 只改当前聊天的增强提示词，不会改掉同一机器人的其他群。设置页仍编辑整台机器人的默认提示词。关闭后仍整台机器人共用群聊/私聊各一份提示词。':
+    'When enabled, /guidance in a group or direct chat changes only that chat’s enhancement guidance, not other chats of the same bot. The settings card still edits the bot-wide default. When disabled, every chat of the bot still shares one group guidance and one direct-chat guidance.',
+  '提示词隔离设置保存失败，请重试。': 'Could not save guidance isolation. Try again.',
   '选择目录': 'Choose folder',
   '选择机器人工作区目录': 'Select bot workspace folder',
   '当前目录': 'Current folder',

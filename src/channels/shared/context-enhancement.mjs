@@ -119,8 +119,37 @@ export function normalizeContextEnhancementConfig(input) {
   }
 }
 
+function overlayGuidance(scope, provider, conversationKey) {
+  if (!scope || typeof conversationKey !== 'string' || !conversationKey) return scope;
+  try {
+    if (provider?.isolateConversationGuidance?.() !== true) return scope;
+    if (typeof provider.conversationGuidance !== 'function') return scope;
+    const override = provider.conversationGuidance(conversationKey);
+    if (override === undefined || override === null) return scope;
+    if (typeof override !== 'string') return scope;
+    const guidance = override.length > CONTEXT_ENHANCEMENT_GUIDANCE_MAX_LENGTH
+      ? override.slice(0, CONTEXT_ENHANCEMENT_GUIDANCE_MAX_LENGTH)
+      : override;
+    if (guidance === scope.guidance) return scope;
+    return Object.freeze({ ...scope, guidance });
+  } catch {
+    return scope;
+  }
+}
+
+/**
+ * Replace snapshot guidance with a per-chat override when isolation is on.
+ * Missing overrides keep the bot-level group/direct guidance already captured.
+ */
+export function overlayConversationGuidance(snapshot, provider, conversationKey) {
+  if (!snapshot || typeof snapshot !== 'object' || !snapshot.config) return snapshot ?? null;
+  const config = overlayGuidance(snapshot.config, provider, conversationKey);
+  if (config === snapshot.config) return snapshot;
+  return Object.freeze({ ...snapshot, config });
+}
+
 /** Capture before queueing. The off path reads only the applicable switch. */
-export function captureContextEnhancement(provider, conversationType) {
+export function captureContextEnhancement(provider, conversationType, conversationKey) {
   if (conversationType !== 'group' && conversationType !== 'direct') return null;
   try {
     const settings = provider?.getSettings?.();
@@ -130,7 +159,7 @@ export function captureContextEnhancement(provider, conversationType) {
       : settings?.[legacyEnabledKey];
     if (enabled !== true) return null;
     const config = normalizeContextEnhancementConfig(settings);
-    const scope = config[conversationType];
+    const scope = overlayGuidance(config[conversationType], provider, conversationKey);
     if (scope.enabled !== true) return null;
     return Object.freeze({ config: scope, botId: provider.botId, conversationType });
   } catch {

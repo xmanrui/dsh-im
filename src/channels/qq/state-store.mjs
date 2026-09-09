@@ -62,6 +62,10 @@ export class QqStateStore {
     return this.#state.sessions[key] ?? null;
   }
 
+  sessionKeys() {
+    return Object.keys(this.#state.sessions);
+  }
+
   async setSession(key, sessionId) {
     this.#state.sessions[key] = sessionId;
     await this.#persist();

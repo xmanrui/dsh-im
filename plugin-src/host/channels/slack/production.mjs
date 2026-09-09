@@ -9,6 +9,7 @@ import { SlackStateStore } from '../../../../src/channels/slack/state-store.mjs'
 import {
   BotWorkspaceStore,
   createBotWorkspaceScope,
+  createContextEnhancementProvider,
   createWorkspaceAwareController,
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
@@ -112,7 +113,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         appToken,
         harness: workspaceScope.harness,
         state: workspaceScope.state,
-        contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
+        contextEnhancement: createContextEnhancementProvider(workspaces, botId),
         accessPolicy: accessPolicyProvider(workspaces, botId, {
           channel: 'slack', config: botConfig,
         }),

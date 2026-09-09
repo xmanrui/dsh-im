@@ -34,9 +34,14 @@ import {
   isPresetCommand,
   runPresetCommand,
 } from '../shared/preset-command.mjs';
+import { runGuidanceCommand } from '../shared/guidance-command.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
-import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  enhanceContextContent,
+  overlayConversationGuidance,
+} from '../shared/context-enhancement.mjs';
 import {
   hasInboundImages,
   imagePromptDiagnostic,
@@ -89,6 +94,7 @@ const HELP_TEXT = () => [
   t('/workspace 工作区序号或绝对路径  切换工作区'),
   t('/workspacelist  列出工作区绝对路径'),
   t('/ws、/wsl、/workspaces  工作区命令别名'),
+  t('/guidance [提示词 | --clear]  查看或设置当前聊天的增强提示词'),
   t('/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题'),
   t('/sessionlist --limit N  仅列出当前工作区前 N 个会话'),
   t('/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话'),
@@ -391,9 +397,11 @@ export class WeixinHarnessBridge {
       this.#acceptedMessageIds.set(messageId, null);
       return this.#finishAccessDecision(messageId, sender, message, access);
     }
-    this.#acceptedMessageIds.set(messageId, captureContextEnhancement(
+    const captureKey = conversationKey(sender);
+    this.#acceptedMessageIds.set(messageId, overlayConversationGuidance(
+      captureContextEnhancement(this.#contextEnhancement, 'direct', captureKey),
       this.#contextEnhancement,
-      'direct',
+      captureKey,
     ));
     if (sender === this.#ownerUserId) {
       rememberConnectionTestTarget(this.#state, { toUserId: sender });
@@ -777,6 +785,16 @@ export class WeixinHarnessBridge {
         : await runWorkspaceCommand(text, this.#harness, key);
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
+          await this.#send(sender, reply, contextToken, runId);
+        }
+        await this.#state.markSeen(messageId);
+        return;
+      }
+      const guidanceCommand = hasImages || hasFiles
+        ? null
+        : await runGuidanceCommand(text, this.#harness, key);
+      if (guidanceCommand) {
+        for (const reply of guidanceCommand.messages ?? [guidanceCommand.message]) {
           await this.#send(sender, reply, contextToken, runId);
         }
         await this.#state.markSeen(messageId);

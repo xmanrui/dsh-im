@@ -11,6 +11,7 @@ import { WecomRuntime } from '../../../../src/channels/wecom/wecom-runtime.mjs';
 import {
   BotWorkspaceStore,
   createBotWorkspaceScope,
+  createContextEnhancementProvider,
   createWorkspaceAwareController,
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
@@ -126,7 +127,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         secret,
         harness: workspaceScope.harness,
         state: workspaceScope.state,
-        contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
+        contextEnhancement: createContextEnhancementProvider(workspaces, botId),
         accessPolicy: accessPolicyProvider(workspaces, botId, {
           channel: 'wecom', config: botConfig,
         }),

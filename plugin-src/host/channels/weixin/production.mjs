@@ -14,6 +14,7 @@ import { WeixinRuntime } from '../../../../src/channels/weixin/weixin-runtime.mj
 import {
   BotWorkspaceStore,
   createBotWorkspaceScope,
+  createContextEnhancementProvider,
   createWorkspaceAwareController,
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
@@ -130,7 +131,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         token,
         harness: workspaceScope.harness,
         state: workspaceScope.state,
-        contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
+        contextEnhancement: createContextEnhancementProvider(workspaces, botId),
         accessPolicy: accessPolicyProvider(workspaces, botId, {
           channel: 'weixin', config: accountConfig,
         }),
