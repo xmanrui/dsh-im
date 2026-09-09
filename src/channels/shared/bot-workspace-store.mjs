@@ -1671,9 +1671,9 @@ export function createBotWorkspaceScope(
     };
   };
   const sessionGenerations = new Map();
-  const rememberSession = (sessionId, conversationKey) => {
+  const rememberSession = (sessionId, conversationKey, generation) => {
     sessionGenerations.set(sessionId, {
-      generation: workspaces.generationFor(botId, conversationKey),
+      generation: generation ?? workspaces.generationFor(botId, conversationKey),
       conversationKey: conversationKey ?? null,
     });
   };
@@ -1966,7 +1966,7 @@ export function createBotWorkspaceScope(
               throw error;
             }
           }
-          rememberSession(sessionId, conversationKey);
+          rememberSession(sessionId, conversationKey, generation);
           return sessionId;
         };
       }

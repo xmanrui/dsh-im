@@ -121,6 +121,7 @@ export default {
     'Send text, an image, a file, or a voice message already transcribed to text to continue the current session.',
   '{label}机器人已连接 DeepSeek Harness。': 'The {label} bot is connected to DeepSeek Harness.',
   '查看最近历史消息（仅私聊）': 'Show recent history (private chats only)',
+  '查看或设置增强提示词': 'Show or set enhancement guidance',
   '按序号列出当前模型可用推理等级': 'List reasoning efforts for the current model by index',
   '查看或切换当前推理等级': 'Show or switch the current reasoning effort',
   '/new  开启一个全新会话': '/new  Start a brand-new session',
