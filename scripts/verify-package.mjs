@@ -142,22 +142,39 @@ if (client.includes('settings.plugins.tab') || clientSources.includes('settings.
   throw new Error('client source or bundle still contains the legacy Plugins-tab settings entry');
 }
 // Connections still have no channel-enable toggle. Checkable inputs are owned
-// only by the shared context editor and the saved-target Session sync row.
-// The context editor contains one switch template and one mapped field-input
-// template; the delivery target adds one ordinary checkbox template.
+// by the shared context editor, the two per-chat isolate switches, and the
+// saved-target Session sync row. The context editor contains one switch
+// template and one mapped field-input template; each isolate editor adds one
+// switch; the delivery target adds one ordinary checkbox template.
 const contextEditorSource = await readFile(resolve(root, 'plugin-src/client/context-enhancement.js'), 'utf8');
+const isolateWorkspaceSource = await readFile(resolve(root, 'plugin-src/client/isolate-workspace-editor.js'), 'utf8');
+const isolateGuidanceSource = await readFile(resolve(root, 'plugin-src/client/isolate-guidance-editor.js'), 'utf8');
 const deliverySettingsSource = await readFile(resolve(root, 'plugin-src/client/delivery-settings.js'), 'utf8');
 const otherClientSources = clientSources
   .replace(contextEditorSource, '')
+  .replace(isolateWorkspaceSource, '')
+  .replace(isolateGuidanceSource, '')
   .replace(deliverySettingsSource, '');
+const isolateSwitchCount = (source) => (source.match(/role:\s*["']switch["']/g) ?? []).length;
+const isolateCheckboxCount = (source) => (source.match(/type:\s*["']checkbox["']/g) ?? []).length;
 if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || (deliverySettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySettingsSource)
-  || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 1
-  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 3) {
-  throw new Error('checkable inputs must be limited to context enhancement and Session sync');
+  || isolateSwitchCount(isolateWorkspaceSource) !== 1
+  || isolateCheckboxCount(isolateWorkspaceSource) !== 1
+  || isolateSwitchCount(isolateGuidanceSource) !== 1
+  || isolateCheckboxCount(isolateGuidanceSource) !== 1
+  || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 3
+  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 5) {
+  throw new Error('checkable inputs must be limited to context enhancement, chat isolation, and Session sync');
 }
-for (const marker of ['bot.context-enhancement.set', '<dsh_im_source>', '<dsh_im_source_guidance>']) {
+for (const marker of [
+  'bot.context-enhancement.set',
+  'bot.workspace.isolate.set',
+  'bot.guidance.isolate.set',
+  '<dsh_im_source>',
+  '<dsh_im_source_guidance>',
+]) {
   if (!host.includes(marker) || !client.includes(marker)) {
     throw new Error(`context-enhancement marker missing from Host or Client bundle: ${marker}`);
   }
