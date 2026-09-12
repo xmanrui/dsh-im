@@ -779,7 +779,7 @@ export class WecomHarnessBridge {
     const navigation = commands.find((command) => parseWecomMenu(command));
     if (navigation) commands = [navigation];
     if (!navigation && entry.workspace !== this.#harness.currentWorkspace?.()) {
-      await this.#sendActive(chatId, t('工作区已变化，请从新菜单重新选择。'));
+      await this.#sendActive(chatId, t('工作区已变化，请发送 /m 重新打开菜单后选择。'));
     } else {
       for (const [index, command] of commands.entries()) {
         const commandFrame = { ...normalized, body: { ...normalized.body,
@@ -789,10 +789,6 @@ export class WecomHarnessBridge {
         await this.accept(commandFrame);
       }
       if (!commands.length) await this.#sendActive(chatId, t('设置未改变。'));
-    }
-    if (!navigation) {
-      this.#cardFrames.add(normalized);
-      await this.#showMain(normalized);
     }
   }
 

@@ -23,7 +23,7 @@ export default {
   '暂无可用选项。': 'No options are available.',
   '预设仅用于之后的新会话。': 'Presets apply to future new sessions.',
   '部分模型暂不可用，可稍后重试。': 'Some models are unavailable. Try again later.',
-  '工作区已变化，请从新菜单重新选择。': 'The workspace changed. Please select again from the new menu.',
+  '工作区已变化，请发送 /m 重新打开菜单后选择。': 'The workspace changed. Send /m to reopen the menu and select again.',
   // Help text (wecom-bridge.mjs)
   '企业微信机器人已连接 DeepSeek Harness。': 'The Enterprise WeChat bot is connected to DeepSeek Harness.',
 
