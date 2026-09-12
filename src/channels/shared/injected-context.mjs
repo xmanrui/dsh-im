@@ -146,6 +146,8 @@ function blockAt(text, cursor, labels) {
         form: 'instructions',
         summary: null,
         text: text.slice(cursor, guidance.end),
+        // The producer wraps the body in exactly one newline on each side.
+        value: text.slice(cursor + tags.guidanceOpen.length + 1, guidance.end - tags.guidanceClose.length - 1),
       },
     };
   }
@@ -192,6 +194,29 @@ export function splitLeadingInjectedContext(text, options = {}) {
   }
   if (blocks.length === 0) return null;
   return { blocks, rest: text.slice(cursor) };
+}
+
+/**
+ * Read the guidance body one composed prompt carries, if any.
+ *
+ * The bridge publishes this before dispatch so the Host can materialize the
+ * guidance as prompt context instead of repeating it in every user message.
+ *
+ * @param content - one prompt's content parts, as the channel composed them.
+ * @returns the guidance body, or undefined when the prompt carries none.
+ */
+export function guidanceInPromptContent(content) {
+  if (!Array.isArray(content) || content.length === 0) return undefined;
+  for (const part of content) {
+    if (part === null || typeof part !== 'object'
+      || part.type !== 'text' || typeof part.text !== 'string') return undefined;
+    const split = splitLeadingInjectedContext(part.text);
+    if (split === null) return undefined;
+    const guidance = split.blocks.find((block) => block.form === 'instructions');
+    if (guidance !== undefined) return guidance.value;
+    if (split.rest.length > 0) return undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -274,6 +299,8 @@ function claimedInjectedContext(message, labels) {
  * @param options.newId - identity factory for the added context messages.
  * @param options.plugin - source plugin name recorded on them.
  * @param options.labels - localized row labels; `reply` names the reply row.
+ * @param options.ownedGuidance - guidance the Host already materializes for the
+ *   session; a block carrying exactly this body is not emitted again.
  * @returns a new array when at least one message was split, otherwise null.
  */
 export function rewriteInjectedContextMessages(messages, options = {}) {
@@ -290,10 +317,14 @@ export function rewriteInjectedContextMessages(messages, options = {}) {
       rewritten.push(message);
       continue;
     }
+    const after = typeof options.ownedGuidance === 'string'
+      ? claimed.after.filter((block) => !(block.form === 'instructions'
+        && block.value === options.ownedGuidance))
+      : claimed.after;
     changed = true;
     for (const block of claimed.before) rewritten.push(contextMessage(block, newId, plugin));
     rewritten.push({ ...message, content: claimed.content });
-    for (const block of claimed.after) rewritten.push(contextMessage(block, newId, plugin));
+    for (const block of after) rewritten.push(contextMessage(block, newId, plugin));
   }
   return changed ? rewritten : null;
 }

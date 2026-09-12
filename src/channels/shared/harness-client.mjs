@@ -13,6 +13,8 @@ import {
   imageFileSourcesFromContent,
   isModelImageRejection,
 } from './image-prompt.mjs';
+import { guidanceInPromptContent } from './injected-context.mjs';
+import { imSourceGuidance } from './im-source-guidance.mjs';
 import { outboundArtifactRegistry } from './semantic/artifact.mjs';
 import { t } from './i18n.mjs';
 import { watchHarnessMux } from './harness-mux.mjs';
@@ -1508,6 +1510,9 @@ export class HarnessClient {
       if (!Array.isArray(content) || content.length === 0) {
         throw new TypeError('Harness prompt content is required');
       }
+      // Publish the guidance the channel composed so the Host materializes it
+      // once per Session as prompt context instead of per user message.
+      imSourceGuidance.publish(sessionId, guidanceInPromptContent(content));
       const clientTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const sendPrompt = (promptContent) => this.rpc('session.prompt', {
         sessionId,

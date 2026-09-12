@@ -11,9 +11,15 @@ import {
   CONTEXT_SUMMARY_MAX_LENGTH,
   DEFAULT_REPLY_LABEL,
   INJECTED_CONTEXT_PLUGIN,
+  guidanceInPromptContent,
   rewriteInjectedContextMessages,
   splitLeadingInjectedContext,
 } from '../src/channels/shared/injected-context.mjs';
+import {
+  IM_SOURCE_GUIDANCE_CONTEXT,
+  IM_SOURCE_GUIDANCE_ORDER,
+  imSourceGuidance,
+} from '../src/channels/shared/im-source-guidance.mjs';
 import { installInjectedContext } from '../plugin-src/host/injected-context.mjs';
 
 const SOURCE = { channel: 'feishu', senderName: '张三' };
@@ -269,15 +275,15 @@ test('the Host installer pairs context on the step it admits', async () => {
   };
   const dispose = installInjectedContext(ctx, { logger: { warn() {} } });
   assert.equal(typeof dispose, 'function');
-  assert.equal(registrations.length, 1);
-  assert.equal(registrations[0].name, 'agent/pre-step');
-  assert.deepEqual(registrations[0].options, { global: true });
+  const preStep = registrations.find((entry) => entry.name === 'agent/pre-step');
+  assert.notEqual(preStep, undefined);
+  assert.deepEqual(preStep.options, { global: true });
 
   const message = imTextMessage({
     id: 'u1', text: '一号', options: { fields: ['channel'] }, source: { channel: 'feishu' },
   });
   const decision = { kind: 'enter', messages: [message] };
-  const result = await registrations[0].listener({}, async () => decision);
+  const result = await preStep.listener({}, async () => decision);
   assert.notEqual(result, decision);
   assert.deepEqual(result.messages.map((entry) => (entry.source.kind === 'plugin' ? 'context' : 'user')),
     ['user', 'context']);
@@ -289,7 +295,12 @@ test('the Host installer pairs context on the step it admits', async () => {
 
 test('the Host installer leaves a rejected or unrelated step alone', async () => {
   let listener;
-  installInjectedContext({ on: (name, handler) => { listener = handler; return () => {}; } });
+  installInjectedContext({
+    on: (name, handler) => {
+      if (name === 'agent/pre-step') listener = handler;
+      return () => {};
+    },
+  });
   const rejected = { kind: 'reject' };
   assert.equal(await listener({}, async () => rejected), rejected);
   const empty = { kind: 'enter', messages: [] };
@@ -300,7 +311,10 @@ test('a rewrite failure keeps the original step and reports it', async () => {
   const warnings = [];
   let listener;
   installInjectedContext({
-    on: (name, handler) => { listener = handler; return () => {}; },
+    on: (name, handler) => {
+      if (name === 'agent/pre-step') listener = handler;
+      return () => {};
+    },
   }, { logger: { warn: (...args) => warnings.push(args) } });
   const decision = {
     kind: 'enter',
@@ -343,4 +357,134 @@ test('a prefixed reply splits into reply, user text, then source', () => {
   assert.equal(rewritten[1].source.rpcId, 'weixin-u9');
   assert.equal(rewritten[1].content.length, 1);
   assert.equal(rewriteInjectedContextMessages(rewritten, { newId }), null);
+});
+
+test('the composed prompt exposes the guidance a bridge publishes', () => {
+  const options = { fields: ['channel'], guidance: '严肃一点' };
+  const source = () => ({ channel: 'feishu' });
+  const text = enhanceContextContent('原始消息', snapshot(options), source);
+  assert.equal(guidanceInPromptContent([{ type: 'text', text }]), '严肃一点');
+  const structured = enhanceContextContent(
+    [{ type: 'text', text: '看图' }], snapshot(options), source,
+  );
+  assert.equal(guidanceInPromptContent(structured), '严肃一点');
+  assert.equal(guidanceInPromptContent([{ type: 'text', text: '没有注入块' }]), undefined);
+  assert.equal(guidanceInPromptContent([]), undefined);
+  assert.equal(guidanceInPromptContent(undefined), undefined);
+});
+
+test('guidance the Host already materializes is not repeated in the message', () => {
+  const message = imTextMessage({
+    id: 'u1', text: '一号', options: { fields: ['channel'], guidance: '严肃一点' },
+    source: { channel: 'feishu' },
+  });
+  const forms = (result) => result.map((entry) => (
+    entry.source.kind === 'plugin' ? entry.source.form : 'user'
+  ));
+  assert.deepEqual(
+    forms(rewriteInjectedContextMessages([message], {
+      newId: identityFactory(), ownedGuidance: '严肃一点',
+    })),
+    ['user', 'notice'],
+  );
+  // Guidance changed between dispatch and claim still reaches the model.
+  assert.deepEqual(
+    forms(rewriteInjectedContextMessages([message], {
+      newId: identityFactory(), ownedGuidance: '另一套',
+    })),
+    ['user', 'notice', 'instructions'],
+  );
+  // Nothing published for the session keeps the message-side copy.
+  assert.deepEqual(
+    forms(rewriteInjectedContextMessages([message], { newId: identityFactory() })),
+    ['user', 'notice', 'instructions'],
+  );
+});
+
+test('the guidance registry keeps guidance per session', () => {
+  imSourceGuidance.publish('registry-a', '严肃一点');
+  imSourceGuidance.publish('registry-b', '轻松一点');
+  assert.equal(imSourceGuidance.get('registry-a'), '严肃一点');
+  assert.equal(imSourceGuidance.get('registry-b'), '轻松一点');
+  assert.equal(imSourceGuidance.get('registry-missing'), undefined);
+  assert.equal(imSourceGuidance.get(undefined), undefined);
+  // Empty guidance clears the session so its snapshot stops being rendered.
+  imSourceGuidance.publish('registry-a', '   ');
+  assert.equal(imSourceGuidance.get('registry-a'), undefined);
+  imSourceGuidance.publish('registry-b', '');
+  assert.equal(imSourceGuidance.get('registry-b'), undefined);
+  imSourceGuidance.publish('registry-c', 'x');
+  imSourceGuidance.forget('registry-c');
+  assert.equal(imSourceGuidance.get('registry-c'), undefined);
+  imSourceGuidance.publish(undefined, 'x');
+});
+
+test('the Host installer materializes guidance as session prompt context', async () => {
+  const contexts = [];
+  const registrations = [];
+  const published = new Map([['s1', '严肃一点']]);
+  const registry = {
+    get: (id) => published.get(id),
+    forget: (id) => published.delete(id),
+  };
+  installInjectedContext({
+    systemPrompt: {
+      context: (definition) => {
+        contexts.push(definition);
+        return () => {};
+      },
+    },
+    on: (name, listener) => {
+      registrations.push({ name, listener });
+      return () => {};
+    },
+  }, { registry });
+
+  assert.equal(contexts.length, 1);
+  assert.equal(contexts[0].name, IM_SOURCE_GUIDANCE_CONTEXT);
+  assert.equal(contexts[0].order, IM_SOURCE_GUIDANCE_ORDER);
+  assert.equal(contexts[0].text({ agent: { session: { id: 's1' } } }), '严肃一点');
+  assert.equal(contexts[0].text({ agent: { session: { id: 'unknown' } } }), '');
+  assert.equal(contexts[0].text(undefined), '');
+
+  // A disposed Agent releases its session's guidance.
+  const disposed = registrations.find((entry) => entry.name === 'agent/disposed');
+  assert.notEqual(disposed, undefined);
+  disposed.listener({ agent: { session: { id: 's1' } } });
+  assert.equal(published.has('s1'), false);
+
+  // The step listener hands the owned guidance to the rewriter.
+  published.set('s1', '严肃一点');
+  const preStep = registrations.find((entry) => entry.name === 'agent/pre-step');
+  const message = imTextMessage({
+    id: 'u2', text: '二号', options: { fields: ['channel'], guidance: '严肃一点' },
+    source: { channel: 'feishu' },
+  });
+  const decision = { kind: 'enter', messages: [message] };
+  const result = await preStep.listener({ agent: { session: { id: 's1' } } }, async () => decision);
+  assert.deepEqual(result.messages.map((entry) => (
+    entry.source.kind === 'plugin' ? entry.source.form : 'user'
+  )), ['user', 'notice']);
+});
+
+test('the Host installer waits for systemPrompt through ctx.inject', () => {
+  const injected = [];
+  const contexts = [];
+  installInjectedContext({
+    inject: (services, callback) => {
+      injected.push(services);
+      callback({
+        systemPrompt: {
+          context: (definition) => {
+            contexts.push(definition);
+            return () => {};
+          },
+        },
+      });
+    },
+    on: () => () => {},
+  }, { registry: { get: () => undefined, forget: () => {} } });
+  assert.deepEqual(injected, [['systemPrompt']]);
+  assert.equal(contexts.length, 1);
+  assert.equal(contexts[0].name, IM_SOURCE_GUIDANCE_CONTEXT);
 });
