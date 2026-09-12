@@ -2,6 +2,15 @@
 export default {
   '这个问题已在其他客户端处理，无需再次回答。':
     'This question has already been answered from another client; no further reply is needed.',
+  '当前还有一个未回答的问题。': 'A question is still pending an answer.',
+  '请从上方选项中选择，或直接回复自定义答案；':
+    'Pick one of the options above, or reply with a custom answer;',
+  '如需放弃本轮，请发送 /stop。': 'To discard this round, send /stop.',
+  '该选项已过期。': 'This option is no longer available.',
+  '无效的选项。': 'Invalid option.',
+  '已选择。': 'Selected.',
+  '该问题已处理完成。': 'This question has already been handled.',
+  '提交失败，请重试。': 'Failed to submit; please try again.',
   '任务已完成。': 'Task completed.',
   '结果文件': 'result file',
   '结果文件「{name}」的发送结果未能确认，请先检查聊天内是否已收到，不要立即重试。':
