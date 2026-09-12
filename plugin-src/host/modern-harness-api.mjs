@@ -479,8 +479,32 @@ class ModernHarnessApi {
         'ask_user_question was aborted before the user answered', 'ASK_ABORTED',
       ));
     }
-    return new Promise((resolve, reject) => {
-      const pending = {
+    // Race the IM answer against the host's own answerers (Web/CLI). Claiming the
+    // request exclusively used to keep the question out of Web entirely, leaving
+    // whoever happened to be looking at that Session with a card they could not
+    // answer. Racing keeps both surfaces usable: the first answer wins.
+    const im = this.#askThroughIm(request, owner);
+    const native = Promise.resolve()
+      .then(() => next())
+      // In a pure-IM session no client is connected and the host rejects with
+      // NO_PROVIDER. That must not fail the question — stay pending for IM.
+      .catch(() => new Promise(() => {}));
+    return Promise.race([native, im.promise]).finally(() => {
+      // Losing side cleanup. A host answer already settled this request, so drop
+      // the IM pending: leaving it registered would let a late press answer a
+      // question the model has moved past. Settling is idempotent.
+      im.dismiss(new Error('another client answered this question'));
+    });
+  }
+
+  /**
+   * Present one question to IM clients. Returns the answer promise plus a
+   * `dismiss` used to retire the pending when the host answers first.
+   */
+  #askThroughIm(request, owner) {
+    let pending = null;
+    const promise = new Promise((resolve, reject) => {
+      pending = {
         rpcId: randomUUID(),
         sessionId: owner.sessionId,
         questions: request.questions,
@@ -505,6 +529,10 @@ class ModernHarnessApi {
       request.signal?.addEventListener('abort', onAbort, { once: true });
       this.#broadcast(this.#questionFrame(pending).payload, pending.rpcId);
     });
+    return {
+      promise,
+      dismiss: (reason) => pending?.settle('cancelled', reason),
+    };
   }
 
   #approvalFrame(pending) {

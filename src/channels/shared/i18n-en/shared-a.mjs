@@ -226,4 +226,15 @@ export default {
     'Failed to submit the answer. Please resend your answer to the current question.',
   '检测到这个 Session 中遗留的待回答问题，已安全取消并继续处理你刚才的消息。':
     'A pending question left over in this Session was detected. It has been safely cancelled, and your latest message is being processed.',
+  // Inline-keyboard question cards (text-harness-bridge.mjs).
+  '该问题已处理，无需再次选择。':
+    'This question has already been handled; no further choice is needed.',
+  '只有发起当前任务的用户可以处理这条问题。':
+    'Only the user who started this task can answer this question.',
+  '正在提交你的选择，请稍候。': 'Submitting your choice, please wait.',
+  '这个选项已失效，请使用最新一条问题。':
+    'This option has expired. Please use the most recent question message.',
+  '多选问题请直接回复文字。':
+    'Please answer a multi-select question by replying with text.',
+  '已选择：{label}': 'Selected: {label}',
 };
