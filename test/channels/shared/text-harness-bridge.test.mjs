@@ -2869,6 +2869,84 @@ test('shared bridge never starts a keepalive timer for a non-keepalive stream', 
   assert.equal(typings.length, 1, 'only the initial typing indicator is sent');
 });
 
+test('Telegram question clears the draft after pending writes and keeps replies enabled until the final answer', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const fixture = stateFixture();
+  const refreshGate = deferred();
+  const answered = deferred();
+  const drafts = [];
+  const messages = [];
+  const finals = [];
+  let options;
+  let draftActive = false;
+  const target = { chatId: 42, chatType: 'private' };
+  const bot = new TelegramBotClient({
+    api: {
+      sendChatAction: async () => true,
+      sendRichMessageDraft: async (payload) => {
+        drafts.push(payload);
+        if (drafts.length === 2) await refreshGate.promise;
+        draftActive = true;
+        return true;
+      },
+      sendMessage: async (payload) => {
+        // Telegram clears a live draft when a regular message arrives.
+        draftActive = false;
+        messages.push(payload);
+        return { message_id: 199 };
+      },
+      sendRichMessage: async (payload) => {
+        finals.push(payload);
+        return { message_id: 200 };
+      },
+    },
+  });
+  const bridge = new TelegramHarnessBridge({
+    bot,
+    state: fixture.state,
+    harness: {
+      createSession: async () => 'session-one',
+      ask: async (_sessionId, _text, askOptions) => {
+        options = askOptions;
+        await answered.promise;
+        return 'ISSUE199_DONE Green';
+      },
+    },
+  });
+  const processing = bridge.accept(message('draft-question', 'Choose a color', { replyTarget: target }));
+  t.after(async () => {
+    refreshGate.resolve();
+    answered.resolve();
+    await processing;
+  });
+  await eventually(() => options !== undefined);
+  t.mock.timers.tick(4_000);
+  await eventually(() => drafts.length === 2);
+  const presentation = options.onInteraction(questionInteraction({
+    questions: [{ id: 'color', question: 'Choose a color', options: [{ label: 'Blue' }, { label: 'Green' }] }],
+    respond: async (response) => {
+      if (!response.ok) return { accepted: true };
+      assert.deepEqual(response.value.answer.answers, [{ id: 'color', selected: ['Green'] }]);
+      answered.resolve();
+      return { accepted: true };
+    },
+  }));
+  const lateProgress = options.onUpdate({ type: 'tool', name: 'ask_user_question' });
+  await new Promise(setImmediate);
+  assert.equal(messages.length, 0, 'the question must wait for an in-flight draft to finish');
+  refreshGate.resolve();
+  await Promise.all([presentation, lateProgress]);
+  assert.equal(messages.length, 1);
+  assert.equal(draftActive, false, 'a late draft must not replace the question and block replies');
+  t.mock.timers.tick(40_000);
+  await options.onUpdate({ type: 'text', text: 'Waiting for your choice' });
+  assert.equal(drafts.length, 2, 'neither heartbeat nor progress may restart the draft');
+  await bridge.accept(message('draft-answer', '2', { replyTarget: target }));
+  await processing;
+  assert.equal(finals.length, 1);
+  assert.equal(finals[0].richMessage.markdown, 'ISSUE199_DONE Green');
+});
+
 test('slow Telegram heartbeat does not queue redundant drafts ahead of the final answer', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const fixture = stateFixture();

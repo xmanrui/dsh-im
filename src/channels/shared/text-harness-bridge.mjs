@@ -744,12 +744,18 @@ export class TextHarnessBridge {
                 : progress);
             }
           } : undefined,
-          onInteraction: (interaction) => this.#handleInteraction(interaction, {
-            key: conversationKey,
-            actor: senderId,
-            target,
-            requiresMention: message.kind === 'group' && message.requiresMention !== false,
-          }),
+          onInteraction: async (interaction) => {
+            if (stream?.keepalive === true && typeof stream.stopPreview === 'function') {
+              stopKeepalive();
+              await stream.stopPreview();
+            }
+            return this.#handleInteraction(interaction, {
+              key: conversationKey,
+              actor: senderId,
+              target,
+              requiresMention: message.kind === 'group' && message.requiresMention !== false,
+            });
+          },
           onInteractionResolved: (resolution) => this.#handleInteractionResolved(resolution),
           files: message.files,
         },

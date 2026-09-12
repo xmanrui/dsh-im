@@ -327,6 +327,7 @@ class TelegramDeliveryStream {
   #lastUpdate = null;
   #lastBlock = null;
   #keepalive = false;
+  #previewStopped = false;
   #chain = Promise.resolve();
 
   constructor({
@@ -367,9 +368,17 @@ class TelegramDeliveryStream {
     return run;
   }
 
+  // Live drafts can block the user's composer. Drain any pending draft before
+  // the regular question/approval message clears it, and keep this turn's
+  // preview stopped so late progress cannot block the answer again.
+  stopPreview() {
+    this.#previewStopped = true;
+    return this.#enqueue(() => undefined);
+  }
+
   update(value) {
     return this.#enqueue(async () => {
-      if (this.#closed) return undefined;
+      if (this.#closed || this.#previewStopped) return undefined;
       const block = createTextDeliveryBlock(value);
       this.#lastBlock = block;
       const key = `${block.format}:${block.text}`;
@@ -390,7 +399,7 @@ class TelegramDeliveryStream {
    *  never overtakes a later finish(). No-op for carriers without keepalive. */
   refresh() {
     return this.#enqueue(async () => {
-      if (this.#closed || !this.#keepalive || !this.#lastBlock) return undefined;
+      if (this.#closed || this.#previewStopped || !this.#keepalive || !this.#lastBlock) return undefined;
       try {
         return await this.#update(this.#lastBlock);
       } catch (error) {
