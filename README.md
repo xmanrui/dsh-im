@@ -35,6 +35,9 @@
 
 ---
 
+> [!NOTE]
+> **DSH-IM 已获得 DeepSeek Harness 官方认可**，并获得价值 **人民币 1,000 元的 Token 额度奖励**。感谢官方对本项目的肯定与支持！
+
 ## 简介
 
 通过扫码、App Manifest 或已有机器人凭据把 IM 机器人接入 DeepSeek Harness，并让本机 Harness 主动连接公网 AI Office。一个插件、一个设置入口，统一管理内置 IM 渠道和 AI Office Connector。**每个 IM 渠道都支持接入多个机器人**，各机器人的连接状态、工作区、模型和会话绑定彼此独立；iMessage 是本机 Messages.app 身份接入的例外，详见[iMessage 渠道说明](docs/imessage.md)。

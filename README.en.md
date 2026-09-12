@@ -34,6 +34,9 @@
 
 ---
 
+> [!NOTE]
+> **DSH-IM has received official recognition from DeepSeek Harness**, along with an award of **RMB 1,000 in token credits**. Thank you to the DeepSeek Harness team for recognizing and supporting this project!
+
 ## Introduction
 
 Connect IM bots to DeepSeek Harness by scanning a QR code, using an App Manifest, or entering existing bot credentials, and let the local Harness connect outward to a public AI Office. One plugin and one settings entry manage the built-in IM channels and the AI Office Connector. iMessage uses one native Messages.app identity per macOS user account; see the [iMessage channel notes](docs/imessage.md).
