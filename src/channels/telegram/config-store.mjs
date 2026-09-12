@@ -50,12 +50,15 @@ export function normalizeTelegramAccessPolicy(value = {}) {
 function normalizeTelegramBotExtension(value) {
   const hasAccessMode = Object.hasOwn(value, 'accessMode');
   const hasAllowedUsers = Object.hasOwn(value, 'allowedUsers');
-  if (!hasAccessMode && !hasAllowedUsers) return {};
+  const hasThinkingTraces = Object.hasOwn(value, 'thinkingTraces');
+  if (!hasAccessMode && !hasAllowedUsers && !hasThinkingTraces) return {};
   try {
     const policy = normalizeTelegramAccessPolicy(value);
     return {
       ...(hasAccessMode ? { accessMode: policy.accessMode } : {}),
       ...(hasAllowedUsers || hasAccessMode ? { allowedUsers: policy.allowedUsers } : {}),
+      // Explicit field is kept; an absent field stays absent.
+      ...(hasThinkingTraces ? { thinkingTraces: value.thinkingTraces === true } : {}),
     };
   } catch {
     return null;

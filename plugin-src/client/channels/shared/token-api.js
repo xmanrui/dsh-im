@@ -37,6 +37,7 @@ export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   setContextEnhancement: 'bot.context-enhancement.set',
   setAccessPolicy: 'bot.access-policy.set',
   setAlias: 'bot.alias.set',
+  setThinkingTraces: 'bot.thinking-traces.set',
 });
 
 export function createTokenChannelApi(channel, connectionSummary, {
@@ -67,6 +68,8 @@ export function createTokenChannelApi(channel, connectionSummary, {
       model: normalizeModelSelection(value.model),
       agentPreset: normalizeAgentPresetId(value.agentPreset),
       contextEnhancement: normalizeContextEnhancementConfig(value.contextEnhancement),
+      // Absent from the backend means ON; only an explicit false opts out.
+      thinkingTraces: value.thinkingTraces !== false,
       ...(Object.hasOwn(value, 'accessPolicy')
         ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }
         : {}),

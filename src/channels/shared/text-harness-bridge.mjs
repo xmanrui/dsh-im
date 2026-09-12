@@ -140,6 +140,7 @@ export class TextHarnessBridge {
   #deferred;
   #contextEnhancement;
   #accessPolicy;
+  #thinkingTraces;
   #status;
   #logger;
   #replyTimeoutMs;
@@ -162,6 +163,7 @@ export class TextHarnessBridge {
     state,
     contextEnhancement,
     accessPolicy,
+    thinkingTraces = false,
     status = createTextBridgeStatus(),
     logger = console,
     replyTimeoutMs = 600_000,
@@ -177,6 +179,7 @@ export class TextHarnessBridge {
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
+    this.#thinkingTraces = thinkingTraces;
     this.#status = status;
     this.#logger = logger;
     this.#replyTimeoutMs = replyTimeoutMs;
@@ -659,26 +662,42 @@ export class TextHarnessBridge {
         this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] typing indicator failed:`, error);
       });
       let streamFinished = false;
-      if (typeof this.#bot.openDeliveryStream === 'function') {
+      if (this.#thinkingTraces && typeof this.#bot.openThinkingStream === 'function') {
         try {
-          stream = await this.#bot.openDeliveryStream(target);
-          semanticStream = true;
+          stream = await this.#bot.openThinkingStream(target);
         } catch (error) {
+          stream = null;
           this.#logger.warn?.(
-            `[dsh-im:${this.#descriptor.key}] unable to start a semantic reply stream; using final delivery:`,
-            error,
-          );
-        }
-      } else if (typeof this.#bot.openStream === 'function') {
-        try {
-          stream = await this.#bot.openStream(target);
-        } catch (error) {
-          this.#logger.warn?.(
-            `[dsh-im:${this.#descriptor.key}] unable to start a streamed reply; using text:`,
+            `[dsh-im:${this.#descriptor.key}] unable to start a thinking stream; using final delivery:`,
             error,
           );
         }
       }
+      if (!stream) {
+        if (typeof this.#bot.openDeliveryStream === 'function') {
+          try {
+            stream = await this.#bot.openDeliveryStream(target);
+            semanticStream = true;
+          } catch (error) {
+            this.#logger.warn?.(
+              `[dsh-im:${this.#descriptor.key}] unable to start a semantic reply stream; using final delivery:`,
+              error,
+            );
+          }
+        } else if (typeof this.#bot.openStream === 'function') {
+          try {
+            stream = await this.#bot.openStream(target);
+          } catch (error) {
+            this.#logger.warn?.(
+              `[dsh-im:${this.#descriptor.key}] unable to start a streamed reply; using text:`,
+              error,
+            );
+          }
+        }
+      }
+      const thinkingMode = Boolean(stream
+        && this.#thinkingTraces
+        && typeof stream.sendToolTrace === 'function');
       let content = hasImages || hasReply
         ? await promptContentForInboundMessage(message, { signal: this.#signal })
         : undefined;
@@ -734,7 +753,21 @@ export class TextHarnessBridge {
           timeoutMs: this.#replyTimeoutMs,
           signal: this.#signal,
           control: { owner: this, key: conversationKey },
+          // Thinking mode needs every update (reasoning + tool calls) in
+          // order; latest mode filters as before.
+          progressMode: thinkingMode ? 'all' : undefined,
           onUpdate: stream ? async (update) => {
+            if (thinkingMode) {
+              // Only the 💭 and 🔧 lines are surfaced; status/text updates
+              // and the assistant-message canonical text are not.
+              if (update.type === 'reasoning') {
+                await stream.sendThinking(update.text);
+              } else if (update.type === 'tool') {
+                await stream.sendToolTrace(update.name, update.arguments);
+              }
+              return;
+            }
+            if (update.type === 'reasoning') return;
             const progress = update.type === 'text' ? update.text
               : update.type === 'tool' ? t('正在使用{name}…', { name: update.name }) : update.text;
             if (progress) {
