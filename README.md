@@ -28,6 +28,7 @@
     <img src="https://img.shields.io/badge/Telegram-26A5E4?logo=telegram&amp;logoColor=white" alt="Telegram">
     <img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&amp;logoColor=white" alt="Discord">
     <img src="https://img.shields.io/badge/WhatsApp-25D366?logo=whatsapp&amp;logoColor=white" alt="WhatsApp">
+    <img src="https://img.shields.io/badge/iMessage-34C759?logo=imessage&amp;logoColor=white" alt="iMessage">
   </p>
 
   <p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
