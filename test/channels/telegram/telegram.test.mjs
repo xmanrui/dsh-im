@@ -23,7 +23,10 @@ import {
   inspectTelegramToken,
   validTelegramToken,
 } from '../../../src/channels/telegram/telegram-api.mjs';
-import { TelegramHarnessBridge } from '../../../src/channels/telegram/telegram-bridge.mjs';
+import {
+  TelegramHarnessBridge,
+  parseTelegramCardCallback,
+} from '../../../src/channels/telegram/telegram-bridge.mjs';
 import {
   TelegramBotClient,
   TelegramRuntime,
@@ -2064,6 +2067,175 @@ test('Telegram runtime keeps polling while a Harness question waits for its answ
       sessionId: 'session-runtime-interaction',
       text: '请先询问测试环境',
     }]);
+  } finally {
+    releaseTurn.resolve();
+    await runtime.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('Telegram runtime answers a question from an inline-keyboard press', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-im-telegram-card-'));
+  const state = await new TelegramStateStore(join(directory, 'state.json')).load();
+  const questionSent = deferred();
+  const answerSubmitted = deferred();
+  const releaseTurn = deferred();
+  const sent = [];
+  const acknowledgements = [];
+  const keyboardEdits = [];
+  let answerUpdateDelivered = false;
+  let cardMessageId = null;
+  let pressedData = null;
+  let nextOutboundMessageId = 900;
+
+  const promptUpdate = {
+    update_id: 10,
+    message: {
+      message_id: 100,
+      chat: { id: 42, type: 'private' },
+      from: { id: 7, is_bot: false },
+      text: '请先询问测试环境',
+    },
+  };
+  const fakeApi = {
+    getMe: async () => ({ id: 123456789, is_bot: true }),
+    getWebhookInfo: async () => ({ url: '' }),
+    getUpdates: async ({ offset, timeout, signal }) => {
+      if (timeout === 0) return [];
+      if (offset <= 0) return [promptUpdate];
+      if (offset === 11) {
+        await questionSent.promise;
+        answerUpdateDelivered = true;
+        return [{
+          update_id: 11,
+          callback_query: {
+            id: 'cb-1',
+            from: { id: 7, is_bot: false, first_name: 'Wings' },
+            message: {
+              message_id: cardMessageId,
+              chat: { id: 42, type: 'private' },
+            },
+            data: pressedData,
+          },
+        }];
+      }
+      return new Promise((resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    },
+    sendChatAction: async () => true,
+    sendMessage: async ({ text, replyMarkup }) => {
+      const messageId = nextOutboundMessageId;
+      nextOutboundMessageId += 1;
+      sent.push({ text, replyMarkup });
+      if (replyMarkup) {
+        cardMessageId = messageId;
+        // Press the second option (生产环境) exactly as a client would.
+        pressedData = replyMarkup.inline_keyboard[1][0].callback_data;
+        questionSent.resolve();
+      }
+      return { message_id: messageId };
+    },
+    answerCallbackQuery: async (payload) => { acknowledgements.push(payload); return true; },
+    editMessageReplyMarkup: async (payload) => { keyboardEdits.push(payload); return true; },
+    setMessageReaction: async () => true,
+  };
+  const harness = {
+    ensureRunning: async () => true,
+    createSession: async () => 'session-card-interaction',
+    ask: async (sessionId, text, options) => {
+      assert.equal(text, '请先询问测试环境');
+      await options.onInteraction({
+        kind: 'question',
+        interactionId: 'telegram-card-question',
+        rpcId: 'telegram-card-question',
+        sessionId,
+        payload: {
+          type: 'question/requested',
+          sessionId,
+          questions: [{
+            id: 'environment',
+            question: '请选择测试环境',
+            options: [{ label: '测试环境' }, { label: '生产环境' }],
+          }],
+        },
+        respond: async (result) => {
+          assert.equal(answerUpdateDelivered, true);
+          answerSubmitted.resolve(result);
+          return { accepted: true };
+        },
+      });
+      await answerSubmitted.promise;
+      await releaseTurn.promise;
+      return '已选择生产环境';
+    },
+  };
+  const runtime = new TelegramRuntime({
+    config: {
+      botId: 'telegram_card',
+      platformId: '123456789',
+      username: 'HarnessBot',
+    },
+    token: TOKEN,
+    harness,
+    state,
+    createApi: () => fakeApi,
+    logger: { error() {}, warn() {} },
+    allowedPrivateUserIds: ['7'],
+  });
+
+  try {
+    await runtime.start();
+    const submitted = await bounded(
+      answerSubmitted.promise,
+      'the button press did not submit a structured answer',
+    );
+    assert.deepEqual(submitted, {
+      ok: true,
+      value: {
+        sessionId: 'session-card-interaction',
+        answer: { answers: [{ id: 'environment', selected: ['生产环境'] }] },
+      },
+    });
+
+    // The question ships as a keyboard card, one button per option, each carrying
+    // the presentation nonce alongside its indexes.
+    const card = sent.find((entry) => entry.replyMarkup);
+    assert.ok(card, 'the question must be delivered with an inline keyboard');
+    const rows = card.replyMarkup.inline_keyboard;
+    assert.deepEqual(rows.map((row) => row[0].text), ['测试环境', '生产环境']);
+    const encoded = rows.map((row) => parseTelegramCardCallback(row[0].callback_data));
+    assert.ok(encoded.every(Boolean), 'every button must encode a press');
+    assert.deepEqual(encoded.map((entry) => entry.questionIndex), [0, 0]);
+    assert.deepEqual(encoded.map((entry) => entry.optionIndex), [0, 1]);
+    assert.equal(new Set(encoded.map((entry) => entry.nonce)).size, 1, 'one card, one identity');
+    assert.match(card.text, /请选择测试环境/);
+
+    // The press is acknowledged, and its keyboard is retired so it cannot replay.
+    // acceptCallback runs detached from the poll loop, so let its tail settle.
+    await bounded((async () => {
+      while (acknowledgements.length === 0 || keyboardEdits.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    })(), 'the press was never acknowledged or its keyboard retired');
+    assert.equal(acknowledgements.length, 1);
+    assert.equal(acknowledgements[0].callbackQueryId, 'cb-1');
+    assert.match(acknowledgements[0].text, /生产环境/);
+    assert.equal(keyboardEdits.length, 1);
+    assert.equal(keyboardEdits[0].chatId, 42);
+    assert.equal(keyboardEdits[0].messageId, cardMessageId);
+    assert.deepEqual(keyboardEdits[0].replyMarkup, { inline_keyboard: [] });
+
+    await bounded((async () => {
+      while (state.cursor() !== 12) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    })(), 'the cursor did not advance past the press update');
+    assert.equal(state.hasSeen('11'), true);
   } finally {
     releaseTurn.resolve();
     await runtime.stop();

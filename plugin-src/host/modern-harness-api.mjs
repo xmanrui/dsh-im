@@ -479,8 +479,72 @@ class ModernHarnessApi {
         'ask_user_question was aborted before the user answered', 'ASK_ABORTED',
       ));
     }
-    return new Promise((resolve, reject) => {
-      const pending = {
+    // Race the IM answer against the host's own answerers (Web/CLI). Claiming the
+    // request exclusively used to keep the question out of Web entirely, leaving
+    // whoever happened to be looking at that Session with a card they could not
+    // answer. Racing keeps both surfaces usable: the first answer wins.
+    const im = this.#askThroughIm(request, owner);
+    let answeredByIm = false;
+    const native = Promise.resolve()
+      .then(() => next())
+      .catch((error) => {
+        // A pure-IM session has no client connected, so the host rejects with
+        // NO_PROVIDER — an expected state rather than a failure — and ASK_ABORTED
+        // is this adapter's own retire signal below. Any other error is real, so
+        // log it instead of swallowing it silently; the question still stays open
+        // for IM rather than being failed outright.
+        if (error?.code !== 'NO_PROVIDER' && error?.code !== 'ASK_ABORTED') {
+          console.warn(
+            '[dsh-im] the host user-question answerer failed; waiting for the IM answer:',
+            error?.message ?? error,
+          );
+        }
+        return new Promise(() => {});
+      });
+    return Promise.race([
+      native,
+      im.promise.then((value) => {
+        answeredByIm = true;
+        return value;
+      }),
+    ]).finally(() => {
+      // Losing side cleanup. A host answer already settled this request, so drop
+      // the IM pending: leaving it registered would let a late press answer a
+      // question the model has moved past. Settling is idempotent.
+      im.dismiss(new Error('another client answered this question'));
+      if (answeredByIm) {
+        // The host's own answerer (DSH Web) keeps its question card until its own
+        // pending settles, and a host-side adapter has no other handle on it. A Web
+        // client holds that pending by listening to `request.signal`, so dispatching
+        // the abort it already stands for makes the client drop a card whose answer
+        // was already given on IM — otherwise it keeps offering choices for a
+        // question the model has moved past.
+        //
+        // Read this signal for what it is: NOT this question's lifetime, but the
+        // enclosing turn's shared signal (dsh-agent-loop mints `phase.abort` per
+        // turn; dsh-tools fuses the caller and wrapper signals into that same
+        // object). Every listener on it is retired, not just ours. That is
+        // harmless today only because `ask_user_question` declares no
+        // `isConcurrencySafe`, so the tool registry runs it exclusively and one
+        // turn never holds two pending questions. If concurrent questions ever
+        // become possible, this broadcast would cancel the siblings too and the
+        // fix has to move to a per-question controller.
+        //
+        // A dispatched event also does not flip `signal.aborted`, so the turn keeps
+        // running: only the client-side pending is retired.
+        request.signal?.dispatchEvent(new Event('abort'));
+      }
+    });
+  }
+
+  /**
+   * Present one question to IM clients. Returns the answer promise plus a
+   * `dismiss` used to retire the pending when the host answers first.
+   */
+  #askThroughIm(request, owner) {
+    let pending = null;
+    const promise = new Promise((resolve, reject) => {
+      pending = {
         rpcId: randomUUID(),
         sessionId: owner.sessionId,
         questions: request.questions,
@@ -505,6 +569,10 @@ class ModernHarnessApi {
       request.signal?.addEventListener('abort', onAbort, { once: true });
       this.#broadcast(this.#questionFrame(pending).payload, pending.rpcId);
     });
+    return {
+      promise,
+      dismiss: (reason) => pending?.settle('cancelled', reason),
+    };
   }
 
   #approvalFrame(pending) {

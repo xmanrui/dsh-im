@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- Telegram 渠道接入 Inline Keyboard：单选型 Harness 提问改为带按钮的卡片，点击即提交，不必再手动回复选项序号。`callback_data` 使用短编码（展示标识 + 题目序号 + 选项序号）以适配 Telegram 的 64 字节上限，发送前统一校验；平台拒绝键盘、多选提问、选项超过八个或按钮标签不可用时自动回退为原有文本流程，编号列表始终保留，因此打字回复仍然有效（[#199](https://github.com/xmanrui/dsh-im/issues/199)）。
+  Telegram now presents single-choice Harness questions as inline-keyboard cards, so a press submits the answer instead of typing an option number. `callback_data` uses a short encoding (presentation identity plus question and option indexes) to fit Telegram's 64-byte limit and is validated before dispatch. A refused keyboard, a multi-select question, more than eight options, or an unusable button label all fall back to the existing text flow — the numbered list is always kept, so replying with text still works ([#199](https://github.com/xmanrui/dsh-im/issues/199)).
+
 ### Fixed / 修复
 
 - 批量输入模式下，引用一条消息再发送 `/send`、`/cancel` 或重复的 `/batch` 不再被当作「未收录的内容」拒绝：命令本身不贡献内容，要求纯文本的只是被收录的文字，因此现在会照常提交、取消或显示进度。同时提交内容严格等于已收录的文字，命令消息自带的引用与附件（企业微信引用、QQ 引用与附件、飞书引用话题、Slack/Telegram/Discord/WhatsApp 的回复引用）不会再混进批量内容。空闲状态下带引用发送 `/send`、`/cancel` 也会返回各自的准确提示，而不是「批量输入命令仅支持纯文字」。
@@ -14,6 +19,16 @@ This file records the notable changes in each dsh-im release. Its format follows
   A batch submission now names its conversation after the first collected message instead of dsh-im's own framing sentence and `[消息 N]` labels, so plugin-authored text no longer appears in the session title.
 
   感谢 [@Librazy](https://github.com/Librazy) 的代码、文档与测试贡献（[#205](https://github.com/xmanrui/dsh-im/pull/205)）。Thanks to [@Librazy](https://github.com/Librazy) for the code, documentation, and tests in [#205](https://github.com/xmanrui/dsh-im/pull/205).
+
+- Harness 提问不再被 dsh-im 独占：宿主适配器改为让 IM 与 DSH 自身的应答方（Web／CLI）竞速，先作答者生效，因此同看一个 Session 的 Web 端重新获得可点击的选项卡，不再只看到无法回答的参数卡片。纯 IM 场景下宿主以 `NO_PROVIDER` 拒绝该分支并静默等待 IM；IM 落败时其待答项会被收回并广播 `question/resolved`，避免迟到点击回答已经翻篇的问题（[#199](https://github.com/xmanrui/dsh-im/issues/199)）。
+  Harness questions are no longer claimed exclusively by dsh-im: the host adapter now races the IM answer against DSH's own answerers (Web/CLI) and the first answer wins. A Web client watching the same Session gets its clickable question back instead of an unanswerable parameter card. In a pure-IM session the host rejects that branch with `NO_PROVIDER` and the adapter silently waits for IM. When IM loses the race its pending is retired and a `question/resolved` frame is broadcast, so a late press cannot answer a question the model has moved past ([#199](https://github.com/xmanrui/dsh-im/issues/199)).
+- 修复卡片送达与点击之间的竞态：按钮点击可能早于卡片自身的发送承诺完成（Telegram 在 API 接受键盘后立即投递回调），此时卡片消息 ID 尚未记录，导致键盘无法回收。现在提交前会先等待本次展示完成。
+- 修复卡片作答路径的三处缺陷：同一张卡片的重复点击会各自推进一题，把第二题的答案写成第一题按钮的标签，现在改为提交前同步认领、提交期间拒绝重复点击；文字作答同样回收键盘，聊天里遗留的旧卡片因此无法回答后续问题；宿主应答链失败时不再静默吞掉所有错误，`NO_PROVIDER` 之外的失败会记录日志。
+  Fixed three defects on the card answer path: repeated presses of one card each advanced a question, writing the first card's label into the second question's answer — a press is now claimed synchronously and duplicates are refused while a submission is in flight; text answers retire the keyboard too, so a card left behind in the chat cannot answer a later question; and a failing host answerer chain is no longer swallowed silently — anything other than `NO_PROVIDER` is logged.
+- 修复数字选项标签的错答：选项标签为纯数字时（例如 `2` / `4` / `8`），按下按钮会把标签再当作「选项序号」解析一次，原本点第一个按钮却提交了第二个选项。按钮回调已知确切选项，现在直接生成结构化答案，跳过文字序号解析；手动回复数字仍然按位置选择，行为不变。
+  Fixed a wrong answer with numeric option labels: when labels are bare numbers (for example `2` / `4` / `8`), a press re-parsed the label as an option position and submitted a different option than the one pressed. A press now supplies the structured answer directly, skipping the text resolution; replying with a number by hand still selects by position, unchanged.
+- 修复 IM 先作答时 Web 端选项卡不消失：宿主应答方持有的待答项只能靠请求信号回收，而 IM 胜出后没有触发它，于是同看一个 Session 的 Web 端卡片一直挂着、输入框持续被占用，只有重启宿主才恢复。IM 胜出且宿主应答方胜负未定时，现在按该信号已有的语义派发一次 abort 事件，Web 端据此收卡。派发不会把信号标记为已中止，回合照常结束；宿主先作答时不会派发，因为那个信号是整回合共享的，误派发会连带收回本回合其它待答项。
+  Fixed the Web question card outliving an IM answer: a pending held by the host answerer can only be retired through the request signal, and winning on IM never triggered it, so a Web client watching the same Session kept an unanswerable card and a blocked composer until the host restarted. When IM wins while the host answerer is still undecided, the adapter now dispatches the abort event that signal already stands for. The dispatch does not mark the signal aborted, so the turn still completes; nothing is dispatched once the host has answered, because that signal is shared by the whole turn and a stray dispatch would retire sibling pendings with it.
 
 ### Documentation / 文档
 
@@ -33,6 +48,7 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 - 补充 #199 的复现、根因与修复验证记录；新增回归用例覆盖在途草稿、迟到进度、后续心跳、答案提交和最终消息投递。
   Recorded the reproduction, root cause, and validation for #199, and added regression coverage for in-flight drafts, late progress, subsequent heartbeats, answer submission, and final-message delivery.
+
 
 ## [4.20.1] - 2026-09-12
 

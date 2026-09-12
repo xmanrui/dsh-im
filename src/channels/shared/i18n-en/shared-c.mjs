@@ -83,6 +83,8 @@ export default {
     'Reply with option numbers or text; separate multiple choices with commas, or add anything else.',
   '请回复一个选项序号或文字，也可直接输入其他答案。':
     'Reply with an option number or its text, or type your own answer directly.',
+  '请点击下方按钮选择，也可直接回复文字。':
+    'Tap a button below to choose, or reply with text directly.',
   '请直接回复你的答案。': 'Please reply with your answer directly.',
   '群聊中请 @机器人 后发送答案。':
     'In group chats, please @ the bot before sending your answer.',

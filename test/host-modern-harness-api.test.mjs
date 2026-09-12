@@ -572,3 +572,260 @@ test('modern adapter delegates interactions when a Session exposes no readable e
   }, () => Promise.resolve(questionAnswer));
   assert.deepEqual(question, questionAnswer);
 });
+
+forEachSessionApi('concurrent questions', async (sessionApi) => {
+  const { events, session } = sessionFixture(sessionApi);
+  const eventRecord = (event) => ({ type: 'event', event });
+  let fixture;
+  let turnTask;
+  const append = (event) => {
+    events.push(event);
+    fixture.emit('session/event', session, event);
+  };
+  const browserAnswer = { answers: [{ id: 'environment', selected: ['Production'] }] };
+  const gateway = {
+    async invoke(request) {
+      const endpoint = `${request.namespace}/${request.method}`;
+      if (endpoint === 'session/page') {
+        return { records: events.map(eventRecord), hasMore: false };
+      }
+      if (endpoint === 'session/prompt') {
+        const rpcId = request.args.request.requestId;
+        turnTask = (async () => {
+          append({ type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } });
+          append({
+            type: 'user/message', seq: 1, time: 1,
+            data: { turn: 1, source: { kind: 'user', rpcId }, message: { content: [] } },
+          });
+          // The host answers; the IM side is offered the question but stays silent.
+          const raced = await fixture.waterfall('user-questions/request', {
+            agent: { id: 'session', session },
+            questions: [{
+              id: 'environment',
+              question: 'Choose an environment',
+              options: [{ label: 'Test' }, { label: 'Production' }],
+            }],
+          }, () => Promise.resolve(browserAnswer));
+          assert.deepEqual(raced, browserAnswer);
+          append({
+            type: 'assistant/message', seq: 2, time: 2,
+            data: { turn: 1, message: { content: [{ type: 'text', text: 'answered by the host' }] } },
+          });
+          append({
+            type: 'turn/end', seq: 3, time: 3,
+            data: { turn: 1, reason: { kind: 'completed' } },
+          });
+        })();
+        return { accepted: true };
+      }
+      throw new Error(`unexpected invoke ${endpoint}`);
+    },
+    async stream(request) {
+      if (`${request.namespace}/${request.method}` !== 'session/follow') {
+        throw new Error('unexpected stream');
+      }
+      return asyncValues({
+        type: 'snapshot', cursor: -1, records: [], hasMore: false,
+        projections: { asOfSeq: -1, values: {} },
+      });
+    },
+  };
+  fixture = fakeContext(gateway);
+  const client = new HarnessClient({
+    ...harnessConnection(fixture.ctx),
+    workspace: '/workspace',
+    rpcIdPrefix: 'modern-race-test',
+    logPrefix: 'modern-race-test',
+  });
+  const interactions = [];
+  const resolutions = [];
+  const answer = await client.ask('session', 'ask a question', {
+    timeoutMs: 5_000,
+    onInteraction: async (interaction) => { interactions.push(interaction); },
+    onInteractionResolved: (resolution) => resolutions.push(resolution),
+  });
+  await turnTask;
+
+  assert.equal(answer, 'answered by the host');
+  assert.equal(interactions.length, 1, 'IM is still offered an active-turn question');
+  assert.equal(resolutions.length, 1, 'the IM pending is retired once the host answers');
+  assert.equal(resolutions[0].outcome, 'cancelled');
+});
+
+forEachSessionApi('questions answered on IM', async (sessionApi) => {
+  const { events, session } = sessionFixture(sessionApi);
+  const eventRecord = (event) => ({ type: 'event', event });
+  let fixture;
+  let turnTask;
+  let retiredByAbort = 0;
+  const append = (event) => {
+    events.push(event);
+    fixture.emit('session/event', session, event);
+  };
+  const gateway = {
+    async invoke(request) {
+      const endpoint = `${request.namespace}/${request.method}`;
+      if (endpoint === 'session/page') {
+        return { records: events.map(eventRecord), hasMore: false };
+      }
+      if (endpoint === 'session/prompt') {
+        const rpcId = request.args.request.requestId;
+        turnTask = (async () => {
+          append({ type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } });
+          append({
+            type: 'user/message', seq: 1, time: 1,
+            data: { turn: 1, source: { kind: 'user', rpcId }, message: { content: [] } },
+          });
+          const controller = new AbortController();
+          controller.signal.addEventListener('abort', () => { retiredByAbort += 1; });
+          const answer = await fixture.waterfall('user-questions/request', {
+            agent: { id: 'session', session },
+            signal: controller.signal,
+            questions: [{
+              id: 'environment',
+              question: 'Choose an environment',
+              options: [{ label: 'Test' }, { label: 'Production' }],
+            }],
+          }, () => new Promise(() => {}));
+          assert.deepEqual(answer, {
+            answers: [{ id: 'environment', selected: ['Test'] }],
+          });
+          append({
+            type: 'assistant/message', seq: 2, time: 2,
+            data: { turn: 1, message: { content: [{ type: 'text', text: 'answered on IM' }] } },
+          });
+          append({
+            type: 'turn/end', seq: 3, time: 3,
+            data: { turn: 1, reason: { kind: 'completed' } },
+          });
+        })();
+        return { accepted: true };
+      }
+      throw new Error(`unexpected invoke ${endpoint}`);
+    },
+    async stream(request) {
+      if (`${request.namespace}/${request.method}` !== 'session/follow') {
+        throw new Error('unexpected stream');
+      }
+      return asyncValues({
+        type: 'snapshot', cursor: -1, records: [], hasMore: false,
+        projections: { asOfSeq: -1, values: {} },
+      });
+    },
+  };
+  fixture = fakeContext(gateway);
+  const client = new HarnessClient({
+    ...harnessConnection(fixture.ctx),
+    workspace: '/workspace',
+    rpcIdPrefix: 'modern-im-answer-test',
+    logPrefix: 'modern-im-answer-test',
+  });
+  const answer = await client.ask('session', 'ask a question', {
+    timeoutMs: 5_000,
+    onInteraction: async (interaction) => {
+      await interaction.respond({
+        ok: true,
+        value: {
+          sessionId: interaction.sessionId,
+          answer: { answers: [{ id: 'environment', selected: ['Test'] }] },
+        },
+      });
+    },
+  });
+  await turnTask;
+
+  assert.equal(answer, 'answered on IM');
+  // The host answerer is still holding the question open here (its own pending
+  // never settles), and a host-side adapter has no other handle on it. Without the
+  // abort a Web client watching the same Session keeps a card offering choices for
+  // a question already answered on IM.
+  assert.equal(retiredByAbort, 1, 'the question pending must be retired after an IM answer');
+});
+
+forEachSessionApi('questions answered by the host', async (sessionApi) => {
+  const { events, session } = sessionFixture(sessionApi);
+  const eventRecord = (event) => ({ type: 'event', event });
+  let fixture;
+  let turnTask;
+  let retiredByAbort = 0;
+  const append = (event) => {
+    events.push(event);
+    fixture.emit('session/event', session, event);
+  };
+  const hostAnswer = { answers: [{ id: 'environment', selected: ['Test'] }] };
+  const gateway = {
+    async invoke(request) {
+      const endpoint = `${request.namespace}/${request.method}`;
+      if (endpoint === 'session/page') {
+        return { records: events.map(eventRecord), hasMore: false };
+      }
+      if (endpoint === 'session/prompt') {
+        const rpcId = request.args.request.requestId;
+        turnTask = (async () => {
+          append({ type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } });
+          append({
+            type: 'user/message', seq: 1, time: 1,
+            data: { turn: 1, source: { kind: 'user', rpcId }, message: { content: [] } },
+          });
+          const controller = new AbortController();
+          controller.signal.addEventListener('abort', () => { retiredByAbort += 1; });
+          // The host answers first, exactly as the Web client does when the person
+          // looking at the Session presses an option before touching Telegram.
+          const answer = await fixture.waterfall('user-questions/request', {
+            agent: { id: 'session', session },
+            signal: controller.signal,
+            questions: [{
+              id: 'environment',
+              question: 'Choose an environment',
+              options: [{ label: 'Test' }, { label: 'Production' }],
+            }],
+          }, () => Promise.resolve(hostAnswer));
+          assert.deepEqual(answer, hostAnswer);
+          append({
+            type: 'assistant/message', seq: 2, time: 2,
+            data: { turn: 1, message: { content: [{ type: 'text', text: 'answered by the host' }] } },
+          });
+          append({
+            type: 'turn/end', seq: 3, time: 3,
+            data: { turn: 1, reason: { kind: 'completed' } },
+          });
+        })();
+        return { accepted: true };
+      }
+      throw new Error(`unexpected invoke ${endpoint}`);
+    },
+    async stream(request) {
+      if (`${request.namespace}/${request.method}` !== 'session/follow') {
+        throw new Error('unexpected stream');
+      }
+      return asyncValues({
+        type: 'snapshot', cursor: -1, records: [], hasMore: false,
+        projections: { asOfSeq: -1, values: {} },
+      });
+    },
+  };
+  fixture = fakeContext(gateway);
+  const client = new HarnessClient({
+    ...harnessConnection(fixture.ctx),
+    workspace: '/workspace',
+    rpcIdPrefix: 'modern-host-answer-test',
+    logPrefix: 'modern-host-answer-test',
+  });
+  const interactions = [];
+  const resolutions = [];
+  const answer = await client.ask('session', 'ask a question', {
+    timeoutMs: 5_000,
+    onInteraction: async (interaction) => { interactions.push(interaction); },
+    onInteractionResolved: (resolution) => resolutions.push(resolution),
+  });
+  await turnTask;
+
+  assert.equal(answer, 'answered by the host');
+  assert.equal(interactions.length, 1, 'IM is still offered an active-turn question');
+  assert.equal(resolutions.length, 1, 'the IM pending is retired once the host answers');
+  assert.equal(resolutions[0].outcome, 'cancelled');
+  // Retirement is one-directional: only an IM answer dispatches the abort that
+  // dismisses a Web card. The host settling the request itself must not broadcast
+  // on the shared turn signal, or it would retire pendings the host never touched.
+  assert.equal(retiredByAbort, 0, 'a host answer must not broadcast an abort on the turn signal');
+});

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from './deferred-delivery-coordinator.mjs';
 import { t } from './i18n.mjs';
 import { commandHelpLines } from './command-catalog.mjs';
@@ -154,6 +156,7 @@ export class TextHarnessBridge {
   #commandTasks = new Set();
   #approvals;
   #batches = new BatchInputManager();
+  #interactionCard;
 
   constructor({
     descriptor,
@@ -167,6 +170,7 @@ export class TextHarnessBridge {
     replyTimeoutMs = 600_000,
     signal,
     keepaliveIntervalMs = 4_000,
+    interactionCard = null,
   }) {
     if (!descriptor?.key || !descriptor?.label) throw new TypeError('A channel descriptor is required');
     if (!bot || typeof bot.sendText !== 'function') throw new TypeError('A bot client is required');
@@ -182,6 +186,7 @@ export class TextHarnessBridge {
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#signal = signal;
     this.#keepaliveIntervalMs = keepaliveIntervalMs;
+    this.#interactionCard = interactionCard ?? null;
     this.#deferred = createDeferredDeliveryCoordinator({ harness, state, signal, logger,
       deliver: (entry, outcome) => this.#deliverDeferredOutcome(entry, outcome),
     });
@@ -932,7 +937,22 @@ export class TextHarnessBridge {
     }
   }
 
-  async #processInteractionReply(message, messageId, senderId, key, expected) {
+  /**
+   * Advance the pending interaction with one answer.
+   *
+   * `resolveAnswer` lets a caller that already knows the exact answer supply it
+   * directly. A button press uses this: replaying its label as reply text would
+   * re-parse a numeric label such as "2" as the second option, submitting a
+   * different option than the one pressed.
+   */
+  async #processInteractionReply(
+    message,
+    messageId,
+    senderId,
+    key,
+    expected,
+    { resolveAnswer } = {},
+  ) {
     if (this.#signal?.aborted) {
       message.statusReaction?.clear();
       return;
@@ -1019,7 +1039,15 @@ export class TextHarnessBridge {
 
     const question = pending.questions[pending.index];
     if (!question) return;
-    pending.answers.push(harnessAnswerForQuestion(question, text));
+    const answer = typeof resolveAnswer === 'function'
+      ? resolveAnswer(question)
+      : harnessAnswerForQuestion(question, text);
+    if (!answer) return;
+    // Retire this question's keyboard before moving on: the answer is already in,
+    // and a card left behind in the chat stays pressable after the batch advances.
+    await this.#retireInteractionCard(pending.target, pending.cardMessageId);
+    pending.cardMessageId = null;
+    pending.answers.push(answer);
     pending.index += 1;
     if (pending.index < pending.questions.length) {
       if (pending.claimedReplyMessageId === messageId) {
@@ -1094,6 +1122,114 @@ export class TextHarnessBridge {
         );
       }
     }
+  }
+
+  /** Acknowledge a press so the client stops its spinner; never fails the answer. */
+  async #answerInteractionCallback(callback, text) {
+    if (typeof this.#bot.answerInteractionCallback !== 'function') return;
+    try {
+      await this.#bot.answerInteractionCallback(callback.callbackQueryId, text);
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not acknowledge a button press:`,
+        error?.message ?? error,
+      );
+    }
+  }
+
+  /** Drop a handled card's keyboard so the same press cannot be submitted twice. */
+  async #retireInteractionCard(target, providerMessageId) {
+    if (!providerMessageId || typeof this.#bot.updateInteractionCard !== 'function') return;
+    try {
+      await this.#bot.updateInteractionCard(target, providerMessageId, {
+        markup: { inline_keyboard: [] },
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not retire an interaction card:`,
+        error?.message ?? error,
+      );
+    }
+  }
+
+  /**
+   * Accept an inline-keyboard press. The press is replayed as the option label the
+   * text flow already understands, so a button and a typed reply share one
+   * submission path and cannot drift apart.
+   */
+  async acceptCallback(callback) {
+    if (this.#signal?.aborted) return;
+    const conversationId = cleanText(callback?.conversationId);
+    const senderId = cleanText(callback?.senderId);
+    const messageId = cleanText(callback?.messageId);
+    if (!conversationId || !senderId || !messageId || callback?.senderIsBot === true) return;
+    const kind = callback.kind === 'group' ? 'group' : 'direct';
+    const key = `${kind}:${conversationId}`;
+    const pending = this.#pendingInteractions.get(key);
+    const notice = (text) => this.#answerInteractionCallback(callback, text);
+    if (!pending) return notice(t('该问题已处理，无需再次选择。'));
+    if (pending.actor !== senderId) {
+      return notice(t('只有发起当前任务的用户可以处理这条问题。'));
+    }
+    // A press can arrive while an earlier one is still being submitted: the
+    // acknowledgement round-trip is a real window, and a user who sees no feedback
+    // presses again. Claim synchronously, before the first await, so the second
+    // press cannot advance the same question twice.
+    if (pending.submitting || pending.callbackClaimed) {
+      return notice(t('正在提交你的选择，请稍候。'));
+    }
+
+    const question = pending.questions[pending.index];
+    const parsed = this.#interactionCard?.parse?.(callback.data) ?? null;
+    const option = parsed && Array.isArray(question?.options)
+      ? question.options[parsed.optionIndex]
+      : undefined;
+    if (!question || !parsed
+      || !pending.cardNonce || parsed.nonce !== pending.cardNonce
+      || parsed.questionIndex !== pending.index
+      || !option || typeof option.label !== 'string') {
+      return notice(t('这个选项已失效，请使用最新一条问题。'));
+    }
+    // Multi-select needs a keyboard that accumulates choices and a submit action;
+    // until that exists the request keeps the text answer it has always accepted.
+    if (question.multiSelect === true) {
+      return notice(t('多选问题请直接回复文字。'));
+    }
+
+    pending.callbackClaimed = true;
+    // A press can beat the card's own send promise — Telegram delivers the update
+    // as soon as its API accepted the keyboard. Wait for delivery so the card id
+    // exists and the shared submission path can retire its keyboard.
+    await pending.presentationTask?.catch(() => undefined);
+    await notice(t('已选择：{label}', { label: option.label }));
+    await this.#processInteractionReply(
+      {
+        kind,
+        conversationId,
+        messageId,
+        senderId,
+        addressed: true,
+        content: option.label,
+        replyTarget: callback.replyTarget ?? pending.target,
+        statusReaction: null,
+      },
+      messageId,
+      senderId,
+      key,
+      pending,
+      // The press already identifies its option by index, so answer with that
+      // exact label. Replaying the label as reply text would re-parse a numeric
+      // label such as "2" as the second option and submit a different one.
+      { resolveAnswer: (current) => ({ id: current.id, selected: [option.label] }) },
+    ).catch((error) => {
+      this.#logger.error?.(
+        `[dsh-im:${this.#descriptor.key}] failed to submit a card answer:`,
+        error,
+      );
+    }).finally(() => {
+      // A failed submission rolls the question back, so let the user press again.
+      if (this.#pendingInteractions.get(key) === pending) pending.callbackClaimed = false;
+    });
   }
 
   async #handleInteraction(interaction, {
@@ -1178,6 +1314,11 @@ export class TextHarnessBridge {
       submitting: false,
       needsPresentation: true,
       presentationTask: null,
+      cardMessageId: null,
+      // Identity of the keyboard currently on screen, and the guard that keeps two
+      // presses of the same card from advancing one question twice.
+      cardNonce: null,
+      callbackClaimed: false,
     };
     this.#pendingInteractions.set(key, pending);
     this.#interactionKeys.set(interactionId, key);
@@ -1196,11 +1337,59 @@ export class TextHarnessBridge {
     this.#clearPendingInteraction(key, interactionId);
   }
 
+  /** Build card content for the current question, or null to keep the text flow. */
+  #interactionCardFor(pending, question) {
+    if (!this.#interactionCard || typeof this.#interactionCard.render !== 'function') return null;
+    if (typeof this.#bot.sendInteractionCard !== 'function') return null;
+    if (pending.submitting) return null;
+    let card = null;
+    try {
+      card = this.#interactionCard.render(question, {
+        questionIndex: pending.index,
+        total: pending.questions.length,
+        requiresMention: pending.requiresMention,
+        nonce: pending.cardNonce,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] interaction card renderer failed:`,
+        error,
+      );
+      return null;
+    }
+    if (!card || typeof card.text !== 'string' || !card.text || !card.markup) return null;
+    return card;
+  }
+
   #presentInteraction(pending) {
     if (pending.presentationTask) return pending.presentationTask;
     const question = pending.questions[pending.index];
     if (!question) return Promise.resolve();
     const task = (async () => {
+      // A fresh nonce per presentation: a later question restarts its indexes at
+      // zero, so without one an old card's keyboard would answer the new question.
+      pending.cardNonce = randomUUID().slice(0, 8);
+      const card = this.#interactionCardFor(pending, question);
+      if (card) {
+        try {
+          const sent = await this.#bot.sendInteractionCard(pending.target, {
+            text: card.text,
+            markup: card.markup,
+          });
+          pending.cardMessageId = sent?.providerMessageIds?.at(-1) ?? null;
+          pending.needsPresentation = false;
+          return;
+        } catch (error) {
+          // A platform that refuses the keyboard must not lose the question:
+          // fall through to the plain-text flow this channel already had.
+          pending.cardMessageId = null;
+          this.#logger.warn?.(
+            `[dsh-im:${this.#descriptor.key}] could not deliver an interaction card; `
+              + 'falling back to plain text:',
+            error?.message ?? error,
+          );
+        }
+      }
       await this.#bot.sendText(
         pending.target,
         harnessQuestionText(

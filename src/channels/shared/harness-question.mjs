@@ -16,7 +16,13 @@ export function validHarnessQuestion(question) {
       ))));
 }
 
-export function harnessQuestionText(question, index, total, { requiresMention = false } = {}) {
+/** Render the question prompt. `hasButtons` only swaps the closing hint: the
+ * numbered list stays, because a channel whose keyboard fails still answers by text.
+ */
+export function harnessQuestionText(question, index, total, {
+  requiresMention = false,
+  hasButtons = false,
+} = {}) {
   const lines = [];
   const progress = total > 1 ? `（${index + 1}/${total}）` : '';
   lines.push(t('DeepSeek Harness 需要你补充信息{progress}：', { progress }));
@@ -34,7 +40,9 @@ export function harnessQuestionText(question, index, total, { requiresMention = 
     });
     lines.push('', question.multiSelect === true
       ? t('请回复选项序号或文字；多选用逗号分隔，也可补充其他内容。')
-      : t('请回复一个选项序号或文字，也可直接输入其他答案。'));
+      : hasButtons
+        ? t('请点击下方按钮选择，也可直接回复文字。')
+        : t('请回复一个选项序号或文字，也可直接输入其他答案。'));
   } else {
     lines.push('', t('请直接回复你的答案。'));
   }
