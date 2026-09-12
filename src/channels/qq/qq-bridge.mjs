@@ -570,7 +570,14 @@ export class QqHarnessBridge {
       if (result.handled) {
         if (result.kind === 'submit') {
           return this.#enqueueMessage(
-            { ...message, content: result.prompt, attachments: [] },
+            {
+              ...message,
+              content: result.prompt,
+              // The submission is exactly the collected text: the command
+              // message's own attachments and quoted message are not part of it.
+              attachments: [],
+              refMsgIdx: undefined,
+            },
             messageId,
             key,
             { batchSubmission: result },
@@ -1038,6 +1045,7 @@ export class QqHarnessBridge {
           key,
           text,
           content,
+          titleText: batchSubmission?.title,
           contextEnhanced,
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },

@@ -180,7 +180,7 @@ function fixture(channel, { contextEnhancement, onAsk } = {}) {
     });
   }
 
-  function event(id, text = ' \t user text\nsecond line  ', { kind = 'direct', name = 'Ada', actor = 'actor', media, poisonName = false } = {}) {
+  function event(id, text = ' \t user text\nsecond line  ', { kind = 'direct', name = 'Ada', actor = 'actor', media, quote = false, poisonName = false } = {}) {
     const group = kind === 'group';
     const nameValue = (object, key) => Object.defineProperty(object, key, { configurable: true, get() {
       sourceReads += 1;
@@ -238,6 +238,27 @@ function fixture(channel, { contextEnhancement, onAsk } = {}) {
       } };
     }
     assert.ok(value, `${channel} event should normalize`);
+    if (quote) {
+      // One quoted message per channel, in the shape that channel's own
+      // normalizer turns into a reply reference.
+      if (TEXT_BRIDGES[channel]) {
+        value.replyTo = { messageId: 'quoted-id', content: 'quoted body' };
+      } else if (channel === 'wecom') {
+        value.body.quote = { msgtype: 'text', text: { content: 'quoted body' } };
+      } else if (channel === 'weixin') {
+        value.item_list[0].ref_msg = { title: 'quoted body' };
+      } else if (channel === 'dingtalk') {
+        value.text = {
+          content: text,
+          isReplyMsg: true,
+          repliedMsg: { msgId: 'quoted-id', msgType: 'text', content: JSON.stringify({ text: 'quoted body' }) },
+        };
+      } else if (channel === 'qq') {
+        value.refMsgIdx = 'quoted-id';
+      } else if (channel === 'feishu') {
+        value.message.parent_id = 'quoted-id';
+      }
+    }
     if (!media) return value;
     const imageNames = media === 'mixed' ? ['first.png', 'second.png'] : media === 'image' ? ['first.png'] : [];
     const includeFile = media === 'file' || media === 'mixed';
@@ -439,6 +460,35 @@ for (const channel of CHANNELS) {
     assert.equal(current.prompts.length, 1);
     assert.equal(current.prompts[0].split('<dsh_im_source>').length - 1, 1);
     assert.match(current.prompts[0], /first item[\s\S]*second item/);
+    // The initial title names the conversation after the first collected
+    // message, never after the composed framing or its labels.
+    assert.deepEqual(
+      current.calls.filter(([operation]) => operation === 'renameSession'),
+      [['renameSession', 'session-existing', 'first item']],
+    );
+  });
+
+  test(`${channel}: a quoted batch command submits the collected text alone`, async () => {
+    // wecom-app has no reply-reference concept, so it cannot carry a quote.
+    if (channel === 'wecom-app') return;
+    const current = fixture(channel, { contextEnhancement: provider(channel, settings()) });
+    // Prove the quote shape reaches the model as a reply block; otherwise the
+    // submission assertions below would pass without testing anything.
+    await current.bridge.accept(current.event(1, 'ordinary', { quote: true }));
+    assert.match(textOf(current.prompts[0]), /<dsh_im_reply_to>/);
+
+    await current.bridge.accept(current.event(2, '/batch'));
+    await current.bridge.accept(current.event(3, 'first item'));
+    await current.bridge.accept(current.event(4, 'second item'));
+    // A quoted command is still a command: neither is collected as content.
+    await current.bridge.accept(current.event(5, '/batch', { quote: true }));
+    assert.equal(current.prompts.length, 1, 'a quoted /batch only reports progress');
+    await current.bridge.accept(current.event(6, '/send', { quote: true }));
+    assert.equal(current.prompts.length, 2, 'a quoted /send submits the batch');
+    const submission = textOf(current.prompts[1]);
+    assert.match(submission, /first item[\s\S]*second item/);
+    assert.doesNotMatch(submission, /<dsh_im_reply_to>/);
+    assert.doesNotMatch(submission, /quoted body/);
   });
 
   test(`${channel}: disabled batches retain the original one-submission behavior and calls`, async () => {

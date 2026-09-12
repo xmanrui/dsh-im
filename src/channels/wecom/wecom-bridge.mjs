@@ -932,6 +932,9 @@ export class WecomHarnessBridge {
               ...body,
               msgtype: 'text',
               text: { content: result.prompt },
+              // The submission is exactly the collected text, so a quote on the
+              // command itself must not become part of it.
+              quote: undefined,
             },
           }, messageId, key, { batchSubmission: result });
         }
@@ -1370,6 +1373,7 @@ export class WecomHarnessBridge {
         key,
         text,
         content,
+        titleText: batchSubmission?.title,
         contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },

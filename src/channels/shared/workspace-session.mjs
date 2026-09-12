@@ -77,6 +77,11 @@ async function createSession(harness, options) {
  * Resolve, persist, and ask through a session that belongs to the bot's
  * current workspace. A concurrent workspace switch invalidates the scoped
  * session and retries before any prompt is sent to the stale session.
+ *
+ * `titleText` names the conversation title when the prompt itself is not the
+ * user's own words -- a batch submission composes dsh-im's framing sentence and
+ * message labels into one prompt, and only the collected text may name the
+ * conversation.
  */
 export async function askInWorkspaceSession({
   harness,
@@ -84,6 +89,7 @@ export async function askInWorkspaceSession({
   key,
   text,
   content,
+  titleText,
   contextEnhanced = false,
   createOptions,
   existsOptions,
@@ -92,7 +98,7 @@ export async function askInWorkspaceSession({
 }) {
   const initialTitle = contextEnhanced
     ? initialSessionTitle({
-        text,
+        text: titleText ?? text,
         content,
         files: typeof askOptions === 'object' ? askOptions?.files : undefined,
       })

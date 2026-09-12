@@ -82,7 +82,7 @@ test('collecting is isolated by conversation and repeated /batch only reports pr
   assert.equal(batches.status('direct:two').phase, 'idle');
 });
 
-test('collecting rejects non-text and other commands without counting them', () => {
+test('collecting rejects non-text content without counting it', () => {
   const batches = new BatchInputManager();
   batches.handle('direct:one', '/batch');
 
@@ -90,15 +90,54 @@ test('collecting rejects non-text and other commands without counting them', () 
   assert.equal(media.kind, 'unsupported-content');
   assert.match(media.message, /未收录/);
   assert.match(media.message, /图片、文件或引用消息/);
-
-  const mediaCommand = batches.handle('direct:one', '/cancel', { plainText: false });
-  assert.equal(mediaCommand.kind, 'unsupported-content');
-  assert.equal(batches.status('direct:one').phase, 'collecting');
+  assert.equal(batches.status('direct:one').count, 0);
 
   const command = batches.handle('direct:one', '/stop');
   assert.equal(command.kind, 'blocked-command');
   assert.match(command.message, /\/send.*\/cancel/);
   assert.equal(batches.status('direct:one').count, 0);
+});
+
+test('quoted batch commands stay commands while collecting', () => {
+  const batches = new BatchInputManager();
+  batches.handle('direct:one', '/batch');
+  batches.handle('direct:one', 'first');
+
+  // A quoted /batch still reports progress instead of being refused as content.
+  const progress = batches.handle('direct:one', '/batch', { plainText: false });
+  assert.equal(progress.kind, 'status');
+  assert.equal(progress.count, 1);
+  assert.equal(batches.status('direct:one').phase, 'collecting');
+
+  const submission = batches.handle('direct:one', '/send', { plainText: false });
+  assert.equal(submission.kind, 'submit');
+  assert.deepEqual(submission.messages, ['first']);
+  assert.equal(batches.status('direct:one').phase, 'submitting');
+
+  const other = new BatchInputManager();
+  other.handle('direct:two', '/batch');
+  other.handle('direct:two', 'first');
+  const cancelled = other.handle('direct:two', '/cancel', { plainText: false });
+  assert.equal(cancelled.kind, 'cancelled');
+  assert.equal(cancelled.count, 1);
+  assert.equal(other.status('direct:two').phase, 'idle');
+});
+
+test('idle batch commands without content answer their own state instead of the text rule', () => {
+  const batches = new BatchInputManager();
+
+  const send = batches.handle('direct:one', '/send', { plainText: false });
+  assert.equal(send.kind, 'no-batch');
+  assert.match(send.message, /没有待提交/);
+
+  const cancel = batches.handle('direct:one', '/cancel', { plainText: false });
+  assert.equal(cancel.kind, 'no-batch');
+  assert.match(cancel.message, /没有正在进行/);
+
+  const start = batches.handle('direct:one', '/batch', { plainText: false });
+  assert.equal(start.kind, 'unsupported-content');
+  assert.match(start.message, /仅支持纯文字/);
+  assert.equal(batches.status('direct:one').phase, 'idle');
 });
 
 test('the tenth message is accepted and later messages are rejected without auto-submit', () => {
@@ -149,6 +188,9 @@ test('/send keeps an empty batch collecting and creates one immutable submission
     '[消息 1]\nfirst line\ncontinued',
     '[消息 2]\nsecond',
   ].join('\n\n'));
+  // The composed prompt is dsh-im's own framing; only the collected text may
+  // name the conversation.
+  assert.equal(submission.title, 'first line\ncontinued');
   assert.equal(batches.status('direct:one').phase, 'submitting');
 
   const duplicate = batches.handle('direct:one', '/send');

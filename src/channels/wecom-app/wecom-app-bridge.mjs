@@ -605,6 +605,7 @@ export class WecomAppBridge {
           key,
           text,
           content,
+          titleText: batchSubmission?.title,
           contextEnhanced,
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },
