@@ -142,20 +142,26 @@ if (client.includes('settings.plugins.tab') || clientSources.includes('settings.
   throw new Error('client source or bundle still contains the legacy Plugins-tab settings entry');
 }
 // Connections still have no channel-enable toggle. Checkable inputs are owned
-// only by the shared context editor and the saved-target Session sync row.
+// only by the shared context editor, the saved-target Session sync row, and
+// the Telegram thinking-traces block.
 // The context editor contains one switch template and one mapped field-input
-// template; the delivery target adds one ordinary checkbox template.
+// template; the delivery target adds one ordinary checkbox template; the
+// Telegram thinking-traces block adds one ordinary checkbox template.
 const contextEditorSource = await readFile(resolve(root, 'plugin-src/client/context-enhancement.js'), 'utf8');
 const deliverySettingsSource = await readFile(resolve(root, 'plugin-src/client/delivery-settings.js'), 'utf8');
+const thinkingTracesSource = await readFile(resolve(root, 'plugin-src/client/channels/telegram/thinking-traces.js'), 'utf8');
 const otherClientSources = clientSources
   .replace(contextEditorSource, '')
-  .replace(deliverySettingsSource, '');
+  .replace(deliverySettingsSource, '')
+  .replace(thinkingTracesSource, '');
 if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || (deliverySettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySettingsSource)
+  || (thinkingTracesSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
+  || /role:\s*["']switch["']/u.test(thinkingTracesSource)
   || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 1
-  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 3) {
-  throw new Error('checkable inputs must be limited to context enhancement and Session sync');
+  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 4) {
+  throw new Error('checkable inputs must be limited to context enhancement, Session sync, and the Telegram thinking-traces toggle');
 }
 for (const marker of ['bot.context-enhancement.set', '<dsh_im_source>', '<dsh_im_source_guidance>']) {
   if (!host.includes(marker) || !client.includes(marker)) {
