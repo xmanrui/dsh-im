@@ -12,7 +12,7 @@
     <img src="https://dsh-im-random-badge.xmanrui-dsh-im.workers.dev" alt="滑动变祖器：今天是梁子或今天是梁圣（随机）">
     <a href="LICENSE"><img src="https://img.shields.io/github/license/xmanrui/dsh-im" alt="MIT license"></a>
     <a href="#recognition"><img src="https://img.shields.io/badge/DeepSeek%20Harness-Official%20Recognition-4176E6?style=flat" alt="DeepSeek Harness Official Recognition"></a>
-    <a href="https://dshfind.com/zh/plugins/xmanrui/dsh-im?ref=badge"><img src="https://dshfind.com/api/badge/xmanrui/dsh-im?lang=zh" alt="dshfind"></a>
+    <a href="https://deepseek1024.com/"><img src="https://img.shields.io/badge/deepseek1024-Top%2010%20Downloads-D97706?style=flat" alt="deepseek1024 Top 10 Downloads"></a>
     <a href="https://dshfind.com/zh/plugins/xmanrui/dsh-im"><img src="https://img.shields.io/badge/dshfind-%E5%88%86%E7%B1%BB%E7%AC%AC%E4%B8%80-d97706" alt="dshfind: 分类第一"></a>
     <a href="https://dshfind.com/zh/plugins/xmanrui/dsh-im?ref=badge"><img src="https://dshfind.com/api/badge/xmanrui/dsh-im?metric=downloads&amp;lang=zh" alt="dshfind downloads"></a>
   </p>
