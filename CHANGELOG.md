@@ -12,6 +12,8 @@ This file records the notable changes in each dsh-im release. Its format follows
   Context enhancement no longer writes its source block into the user message. The Host splits the prefix a channel wrote at `agent/pre-step` into its own `dsh-im` context message, so the user message keeps only what the person sent while its durable source still identifies the prompt, and no raw tags remain in the transcript. Pairing follows message identity rather than inbox position, so in-flight or concurrent prompts cannot swap sources; a Host that cannot split, or a configuration pointing at an external Harness, keeps the previous inline prefix.
 - 引用回复的 `<dsh_im_reply_to>` 块同样改为独立消息，排在用户消息之前：引用材料作为 `dsh-im` 上下文行可折叠展示（引用正文上限 8000 字符），用户气泡只保留用户自己的提问；排在提问之前以保留「先引用、后提问」的阅读顺序。
   Quoted replies are split the same way and placed before the user's message: the quoted material becomes a collapsible `dsh-im` context row (the quoted body is capped at 8000 characters) while the user bubble keeps only the person's own question, and it precedes the question to preserve the quoted-then-asked reading order.
+- `/补充指令` 的纠偏消息现在也带 `dsh_im_source`：命令路径在运行时捕获当前会话场景的增强配置，并写入**下达指令者**的来源字段，因此同群不同人补的指令各自可辨，不再借用开启该回合那条消息的来源。卡片入口使用操作者身份，菜单与消息输入使用该消息的发送者；未开启增强时行为不变。
+  `/steer` corrections now carry the same `dsh_im_source` block: the command path captures the scope's enhancement when it runs and fills the source fields of whoever issued the correction, so instructions from different group members stay distinguishable instead of borrowing the provenance of the message that opened the turn. Card entry points use the operator identity, menu and message entry points use that message's sender, and behaviour is unchanged where enhancement is off.
 
 ### Changed / 变更
 

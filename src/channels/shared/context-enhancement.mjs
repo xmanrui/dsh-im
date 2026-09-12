@@ -155,6 +155,26 @@ export function captureContextEnhancement(provider, conversationType) {
   }
 }
 
+/**
+ * Capture the enhancement one prompt replays, together with the source factory
+ * that fills its selected fields.
+ *
+ * Ordinary messages snapshot this when they are accepted, so a queued message
+ * keeps the settings it arrived under. A control command is never queued, so it
+ * captures at the moment it runs -- and it must, because the source fields of a
+ * steering instruction belong to whoever issued it, not to the message that
+ * opened the turn.
+ *
+ * @param provider - the bot's enhancement provider.
+ * @param conversationType - the inbound message's scope.
+ * @param source - factory for the currently selected source fields.
+ * @returns the enhancement to apply, or null when the scope is off.
+ */
+export function captureContextEnhancementSource(provider, conversationType, source) {
+  const snapshot = captureContextEnhancement(provider, conversationType);
+  return snapshot === null ? null : Object.freeze({ snapshot, source });
+}
+
 function sourceString(value, field) {
   if (field === 'senderId' && (typeof value === 'bigint' || Number.isFinite(value))) {
     value = String(value);

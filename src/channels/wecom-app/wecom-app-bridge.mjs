@@ -26,7 +26,11 @@ import {
 } from '../shared/preset-command.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
-import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  captureContextEnhancementSource,
+  enhanceContextContent,
+} from '../shared/context-enhancement.mjs';
 import {
   DEFAULT_IMAGE_PROMPT,
   hasInboundImages,
@@ -498,6 +502,11 @@ export class WecomAppBridge {
         || this.#approvals.hasPending(key),
       control: { owner: this, key },
       deferredDelivery: this.#deferred,
+      enhancement: captureContextEnhancementSource(
+        this.#contextEnhancement,
+        'direct',
+        () => ({ channel: 'wecom-app', senderId: sender, chatId: sender }),
+      ),
     });
     if (result?.stopped) {
       await Promise.allSettled([

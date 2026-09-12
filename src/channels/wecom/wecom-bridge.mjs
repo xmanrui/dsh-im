@@ -33,7 +33,11 @@ import {
 } from '../shared/preset-command.mjs';
 import { runWorkspaceCommand, workspacePathSnapshot } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
-import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  captureContextEnhancementSource,
+  enhanceContextContent,
+} from '../shared/context-enhancement.mjs';
 import {
   hasInboundImages,
   ImagePromptError,
@@ -1167,6 +1171,11 @@ export class WecomHarnessBridge {
         || this.#approvals.hasPending(key),
       control: { owner: this, key },
       deferredDelivery: this.#deferred,
+      enhancement: captureContextEnhancementSource(
+        this.#contextEnhancement,
+        bodyOf(frame).chattype === 'single' ? 'direct' : 'group',
+        () => ({ channel: 'wecom', senderId: bodyOf(frame).from?.userid, chatId }),
+      ),
     });
     if (result?.stopped) {
       await Promise.allSettled([

@@ -5,7 +5,11 @@ import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
 } from './inbound-access.mjs';
-import { captureContextEnhancement, enhanceContextContent } from './context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  captureContextEnhancementSource,
+  enhanceContextContent,
+} from './context-enhancement.mjs';
 import { runWorkspaceCommand } from './workspace-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from './history-command.mjs';
@@ -336,6 +340,7 @@ export class TextHarnessBridge {
         messageId,
         key,
         commandRunner,
+        senderId,
       ).finally(() => {
         this.#acceptedMessageIds.delete(messageId);
         this.#commandTasks.delete(task);
@@ -477,7 +482,7 @@ export class TextHarnessBridge {
     await this.#deferred.whenIdle();
   }
 
-  async #processFastCommand(message, messageId, key, runner) {
+  async #processFastCommand(message, messageId, key, runner, senderId) {
     if (this.#state.hasSeen(messageId)) return;
     await this.#state.markSeen(messageId);
     this.#status.messagesReceived += 1;
@@ -498,6 +503,21 @@ export class TextHarnessBridge {
             || this.#approvals.hasPending(key),
           control: { owner: this, key },
           deferredDelivery: this.#deferred,
+          enhancement: captureContextEnhancementSource(
+            this.#contextEnhancement,
+            message.kind,
+            () => {
+              const source = message.contextSource?.();
+              return {
+                channel: this.#descriptor.key,
+                senderId,
+                senderName: source?.senderName,
+                conversationTitle: source?.conversationTitle,
+                chatId: source?.chatId ?? message.conversationId,
+                threadId: source?.threadId,
+              };
+            },
+          ),
         },
       );
       if (result?.stopped) {

@@ -1,3 +1,4 @@
+import { enhanceContextContent } from './context-enhancement.mjs';
 import { t } from './i18n.mjs';
 import manifest from '../../../package.json' with { type: 'json' };
 
@@ -41,6 +42,7 @@ export async function runControlCommand(text, harness, state, key, {
   pendingInteraction = false,
   control,
   deferredDelivery,
+  enhancement,
 } = {}) {
   if (!isControlCommand(text)) return null;
   const command = text.trim();
@@ -93,8 +95,13 @@ export async function runControlCommand(text, harness, state, key, {
   if (typeof session.steerActiveTurn !== 'function') {
     throw new TypeError('Harness session does not support steering active turns');
   }
+  // A mid-turn correction carries the same provenance as the message that
+  // opened the turn, so a group member who steers is identified too.
+  const steering = enhancement
+    ? enhanceContextContent(instruction, enhancement.snapshot, enhancement.source)
+    : instruction;
   const steered = await session.steerActiveTurn(
-    instruction,
+    steering,
     control,
     requestOptions(signal),
   );
