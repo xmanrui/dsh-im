@@ -484,15 +484,16 @@ class ModernHarnessApi {
     // whoever happened to be looking at that Session with a card they could not
     // answer. Racing keeps both surfaces usable: the first answer wins.
     const im = this.#askThroughIm(request, owner);
+    let answeredByIm = false;
     const native = Promise.resolve()
       .then(() => next())
       .catch((error) => {
         // A pure-IM session has no client connected, so the host rejects with
-        // NO_PROVIDER — an expected state rather than a failure, and the IM
-        // answerer is independent of that chain. Any other error is real, so log
-        // it instead of swallowing it silently; the question still stays open for
-        // IM rather than being failed outright.
-        if (error?.code !== 'NO_PROVIDER') {
+        // NO_PROVIDER — an expected state rather than a failure — and ASK_ABORTED
+        // is this adapter's own retire signal below. Any other error is real, so
+        // log it instead of swallowing it silently; the question still stays open
+        // for IM rather than being failed outright.
+        if (error?.code !== 'NO_PROVIDER' && error?.code !== 'ASK_ABORTED') {
           console.warn(
             '[dsh-im] the host user-question answerer failed; waiting for the IM answer:',
             error?.message ?? error,
@@ -500,11 +501,26 @@ class ModernHarnessApi {
         }
         return new Promise(() => {});
       });
-    return Promise.race([native, im.promise]).finally(() => {
+    return Promise.race([
+      native,
+      im.promise.then((value) => {
+        answeredByIm = true;
+        return value;
+      }),
+    ]).finally(() => {
       // Losing side cleanup. A host answer already settled this request, so drop
       // the IM pending: leaving it registered would let a late press answer a
       // question the model has moved past. Settling is idempotent.
       im.dismiss(new Error('another client answered this question'));
+      if (answeredByIm) {
+        // The host's own answerer (DSH Web) keeps its question card until its own
+        // pending settles, and this request's lifetime signal is the only handle a
+        // host-side adapter has on it. Dispatch the abort that signal already
+        // stands for, so a Web client watching the same Session drops a card whose
+        // answer was already given on IM — otherwise it keeps offering choices for
+        // a question the model has moved past.
+        request.signal?.dispatchEvent(new Event('abort'));
+      }
     });
   }
 
