@@ -20,12 +20,13 @@ This file records the notable changes in each dsh-im release. Its format follows
 
   感谢 [@Librazy](https://github.com/Librazy) 的代码、文档与测试贡献（[#205](https://github.com/xmanrui/dsh-im/pull/205)）。Thanks to [@Librazy](https://github.com/Librazy) for the code, documentation, and tests in [#205](https://github.com/xmanrui/dsh-im/pull/205).
 
-
 - Harness 提问不再被 dsh-im 独占：宿主适配器改为让 IM 与 DSH 自身的应答方（Web／CLI）竞速，先作答者生效，因此同看一个 Session 的 Web 端重新获得可点击的选项卡，不再只看到无法回答的参数卡片。纯 IM 场景下宿主以 `NO_PROVIDER` 拒绝该分支并静默等待 IM；IM 落败时其待答项会被收回并广播 `question/resolved`，避免迟到点击回答已经翻篇的问题（[#199](https://github.com/xmanrui/dsh-im/issues/199)）。
   Harness questions are no longer claimed exclusively by dsh-im: the host adapter now races the IM answer against DSH's own answerers (Web/CLI) and the first answer wins. A Web client watching the same Session gets its clickable question back instead of an unanswerable parameter card. In a pure-IM session the host rejects that branch with `NO_PROVIDER` and the adapter silently waits for IM. When IM loses the race its pending is retired and a `question/resolved` frame is broadcast, so a late press cannot answer a question the model has moved past ([#199](https://github.com/xmanrui/dsh-im/issues/199)).
 - 修复卡片送达与点击之间的竞态：按钮点击可能早于卡片自身的发送承诺完成（Telegram 在 API 接受键盘后立即投递回调），此时卡片消息 ID 尚未记录，导致键盘无法回收。现在提交前会先等待本次展示完成。
 - 修复卡片作答路径的三处缺陷：同一张卡片的重复点击会各自推进一题，把第二题的答案写成第一题按钮的标签，现在改为提交前同步认领、提交期间拒绝重复点击；文字作答同样回收键盘，聊天里遗留的旧卡片因此无法回答后续问题；宿主应答链失败时不再静默吞掉所有错误，`NO_PROVIDER` 之外的失败会记录日志。
   Fixed three defects on the card answer path: repeated presses of one card each advanced a question, writing the first card's label into the second question's answer — a press is now claimed synchronously and duplicates are refused while a submission is in flight; text answers retire the keyboard too, so a card left behind in the chat cannot answer a later question; and a failing host answerer chain is no longer swallowed silently — anything other than `NO_PROVIDER` is logged.
+- 修复数字选项标签的错答：选项标签为纯数字时（例如 `2` / `4` / `8`），按下按钮会把标签再当作「选项序号」解析一次，原本点第一个按钮却提交了第二个选项。按钮回调已知确切选项，现在直接生成结构化答案，跳过文字序号解析；手动回复数字仍然按位置选择，行为不变。
+  Fixed a wrong answer with numeric option labels: when labels are bare numbers (for example `2` / `4` / `8`), a press re-parsed the label as an option position and submitted a different option than the one pressed. A press now supplies the structured answer directly, skipping the text resolution; replying with a number by hand still selects by position, unchanged.
 
 ### Documentation / 文档
 

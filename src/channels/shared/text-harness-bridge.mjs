@@ -937,7 +937,22 @@ export class TextHarnessBridge {
     }
   }
 
-  async #processInteractionReply(message, messageId, senderId, key, expected) {
+  /**
+   * Advance the pending interaction with one answer.
+   *
+   * `resolveAnswer` lets a caller that already knows the exact answer supply it
+   * directly. A button press uses this: replaying its label as reply text would
+   * re-parse a numeric label such as "2" as the second option, submitting a
+   * different option than the one pressed.
+   */
+  async #processInteractionReply(
+    message,
+    messageId,
+    senderId,
+    key,
+    expected,
+    { resolveAnswer } = {},
+  ) {
     if (this.#signal?.aborted) {
       message.statusReaction?.clear();
       return;
@@ -1024,11 +1039,15 @@ export class TextHarnessBridge {
 
     const question = pending.questions[pending.index];
     if (!question) return;
+    const answer = typeof resolveAnswer === 'function'
+      ? resolveAnswer(question)
+      : harnessAnswerForQuestion(question, text);
+    if (!answer) return;
     // Retire this question's keyboard before moving on: the answer is already in,
     // and a card left behind in the chat stays pressable after the batch advances.
     await this.#retireInteractionCard(pending.target, pending.cardMessageId);
     pending.cardMessageId = null;
-    pending.answers.push(harnessAnswerForQuestion(question, text));
+    pending.answers.push(answer);
     pending.index += 1;
     if (pending.index < pending.questions.length) {
       if (pending.claimedReplyMessageId === messageId) {
@@ -1198,6 +1217,10 @@ export class TextHarnessBridge {
       senderId,
       key,
       pending,
+      // The press already identifies its option by index, so answer with that
+      // exact label. Replaying the label as reply text would re-parse a numeric
+      // label such as "2" as the second option and submit a different one.
+      { resolveAnswer: (current) => ({ id: current.id, selected: [option.label] }) },
     ).catch((error) => {
       this.#logger.error?.(
         `[dsh-im:${this.#descriptor.key}] failed to submit a card answer:`,

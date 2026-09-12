@@ -574,3 +574,79 @@ test('a refused keyboard degrades to the plain-text question', async () => {
   controller.abort(new DOMException('test finished', 'AbortError'));
   await processing.catch(() => {});
 });
+
+test('a press answers with its own option when labels are numbers', async () => {
+  const answered = [];
+  const { bridge, controller, cards } = bridgeFixture({
+    questions: [{
+      id: 'concurrency',
+      question: '并发数选多少？',
+      options: [{ label: '2' }, { label: '4' }, { label: '8' }],
+    }],
+    respond: async (result) => { answered.push(result); return { accepted: true }; },
+  });
+  const processing = bridge.accept(message('m-1', '开始提问'));
+  await eventually(() => cards.length === 1);
+
+  // Pressing the first button ("2") must submit "2". Replaying the label as reply
+  // text would re-read it as option 2 and submit "4" — a different option entirely.
+  await bridge.acceptCallback(callback({ data: pressData(cards, 0) }));
+  await eventually(() => answered.length === 1);
+  assert.deepEqual(answered[0].value.answer.answers, [
+    { id: 'concurrency', selected: ['2'] },
+  ]);
+
+  controller.abort(new DOMException('test finished', 'AbortError'));
+  await processing.catch(() => {});
+});
+
+test('a pressed numeric label never shifts to a neighbouring option', async () => {
+  for (const [index, label] of [['0', '2'], ['1', '4'], ['2', '8']]) {
+    const answered = [];
+    const { bridge, controller, cards } = bridgeFixture({
+      questions: [{
+        id: 'concurrency',
+        question: '并发数选多少？',
+        options: [{ label: '2' }, { label: '4' }, { label: '8' }],
+      }],
+      respond: async (result) => { answered.push(result); return { accepted: true }; },
+    });
+    const processing = bridge.accept(message('m-1', '开始提问'));
+    await eventually(() => cards.length === 1);
+
+    await bridge.acceptCallback(callback({ data: pressData(cards, Number(index)) }));
+    await eventually(() => answered.length === 1);
+    assert.deepEqual(
+      answered[0].value.answer.answers,
+      [{ id: 'concurrency', selected: [label] }],
+      `button ${index} must answer ${label}`,
+    );
+
+    controller.abort(new DOMException('test finished', 'AbortError'));
+    await processing.catch(() => {});
+  }
+});
+
+test('typing a number still selects the option at that position', async () => {
+  const answered = [];
+  const { bridge, controller, cards } = bridgeFixture({
+    questions: [{
+      id: 'concurrency',
+      question: '并发数选多少？',
+      options: [{ label: '2' }, { label: '4' }, { label: '8' }],
+    }],
+    respond: async (result) => { answered.push(result); return { accepted: true }; },
+  });
+  const processing = bridge.accept(message('m-1', '开始提问'));
+  await eventually(() => cards.length === 1);
+
+  // The text path keeps its existing meaning: "2" is the position, not the label.
+  await bridge.accept(message('m-2', '2'));
+  await eventually(() => answered.length === 1);
+  assert.deepEqual(answered[0].value.answer.answers, [
+    { id: 'concurrency', selected: ['4'] },
+  ]);
+
+  controller.abort(new DOMException('test finished', 'AbortError'));
+  await processing.catch(() => {});
+});
