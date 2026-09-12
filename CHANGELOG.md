@@ -6,6 +6,20 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.20.1] - 2026-09-12
+
+### Fixed / 修复
+
+- 企业微信不再因进入单聊而自动发送菜单，重复进入、断线重连和运行时重启也保持静默；交互菜单通过 `/m` 或 `/menu` 手动打开，普通消息及其他文字命令不会额外触发菜单卡片。
+  Enterprise WeChat no longer sends menus automatically on direct-chat entry, including repeated entries, reconnects, and runtime restarts. Open the interactive menu explicitly with `/m` or `/menu`; ordinary messages and other text commands do not trigger extra menu cards.
+- 企业微信菜单按钮执行后仅确认操作并反馈结果，不再自动补发整组菜单；覆盖新会话、停止、压缩、状态、帮助、工作区切换及会话／模型／预设设置。保留卡片上的「重新打开菜单」入口；工作区已变化的旧卡片会提示发送 `/m` 重新选择，避免误操作。
+  Enterprise WeChat menu actions now acknowledge the operation and return its result without automatically appending another set of menus. This covers new Session, stop, compact, status, help, workspace switching, and Session/model/preset settings. The card's Reopen menu action remains available; stale workspace cards prompt users to send `/m` and select again to avoid unintended actions.
+
+### Documentation / 文档
+
+- 同步中英文 README 与机器人命令指南，说明企业微信菜单的手动打开及操作后反馈行为。
+  Updated the bilingual READMEs and bot-command guide to describe explicit Enterprise WeChat menu opening and post-action feedback.
+
 ## [4.20.0] - 2026-09-12
 
 ### Added / 新增
@@ -985,7 +999,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.20.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.20.1...HEAD
+[4.20.1]: https://github.com/xmanrui/dsh-im/compare/v4.20.0...v4.20.1
 [4.20.0]: https://github.com/xmanrui/dsh-im/compare/v4.19.2...v4.20.0
 [4.19.2]: https://github.com/xmanrui/dsh-im/compare/v4.19.1...v4.19.2
 [4.19.1]: https://github.com/xmanrui/dsh-im/compare/v4.19.0...v4.19.1
