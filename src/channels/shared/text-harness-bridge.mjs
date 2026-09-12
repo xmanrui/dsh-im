@@ -303,7 +303,12 @@ export class TextHarnessBridge {
           return this.#enqueueMessage({
             ...normalized,
             content: batch.prompt,
-            batchSubmission: { token: batch.token },
+            // The submission is exactly the collected text; a quote or an
+            // attachment on the command itself is not part of it.
+            replyTo: null,
+            images: [],
+            files: [],
+            batchSubmission: { token: batch.token, title: batch.title },
           }, messageId, senderId, key);
         }
         return this.#finishLocalMessage(normalized, messageId, batch.message);
@@ -727,6 +732,7 @@ export class TextHarnessBridge {
         key: conversationKey,
         text,
         content,
+        titleText: batchSubmission?.title,
         contextEnhanced,
         createOptions: this.#signal ? { signal: this.#signal } : undefined,
         existsOptions: this.#signal ? { signal: this.#signal } : undefined,

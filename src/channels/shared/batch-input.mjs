@@ -33,6 +33,18 @@ function submissionPrompt(messages) {
   ].join('\n\n');
 }
 
+/**
+ * Session title for one submission.
+ *
+ * The submitted prompt is dsh-im's own composition -- a framing sentence plus
+ * `[消息 N]` labels -- so using it as the conversation title would put plugin
+ * text where the user's own words belong. The first collected message is what
+ * the user actually said first.
+ */
+function submissionTitle(messages) {
+  return messages.find((message) => message.trim()) ?? '';
+}
+
 export function isBatchInputCommand(text) {
   return commandName(text) !== null;
 }
@@ -73,7 +85,10 @@ export class BatchInputManager {
 
     if (!batch) {
       if (!name) return { handled: false };
-      if (!plainText) {
+      // Only starting a batch requires the plain-text command itself; /send and
+      // /cancel carry no content, so they must answer with their own state
+      // message instead of being refused as uncollectable content.
+      if (!plainText && name === 'batch') {
         return result('unsupported-content', t('批量输入命令仅支持纯文字，请移除图片、文件或引用消息后重试。'));
       }
       if (name === 'send') {
@@ -90,7 +105,11 @@ export class BatchInputManager {
       });
     }
 
-    if (!plainText && (batch.phase === 'collecting' || name)) {
+    // A command is never collected content: /send, /cancel and a repeated
+    // /batch must keep working even when the message that carries them is a
+    // quoted reply, an image caption or a file. Only the collected text itself
+    // has to be plain.
+    if (!plainText && batch.phase === 'collecting' && !name) {
       return result('unsupported-content', t(`批量输入模式目前仅支持文字，不支持图片、文件或引用消息，这条消息未收录。
 请继续发送文字，或使用 /send、/cancel。`), {
         count: batch.messages.length,
@@ -141,6 +160,7 @@ export class BatchInputManager {
         token,
         messages,
         prompt: submissionPrompt(messages),
+        title: submissionTitle(messages),
         count: messages.length,
       });
     }

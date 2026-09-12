@@ -1037,12 +1037,16 @@ export class FeishuHarnessBridge {
         if (result.kind === 'submit') {
           const submissionEvent = {
             ...event,
-            batchSubmission: { token: result.token },
+            batchSubmission: { token: result.token, title: result.title },
             message: {
               ...event.message,
               message_type: 'text',
               content: JSON.stringify({ text: result.prompt }),
               mentions: [],
+              // The submission is exactly the collected text, so quoting the
+              // message that carried /send must not attach it to the batch.
+              parent_id: undefined,
+              root_id: undefined,
             },
           };
           return this.#enqueueMessage(
@@ -4959,6 +4963,7 @@ export class FeishuHarnessBridge {
       key,
       text,
       content,
+      titleText: event.batchSubmission?.title,
       contextEnhanced,
       createOptions: { signal: this.#signal },
       existsOptions: { signal: this.#signal },
@@ -5201,6 +5206,7 @@ export class FeishuHarnessBridge {
         key,
         text,
         content,
+        titleText: event.batchSubmission?.title,
         contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
@@ -5280,6 +5286,7 @@ export class FeishuHarnessBridge {
             key,
             text,
             content,
+            titleText: event.batchSubmission?.title,
             contextEnhanced,
             createOptions: { signal: this.#signal },
             existsOptions: { signal: this.#signal },
@@ -5350,6 +5357,7 @@ export class FeishuHarnessBridge {
         key,
         text,
         content,
+        titleText: event.batchSubmission?.title,
         contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
