@@ -3068,3 +3068,171 @@ for (const outcome of ['success', 'failure']) {
     await accepted;
   });
 }
+
+test('Telegram presents question options as an inline keyboard and accepts a button click as the selected answer', async () => {
+  const fixture = stateFixture();
+  const sentTexts = [];
+  const optionSends = [];
+  const callbackAnswers = [];
+  const keyboardRetired = [];
+  const questionAnswered = deferred();
+  let responded = null;
+  const bridge = new TelegramHarnessBridge({
+    descriptor: { key: 'telegram', label: 'Telegram', reactions: { processing: '👀', success: '👍', error: '👎' } },
+    state: fixture.state,
+    bot: {
+      sendText: async (_target, text) => { sentTexts.push(text); },
+      sendOptions: async (_target, text, buttons) => {
+        optionSends.push({ text, buttons });
+        return { providerMessageIds: ['inline-msg-1'] };
+      },
+      answerCallback: async (callbackQueryId, { text } = {}) => { callbackAnswers.push({ callbackQueryId, text }); },
+      removeKeyboard: async (_target, messageId, text) => { keyboardRetired.push({ messageId, text }); },
+    },
+    harness: {
+      sessionExists: async () => false,
+      createSession: async () => 'session-inline-question',
+      ask: async (sessionId, _text, options) => {
+        await options.onInteraction(questionInteraction({
+          sessionId,
+          questions: [{
+            id: 'flavor',
+            question: 'Which dessert?',
+            options: [
+              { label: 'Chocolate cake', description: 'A classic' },
+              { label: 'Cheesecake', description: 'Creamy' },
+            ],
+          }],
+          respond: async (result) => {
+            responded = result;
+            questionAnswered.resolve(result);
+            return { accepted: true };
+          },
+        }));
+        await questionAnswered.promise;
+        return 'done';
+      },
+    },
+    logger: { warn() {}, error() {}, debug() {} },
+  });
+
+  const processing = bridge.accept(message('inline-start', 'ask me'));
+  await eventually(() => optionSends.length === 1, 2000);
+
+  assert.equal(sentTexts.length, 0, 'no plain-text send when inline keyboard is used');
+  const { text, buttons } = optionSends[0];
+  assert.match(text, /Which dessert\?/);
+  assert.equal(buttons.length, 1, 'a single row of buttons');
+  assert.deepEqual(buttons[0].map((button) => button.text), [
+    '1. Chocolate cake',
+    '2. Cheesecake',
+  ]);
+  const [firstButton, secondButton] = buttons[0].map((button) => button.callbackData);
+  assert.match(firstButton, /^dshq:0:0:/);
+  assert.match(secondButton, /^dshq:0:1:/);
+
+  await bridge.acceptCallback({
+    callbackQueryId: 'cb-1',
+    data: secondButton,
+    chatId: 'chat-a',
+  });
+  await processing;
+
+  assert.equal(responded?.ok, true);
+  assert.deepEqual(responded?.value?.answer?.answers, [
+    { id: 'flavor', selected: ['Cheesecake'] },
+  ]);
+  assert.equal(callbackAnswers.at(-1)?.text, '已选择。');
+  await eventually(() => keyboardRetired.length === 1, 2000);
+  assert.deepEqual(keyboardRetired[0].messageId, 'inline-msg-1', 'the question keyboard is retired after a click');
+  assert.match(keyboardRetired[0].text, /Which dessert\?/);
+});
+
+test('a command token sent while a question is pending is surfaced instead of swallowed as a custom answer', async () => {
+  const fixture = stateFixture();
+  const sentTexts = [];
+  const questionAnswered = deferred();
+  let responded = null;
+  const bridge = new TelegramHarnessBridge({
+    descriptor: { key: 'telegram', label: 'Telegram', reactions: { processing: '👀', success: '👍', error: '👎' } },
+    state: fixture.state,
+    bot: { sendText: async (_target, text) => { sentTexts.push(text); } },
+    harness: {
+      sessionExists: async () => false,
+      createSession: async () => 'session-command-priority',
+      ask: async (sessionId, _text, options) => {
+        await options.onInteraction(questionInteraction({
+          sessionId,
+          questions: [{ id: 'confirm', question: 'Continue?' }],
+          respond: async (result) => {
+            responded = result;
+            questionAnswered.resolve(result);
+            return { accepted: true };
+          },
+        }));
+        await questionAnswered.promise;
+        return 'done';
+      },
+    },
+    logger: { warn() {}, error() {}, debug() {} },
+  });
+
+  const processing = bridge.accept(message('cmd-start', 'ask me'));
+  await eventually(() => sentTexts.some((text) => text.includes('Continue?')));
+  const before = sentTexts.length;
+
+  await bridge.accept(message('cmd-new', '/new'));
+  await new Promise(setImmediate);
+  await eventually(() => sentTexts.length > before);
+
+  assert.equal(responded, null, 'a command must not be coerced into a custom answer');
+  assert.match(sentTexts.at(-1), /stop|未回答/);
+});
+
+test('a stale or unknown inline-keyboard click is acknowledged without submitting an answer', async () => {
+  const fixture = stateFixture();
+  const callbackAnswers = [];
+  const questionAnswered = deferred();
+  let responded = null;
+  const bridge = new TelegramHarnessBridge({
+    descriptor: { key: 'telegram', label: 'Telegram', reactions: { processing: '👀', success: '👍', error: '👎' } },
+    state: fixture.state,
+    bot: {
+      sendText: async () => {},
+      sendOptions: async () => {},
+      answerCallback: async (callbackQueryId, { text } = {}) => { callbackAnswers.push({ callbackQueryId, text }); },
+    },
+    harness: {
+      sessionExists: async () => false,
+      createSession: async () => 'session-stale-callback',
+      ask: async (sessionId, _text, options) => {
+        await options.onInteraction(questionInteraction({
+          sessionId,
+          id: 'known-question',
+          questions: [{ id: 'confirm', question: 'Continue?', options: [{ label: 'Yes' }] }],
+          respond: async (result) => {
+            responded = result;
+            questionAnswered.resolve(result);
+            return { accepted: true };
+          },
+        }));
+        await questionAnswered.promise;
+        return 'done';
+      },
+    },
+    logger: { warn() {}, error() {}, debug() {} },
+  });
+
+  const processing = bridge.accept(message('stale-start', 'ask me'));
+  await eventually(() => true);
+  void processing;
+
+  await bridge.acceptCallback({
+    callbackQueryId: 'cb-unknown',
+    data: 'dshq:0:0:not-a-real-interaction',
+    chatId: 'chat-a',
+  });
+  await new Promise(setImmediate);
+  assert.equal(responded, null, 'an unknown interaction must not submit an answer');
+  assert.equal(callbackAnswers.at(-1)?.text, '该选项已过期。');
+});

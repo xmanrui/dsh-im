@@ -463,6 +463,63 @@ export class TelegramBotClient {
     return { providerMessageIds };
   }
 
+  async sendOptions(target, text, buttons) {
+    const rows = (Array.isArray(buttons) ? buttons : [])
+      .filter((row) => Array.isArray(row) && row.length > 0)
+      .map((row) => row
+        .filter((button) => button && typeof button.text === 'string' && button.text.trim()
+          && typeof button.callbackData === 'string' && button.callbackData)
+        .map((button) => ({
+          text: button.text.trim(),
+          callback_data: button.callbackData,
+        })));
+    if (rows.length === 0) {
+      return this.sendText(target, text);
+    }
+    const result = await this.#api.sendMessage({
+      chatId: target.chatId,
+      text,
+      replyToMessageId: target.replyToMessageId,
+      messageThreadId: target.messageThreadId,
+      replyMarkup: { inline_keyboard: rows },
+      signal: this.#signal,
+    });
+    const providerMessageIds = [];
+    if (Number.isSafeInteger(result?.message_id)) {
+      providerMessageIds.push(String(result.message_id));
+    }
+    return { providerMessageIds };
+  }
+
+  async answerCallback(callbackQueryId, { text, showAlert = false } = {}) {
+    await this.#api.answerCallbackQuery({
+      callbackQueryId,
+      text,
+      showAlert,
+      signal: this.#signal,
+    });
+  }
+
+  async removeKeyboard(target, messageId, text) {
+    if (!messageId) return false;
+    try {
+      await this.#api.editMessageText({
+        chatId: target.chatId,
+        messageId: String(messageId),
+        text,
+        replyMarkup: { inline_keyboard: [] },
+        signal: this.#signal,
+      });
+      return true;
+    } catch (error) {
+      this.#logger?.debug?.(
+        '[dsh-im:telegram] failed to remove inline keyboard:',
+        error,
+      );
+      return false;
+    }
+  }
+
   async addReaction(target, emoji, { signal } = {}) {
     const reactionKey = String(emoji ?? '').trim();
     await this.#api.setMessageReaction({
@@ -1096,21 +1153,36 @@ export class TelegramRuntime {
       });
       for (const { update, contextSnapshot } of received) {
         if (signal.aborted) return;
-        const message = normalizeTelegramUpdate(update, {
-          botId: this.#config.platformId,
-          username: this.#config.username,
-          loadFile: (fileId, options) => this.#api.downloadFile({ fileId, ...options }),
-          loadFileStream: (fileId, options) => this.#api.downloadFileStream({ fileId, ...options }),
-          loadReplyContent: (reference, options) => this.#loadReplyContent(reference, options),
-        });
-        if (message) {
-          void this.#bridge.accept(message, { contextSnapshot }).catch((error) => {
+        const callback = update?.callback_query;
+        if (callback?.id) {
+          void this.#bridge.acceptCallback({
+            callbackQueryId: String(callback.id),
+            data: typeof callback.data === 'string' ? callback.data : '',
+            chatId: callback.message?.chat?.id,
+          }).catch((error) => {
             if (signal.aborted) return;
             this.#logger.error?.(
-              `[dsh-im:telegram] bot ${this.#config.botId} message handling failed:`,
+              `[dsh-im:telegram] bot ${this.#config.botId} callback handling failed:`,
               error,
             );
           });
+        } else {
+          const message = normalizeTelegramUpdate(update, {
+            botId: this.#config.platformId,
+            username: this.#config.username,
+            loadFile: (fileId, options) => this.#api.downloadFile({ fileId, ...options }),
+            loadFileStream: (fileId, options) => this.#api.downloadFileStream({ fileId, ...options }),
+            loadReplyContent: (reference, options) => this.#loadReplyContent(reference, options),
+          });
+          if (message) {
+            void this.#bridge.accept(message, { contextSnapshot }).catch((error) => {
+              if (signal.aborted) return;
+              this.#logger.error?.(
+                `[dsh-im:telegram] bot ${this.#config.botId} message handling failed:`,
+                error,
+              );
+            });
+          }
         }
         cursor = update.update_id + 1;
         await this.#state.setCursor(cursor);

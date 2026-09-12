@@ -146,7 +146,7 @@ export class TelegramApi {
     const payload = {
       timeout,
       limit: 100,
-      allowed_updates: ['message'],
+      allowed_updates: ['message', 'callback_query'],
       ...(Number.isSafeInteger(offset) ? { offset } : {}),
     };
     return this.#call('getUpdates', payload, {
@@ -203,16 +203,25 @@ export class TelegramApi {
     return url;
   }
 
-  async sendMessage({ chatId, text, replyToMessageId, messageThreadId, signal }) {
+  async sendMessage({ chatId, text, replyToMessageId, messageThreadId, replyMarkup, signal }) {
     return this.#call('sendMessage', {
       chat_id: chatId,
       text,
       link_preview_options: { is_disabled: true },
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       ...(replyToMessageId ? {
         reply_parameters: { message_id: replyToMessageId, allow_sending_without_reply: true },
       } : {}),
       ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
     }, { signal });
+  }
+
+  async answerCallbackQuery({ callbackQueryId, text, showAlert = false, signal }) {
+    return this.#call('answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      ...(text ? { text } : {}),
+      show_alert: showAlert,
+    }, { signal, timeoutMs: 10_000 });
   }
 
   async setMessageReaction({ chatId, messageId, emoji, signal, timeoutMs }) {
@@ -319,7 +328,7 @@ export class TelegramApi {
     }
   }
 
-  async editMessageText({ chatId, messageId, text, richMessage, signal }) {
+  async editMessageText({ chatId, messageId, text, richMessage, replyMarkup, signal }) {
     if ((text === undefined) === (richMessage === undefined)) {
       throw new TypeError('Telegram message edit requires exactly one of text or richMessage');
     }
@@ -330,6 +339,7 @@ export class TelegramApi {
         text,
         link_preview_options: { is_disabled: true },
       }),
+      ...(replyMarkup !== undefined ? { reply_markup: replyMarkup } : {}),
     }, { signal });
   }
 

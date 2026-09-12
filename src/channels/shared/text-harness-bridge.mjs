@@ -80,6 +80,29 @@ function canClaimInteractionReply(message, pending, senderId) {
     && Boolean(cleanText(message.content));
 }
 
+const INTERACTION_CALLBACK = /^dshq:(\d+):(\d+):(.+)$/;
+
+function parseInteractionCallback(data) {
+  if (typeof data !== 'string') return null;
+  const match = INTERACTION_CALLBACK.exec(data.trim());
+  if (!match) return null;
+  const questionIndex = Number(match[1]);
+  const optionIndex = Number(match[2]);
+  const interactionId = match[3];
+  if (!Number.isSafeInteger(questionIndex) || !Number.isSafeInteger(optionIndex)) return null;
+  if (questionIndex < 0 || optionIndex < 0) return null;
+  if (!interactionId) return null;
+  return { questionIndex, optionIndex, interactionId };
+}
+
+function isLikelyCommandText(text) {
+  if (typeof text !== 'string') return false;
+  const value = text.trim();
+  if (!value.startsWith('/')) return false;
+  const head = value.slice(0, value.search(/\s+/) === -1 ? value.length : value.search(/\s+/));
+  return /^\/[a-z][a-z0-9_-]*$/iu.test(head);
+}
+
 function artifactFailureText(fileName, error, descriptor) {
   const name = String(fileName ?? t('结果文件'))
     .replace(/[\r\n]+/g, ' ')
@@ -1019,6 +1042,19 @@ export class TextHarnessBridge {
 
     const question = pending.questions[pending.index];
     if (!question) return;
+    if (isLikelyCommandText(text)) {
+      pending.submitting = false;
+      await this.#bot.sendText(
+        pending.target,
+        [
+          t('当前还有一个未回答的问题。'),
+          '',
+          t('请从上方选项中选择，或直接回复自定义答案；'),
+          t('如需放弃本轮，请发送 /stop。'),
+        ].join('\n'),
+      ).catch(() => undefined);
+      return;
+    }
     pending.answers.push(harnessAnswerForQuestion(question, text));
     pending.index += 1;
     if (pending.index < pending.questions.length) {
@@ -1200,16 +1236,24 @@ export class TextHarnessBridge {
     if (pending.presentationTask) return pending.presentationTask;
     const question = pending.questions[pending.index];
     if (!question) return Promise.resolve();
+    const text = harnessQuestionText(
+      question,
+      pending.index,
+      pending.questions.length,
+      { requiresMention: pending.requiresMention },
+    );
+    const buttons = this.#questionOptionButtons(pending, question);
     const task = (async () => {
-      await this.#bot.sendText(
-        pending.target,
-        harnessQuestionText(
-          question,
-          pending.index,
-          pending.questions.length,
-          { requiresMention: pending.requiresMention },
-        ),
-      );
+      if (buttons.length > 0 && typeof this.#bot.sendOptions === 'function') {
+        const result = await this.#bot.sendOptions(pending.target, text, buttons);
+        const messageId = result?.providerMessageIds?.[0];
+        if (typeof messageId === 'string' && messageId) {
+          pending.questionMessageId = messageId;
+          pending.questionText = text;
+        }
+      } else {
+        await this.#bot.sendText(pending.target, text);
+      }
       pending.needsPresentation = false;
     })();
     pending.presentationTask = task;
@@ -1222,6 +1266,90 @@ export class TextHarnessBridge {
       },
     );
     return task;
+  }
+
+  #questionOptionButtons(pending, question) {
+    const options = Array.isArray(question.options) ? question.options : [];
+    if (options.length === 0) return [];
+    return [[...options].map((option, index) => ({
+      text: `${index + 1}. ${option.label}`,
+      callbackData: `dshq:${pending.index}:${index}:${pending.interactionId}`,
+    }))];
+  }
+
+  #retireQuestionKeyboard(pending) {
+    const messageId = pending.questionMessageId;
+    const text = pending.questionText;
+    pending.questionMessageId = null;
+    pending.questionText = null;
+    if (!messageId || !text) return;
+    if (typeof this.#bot.removeKeyboard !== 'function') return;
+    this.#bot.removeKeyboard(pending.target, messageId, text).catch((error) => {
+      this.#logger?.debug?.(`[dsh-im:${this.#descriptor.key}] failed to retire inline keyboard:`, error);
+    });
+  }
+
+  async acceptCallback({ callbackQueryId, data, chatId } = {}) {
+    const parsed = parseInteractionCallback(data);
+    const respond = async (text) => {
+      try {
+        if (callbackQueryId && typeof this.#bot.answerCallback === 'function') {
+          await this.#bot.answerCallback(callbackQueryId, { text });
+        }
+      } catch (error) {
+        this.#logger?.debug?.(`[dsh-im:${this.#descriptor.key}] failed to answer a callback:`, error);
+      }
+    };
+    if (!parsed) return respond(t('该选项已过期。'));
+    const key = this.#interactionKeys.get(parsed.interactionId);
+    if (!key) return respond(t('该选项已过期。'));
+    const pending = this.#pendingInteractions.get(key);
+    if (!pending || pending.submitting || pending.index !== parsed.questionIndex) {
+      return respond(t('该选项已过期。'));
+    }
+    const question = pending.questions[parsed.questionIndex];
+    const option = question?.options?.[parsed.optionIndex];
+    if (!option) return respond(t('无效的选项。'));
+    pending.target = { ...(pending.target ?? {}), chatId: chatId ?? pending.target?.chatId };
+    pending.answers.push({ id: question.id, selected: [option.label] });
+    pending.index += 1;
+    this.#retireQuestionKeyboard(pending);
+    if (pending.index < pending.questions.length) {
+      pending.needsPresentation = true;
+      try {
+        await this.#presentInteraction(pending);
+      } catch (error) {
+        pending.interaction.reconnect?.();
+      }
+      return respond(t('已选择。'));
+    }
+    pending.submitting = true;
+    try {
+      await pending.interaction.respond({
+        ok: true,
+        value: {
+          sessionId: pending.sessionId,
+          answer: { answers: pending.answers },
+        },
+      });
+      this.#clearPendingInteraction(key, pending.interactionId);
+      this.#status.lastError = null;
+    } catch (error) {
+      if (error?.code === 'interaction-not-pending') {
+        this.#clearPendingInteraction(key, pending.interactionId);
+        return respond(t('该问题已处理完成。'));
+      }
+      pending.submitting = false;
+      pending.answers.pop();
+      pending.index -= 1;
+      this.#status.lastError = t('回答提交失败。');
+      this.#logger?.error?.(
+        `[dsh-im:${this.#descriptor.key}] failed to submit a callback answer:`,
+        error,
+      );
+      return respond(t('提交失败，请重试。'));
+    }
+    return respond(t('已选择。'));
   }
 
   async #discardResolvedInteractionReply(message, messageId, {
