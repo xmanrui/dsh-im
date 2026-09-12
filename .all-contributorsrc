@@ -419,6 +419,26 @@
       ]
     },
     {
+      "login": "Librazy",
+      "name": "Liqueur Librazy",
+      "avatar_url": "https://avatars.githubusercontent.com/u/2211542",
+      "profile": "https://github.com/Librazy",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/205"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/pull/205"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/205"
+        }
+      ]
+    },
+    {
       "login": "lKolabrodl",
       "name": "Kolabrod",
       "avatar_url": "https://avatars.githubusercontent.com/u/36865467",

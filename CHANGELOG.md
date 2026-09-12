@@ -13,6 +13,13 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 批量提交的会话标题改为取第一条已收录内容，不再使用 dsh-im 自己拼接的框架句和 `[消息 N]` 标签，避免插件文字出现在会话标题里。
   A batch submission now names its conversation after the first collected message instead of dsh-im's own framing sentence and `[消息 N]` labels, so plugin-authored text no longer appears in the session title.
 
+  感谢 [@Librazy](https://github.com/Librazy) 的代码、文档与测试贡献（[#205](https://github.com/xmanrui/dsh-im/pull/205)）。Thanks to [@Librazy](https://github.com/Librazy) for the code, documentation, and tests in [#205](https://github.com/xmanrui/dsh-im/pull/205).
+
+### Documentation / 文档
+
+- 明确首次开启批次需要纯文字 `/batch`，收集期间才支持通过带引用的 `/batch` 查看进度；中英文指南同步更新，并补充贡献者名单。
+  Clarified that starting a batch requires a plain-text `/batch`, while a quoted `/batch` reports progress only during collection. Updated both command guides and contributor lists.
+
 ## [4.20.2] - 2026-09-13
 
 ### Fixed / 修复
