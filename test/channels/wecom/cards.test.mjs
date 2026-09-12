@@ -65,19 +65,17 @@ test('menu navigation, new session and status execute without invoking the model
   assert.match(f.latest().main_title.title, /工作区与任务/);
 });
 
-test('welcome uses the same interactive menu and ignores duplicate and group enters', async () => {
+test('entering direct or group chats stays silent, including repeated and later entry events', async () => {
   const f = setup();
   const enter = f.frame('', { msgtype: 'event', chattype: undefined, event: { eventtype: 'enter_chat' } });
   await Promise.all([f.bridge.acceptEvent(enter), f.bridge.acceptEvent(enter)]);
-  assert.equal(f.sent.filter((item) => item.type === 'welcome').length, 1);
-  assert.equal(f.sent[0].type, 'welcome');
-  assert.equal(f.sent.length, 2);
-  await f.bridge.acceptEvent(f.clickFrame('新会话', {}, {}, f.sent[0].card));
-  assert.equal(f.state.sessionFor(), null);
-  const count = f.sent.length;
+  await f.bridge.acceptEvent(enter);
+  await f.bridge.acceptEvent(f.frame('', { msgtype: 'event', event: { eventtype: 'enter_chat' } }));
   await f.bridge.acceptEvent(f.frame('', { chattype: 'group', chatid: 'group-1',
     msgtype: 'event', event: { eventtype: 'enter_chat' } }));
-  assert.equal(f.sent.length, count);
+  assert.deepEqual(f.sent, []);
+  assert.equal(f.state.sessionFor(), 'session-old');
+  assert.equal(f.bridge.status.lastMessageError, null);
 });
 
 test('menu selection is acknowledged before slow catalog RPC and repeated clicks execute once', async () => {
@@ -311,14 +309,15 @@ test('menu card and text rejection retains the final provider code in the failur
   assert.equal(errors[0][1].providerCode, 48002);
 });
 
-test('welcome menu delivery failures are structured and recover on a successful menu command', async () => {
-  const f = setup();
-  const welcome = f.client.replyWelcome;
-  f.client.replyWelcome = async () => { throw { errcode: 48002, errmsg: 'denied' }; };
-  await f.bridge.acceptEvent(f.frame('', { msgtype: 'event', event: { eventtype: 'enter_chat' } }));
-  assert.equal(f.bridge.status.lastMessageError.code, 'CHANNEL_PERMISSION');
-  f.client.replyWelcome = welcome;
-  await f.bridge.accept(f.frame('/m'));
+test('ordinary messages and text commands do not open menu cards', async () => {
+  const f = setup({ harness: {
+    sessionExists: async () => true,
+    ask: async () => '你好',
+  } });
+  await f.bridge.accept(f.frame('你好'));
+  assert.ok(f.sent.some((item) => item.content?.includes('你好')));
+  for (const command of ['/status', '/help', '/new']) await f.bridge.accept(f.frame(command));
+  assert.ok(f.sent.every((item) => item.type === 'text'));
   assert.equal(f.bridge.status.lastMessageError, null);
 });
 
@@ -373,15 +372,29 @@ test('model menu works immediately after new without constructing an empty sessi
   assert.equal(f.state.sessionFor(), null);
 });
 
-test('runtime dispatches real SDK welcome and card events', async () => {
+test('runtime stays silent on entry and restart, while both menu commands and card actions work', async (t) => {
   const f = setup();
   const runtime = new WecomRuntime({ config: { botId: 'test', remoteBotId: 'test' }, secret: 'test',
     client: f.client, state: f.state, harness: f.harness, createClient: () => f.client });
-  await runtime.start();
-  const enter = f.frame('', { msgtype: 'event', event: { eventtype: 'enter_chat' } });
-  await f.client.listeners('event.enter_chat')[0](enter);
-  assert.equal(f.sent[0].type, 'welcome');
-  await f.client.listeners('event.template_card_event')[0](f.clickFrame('新会话', {}, {}, f.sent[0].card));
-  assert.equal(f.state.sessionFor(), null);
-  await runtime.stop();
+  t.after(() => runtime.stop());
+  for (const command of ['/m', '/menu']) {
+    f.sent.length = 0;
+    await f.state.setSession('single:member-1', 'session-old');
+    await runtime.start();
+    const enter = f.frame('', { msgtype: 'event', event: { eventtype: 'enter_chat' } });
+    f.client.emit('event.enter_chat', enter);
+    f.client.emit('disconnected', 'network');
+    f.client.emit('authenticated');
+    f.client.emit('event.enter_chat', enter);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(f.sent, []);
+    await f.client.listeners('message')[0](f.frame(command));
+    assert.equal(f.sent.length, 2);
+    assert.ok(f.sent.every((item) => item.type === 'card'));
+    assert.match(f.sent[0].card.main_title.title, /助手中心/);
+    assert.match(f.sent[1].card.main_title.title, /工作区与任务/);
+    await f.client.listeners('event.template_card_event')[0](f.clickFrame('新会话'));
+    assert.equal(f.state.sessionFor(), null);
+    await runtime.stop();
+  }
 });

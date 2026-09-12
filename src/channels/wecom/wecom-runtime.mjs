@@ -168,7 +168,7 @@ export class WecomRuntime {
     client.on('reconnecting', onReconnecting);
     client.on('error', onError);
     client.on('message', onMessage);
-    client.on('event.enter_chat', (frame) => this.#bridge?.acceptEvent(frame));
+    // Menus are opened explicitly with /m or /menu; chat entry stays silent.
     client.on('event.template_card_event', (frame) => this.#bridge?.acceptEvent(frame));
 
     let timer;
