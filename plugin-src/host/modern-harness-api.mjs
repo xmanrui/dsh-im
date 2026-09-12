@@ -514,11 +514,24 @@ class ModernHarnessApi {
       im.dismiss(new Error('another client answered this question'));
       if (answeredByIm) {
         // The host's own answerer (DSH Web) keeps its question card until its own
-        // pending settles, and this request's lifetime signal is the only handle a
-        // host-side adapter has on it. Dispatch the abort that signal already
-        // stands for, so a Web client watching the same Session drops a card whose
-        // answer was already given on IM — otherwise it keeps offering choices for
-        // a question the model has moved past.
+        // pending settles, and a host-side adapter has no other handle on it. A Web
+        // client holds that pending by listening to `request.signal`, so dispatching
+        // the abort it already stands for makes the client drop a card whose answer
+        // was already given on IM — otherwise it keeps offering choices for a
+        // question the model has moved past.
+        //
+        // Read this signal for what it is: NOT this question's lifetime, but the
+        // enclosing turn's shared signal (dsh-agent-loop mints `phase.abort` per
+        // turn; dsh-tools fuses the caller and wrapper signals into that same
+        // object). Every listener on it is retired, not just ours. That is
+        // harmless today only because `ask_user_question` declares no
+        // `isConcurrencySafe`, so the tool registry runs it exclusively and one
+        // turn never holds two pending questions. If concurrent questions ever
+        // become possible, this broadcast would cancel the siblings too and the
+        // fix has to move to a per-question controller.
+        //
+        // A dispatched event also does not flip `signal.aborted`, so the turn keeps
+        // running: only the client-side pending is retired.
         request.signal?.dispatchEvent(new Event('abort'));
       }
     });
