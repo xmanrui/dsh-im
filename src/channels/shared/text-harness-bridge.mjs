@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from './deferred-delivery-coordinator.mjs';
 import { t } from './i18n.mjs';
 import { commandHelpLines } from './command-catalog.mjs';
@@ -1022,6 +1024,10 @@ export class TextHarnessBridge {
 
     const question = pending.questions[pending.index];
     if (!question) return;
+    // Retire this question's keyboard before moving on: the answer is already in,
+    // and a card left behind in the chat stays pressable after the batch advances.
+    await this.#retireInteractionCard(pending.target, pending.cardMessageId);
+    pending.cardMessageId = null;
     pending.answers.push(harnessAnswerForQuestion(question, text));
     pending.index += 1;
     if (pending.index < pending.questions.length) {
@@ -1113,14 +1119,12 @@ export class TextHarnessBridge {
   }
 
   /** Drop a handled card's keyboard so the same press cannot be submitted twice. */
-  async #retireInteractionCard(callback, providerMessageId) {
+  async #retireInteractionCard(target, providerMessageId) {
     if (!providerMessageId || typeof this.#bot.updateInteractionCard !== 'function') return;
     try {
-      await this.#bot.updateInteractionCard(
-        callback.replyTarget ?? { chatId: callback.conversationId },
-        providerMessageId,
-        { markup: { inline_keyboard: [] } },
-      );
+      await this.#bot.updateInteractionCard(target, providerMessageId, {
+        markup: { inline_keyboard: [] },
+      });
     } catch (error) {
       this.#logger.warn?.(
         `[dsh-im:${this.#descriptor.key}] could not retire an interaction card:`,
@@ -1148,14 +1152,22 @@ export class TextHarnessBridge {
     if (pending.actor !== senderId) {
       return notice(t('只有发起当前任务的用户可以处理这条问题。'));
     }
-    if (pending.submitting) return notice(t('正在提交你的选择，请稍候。'));
+    // A press can arrive while an earlier one is still being submitted: the
+    // acknowledgement round-trip is a real window, and a user who sees no feedback
+    // presses again. Claim synchronously, before the first await, so the second
+    // press cannot advance the same question twice.
+    if (pending.submitting || pending.callbackClaimed) {
+      return notice(t('正在提交你的选择，请稍候。'));
+    }
 
     const question = pending.questions[pending.index];
     const parsed = this.#interactionCard?.parse?.(callback.data) ?? null;
     const option = parsed && Array.isArray(question?.options)
       ? question.options[parsed.optionIndex]
       : undefined;
-    if (!question || !parsed || parsed.questionIndex !== pending.index
+    if (!question || !parsed
+      || !pending.cardNonce || parsed.nonce !== pending.cardNonce
+      || parsed.questionIndex !== pending.index
       || !option || typeof option.label !== 'string') {
       return notice(t('这个选项已失效，请使用最新一条问题。'));
     }
@@ -1165,11 +1177,11 @@ export class TextHarnessBridge {
       return notice(t('多选问题请直接回复文字。'));
     }
 
+    pending.callbackClaimed = true;
     // A press can beat the card's own send promise — Telegram delivers the update
     // as soon as its API accepted the keyboard. Wait for delivery so the card id
-    // exists and its keyboard can actually be retired afterwards.
+    // exists and the shared submission path can retire its keyboard.
     await pending.presentationTask?.catch(() => undefined);
-    const cardMessageId = pending.cardMessageId;
     await notice(t('已选择：{label}', { label: option.label }));
     await this.#processInteractionReply(
       {
@@ -1191,8 +1203,10 @@ export class TextHarnessBridge {
         `[dsh-im:${this.#descriptor.key}] failed to submit a card answer:`,
         error,
       );
+    }).finally(() => {
+      // A failed submission rolls the question back, so let the user press again.
+      if (this.#pendingInteractions.get(key) === pending) pending.callbackClaimed = false;
     });
-    await this.#retireInteractionCard(callback, cardMessageId);
   }
 
   async #handleInteraction(interaction, {
@@ -1278,6 +1292,10 @@ export class TextHarnessBridge {
       needsPresentation: true,
       presentationTask: null,
       cardMessageId: null,
+      // Identity of the keyboard currently on screen, and the guard that keeps two
+      // presses of the same card from advancing one question twice.
+      cardNonce: null,
+      callbackClaimed: false,
     };
     this.#pendingInteractions.set(key, pending);
     this.#interactionKeys.set(interactionId, key);
@@ -1307,6 +1325,7 @@ export class TextHarnessBridge {
         questionIndex: pending.index,
         total: pending.questions.length,
         requiresMention: pending.requiresMention,
+        nonce: pending.cardNonce,
       });
     } catch (error) {
       this.#logger.warn?.(
@@ -1324,6 +1343,9 @@ export class TextHarnessBridge {
     const question = pending.questions[pending.index];
     if (!question) return Promise.resolve();
     const task = (async () => {
+      // A fresh nonce per presentation: a later question restarts its indexes at
+      // zero, so without one an old card's keyboard would answer the new question.
+      pending.cardNonce = randomUUID().slice(0, 8);
       const card = this.#interactionCardFor(pending, question);
       if (card) {
         try {

@@ -90,11 +90,18 @@ function callback(overrides = {}) {
     senderIsBot: false,
     kind: 'direct',
     conversationId: 'chat-a',
-    data: 'q|0|1',
     addressed: true,
     replyTarget: { chatId: 42 },
     ...overrides,
   };
+}
+
+/** The payload a real Telegram client would send back for one delivered button. */
+function pressData(cards, optionIndex = 0) {
+  const rows = cards.at(-1)?.markup?.inline_keyboard ?? [];
+  const data = rows[optionIndex]?.[0]?.callback_data;
+  assert.ok(data, `no delivered button at index ${optionIndex}`);
+  return data;
 }
 
 async function eventually(predicate, timeoutMs = 1_000) {
@@ -106,8 +113,7 @@ async function eventually(predicate, timeoutMs = 1_000) {
   assert.fail('condition was not met before timeout');
 }
 
-/** Build a bridge whose harness answers one question through the given callback. */
-function bridgeFixture({ questions, respond, cardResult } = {}) {
+function bridgeFixture({ questions, respond, cardResult, ackDelayMs = 0 } = {}) {
   const { state } = stateFixture();
   // The bridge forwards its own signal into ask(); the harness needs one to park on.
   const controller = new AbortController();
@@ -132,22 +138,40 @@ function bridgeFixture({ questions, respond, cardResult } = {}) {
       },
       answerInteractionCallback: async (queryId, text) => {
         notices.push({ queryId, text });
+        // A real round-trip: a second press can land while this is still in flight.
+        if (ackDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, ackDelayMs));
       },
     },
     harness: {
       sessionExists: async () => false,
       createSession: async () => 'session-one',
       ask: async (sessionId, _text, options) => {
-        await options.onInteraction(questionInteraction({
+        const base = questionInteraction({
           sessionId,
           ...(questions ? { questions } : {}),
           ...(respond ? { respond } : {}),
-        }));
-        await new Promise((resolve, reject) => {
-          options.signal.addEventListener('abort', () => reject(options.signal.reason), {
-            once: true,
-          });
         });
+        let markAnswered;
+        const answered = new Promise((resolve) => { markAnswered = resolve; });
+        await options.onInteraction({
+          ...base,
+          respond: async (result) => {
+            const value = await base.respond(result);
+            markAnswered();
+            return value;
+          },
+        });
+        // Settle when the interaction is answered, so a later message in the same
+        // conversation is not stuck behind this turn.
+        await Promise.race([
+          answered,
+          new Promise((_, reject) => {
+            options.signal.addEventListener('abort', () => reject(options.signal.reason), {
+              once: true,
+            });
+          }),
+        ]);
+        return '已完成';
       },
     },
     logger: { warn() {}, error() {} },
@@ -156,11 +180,25 @@ function bridgeFixture({ questions, respond, cardResult } = {}) {
 }
 
 test('Telegram card callback payload round-trips and rejects foreign data', () => {
-  assert.deepEqual(parseTelegramCardCallback('q|0|2'), { questionIndex: 0, optionIndex: 2 });
-  assert.deepEqual(parseTelegramCardCallback('q|12|7'), { questionIndex: 12, optionIndex: 7 });
-  for (const invalid of ['', 'q', 'q|0', 'q|0|', 'x|0|0', 'q|a|b', 'q|0|2|3', null, undefined, 7]) {
+  assert.deepEqual(parseTelegramCardCallback('q|abcd1234|0|2'), {
+    nonce: 'abcd1234',
+    questionIndex: 0,
+    optionIndex: 2,
+  });
+  assert.deepEqual(parseTelegramCardCallback('q|A-1_b|12|7'), {
+    nonce: 'A-1_b',
+    questionIndex: 12,
+    optionIndex: 7,
+  });
+  for (const invalid of [
+    '', 'q', 'q|n', 'q|n|0', 'q|n||0', 'x|n|0|0', 'q|n|a|b',
+    'q|n|0|0|0', 'q||0|0', null, undefined, 7,
+  ]) {
     assert.equal(parseTelegramCardCallback(invalid), null, `rejected ${String(invalid)}`);
   }
+  // The two-field shape predating the presentation nonce must not parse: without an
+  // identity, a press cannot be attributed to the card currently on screen.
+  assert.equal(parseTelegramCardCallback('q|0|1'), null);
 });
 
 test('Telegram card renderer encodes one button per option within the byte budget', () => {
@@ -169,14 +207,18 @@ test('Telegram card renderer encodes one button per option within the byte budge
     question: '选一个颜色',
     options: [{ label: '红色', description: '像蝴蝶结' }, { label: '绿色' }],
   };
-  const card = TELEGRAM_INTERACTION_CARD.render(question, { questionIndex: 1, total: 2 });
+  const card = TELEGRAM_INTERACTION_CARD.render(question, {
+    questionIndex: 1,
+    total: 2,
+    nonce: 'abcd1234',
+  });
   assert.ok(card, 'expected a card for a single-choice question with options');
   assert.equal(card.markup.inline_keyboard.length, 2);
   assert.deepEqual(card.markup.inline_keyboard[0], [
-    { text: '红色', callback_data: 'q|1|0' },
+    { text: '红色', callback_data: 'q|abcd1234|1|0' },
   ]);
   assert.deepEqual(card.markup.inline_keyboard[1], [
-    { text: '绿色', callback_data: 'q|1|1' },
+    { text: '绿色', callback_data: 'q|abcd1234|1|1' },
   ]);
   // The numbered list survives so a refused keyboard can still be answered by text.
   assert.match(card.text, /1\. 红色/);
@@ -190,9 +232,10 @@ test('Telegram card renderer encodes one button per option within the byte budge
 
 test('Telegram card renderer declines shapes a keyboard cannot express', () => {
   const base = { id: 'pick', question: '问题' };
-  assert.equal(TELEGRAM_INTERACTION_CARD.render({ ...base }, {}), null, 'no options');
+  const nonce = 'abcd1234';
+  assert.equal(TELEGRAM_INTERACTION_CARD.render({ ...base }, { nonce }), null, 'no options');
   assert.equal(
-    TELEGRAM_INTERACTION_CARD.render({ ...base, options: [] }, {}),
+    TELEGRAM_INTERACTION_CARD.render({ ...base, options: [] }, { nonce }),
     null,
     'empty options',
   );
@@ -201,7 +244,7 @@ test('Telegram card renderer declines shapes a keyboard cannot express', () => {
       ...base,
       multiSelect: true,
       options: [{ label: '红色' }, { label: '绿色' }],
-    }, {}),
+    }, { nonce }),
     null,
     'multi-select keeps the text flow',
   );
@@ -209,19 +252,27 @@ test('Telegram card renderer declines shapes a keyboard cannot express', () => {
     TELEGRAM_INTERACTION_CARD.render({
       ...base,
       options: Array.from({ length: 9 }, (_, index) => ({ label: `选项${index}` })),
-    }, {}),
+    }, { nonce }),
     null,
     'too many options',
   );
   assert.equal(
-    TELEGRAM_INTERACTION_CARD.render({ ...base, options: [{ label: '   ' }] }, {}),
+    TELEGRAM_INTERACTION_CARD.render({ ...base, options: [{ label: '   ' }] }, { nonce }),
     null,
     'unusable label',
   );
   assert.equal(
-    TELEGRAM_INTERACTION_CARD.render({ ...base, options: [{ description: 'no label' }] }, {}),
+    TELEGRAM_INTERACTION_CARD.render(
+      { ...base, options: [{ description: 'no label' }] },
+      { nonce },
+    ),
     null,
     'missing label',
+  );
+  assert.equal(
+    TELEGRAM_INTERACTION_CARD.render({ ...base, options: [{ label: '红色' }] }, {}),
+    null,
+    'a press needs a presentation identity to be attributed to',
   );
 });
 
@@ -235,7 +286,7 @@ test('Telegram callback normalization reuses the message conversation key', () =
         message_id: 700,
         chat: { id: 42, type: 'private' },
       },
-      data: 'q|0|1',
+      data: 'q|abcd1234|0|1',
     },
   }, { botId: 123456789 });
   assert.ok(normalized);
@@ -244,7 +295,7 @@ test('Telegram callback normalization reuses the message conversation key', () =
   assert.equal(normalized.senderId, '7');
   assert.equal(normalized.conversationId, '42');
   assert.equal(normalized.kind, 'direct');
-  assert.equal(normalized.data, 'q|0|1');
+  assert.equal(normalized.data, 'q|abcd1234|0|1');
   assert.equal(normalized.messageId, '20');
   assert.equal(normalized.addressed, true);
 
@@ -266,11 +317,21 @@ test('Telegram callback normalization keeps topic threads apart', () => {
         message_thread_id: 55,
         chat: { id: 42, type: 'supergroup' },
       },
-      data: 'q|0|0',
+      data: 'q|abcd1234|0|0',
     },
   }, {});
   assert.equal(normalized.conversationId, '42:55');
   assert.equal(normalized.kind, 'group');
+});
+
+test('Telegram long polling subscribes to button presses', async () => {
+  const { api, calls } = apiRecorder({ responses: { getUpdates: { ok: true, result: [] } } });
+  await api.getUpdates({ offset: 3, timeout: 0 });
+  assert.deepEqual(
+    calls[0].payload.allowed_updates,
+    ['message', 'callback_query'],
+    'a keyboard that never delivers presses would fail silently on a real bot',
+  );
 });
 
 test('Telegram API accepts an inline keyboard and an empty one that removes it', async () => {
@@ -278,10 +339,10 @@ test('Telegram API accepts an inline keyboard and an empty one that removes it',
   await api.sendMessage({
     chatId: 42,
     text: '选一个',
-    replyMarkup: { inline_keyboard: [[{ text: '红色', callback_data: 'q|0|0' }]] },
+    replyMarkup: { inline_keyboard: [[{ text: '红色', callback_data: 'q|abcd1234|0|0' }]] },
   });
   assert.deepEqual(calls[0].payload.reply_markup, {
-    inline_keyboard: [[{ text: '红色', callback_data: 'q|0|0' }]],
+    inline_keyboard: [[{ text: '红色', callback_data: 'q|abcd1234|0|0' }]],
   });
 
   await api.editMessageReplyMarkup({ chatId: 42, messageId: 700, replyMarkup: { inline_keyboard: [] } });
@@ -334,13 +395,11 @@ test('a card press submits the pressed label through the shared answer path', as
   const processing = bridge.accept(message('m-1', '开始提问'));
   await eventually(() => cards.length === 1);
 
-  await bridge.acceptCallback(callback());
+  await bridge.acceptCallback(callback({ data: pressData(cards, 1) }));
   await eventually(() => answered.length === 1);
 
   assert.equal(answered[0].ok, true);
-  assert.deepEqual(answered[0].value.answer.answers, [
-    { id: 'pick', selected: ['绿色'] },
-  ]);
+  assert.deepEqual(answered[0].value.answer.answers, [{ id: 'pick', selected: ['绿色'] }]);
   assert.equal(answered[0].value.sessionId, 'session-one');
   // The press is acknowledged and its keyboard retired so it cannot replay.
   assert.equal(notices.length, 1);
@@ -360,7 +419,7 @@ test('a card press from another user is refused without answering', async () => 
   const processing = bridge.accept(message('m-1', '开始提问'));
   await eventually(() => cards.length === 1);
 
-  await bridge.acceptCallback(callback({ senderId: 'actor-b' }));
+  await bridge.acceptCallback(callback({ data: pressData(cards, 0), senderId: 'actor-b' }));
   assert.equal(answered.length, 0, 'a stranger must not answer');
   assert.equal(notices.length, 1);
   assert.equal(edits.length, 0, 'the keyboard stays for the original actor');
@@ -376,16 +435,86 @@ test('a stale keyboard cannot answer the question now on screen', async () => {
   });
   const processing = bridge.accept(message('m-1', '开始提问'));
   await eventually(() => cards.length === 1);
+  const nonce = parseTelegramCardCallback(pressData(cards, 0)).nonce;
 
   // The card on screen carries question index 0; replay an index-3 payload.
-  await bridge.acceptCallback(callback({ data: 'q|3|0' }));
+  await bridge.acceptCallback(callback({ data: `q|${nonce}|3|0` }));
   assert.equal(answered.length, 0);
   assert.equal(notices.length, 1);
   assert.match(notices[0].text, /失效/);
 
+  // A payload from a different presentation is refused even at identical indexes.
+  await bridge.acceptCallback(callback({ data: 'q|deadbeef|0|0' }));
+  assert.equal(answered.length, 0, 'another presentation must not answer this one');
+  assert.equal(notices.length, 2);
+
   await bridge.acceptCallback(callback({ data: 'not-ours' }));
   assert.equal(answered.length, 0, 'foreign payloads never answer');
-  assert.equal(notices.length, 2);
+  assert.equal(notices.length, 3);
+
+  controller.abort(new DOMException('test finished', 'AbortError'));
+  await processing.catch(() => {});
+});
+
+test('two presses of one card answer only the question it belongs to', async () => {
+  const answered = [];
+  const { bridge, controller, cards, notices } = bridgeFixture({
+    ackDelayMs: 40,
+    questions: [
+      { id: 'q-a', question: '第一题', options: [{ label: 'A1' }, { label: 'A2' }] },
+      { id: 'q-b', question: '第二题', options: [{ label: 'B1' }, { label: 'B2' }] },
+    ],
+    respond: async (result) => { answered.push(result); return { accepted: true }; },
+  });
+  const processing = bridge.accept(message('m-1', '开始提问'));
+  await eventually(() => cards.length === 1);
+  const first = pressData(cards, 1);
+
+  // A user who sees no feedback presses again while the acknowledgement is still in
+  // flight: the second press must not advance the second question by itself.
+  await Promise.all([
+    bridge.acceptCallback(callback({ data: first, messageId: 'update-20' })),
+    bridge.acceptCallback(callback({ data: first, messageId: 'update-21' })),
+  ]);
+  assert.equal(answered.length, 0, 'the batch is not submitted before every question is answered');
+  assert.ok(
+    notices.some((entry) => /正在提交/.test(entry.text)),
+    'the duplicate press is told to wait rather than answering again',
+  );
+
+  await eventually(() => cards.length === 2);
+  await bridge.acceptCallback(callback({ data: pressData(cards, 0), messageId: 'update-22' }));
+  await eventually(() => answered.length === 1);
+  assert.deepEqual(answered[0].value.answer.answers, [
+    { id: 'q-a', selected: ['A2'] },
+    { id: 'q-b', selected: ['B1'] },
+  ]);
+
+  controller.abort(new DOMException('test finished', 'AbortError'));
+  await processing.catch(() => {});
+});
+
+test('answering by text retires the card keyboard', async () => {
+  const answered = [];
+  const { bridge, controller, cards, edits } = bridgeFixture({
+    respond: async (result) => { answered.push(result); return { accepted: true }; },
+  });
+  const processing = bridge.accept(message('m-1', '开始提问'));
+  await eventually(() => cards.length === 1);
+  const delivered = pressData(cards, 0);
+
+  await bridge.accept(message('m-2', '1'));
+  await eventually(() => answered.length === 1);
+  assert.deepEqual(answered[0].value.answer.answers, [{ id: 'pick', selected: ['红色'] }]);
+
+  // A card left behind in the chat would stay pressable after the batch moved on,
+  // so the text answer path retires its keyboard too.
+  await eventually(() => edits.length === 1);
+  assert.deepEqual(edits[0], { messageId: '700', markup: { inline_keyboard: [] } });
+
+  // And the payload itself is refused once the interaction is gone.
+  await bridge.acceptCallback(callback({ data: delivered, messageId: 'update-30' }));
+  assert.equal(answered.length, 1, 'a retired card must not submit again');
 
   controller.abort(new DOMException('test finished', 'AbortError'));
   await processing.catch(() => {});
@@ -409,17 +538,17 @@ test('a multi-select question keeps the text flow instead of a keyboard', async 
   assert.equal(sent.length, 1, 'the text flow still asks the question');
   assert.match(sent[0], /多选用逗号分隔/);
 
-  await bridge.acceptCallback(callback());
+  await bridge.acceptCallback(callback({ data: 'q|deadbeef|0|0' }));
   assert.equal(answered.length, 0);
-  assert.match(notices[0].text, /多选/);
+  assert.match(notices[0].text, /失效|多选/);
 
   controller.abort(new DOMException('test finished', 'AbortError'));
   await processing.catch(() => {});
 });
 
 test('a press with no pending question is acknowledged without a submission', async () => {
-  const { bridge, controller, notices } = bridgeFixture({});
-  await bridge.acceptCallback(callback());
+  const { bridge, notices } = bridgeFixture({});
+  await bridge.acceptCallback(callback({ data: 'q|deadbeef|0|0' }));
   assert.equal(notices.length, 1);
   assert.match(notices[0].text, /已处理/);
 });
@@ -440,9 +569,7 @@ test('a refused keyboard degrades to the plain-text question', async () => {
   // The text reply still completes the interaction.
   await bridge.accept(message('m-2', '2'));
   await eventually(() => answered.length === 1);
-  assert.deepEqual(answered[0].value.answer.answers, [
-    { id: 'pick', selected: ['绿色'] },
-  ]);
+  assert.deepEqual(answered[0].value.answer.answers, [{ id: 'pick', selected: ['绿色'] }]);
 
   controller.abort(new DOMException('test finished', 'AbortError'));
   await processing.catch(() => {});

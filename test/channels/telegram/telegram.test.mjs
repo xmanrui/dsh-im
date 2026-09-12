@@ -23,7 +23,10 @@ import {
   inspectTelegramToken,
   validTelegramToken,
 } from '../../../src/channels/telegram/telegram-api.mjs';
-import { TelegramHarnessBridge } from '../../../src/channels/telegram/telegram-bridge.mjs';
+import {
+  TelegramHarnessBridge,
+  parseTelegramCardCallback,
+} from '../../../src/channels/telegram/telegram-bridge.mjs';
 import {
   TelegramBotClient,
   TelegramRuntime,
@@ -2082,6 +2085,7 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
   const keyboardEdits = [];
   let answerUpdateDelivered = false;
   let cardMessageId = null;
+  let pressedData = null;
   let nextOutboundMessageId = 900;
 
   const promptUpdate = {
@@ -2111,7 +2115,7 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
               message_id: cardMessageId,
               chat: { id: 42, type: 'private' },
             },
-            data: 'q|0|1',
+            data: pressedData,
           },
         }];
       }
@@ -2130,6 +2134,8 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
       sent.push({ text, replyMarkup });
       if (replyMarkup) {
         cardMessageId = messageId;
+        // Press the second option (生产环境) exactly as a client would.
+        pressedData = replyMarkup.inline_keyboard[1][0].callback_data;
         questionSent.resolve();
       }
       return { message_id: messageId };
@@ -2196,15 +2202,17 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
       },
     });
 
-    // The question ships as a keyboard card, one button per option.
+    // The question ships as a keyboard card, one button per option, each carrying
+    // the presentation nonce alongside its indexes.
     const card = sent.find((entry) => entry.replyMarkup);
     assert.ok(card, 'the question must be delivered with an inline keyboard');
-    assert.deepEqual(card.replyMarkup, {
-      inline_keyboard: [
-        [{ text: '测试环境', callback_data: 'q|0|0' }],
-        [{ text: '生产环境', callback_data: 'q|0|1' }],
-      ],
-    });
+    const rows = card.replyMarkup.inline_keyboard;
+    assert.deepEqual(rows.map((row) => row[0].text), ['测试环境', '生产环境']);
+    const encoded = rows.map((row) => parseTelegramCardCallback(row[0].callback_data));
+    assert.ok(encoded.every(Boolean), 'every button must encode a press');
+    assert.deepEqual(encoded.map((entry) => entry.questionIndex), [0, 0]);
+    assert.deepEqual(encoded.map((entry) => entry.optionIndex), [0, 1]);
+    assert.equal(new Set(encoded.map((entry) => entry.nonce)).size, 1, 'one card, one identity');
     assert.match(card.text, /请选择测试环境/);
 
     // The press is acknowledged, and its keyboard is retired so it cannot replay.

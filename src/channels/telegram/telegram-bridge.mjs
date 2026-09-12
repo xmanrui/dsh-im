@@ -12,19 +12,26 @@ export const TELEGRAM_DESCRIPTOR = Object.freeze({
 const MAX_CARD_OPTIONS = 8;
 
 /**
- * Encode a press. The question index is carried so a keyboard left over from an
- * earlier question cannot answer the one currently on screen. Well under
- * Telegram's 64-byte callback_data budget, so no server-side id table is needed.
+ * Encode a press. Carries the presentation nonce so a keyboard left over from an
+ * earlier question cannot answer a later one — a new request restarts its indexes
+ * at zero, so the index alone would collide. Still far under Telegram's 64-byte
+ * callback_data budget, so no server-side id table is needed.
  */
-function cardCallbackData(questionIndex, optionIndex) {
-  return `q|${questionIndex}|${optionIndex}`;
+function cardCallbackData(nonce, questionIndex, optionIndex) {
+  return `q|${nonce}|${questionIndex}|${optionIndex}`;
 }
 
 /** Parse a press produced by {@link cardCallbackData}; null for foreign payloads. */
 export function parseTelegramCardCallback(data) {
-  const match = typeof data === 'string' ? /^q\|(\d{1,3})\|(\d{1,3})$/u.exec(data) : null;
+  const match = typeof data === 'string'
+    ? /^q\|([A-Za-z0-9_-]{1,16})\|(\d{1,4})\|(\d{1,4})$/u.exec(data)
+    : null;
   if (!match) return null;
-  return { questionIndex: Number(match[1]), optionIndex: Number(match[2]) };
+  return {
+    nonce: match[1],
+    questionIndex: Number(match[2]),
+    optionIndex: Number(match[3]),
+  };
 }
 
 /**
@@ -36,7 +43,9 @@ export function parseTelegramCardCallback(data) {
  * plus a submit action this channel does not have yet).
  */
 export const TELEGRAM_INTERACTION_CARD = Object.freeze({
-  render(question, { questionIndex = 0, total = 1, requiresMention = false } = {}) {
+  render(question, { questionIndex = 0, total = 1, requiresMention = false, nonce } = {}) {
+    // Without an identity the press could not be attributed to this presentation.
+    if (typeof nonce !== 'string' || !nonce) return null;
     const options = Array.isArray(question?.options) ? question.options : [];
     if (options.length === 0 || options.length > MAX_CARD_OPTIONS) return null;
     if (question.multiSelect === true) return null;
@@ -51,7 +60,7 @@ export const TELEGRAM_INTERACTION_CARD = Object.freeze({
       markup: {
         inline_keyboard: options.map((option, optionIndex) => [{
           text: option.label,
-          callback_data: cardCallbackData(questionIndex, optionIndex),
+          callback_data: cardCallbackData(nonce, questionIndex, optionIndex),
         }]),
       },
     };

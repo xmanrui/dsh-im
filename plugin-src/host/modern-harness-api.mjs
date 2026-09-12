@@ -486,9 +486,20 @@ class ModernHarnessApi {
     const im = this.#askThroughIm(request, owner);
     const native = Promise.resolve()
       .then(() => next())
-      // In a pure-IM session no client is connected and the host rejects with
-      // NO_PROVIDER. That must not fail the question — stay pending for IM.
-      .catch(() => new Promise(() => {}));
+      .catch((error) => {
+        // A pure-IM session has no client connected, so the host rejects with
+        // NO_PROVIDER — an expected state rather than a failure, and the IM
+        // answerer is independent of that chain. Any other error is real, so log
+        // it instead of swallowing it silently; the question still stays open for
+        // IM rather than being failed outright.
+        if (error?.code !== 'NO_PROVIDER') {
+          console.warn(
+            '[dsh-im] the host user-question answerer failed; waiting for the IM answer:',
+            error?.message ?? error,
+          );
+        }
+        return new Promise(() => {});
+      });
     return Promise.race([native, im.promise]).finally(() => {
       // Losing side cleanup. A host answer already settled this request, so drop
       // the IM pending: leaving it registered would let a late press answer a
