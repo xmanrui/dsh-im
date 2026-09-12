@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 上下文增强的来源块与增强提示词不再写入用户消息正文：Host 在 `agent/pre-step` 把渠道写入的前缀拆成独立的 `dsh-im` 上下文消息（来源块为 `notice`、提示词为 `instructions`），用户消息只保留用户真正发送的内容，同时保留可审计的提交来源，会话展示中不再出现裸标签。配对按消息身份而非队列位置决定，因此在途或并发的多条消息不会互相串用来源；无法拆分的 Host 或指向外部 Harness 的配置保持原有内联前缀行为。
+  Context enhancement no longer writes its source block or guidance into the user message. The Host splits the prefix a channel wrote at `agent/pre-step` into separate `dsh-im` context messages (the source block as a notice, the guidance as instructions), so the user message keeps only what the person sent while its durable source still identifies the prompt, and no raw tags remain in the transcript. Pairing follows message identity rather than inbox position, so in-flight or concurrent prompts cannot swap sources; a Host that cannot split, or a configuration pointing at an external Harness, keeps the previous inline prefix.
+
 ## [4.20.0] - 2026-09-12
 
 ### Added / 新增

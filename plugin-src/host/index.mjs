@@ -17,6 +17,7 @@ import { installDeliveryRpc } from './delivery-rpc.mjs';
 import { installDeliveryHttp } from './delivery-http.mjs';
 import { createDeliveryService } from './delivery-service.mjs';
 import { installInboundTtlRpc } from './inbound-ttl-rpc.mjs';
+import { installInjectedContext } from './injected-context.mjs';
 import { installSessionSyncCoordinator } from './session-sync-coordinator.mjs';
 import { installSessionTitlePrefix } from './session-title-prefix.mjs';
 import { installUpdateRpc } from './update-rpc.mjs';
@@ -41,6 +42,7 @@ export function createImHostPlugin(internals = {}) {
   const startHostLanguageRpc = internals.installHostLanguageRpc ?? installHostLanguageRpc;
   const startUpdate = internals.installUpdateRpc ?? installUpdateRpc;
   const startInboundTtl = internals.installInboundTtlRpc ?? installInboundTtlRpc;
+  const startInjectedContext = internals.installInjectedContext ?? installInjectedContext;
   const startDelivery = internals.installDeliveryRpc ?? installDeliveryRpc;
   const startDeliveryHttp = internals.installDeliveryHttp ?? installDeliveryHttp;
   const startSessionSync = internals.installSessionSyncCoordinator
@@ -139,6 +141,11 @@ export function createImHostPlugin(internals = {}) {
     const logger = typeof ctx?.logger === 'function'
       ? ctx.logger(name)
       : (ctx?.logger ?? console);
+    try {
+      startInjectedContext(ctx, { logger });
+    } catch (error) {
+      logger.error?.('[dsh-im] failed to activate injected-context pairing; prompts keep the inline prefix', error);
+    }
     if (ctx?.connection?.fetch) {
       if (hostLanguage) {
         try {
