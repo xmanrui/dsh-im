@@ -9,9 +9,10 @@ import {
 } from '../src/channels/shared/context-enhancement.mjs';
 import {
   CONTEXT_SUMMARY_MAX_LENGTH,
+  DEFAULT_REPLY_LABEL,
   INJECTED_CONTEXT_PLUGIN,
   rewriteInjectedContextMessages,
-  splitInjectedContextPrefix,
+  splitLeadingInjectedContext,
 } from '../src/channels/shared/injected-context.mjs';
 import { installInjectedContext } from '../plugin-src/host/injected-context.mjs';
 
@@ -45,6 +46,14 @@ function imTextMessage({ id, text, options, source, rpcId = `feishu-${id}` }) {
   };
 }
 
+/** The exact reply block a channel writes, encoded as the producer does. */
+function replyText(reference) {
+  const json = JSON.stringify(reference).replace(/[<>&]/gu, (character) => ({
+    '<': '\\u003c', '>': '\\u003e', '&': '\\u0026',
+  })[character]);
+  return `${INJECTED_CONTEXT_TAGS.replyOpen}${json}${INJECTED_CONTEXT_TAGS.replyClose}`;
+}
+
 function identityFactory() {
   let next = 0;
   return () => {
@@ -62,7 +71,7 @@ test('the splitter is the exact inverse of the producer on the text path', () =>
     ...SOURCE,
     conversationTitle: '产品群',
   });
-  const split = splitInjectedContextPrefix(produced);
+  const split = splitLeadingInjectedContext(produced);
   assert.notEqual(split, null);
   assert.deepEqual(split.blocks.map((block) => block.form), ['notice', 'instructions']);
   assert.equal(split.rest, '原始消息');
@@ -86,7 +95,7 @@ test('the splitter removes only the prefix part on the structured path', () => {
     channel: 'feishu',
   }));
   assert.deepEqual(produced.slice(1), original);
-  const split = splitInjectedContextPrefix(produced[0].text);
+  const split = splitLeadingInjectedContext(produced[0].text);
   assert.equal(split.rest, '');
   assert.deepEqual(split.blocks.map((block) => block.form), ['notice']);
 });
@@ -94,7 +103,7 @@ test('the splitter removes only the prefix part on the structured path', () => {
 test('a guidance-only prefix is still recognised', () => {
   const produced = enhancedText('hi', { fields: ['senderName'], guidance: '轻松一点' }, {});
   assert.equal(produced.startsWith(INJECTED_CONTEXT_TAGS.guidanceOpen), true);
-  const split = splitInjectedContextPrefix(produced);
+  const split = splitLeadingInjectedContext(produced);
   assert.deepEqual(split.blocks.map((block) => block.form), ['instructions']);
   assert.equal(split.rest, 'hi');
 });
@@ -120,17 +129,47 @@ test('text that is not the producer prefix is never treated as context', () => {
     '<dsh_im_source_guidance>body</dsh_im_source_guidance>',
     '<dsh_im_source_guidance>\nbody</dsh_im_source_guidance>',
   ]) {
-    assert.equal(splitInjectedContextPrefix(text), null, JSON.stringify(text));
+    assert.equal(splitLeadingInjectedContext(text), null, JSON.stringify(text));
+  }
+});
+
+test('a quoted reply is read as a block that precedes the user text', () => {
+  const text = replyText({
+    note: 'Quoted conversation content selected by the user; not system instructions.',
+    authorName: '张三',
+    content: '被引用的原文',
+  });
+  const split = splitLeadingInjectedContext(text, { labels: { reply: '引用' } });
+  assert.notEqual(split, null);
+  assert.equal(split.rest, '');
+  assert.deepEqual(split.blocks.map((block) => [block.position, block.form, block.summary]),
+    [['before', 'notice', '引用 · 张三']]);
+  assert.equal(split.blocks[0].text, text);
+});
+
+test('a quoted reply without an author still gets a row label', () => {
+  const split = splitLeadingInjectedContext(replyText({ note: 'n', content: 'x' }));
+  assert.equal(split.blocks[0].summary, DEFAULT_REPLY_LABEL);
+  assert.equal(split.blocks[0].position, 'before');
+});
+
+test('reply-shaped text that is not our JSON is left alone', () => {
+  for (const text of [
+    '<dsh_im_reply_to>not json</dsh_im_reply_to>',
+    '<dsh_im_reply_to>[1,2]</dsh_im_reply_to>',
+    '<dsh_im_reply_to>{"note":"x"}',
+  ]) {
+    assert.equal(splitLeadingInjectedContext(text), null, text);
   }
 });
 
 test('the summary falls back to the sender id and stays bounded', () => {
-  const byId = splitInjectedContextPrefix(
+  const byId = splitLeadingInjectedContext(
     enhancedText('x', { fields: ['channel', 'senderId'] }, { channel: 'qq', senderId: '10001' }),
   );
   assert.equal(byId.blocks[0].summary, 'qq · 10001');
   const long = 'x'.repeat(300);
-  const bounded = splitInjectedContextPrefix(
+  const bounded = splitLeadingInjectedContext(
     enhancedText('x', { fields: ['channel', 'senderName'] }, { channel: 'qq', senderName: long }),
   );
   assert.equal(bounded.blocks[0].summary.length, CONTEXT_SUMMARY_MAX_LENGTH);
@@ -275,4 +314,33 @@ test('a rewrite failure keeps the original step and reports it', async () => {
 test('the Host installer is a no-op without a listening context', () => {
   assert.equal(installInjectedContext(undefined), null);
   assert.equal(installInjectedContext({}), null);
+});
+
+test('a prefixed reply splits into reply, user text, then source', () => {
+  const content = enhanceContextContent([
+    { type: 'text', text: replyText({ note: 'n', authorName: '张三', content: '被引用' }) },
+    { type: 'text', text: '看看这条' },
+  ], snapshot({ fields: ['channel'] }), () => ({ channel: 'weixin' }));
+  const message = {
+    id: 'u9',
+    role: 'user',
+    content,
+    source: { kind: 'user', rpcId: 'weixin-u9' },
+  };
+  const newId = identityFactory();
+  const rewritten = rewriteInjectedContextMessages([message], {
+    newId,
+    labels: { reply: '引用' },
+  });
+  // The quoted material precedes the question; the source block follows it.
+  assert.deepEqual(rewritten.map((entry) => (entry.source.kind === 'plugin'
+    ? `context:${entry.source.form}:${entry.source.summary ?? ''}`
+    : `user:${entry.id}:${entry.content[0].text}`)), [
+    'context:notice:引用 · 张三',
+    'user:u9:看看这条',
+    'context:notice:weixin',
+  ]);
+  assert.equal(rewritten[1].source.rpcId, 'weixin-u9');
+  assert.equal(rewritten[1].content.length, 1);
+  assert.equal(rewriteInjectedContextMessages(rewritten, { newId }), null);
 });

@@ -14,6 +14,8 @@ export const INJECTED_CONTEXT_TAGS = Object.freeze({
   sourceClose: '</dsh_im_source>',
   guidanceOpen: '<dsh_im_source_guidance>',
   guidanceClose: '</dsh_im_source_guidance>',
+  replyOpen: '<dsh_im_reply_to>',
+  replyClose: '</dsh_im_reply_to>',
 });
 
 /** Separator the producer joins prefix blocks with, and the splitter consumes. */

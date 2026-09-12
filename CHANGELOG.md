@@ -10,6 +10,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 - 上下文增强的来源块与增强提示词不再写入用户消息正文：Host 在 `agent/pre-step` 把渠道写入的前缀拆成独立的 `dsh-im` 上下文消息（来源块为 `notice`、提示词为 `instructions`），用户消息只保留用户真正发送的内容，同时保留可审计的提交来源，会话展示中不再出现裸标签。配对按消息身份而非队列位置决定，因此在途或并发的多条消息不会互相串用来源；无法拆分的 Host 或指向外部 Harness 的配置保持原有内联前缀行为。
   Context enhancement no longer writes its source block or guidance into the user message. The Host splits the prefix a channel wrote at `agent/pre-step` into separate `dsh-im` context messages (the source block as a notice, the guidance as instructions), so the user message keeps only what the person sent while its durable source still identifies the prompt, and no raw tags remain in the transcript. Pairing follows message identity rather than inbox position, so in-flight or concurrent prompts cannot swap sources; a Host that cannot split, or a configuration pointing at an external Harness, keeps the previous inline prefix.
+- 引用回复的 `<dsh_im_reply_to>` 块同样改为独立消息，排在用户消息之前：引用材料作为 `dsh-im` 上下文行可折叠展示（引用正文上限 8000 字符），用户气泡只保留用户自己的提问；排在提问之前以保留「先引用、后提问」的阅读顺序。
+  Quoted replies are split the same way and placed before the user's message: the quoted material becomes a collapsible `dsh-im` context row (the quoted body is capped at 8000 characters) while the user bubble keeps only the person's own question, and it precedes the question to preserve the quoted-then-asked reading order.
 
 ## [4.20.0] - 2026-09-12
 
