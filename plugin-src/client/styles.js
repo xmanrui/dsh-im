@@ -126,10 +126,11 @@ const CSS = String.raw`
 .dim-logoOffice svg { width: 23px; height: 23px; }
 .dim-logoDiscord { color: white; background: #5865f2; }
 .dim-logoDiscord svg { width: 21px; height: 21px; }
-.dim-logoSlack { color: white; background: #4a154b; }
+.dim-logoSlack { background: linear-gradient(145deg, #fff, #f8fafb); border: 1px solid #e5e6eb; }
 .dim-logoSlack svg { width: 21px; height: 21px; }
 .dim-logoWhatsapp { color: white; background: #25d366; }
-.dim-logoIMessage { color: white; background: #32a852; }
+.dim-logoIMessage { color: white; background: linear-gradient(180deg, #5bf675 0%, #28d944 50%, #0fbd2c 100%); box-shadow: inset 0 1px 1px rgb(255 255 255 / 45%), 0 1px 3px rgb(31 35 41 / 12%); }
+.dim-logoIMessage svg { width: 23px; height: 23px; }
 .dim-logoWhatsapp svg { width: 21px; height: 21px; }
 .dim-channelCopy { min-width: 0; display: grid; }
 .dim-channelCopy strong { overflow: hidden; color: inherit; font-size: 14px; line-height: 20px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
