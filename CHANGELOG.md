@@ -6,6 +6,20 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.20.2] - 2026-09-13
+
+### Fixed / 修复
+
+- 修复 Telegram 私聊在 `ask_user_question` 等待回答时，流式草稿心跳持续占用输入框、导致答案无法正常发送的问题（[#199](https://github.com/xmanrui/dsh-im/issues/199)）。需要提问或审批时，先停止本轮草稿预览与心跳，等待已在发送的草稿结束，再发送普通交互消息，避免迟到草稿覆盖问题并再次阻塞作答。
+  Fixed Telegram private-chat live-draft heartbeats keeping the composer busy while `ask_user_question` waits for an answer, preventing replies from being sent normally ([#199](https://github.com/xmanrui/dsh-im/issues/199)). Questions and approvals now stop the current turn's draft preview and heartbeat and drain in-flight draft writes before sending the regular interaction message, so a late draft cannot replace the question and block replies again.
+- 交互开始后，本轮后续进度不再重新激活草稿，最终回复仍正常发送；下一轮恢复正常流式预览，群聊的普通占位消息不受影响。提问仍通过编号或文字回答，本次未增加按钮协议、配置项或外部依赖。
+  Later progress cannot restart the draft once interaction begins, while the final reply is still delivered normally. The next turn starts a fresh stream, and regular group-chat placeholders are unchanged. Questions still accept numbered or text replies; no button protocol, configuration option, or external dependency was added.
+
+### Documentation / 文档
+
+- 补充 #199 的复现、根因与修复验证记录；新增回归用例覆盖在途草稿、迟到进度、后续心跳、答案提交和最终消息投递。
+  Recorded the reproduction, root cause, and validation for #199, and added regression coverage for in-flight drafts, late progress, subsequent heartbeats, answer submission, and final-message delivery.
+
 ## [4.20.1] - 2026-09-12
 
 ### Fixed / 修复
@@ -999,7 +1013,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.20.1...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.20.2...HEAD
+[4.20.2]: https://github.com/xmanrui/dsh-im/compare/v4.20.1...v4.20.2
 [4.20.1]: https://github.com/xmanrui/dsh-im/compare/v4.20.0...v4.20.1
 [4.20.0]: https://github.com/xmanrui/dsh-im/compare/v4.19.2...v4.20.0
 [4.19.2]: https://github.com/xmanrui/dsh-im/compare/v4.19.1...v4.19.2
