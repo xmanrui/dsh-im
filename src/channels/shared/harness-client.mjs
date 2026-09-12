@@ -351,8 +351,21 @@ export function textFromHarnessContent(content) {
     .trim();
 }
 
+/** Join only reasoning blocks from one Harness message payload. */
+export function reasoningFromHarnessContent(content) {
+  return (Array.isArray(content) ? content : [])
+    .filter((part) => part?.type === 'reasoning' && typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('\n')
+    .trim();
+}
+
 function assistantMessageText(event) {
   return textFromHarnessContent(event?.data?.message?.content);
+}
+
+function assistantReasoningText(event) {
+  return reasoningFromHarnessContent(event?.data?.message?.content);
 }
 
 /** Aggregate assistant text in stable step/index order for one Harness Turn. */
@@ -593,6 +606,10 @@ export class HarnessReplyTracker {
         // canonical 定稿且非空时按 step 透出，供分步推送消费方使用；
         // 先于 commitText 透出，保持 text 更新作为批次末尾的既有语义。
         if (text) pushUpdate({ type: 'assistant-message', step, text });
+        // Thinking-trace channels consume this as the 💭 line that precedes the
+        // tool call it explains; latest-mode consumers must ignore it.
+        const reasoning = assistantReasoningText(event);
+        if (reasoning) pushUpdate({ type: 'reasoning', step, text: reasoning });
         this.#commitText(this.#assistantText.text, pushUpdate);
         continue;
       }

@@ -425,6 +425,93 @@ class TelegramDeliveryStream {
   }
 }
 
+// Thinking-trace display rules. Truncation fallback (spoiler / inline-button
+// expansion are follow-ups gated on three-platform client verification):
+// tool traces cap the argument summary, reasoning caps the first paragraph.
+const TOOL_TRACE_ARG_KEYS = Object.freeze([
+  'command', 'pattern', 'query', 'url', 'file_path', 'path', 'text', 'prompt', 'message', 'description',
+]);
+const TOOL_TRACE_SUMMARY_LIMIT = 120;
+const THINKING_LINE_LIMIT = 200;
+
+function truncateCapped(value, limit) {
+  return value.length > limit ? `${value.slice(0, limit)}…` : value;
+}
+
+/** Extract a one-line argument summary from a tool call's `arguments`. */
+export function toolTraceSummary(argumentsValue) {
+  let record = null;
+  if (argumentsValue && typeof argumentsValue === 'object' && !Array.isArray(argumentsValue)) {
+    record = argumentsValue;
+  } else if (typeof argumentsValue === 'string') {
+    const trimmed = argumentsValue.trim();
+    if (!trimmed) return null;
+    let parsed = null;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return truncateCapped(trimmed.replace(/\s+/g, ' ').trim(), TOOL_TRACE_SUMMARY_LIMIT);
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      record = parsed;
+    } else {
+      return truncateCapped(trimmed.replace(/\s+/g, ' ').trim(), TOOL_TRACE_SUMMARY_LIMIT);
+    }
+  }
+  if (!record) return null;
+  for (const key of TOOL_TRACE_ARG_KEYS) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return truncateCapped(value.replace(/\s+/g, ' ').trim(), TOOL_TRACE_SUMMARY_LIMIT);
+    }
+  }
+  return null;
+}
+
+/** Format one tool-trace line: `🔧 <name> → <summary>` (summary optional). */
+export function formatToolTrace(name, argumentsValue) {
+  const toolName = typeof name === 'string' && name.trim() ? name.trim() : t('工具');
+  const summary = toolTraceSummary(argumentsValue);
+  return summary ? `🔧 ${toolName} → ${summary}` : `🔧 ${toolName}`;
+}
+
+/** Format one reasoning line: `💭 <first paragraph>` (200-char cap). */
+export function formatThinkingLine(text) {
+  const trimmed = typeof text === 'string' ? text.trim() : '';
+  if (!trimmed) return null;
+  const firstParagraph = trimmed.split(/\n{2,}/)[0].trim();
+  if (!firstParagraph) return null;
+  return `💭 ${truncateCapped(firstParagraph, THINKING_LINE_LIMIT)}`;
+}
+
+/**
+ * Split a final answer for Telegram delivery. Paragraphs (blank-line
+ * separated) accumulate up to `targetLimit`; an individual paragraph above
+ * `hardLimit` is hard-split. Every chunk stays within `hardLimit`.
+ */
+export function splitAnswerIntoMessages(text, targetLimit = 1_600, hardLimit = 4_000) {
+  const trimmed = (typeof text === 'string' ? text : '').trim();
+  if (!trimmed) return [];
+  const paragraphs = trimmed.split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .flatMap((part) => (part.length > hardLimit ? splitMessageText(part, hardLimit) : [part]));
+  const messages = [];
+  let current = '';
+  for (const paragraph of paragraphs) {
+    if (!current) {
+      current = paragraph;
+    } else if (`${current}\n\n${paragraph}`.length <= targetLimit) {
+      current = `${current}\n\n${paragraph}`;
+    } else {
+      messages.push(current);
+      current = paragraph;
+    }
+  }
+  if (current) messages.push(current);
+  return messages;
+}
+
 export class TelegramBotClient {
   #api;
   #signal;
@@ -790,6 +877,92 @@ export class TelegramBotClient {
     });
     return stream.start();
   }
+
+  /**
+   * Thinking-trace stream: every intermediate line is a permanent, separate
+   * Telegram message (no placeholder editing), so the user watches the
+   * "think → act" chain build up. Trace lines are best-effort; the final
+   * answer must still land, falling back to plain sendText delivery.
+   */
+  openThinkingStream(target) {
+    const client = this;
+    const providerMessageIds = [];
+    let firstMessageId = null;
+    let closed = false;
+    const logger = this.#logger;
+    const warnFailure = (label, error) => {
+      logger?.warn?.(`[dsh-im:telegram] thinking stream ${label} failed:`, error);
+    };
+    const sendLine = async (text) => {
+      const message = await this.#api.sendMessage({
+        chatId: target.chatId,
+        text,
+        replyToMessageId: firstMessageId === null ? target.replyToMessageId : undefined,
+        messageThreadId: target.messageThreadId,
+        signal: this.#signal,
+      });
+      const id = message?.message_id;
+      if (Number.isSafeInteger(id)) {
+        if (firstMessageId === null) firstMessageId = id;
+        providerMessageIds.push(String(id));
+      }
+    };
+    return {
+      get messageId() {
+        return firstMessageId;
+      },
+      get providerMessageIds() {
+        return [...providerMessageIds];
+      },
+      presentation: 'telegram-thinking',
+      // The chain is made of permanent messages, but long tool runs still
+      // want the typing indicator; the bridge re-sends it every 4 seconds.
+      keepalive: true,
+      update: async () => {},
+      refresh: async () => {},
+      sendLine,
+      sendToolTrace: (name, argumentsValue) => (async () => {
+        if (closed) return;
+        try {
+          await sendLine(formatToolTrace(name, argumentsValue));
+        } catch (error) {
+          warnFailure('tool trace', error);
+        }
+      })(),
+      sendThinking: (text) => (async () => {
+        if (closed) return;
+        const line = formatThinkingLine(text);
+        if (!line) return;
+        try {
+          await sendLine(line);
+        } catch (error) {
+          warnFailure('thinking line', error);
+        }
+      })(),
+      async finish(answer) {
+        if (closed) throw new Error('Message stream is already closed');
+        closed = true;
+        const text = answer && typeof answer === 'object' && typeof answer.text === 'string'
+          ? answer.text
+          : typeof answer === 'string' ? answer : '';
+        const trimmed = text.trim();
+        const chunks = trimmed ? splitAnswerIntoMessages(trimmed) : [];
+        try {
+          for (const chunk of chunks.length > 0 ? chunks : [t('处理完成。')]) {
+            await sendLine(chunk);
+          }
+          return { presentation: 'telegram-thinking', providerMessageIds: [...providerMessageIds] };
+        } catch (error) {
+          if (!trimmed) throw error;
+          warnFailure('final answer', error);
+          return client.sendText(target, trimmed);
+        }
+      },
+      cancel() {
+        closed = true;
+      },
+    };
+  }
 }
 
 export function createTelegramRuntimeStatus() {
@@ -958,6 +1131,8 @@ export class TelegramRuntime {
         state: this.#state,
         contextEnhancement: this.#contextEnhancement,
         accessPolicy: this.#accessPolicy,
+        // Default ON; an explicit false in the bot config opts out.
+        thinkingTraces: this.#config?.thinkingTraces !== false,
         status: this.#status,
         logger: this.#logger,
         replyTimeoutMs: this.#replyTimeoutMs,

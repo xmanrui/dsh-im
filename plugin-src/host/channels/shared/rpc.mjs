@@ -14,6 +14,7 @@ import {
   validAgentPresetPayload,
 } from './agent-preset-rpc.mjs';
 import { SET_MODEL_ENDPOINT, validModelPayload } from './model-setting-rpc.mjs';
+import { SET_THINKING_TRACES_ENDPOINT, validThinkingTracesPayload } from './thinking-traces-rpc.mjs';
 
 export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   status: 'connection.status',
@@ -26,6 +27,7 @@ export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
+  setThinkingTraces: SET_THINKING_TRACES_ENDPOINT,
 });
 
 const ENDPOINTS = Object.freeze(Object.values(TOKEN_BOT_ENDPOINTS));
@@ -95,6 +97,10 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === TOKEN_BOT_ENDPOINTS.setAlias) {
     return validAliasPayload(payload)
       ? null : '请输入有效的别名（最多 80 个字符）。';
+  }
+  if (endpoint === TOKEN_BOT_ENDPOINTS.setThinkingTraces) {
+    return validThinkingTracesPayload(payload)
+      ? null : '请提交有效的思考过程留痕设置。';
   }
   return 'Unknown bot endpoint.';
 }
@@ -192,6 +198,9 @@ export function createTokenBotRpcHandler(controller, { channel }) {
       } else if (endpoint === TOKEN_BOT_ENDPOINTS.setAgentPreset) {
         if (typeof controller.updateAgentPreset !== 'function') throw new Error('Agent preset update is unavailable');
         value = await controller.updateAgentPreset(payload.botId, payload.agentPreset);
+      } else if (endpoint === TOKEN_BOT_ENDPOINTS.setThinkingTraces) {
+        if (typeof controller.setThinkingTraces !== 'function') throw new Error('Thinking traces update is unavailable');
+        value = await controller.setThinkingTraces(payload.botId, payload.thinkingTraces);
       } else {
         value = await controller.deleteBot(payload.botId);
       }
