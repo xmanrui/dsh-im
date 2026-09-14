@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 
-import { createEditableMessageStream, splitMessageText } from '../shared/editable-message-stream.mjs';
+import { createEditableMessageStream } from '../shared/editable-message-stream.mjs';
 import { createTextDeliveryBlock } from '../shared/semantic/delivery.mjs';
 import { t } from '../shared/i18n.mjs';
 import { captureContextEnhancement } from '../shared/context-enhancement.mjs';
@@ -434,6 +434,96 @@ class TelegramDeliveryStream {
   }
 }
 
+// Thinking-trace display rules. Truncation fallback (spoiler / inline-button
+// expansion are follow-ups gated on three-platform client verification):
+// tool traces cap the argument summary, reasoning caps the first paragraph.
+const TOOL_TRACE_ARG_KEYS = Object.freeze([
+  'command', 'pattern', 'query', 'url', 'file_path', 'path', 'text', 'prompt', 'message', 'description',
+]);
+const TOOL_TRACE_SUMMARY_LIMIT = 120;
+const THINKING_LINE_LIMIT = 200;
+
+function truncateCapped(value, limit) {
+  return value.length > limit ? `${value.slice(0, limit)}…` : value;
+}
+
+/** Extract a one-line argument summary from a tool call's `arguments`. */
+export function toolTraceSummary(argumentsValue) {
+  let record = null;
+  if (argumentsValue && typeof argumentsValue === 'object' && !Array.isArray(argumentsValue)) {
+    record = argumentsValue;
+  } else if (typeof argumentsValue === 'string') {
+    const trimmed = argumentsValue.trim();
+    if (!trimmed) return null;
+    let parsed = null;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return truncateCapped(trimmed.replace(/\s+/g, ' ').trim(), TOOL_TRACE_SUMMARY_LIMIT);
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      record = parsed;
+    } else {
+      return truncateCapped(trimmed.replace(/\s+/g, ' ').trim(), TOOL_TRACE_SUMMARY_LIMIT);
+    }
+  }
+  if (!record) return null;
+  for (const key of TOOL_TRACE_ARG_KEYS) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return truncateCapped(value.replace(/\s+/g, ' ').trim(), TOOL_TRACE_SUMMARY_LIMIT);
+    }
+  }
+  return null;
+}
+
+/** Format one tool-trace line: `🔧 <name> → <summary>` (summary optional). */
+export function formatToolTrace(name, argumentsValue) {
+  const toolName = typeof name === 'string' && name.trim() ? name.trim() : t('工具');
+  const summary = toolTraceSummary(argumentsValue);
+  return summary ? `🔧 ${toolName} → ${summary}` : `🔧 ${toolName}`;
+}
+
+/** Format one reasoning line: `💭 <first paragraph>` (200-char cap). */
+export function formatThinkingLine(text) {
+  const trimmed = typeof text === 'string' ? text.trim() : '';
+  if (!trimmed) return null;
+  const firstParagraph = trimmed.split(/\n{2,}/)[0].trim();
+  if (!firstParagraph) return null;
+  return `💭 ${truncateCapped(firstParagraph, THINKING_LINE_LIMIT)}`;
+}
+
+/**
+ * Split a final answer for Telegram delivery. Paragraphs (blank-line
+ * separated) accumulate up to `targetLimit`; an individual paragraph above
+ * `hardLimit` is split with the codepoint-safe Telegram regular-text
+ * splitter (whitespace preserved, surrogate pairs never cut, preferred cut
+ * at a line or space boundary). Every chunk stays within `hardLimit`.
+ */
+export function splitAnswerIntoMessages(text, targetLimit = 1_600, hardLimit = 4_000) {
+  const trimmed = (typeof text === 'string' ? text : '').trim();
+  if (!trimmed) return [];
+  // Keep each paragraph's own whitespace (indented code after a blank line is
+  // content); only whitespace-only paragraphs carry nothing and are dropped.
+  const paragraphs = trimmed.split(/\n{2,}/)
+    .filter((part) => part.trim())
+    .flatMap((part) => (part.length > hardLimit ? splitTelegramRegularText(part, hardLimit) : [part]));
+  const messages = [];
+  let current = '';
+  for (const paragraph of paragraphs) {
+    if (!current) {
+      current = paragraph;
+    } else if (`${current}\n\n${paragraph}`.length <= targetLimit) {
+      current = `${current}\n\n${paragraph}`;
+    } else {
+      messages.push(current);
+      current = paragraph;
+    }
+  }
+  if (current) messages.push(current);
+  return messages;
+}
+
 export class TelegramBotClient {
   #api;
   #signal;
@@ -799,6 +889,132 @@ export class TelegramBotClient {
     });
     return stream.start();
   }
+
+  /**
+   * Thinking-trace stream: every intermediate line is a permanent, separate
+   * Telegram message (no placeholder editing), so the user watches the
+   * "think → act" chain build up. Trace lines are best-effort; the final
+   * answer must still land, falling back to plain sendText delivery.
+   */
+  openThinkingStream(target) {
+    const client = this;
+    const providerMessageIds = [];
+    let firstMessageId = null;
+    let closed = false;
+    const logger = this.#logger;
+    const warnFailure = (label, error) => {
+      logger?.warn?.(`[dsh-im:telegram] thinking stream ${label} failed:`, error);
+    };
+    const sendLine = async (text) => {
+      const message = await this.#api.sendMessage({
+        chatId: target.chatId,
+        text,
+        replyToMessageId: firstMessageId === null ? target.replyToMessageId : undefined,
+        messageThreadId: target.messageThreadId,
+        signal: this.#signal,
+      });
+      const id = message?.message_id;
+      if (Number.isSafeInteger(id)) {
+        if (firstMessageId === null) firstMessageId = id;
+        providerMessageIds.push(String(id));
+      }
+    };
+    return {
+      get messageId() {
+        return firstMessageId;
+      },
+      get providerMessageIds() {
+        return [...providerMessageIds];
+      },
+      presentation: 'telegram-thinking',
+      // The chain is made of permanent messages, but long tool runs still
+      // want the typing indicator; the bridge re-sends it every 4 seconds.
+      keepalive: true,
+      update: async () => {},
+      refresh: async () => {},
+      sendLine,
+      sendToolTrace: (name, argumentsValue) => (async () => {
+        if (closed) return;
+        try {
+          await sendLine(formatToolTrace(name, argumentsValue));
+        } catch (error) {
+          warnFailure('tool trace', error);
+        }
+      })(),
+      sendThinking: (text) => (async () => {
+        if (closed) return;
+        const line = formatThinkingLine(text);
+        if (!line) return;
+        try {
+          await sendLine(line);
+        } catch (error) {
+          warnFailure('thinking line', error);
+        }
+      })(),
+      async finish(answer) {
+        if (closed) throw new Error('Message stream is already closed');
+        closed = true;
+        const format = answer && typeof answer === 'object' && answer.format === 'markdown'
+          ? 'markdown'
+          : 'plain';
+        const text = answer && typeof answer === 'object' && typeof answer.text === 'string'
+          ? answer.text
+          : typeof answer === 'string' ? answer : '';
+        const trimmed = text.trim();
+        const chunks = trimmed ? splitAnswerIntoMessages(trimmed) : [t('处理完成。')];
+        // The final answer keeps the channel's normal delivery path, so a
+        // markdown answer renders rich (bold, code fences) exactly like
+        // non-trace mode; trace lines above stay plain permanent messages.
+        const remember = (ids) => {
+          for (const id of ids ?? []) {
+            if (!providerMessageIds.includes(id)) providerMessageIds.push(id);
+          }
+        };
+        for (let index = 0; index < chunks.length; index += 1) {
+          let result;
+          try {
+            result = await client.#sendRich(target, createTextDeliveryBlock(chunks[index], format));
+          } catch (error) {
+            const failure = telegramFailure(error);
+            warnFailure('final answer', error);
+            if (failure.outcome === 'unknown') {
+              return deliveryResult('telegram-thinking', providerMessageIds, 'unknown', failure.reason);
+            }
+          }
+          if (result?.deliveryOutcome === 'sent') {
+            remember(result.providerMessageIds);
+            continue;
+          }
+          if (result?.deliveryOutcome === 'unknown') {
+            // 结果未知（超时等）：可能已送达，重发会造成重复，保留 unknown 状态。
+            remember(result.providerMessageIds);
+            return deliveryResult('telegram-thinking', providerMessageIds, 'unknown', result.reason);
+          }
+          // 明确失败：该分片确认未送达。纯文本分片再走一次 plain 重发
+          // （markdown 分片的 plain 回退已在 #sendRich 内尝试过），只重发
+          // 尚未发送的尾部内容，已成功的分片不重复。
+          remember(result?.providerMessageIds);
+          if (format === 'markdown') {
+            return deliveryResult('telegram-thinking', providerMessageIds, 'failed', result.reason);
+          }
+          warnFailure('final answer chunk', new Error('chunk definitively rejected'));
+          try {
+            const fallback = await client.sendText(target, chunks.slice(index).join('\n\n'));
+            remember(fallback.providerMessageIds);
+            return deliveryResult('telegram-thinking', providerMessageIds);
+          } catch (error) {
+            const failure = telegramFailure(error);
+            warnFailure('final answer fallback', error);
+            return deliveryResult('telegram-thinking', providerMessageIds, failure.outcome, failure.reason);
+          }
+        }
+        return deliveryResult('telegram-thinking', providerMessageIds);
+      },
+      cancel() {
+        closed = true;
+      },
+    };
+  }
 }
 
 export function createTelegramRuntimeStatus() {
@@ -967,6 +1183,8 @@ export class TelegramRuntime {
         state: this.#state,
         contextEnhancement: this.#contextEnhancement,
         accessPolicy: this.#accessPolicy,
+        // Default ON; an explicit false in the bot config opts out.
+        thinkingTraces: this.#config?.thinkingTraces !== false,
         status: this.#status,
         logger: this.#logger,
         replyTimeoutMs: this.#replyTimeoutMs,

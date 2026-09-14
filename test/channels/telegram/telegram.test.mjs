@@ -1954,6 +1954,9 @@ test('Telegram runtime keeps polling while a Harness question waits for its answ
       const messageId = nextOutboundMessageId;
       nextOutboundMessageId += 1;
       if (text.includes('请选择测试环境')) questionSent.resolve();
+      // Thinking-traces mode (default ON) delivers the final answer as a
+      // plain permanent message instead of a rich draft.
+      if (text === '已选择生产环境') finalReplySent.resolve();
       return { message_id: messageId };
     },
     sendRichMessageDraft: async () => true,

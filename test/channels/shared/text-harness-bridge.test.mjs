@@ -2797,6 +2797,50 @@ test('shared bridge keepalives a short-lived draft stream and stops the timer on
   assert.equal(typings.length, typingAt, 'no typing after the turn ends');
 });
 
+test('shared bridge passes a markdown delivery block to the thinking stream finish', async () => {
+  const fixture = stateFixture();
+  const finished = [];
+  const bridge = new TextHarnessBridge({
+    descriptor: { key: 'test', label: 'Test' },
+    thinkingTraces: true,
+    bot: {
+      sendText: async () => 'done',
+      openThinkingStream: async () => ({
+        keepalive: true,
+        update: async () => undefined,
+        refresh: async () => undefined,
+        sendThinking: async () => undefined,
+        sendToolTrace: async () => undefined,
+        finish: async (answer) => {
+          finished.push(answer);
+          return {
+            presentation: 'telegram-thinking',
+            providerMessageIds: [],
+            deliveryOutcome: 'sent',
+          };
+        },
+        fail: async () => undefined,
+      }),
+    },
+    harness: {
+      createSession: async () => 'session-thinking-format',
+      ask: async () => '**bold** answer with `code`',
+    },
+    state: fixture.state,
+    logger: { warn() {}, error() {} },
+  });
+
+  await bridge.accept(message('thinking-format', '总结一段内容'));
+  assert.equal(finished.length, 1, 'the thinking stream finish must be called once');
+  assert.equal(
+    typeof finished[0],
+    'object',
+    'the thinking stream must receive a delivery block, not a raw string',
+  );
+  assert.equal(finished[0].format, 'markdown', 'a text answer keeps markdown delivery so it renders rich');
+  assert.match(finished[0].text, /\*\*bold\*\*/);
+});
+
 test('shared bridge clears the keepalive timer when a long turn fails', async () => {
   const fixture = stateFixture();
   const refreshes = [];

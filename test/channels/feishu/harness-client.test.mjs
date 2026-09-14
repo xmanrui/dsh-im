@@ -1134,6 +1134,146 @@ test('latest-mode ask() filters assistant-message updates out of delivered progr
   ]);
 });
 
+test('default ask() consumers never receive reasoning updates from canonical messages', async () => {
+  const client = new HarnessClient({
+    baseUrl: 'http://127.0.0.1:3080',
+    workspace: '/tmp/dsh-feishu-workspace',
+  });
+  client.ensureRunning = async () => undefined;
+  let promptRpcId;
+  let prompted = false;
+  let seq = 0;
+  let historyPolls = 0;
+  let sessionListPolls = 0;
+  const events = [];
+  client.rpc = async (method, _payload, _timeoutMs, options) => {
+    if (method === 'session.history') {
+      if (!prompted) return { events: [] };
+      historyPolls += 1;
+      if (historyPolls === 1) {
+        events.push(
+          { type: 'turn/start', seq: ++seq, data: { turn: 1 } },
+          { type: 'user/message', seq: ++seq, data: { turn: 1, source: { rpcId: promptRpcId } } },
+          { type: 'assistant/chunk', seq: ++seq, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: '第一段' } } },
+        );
+      } else if (historyPolls === 2) {
+        // 本轮唯一变化是 canonical 定稿携带 reasoning：未订阅 reasoning 时该批次不应投递任何进度。
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: {
+            turn: 1, step: 1,
+            message: { content: [
+              { type: 'reasoning', text: 'Let me check the files first.' },
+              { type: 'text', text: '第一段' },
+            ] },
+          } },
+        );
+      } else if (historyPolls === 3) {
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '最终结果' }] } } },
+          { type: 'turn/end', seq: ++seq, data: { turn: 1, reason: { kind: 'completed' } } },
+        );
+      }
+      return { events: events.map((event) => ({ event })) };
+    }
+    if (method === 'session.prompt') {
+      prompted = true;
+      promptRpcId = options.rpcId;
+      return {};
+    }
+    if (method === 'session.list') {
+      sessionListPolls += 1;
+      return { items: [{ sessionId: 'session-reasoning-default', running: false }] };
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  };
+
+  const delivered = [];
+  const answer = await client.ask('session-reasoning-default', 'long task', {
+    timeoutMs: 450,
+    control: { owner: {}, key: 'route' },
+    onUpdate: async (update) => { delivered.push(update); },
+  });
+  assert.equal(answer, '最终结果');
+  assert.equal(historyPolls, 3);
+  // 默认模式（无 reasoning 选项）下 reasoning 更新不出现在 onUpdate 中：
+  // 钉钉、企微等以 update.text 作进度展示的渠道因此不受思考内容影响。
+  assert.deepEqual(delivered, [
+    { type: 'text', text: '第一段' },
+    { type: 'text', text: '最终结果' },
+  ]);
+});
+
+test('reasoning-subscribed all-mode ask() receives reasoning updates', async () => {
+  const client = new HarnessClient({
+    baseUrl: 'http://127.0.0.1:3080',
+    workspace: '/tmp/dsh-feishu-workspace',
+  });
+  client.ensureRunning = async () => undefined;
+  let promptRpcId;
+  let prompted = false;
+  let seq = 0;
+  let historyPolls = 0;
+  let sessionListPolls = 0;
+  const events = [];
+  client.rpc = async (method, _payload, _timeoutMs, options) => {
+    if (method === 'session.history') {
+      if (!prompted) return { events: [] };
+      historyPolls += 1;
+      if (historyPolls === 1) {
+        events.push(
+          { type: 'turn/start', seq: ++seq, data: { turn: 1 } },
+          { type: 'user/message', seq: ++seq, data: { turn: 1, source: { rpcId: promptRpcId } } },
+        );
+      } else if (historyPolls === 2) {
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: {
+            turn: 1, step: 1,
+            message: { content: [
+              { type: 'reasoning', text: 'Let me check the files first.' },
+              { type: 'text', text: '第一段' },
+            ] },
+          } },
+        );
+      } else if (historyPolls === 3) {
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '最终结果' }] } } },
+          { type: 'turn/end', seq: ++seq, data: { turn: 1, reason: { kind: 'completed' } } },
+        );
+      }
+      return { events: events.map((event) => ({ event })) };
+    }
+    if (method === 'session.prompt') {
+      prompted = true;
+      promptRpcId = options.rpcId;
+      return {};
+    }
+    if (method === 'session.list') {
+      sessionListPolls += 1;
+      return { items: [{ sessionId: 'session-reasoning-all', running: false }] };
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  };
+
+  const delivered = [];
+  const answer = await client.ask('session-reasoning-all', 'long task', {
+    timeoutMs: 450,
+    control: { owner: {}, key: 'route' },
+    progressMode: 'all',
+    reasoning: true,
+    onUpdate: async (update) => { delivered.push(update); },
+  });
+  assert.equal(answer, '最终结果');
+  assert.equal(historyPolls, 3);
+  // 显式订阅（progressMode all + reasoning）时 reasoning 按序透出，供留痕渠道展示。
+  assert.deepEqual(delivered, [
+    { type: 'assistant-message', step: 1, text: '第一段' },
+    { type: 'reasoning', step: 1, text: 'Let me check the files first.' },
+    { type: 'text', text: '第一段' },
+    { type: 'assistant-message', step: 1, text: '最终结果' },
+    { type: 'text', text: '最终结果' },
+  ]);
+});
+
 test('a production-owned turn that starts and then stalls still times out', async () => {
   const client = new HarnessClient({
     baseUrl: 'http://127.0.0.1:3080',

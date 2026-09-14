@@ -351,8 +351,21 @@ export function textFromHarnessContent(content) {
     .trim();
 }
 
+/** Join only reasoning blocks from one Harness message payload. */
+export function reasoningFromHarnessContent(content) {
+  return (Array.isArray(content) ? content : [])
+    .filter((part) => part?.type === 'reasoning' && typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('\n')
+    .trim();
+}
+
 function assistantMessageText(event) {
   return textFromHarnessContent(event?.data?.message?.content);
+}
+
+function assistantReasoningText(event) {
+  return reasoningFromHarnessContent(event?.data?.message?.content);
 }
 
 /** Aggregate assistant text in stable step/index order for one Harness Turn. */
@@ -500,10 +513,15 @@ export class HarnessReplyTracker {
   #reason = null;
   #toolNames = new Map();
   #lastToolName = null;
+  #reasoning = false;
 
-  constructor({ promptRpcId, afterSeq = -1 }) {
+  constructor({ promptRpcId, afterSeq = -1, reasoning = false }) {
     this.#promptRpcId = promptRpcId;
     this.#lastSeq = afterSeq;
+    // Reasoning updates are opt-in per consumer: only channels that surface
+    // thinking traces (Telegram thinking mode) subscribe; every other channel
+    // keeps its pre-thinking-traces update stream untouched.
+    this.#reasoning = reasoning === true;
   }
 
   get finished() {
@@ -593,6 +611,14 @@ export class HarnessReplyTracker {
         // canonical 定稿且非空时按 step 透出，供分步推送消费方使用；
         // 先于 commitText 透出，保持 text 更新作为批次末尾的既有语义。
         if (text) pushUpdate({ type: 'assistant-message', step, text });
+        // Thinking-trace channels consume this as the 💭 line that precedes the
+        // tool call it explains; only consumers that explicitly subscribed
+        // (reasoning: true) see these updates, so default-mode channels keep
+        // their pre-thinking-traces progress stream.
+        if (this.#reasoning) {
+          const reasoning = assistantReasoningText(event);
+          if (reasoning) pushUpdate({ type: 'reasoning', step, text: reasoning });
+        }
         this.#commitText(this.#assistantText.text, pushUpdate);
         continue;
       }
@@ -637,6 +663,19 @@ export class HarnessReplyTracker {
   consume(entries) {
     return this.consumeAll(entries).at(-1) ?? null;
   }
+}
+
+/**
+ * Progress updates an ask() consumer actually receives. latest 模式只投递一条
+ * 最新进展；assistant-message 是分步推送专用更新，且 canonical 去重后可能成为
+ * 批次唯一变化，绝不能冒充进度投给全部渠道。reasoning 同为思考留痕渠道专用，
+ * 默认模式下不得冒充进度（钉钉、企微等会展示其 text）。
+ */
+export function visibleProgressUpdates(updates, progressMode) {
+  if (progressMode === 'all') return updates;
+  return updates
+    .filter((update) => update.type !== 'assistant-message' && update.type !== 'reasoning')
+    .slice(-1);
 }
 
 export class HarnessRpcError extends Error {
@@ -1395,6 +1434,9 @@ export class HarnessClient {
     const signal = options.signal;
     const onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : null;
     const progressMode = options.progressMode === 'all' ? 'all' : 'latest';
+    // Reasoning updates only exist for consumers that opt in (thinking-trace
+    // mode); default ask() consumers keep the pre-thinking-traces stream.
+    const reasoning = options.reasoning === true;
     const onArtifact = typeof options.onArtifact === 'function' ? options.onArtifact : null;
     const onInteraction = typeof options.onInteraction === 'function'
       ? options.onInteraction
@@ -1414,7 +1456,7 @@ export class HarnessClient {
     const baselineSeq = Math.max(-1, ...(before.events ?? []).map(({ event }) => event.seq ?? -1));
     const promptRpcId = `${this.#rpcIdPrefix}-${randomUUID()}`;
     const releasePromptInputOrigin = registerImInputOrigin(this.#interactionRegistry, promptRpcId);
-    const tracker = new HarnessReplyTracker({ promptRpcId, afterSeq: baselineSeq });
+    const tracker = new HarnessReplyTracker({ promptRpcId, afterSeq: baselineSeq, reasoning });
     const interactionController = onInteraction || onInteractionResolved
       ? new AbortController()
       : null;
@@ -1579,9 +1621,7 @@ export class HarnessClient {
           if (onUpdate) {
             // latest 模式只投递一条最新进展；assistant-message 是分步推送专用更新，
             // 且 canonical 去重后可能成为批次唯一变化，绝不能冒充进度投给全部渠道。
-            const visibleUpdates = progressMode === 'all'
-              ? updates
-              : updates.filter((update) => update.type !== 'assistant-message').slice(-1);
+            const visibleUpdates = visibleProgressUpdates(updates, progressMode);
             for (const update of visibleUpdates) {
               try {
                 await onUpdate(update);
