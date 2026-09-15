@@ -6,8 +6,9 @@
 
 ## 0. 先读这一句
 
-**本次重启不需要重装。磁盘上已经是最新构建**（已安装副本的 `lib/client.js` 与 `lib/index.js` 哈希与仓库 HEAD 逐字节相同），
-版本号改写也已在位（已安装副本为 `4.20.3-local.0`）。
+**不需要重装，而且以后也不需要。** 2026-09-15 起 3080 的安装形态已从「真实拷贝」改为**指向本仓库的符号链接**
+（`"@xmanrui/dsh-im": "link:D:/ProjectSomething/dsh-im"`），与 3081 一致：仓库改完 `npm run build`，两个实例都自动读到最新 `lib/`。
+安装副本版本号随仓库走，现为 **`4.21.0`**。附录 B 的 `4.20.3-local.0` 版本改写**已停用**（理由见附录 B）。
 
 **重启的唯一作用是：让正在运行的进程重新加载当前宿主端产物。**
 客户端产物（`lib/client.js`）刷新浏览器即生效，但宿主端（`lib/index.js`）只在进程启动时装载一次，
@@ -38,8 +39,8 @@
 | 端口 | 3080（默认） | 3081 |
 | 语言 | English | 中文 |
 | 真实机器人 | 只配了飞书 | 无 |
-| 插件安装形态 | **真实拷贝** | **符号链接** → `D:\ProjectSomething\dsh-im` |
-| 改完仓库要不要重装 | **要** | **不要**（链接自动跟随仓库） |
+| 插件安装形态 | **符号链接** → `D:\ProjectSomething\dsh-im`（2026-09-15 起） | **符号链接** → `D:\ProjectSomething\dsh-im` |
+| 改完仓库要不要重装 | **不要**（链接自动跟随仓库；只需 `npm run build`） | **不要**（链接自动跟随仓库） |
 
 - 3080 安装路径：`C:\Users\speak\.dsh\profiles\web\node_modules\@xmanrui\dsh-im`
 - 3081 安装路径：`C:\Users\speak\.dsh-imui\profiles\imui\node_modules\@xmanrui\dsh-im`
@@ -233,7 +234,19 @@ node --test test/client-native-border-contract.test.mjs test/client-role-form-co
 | 「变淡」复核 | 24 条逐条清单（元素 / 旧值 / 新值 / 对比度前后 / 在 3080 哪里看）见证据目录 `handoff/fade-review.md` |
 | push / 开 PR | **均未做**，需显式授权 |
 
-## 附录 A：将来确实需要重装时（本次不需要）
+## 附录 A：将来确实需要重装时（现在一般不需要）
+
+> **2026-09-15 实测：本附录的第一种做法在本机跑不通。** `bin/dsh-im.mjs` 用
+> `spawnSync('dsh', args, { shell: false })`，而 **Node 在 Windows 上不经 shell 无法执行 `.cmd`**，
+> 于是报「找不到 dsh」。绕过办法是直接执行它内部那条同样的命令：
+>
+> ```powershell
+> & 'C:\Users\speak\AppData\Roaming\npm\dsh.cmd' plugin --profile web add --save-exact 'D:\ProjectSomething\dsh-im'
+> ```
+>
+> ⚠️ **它会改写 profile 的依赖写法**：从 registry 范围 `^4.20.2` 变成 `link:D:/ProjectSomething/dsh-im`，
+> 并把安装形态从拷贝换成符号链接。这正是 2026-09-15 发生的事，此后不再需要重装。
+> 执行前先备份 `C:\Users\speak\.dsh\profiles\web\package.json`。
 
 3080 的已安装副本是**真实拷贝**而不是链接，所以仓库改了它不会自动跟随。
 只有当 §4.2 的哈希核对**不相等**、而且你确实想把磁盘上的安装刷成 HEAD 时才需要重装。
@@ -265,7 +278,12 @@ Copy-Item lib\index.js  "C:\Users\speak\.dsh\profiles\web\node_modules\@xmanrui\
 
 ## 附录 B：版本号改写（本次只核对，不重做）
 
-**核对**：§4.1 的命令，期望 `4.20.3-local.0`。
+> **已停用（2026-09-15）。** 仓库版本升到 4.21.0 之后，npm 上的 latest 仍是 4.20.2，
+> semver.gt(4.20.2, 4.21.0) 本来就是假，「一键更新」天然保持禁用 —— 不再需要把安装副本改写成 4.20.3-local.0。
+> 同时 3080 已改为 link: 依赖，宿主判定 sourceInstall 为真，多了第二道拦截（见下）。
+> 下文的改写步骤保留作历史记录，**不要重做**。
+
+**核对**：§4.1 的命令，期望 **4.21.0**。
 
 **它为什么存在**：更新判定在 `plugin-src/host/update-service.mjs:197` ——
 `canInstall` 要求 `semver.gt(已发布版本, 运行中版本)`。npm 上 `@xmanrui/dsh-im` 的 latest 是 `4.20.2`，

@@ -91,24 +91,51 @@ updated: 2026-09-15
 
 ## 四、已经固化的护栏
 
-三个契约测试共 13 例，逐一用变异测试验证过有牙（把缺陷放回去会变红）：
+**五个契约测试共 32 例**，逐一用变异测试验证过有牙（把缺陷放回去会变红）：
 
-- `test/client-native-border-contract.test.mjs`——中性 token 边框与实心分隔线画在原生 0.5px hairline；
+- `test/client-native-border-contract.test.mjs`（5 例）——中性 token 边框与实心分隔线画在原生 0.5px hairline；
   高程阴影不配中性边框；账户 chevron 用内置的原生字形；**token 层声明在 `body` 上**（把声明移回 `:root` 会变红）。
-- `test/client-role-form-contract.test.mjs`——设置行标签用原生行标题角色、组标题用原生 caption 角色、
-  以 footer 结尾的卡片有底部内边距、禁用选择器保留表面只压暗文字、弹窗滚正文不滚自身 chrome、placeholder 用原生 placeholder token。
-- `test/client-toolbar-role-contract.test.mjs`——标题栏的两个按钮共用一份 padding，且没有别的规则给它们单独的内联 padding。
+- `test/client-role-form-contract.test.mjs`（10 例）——设置行标签用原生行标题角色、组标题用原生 caption 角色、
+  以 footer 结尾的卡片有底部内边距、禁用选择器保留表面只压暗文字、弹窗滚正文不滚自身 chrome、placeholder 用原生 placeholder token、
+  右槽只声明一次且 hover/focus/disabled 与基类同址。
+- `test/client-toolbar-role-contract.test.mjs`（2 例）——标题栏的两个按钮共用一份 padding，且没有别的规则给它们单独的内联 padding。
+- `test/client-disclosure-contract.test.mjs`（6 例）——三类展开共用一套解剖；手势（箭头旋转、展开时长、body 裁剪）只有一处声明；
+  **全量扫描禁止任何 `h('details')` 带内联样式复活**；诊断展开用具名角色而非内联 chrome。
+- `test/client-row-control-contract.test.mjs`（9 例）——行控件的皮肤、状态与内部布局只有一处声明；行文字是文本光标且可选中，
+  只有控件拿手指针；`.dim-botList` 等容器各取宿主角色；11px 一档按宿主的两类角色拆开；portal 菜单自带字体；
+  渠道表不得再声明已删的死类前缀。
 
-改样式后至少跑这一条门禁（189 例）：
+改样式后至少跑这一条门禁（14 文件、199 例）：
 
 ```sh
 node --test test/client-native-border-contract.test.mjs test/client-role-form-contract.test.mjs \
+  test/client-row-control-contract.test.mjs test/client-disclosure-contract.test.mjs \
   test/client-toolbar-role-contract.test.mjs test/client-ui.test.mjs \
   test/context-enhancement-ui.test.mjs test/client-delivery-settings.test.mjs \
   test/model-setting-ui.test.mjs test/workspace-editor.test.mjs test/bot-alias-ui.test.mjs \
   test/channels/dingtalk/client-ui.test.mjs test/channels/telegram/client-ui.test.mjs \
-  test/client-disclosure-contract.test.mjs test/channels/weixin/client-api.test.mjs
+  test/channels/weixin/client-api.test.mjs
 ```
+
+> CI 跑的是全量 `npm run check`（`test/*.test.mjs` + `test/channels/*/*.test.mjs` + `scripts/verify-package.mjs`）。
+> 本机 Windows 下全量有 87 条既有失败，全部落在服务端/Host 测试文件；**新增改动前先确认失败集合没有变化**，不要只看数字。
+
+### 4.2 清单类工具（从代码生成，可重跑）
+
+收敛的每一步都需要一份**从代码算出来、且能再算一次**的清单。手抄的清单不行：本仓库曾经出现过一份约 118 个表面的手抄清单，只存在于一次对话里，
+等再次需要时它已经不存在了。因此把四类问题各做成一个可重跑的脚本：
+
+| 脚本 | 回答什么问题 | 用法 |
+| --- | --- | --- |
+| `scripts/row-anatomy-audit.mjs` | 每个「设置类」块是按什么解剖搭的（行 / 堆叠 / 字段 / 提示 / 状态 / 组标题），哪些不是宿主那一种 | `node scripts/row-anatomy-audit.mjs [--json]` |
+| `scripts/role-form-audit.mjs` | **同一角色在不同渠道是否穿了不同形态** —— 逐个值比对看不出这种失败，因为每种写法单独看都合法 | `node scripts/role-form-audit.mjs [--all] [--soft]` |
+| `scripts/surface-audit.mjs` | 设置页能渲染出哪些表面（portal / select / menu / 条件挂载 / 数据门控），静态可枚举的那部分 | `node scripts/surface-audit.mjs [--json]` |
+| `scripts/surface-probe.js` | 上一条的**第二阶段**：在真实页面里确认候选表面确实渲染、并读出计算值 | 在页面控制台 `await __surfaceProbe()` |
+| `scripts/dead-rule-audit.mjs` | 哪条渠道规则永远赢不了层叠，或**根本没有渲染点**（附「被谁压掉」或「零引用」的证据） | `node scripts/dead-rule-audit.mjs [--json]` |
+
+关于 `dead-rule-audit.mjs` 的一条**已知盲区**：它的第四个桶用 `selectors.every(...)` 判定，
+**选择器里只要有一个活类，整条规则就逃出该桶**。更严的做法是逐令牌验证（抽出全部类令牌、全仓 grep 非样式表引用）
+并做鉴别力自检 —— 最薄的那个令牌应当恰好命中 1 次，以此证明计数不是恒真。战役中正是用这个方法确认两个渠道表已无真死规则。
 
 ### 决策：内嵌展开只有一个机制（本轮）
 
