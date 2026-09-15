@@ -105,16 +105,12 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
     description ? h('span', { className: 'dim-modelDescription' }, description) : null),
   h('span', { className: 'dim-modelCheck', 'aria-hidden': true }, selected ? h(CheckGlyph, { size: 16 }) : null));
 
-  const row = (key, label, value, blocked = false, description = null) => h('button', {
-    type: 'button', className: 'dim-modelRow', disabled: disabled || saving || blocked,
-    'aria-label': label, 'aria-haspopup': 'menu', 'aria-expanded': pane === key,
-    'aria-controls': pane === key ? `${id}-menu` : undefined,
-    'aria-describedby': key === 'effort' && effortHint ? `${id}-hint` : undefined,
-    onClick: (event) => {
-      triggerRef.current = event.currentTarget;
-      setPane(pane === key ? null : key);
-    },
-  }, h('span', { className: 'dim-modelRowText' },
+  // Only the control on the right is interactive. The row is a plain container: a row
+  // that opens its menu from anywhere makes the whole strip a hit target, and native
+  // gives the click to the cell, not to the line.
+  const row = (key, label, value, blocked = false, description = null, divider = false) => h('div', {
+    className: divider ? 'dim-modelRow dim-rowDivider' : 'dim-modelRow',
+  }, h('span', { className: 'dim-rowText' },
     h('span', { className: 'dim-modelRowLabel' }, label),
     // The description sits UNDER its own label, inside the row - native's
     // .rowText is a 4px-gap column of title + desc. It used to be a separate
@@ -125,8 +121,16 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
     }, description) : null),
   // Label left, value inside the native selector pill on the right — the exact
   // cell the General page uses for Language and Conversation display.
-  h('span', { className: 'dim-modelSelector' },
-    h('span', { className: 'dim-modelValue', title: value }, value), chevron(pane === key)));
+  h('button', {
+    type: 'button', className: 'dim-modelSelector', disabled: disabled || saving || blocked,
+    'aria-label': label, 'aria-haspopup': 'menu', 'aria-expanded': pane === key,
+    'aria-controls': pane === key ? `${id}-menu` : undefined,
+    'aria-describedby': key === 'effort' && effortHint ? `${id}-hint` : undefined,
+    onClick: (event) => {
+      triggerRef.current = event.currentTarget;
+      setPane(pane === key ? null : key);
+    },
+  }, h('span', { className: 'dim-modelValue', title: value }, value), chevron(pane === key)));
 
   return h('div', {
     ref: rootRef, className: 'dim-preset dim-modelSetting',
@@ -149,9 +153,10 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
   h('div', { className: 'dim-presetHeader' },
     h('span', { className: 'dim-presetTitle' }, '模型与思考强度'),
     saving ? h('span', { className: 'dim-presetStatus', role: 'status' }, '保存中…') : null),
-  row('model', '模型', entry?.name ?? (current ? modelSelectionId(current) : localizeText('跟随默认模型'))),
-  row('effort', '思考强度', effortLabel, effortDisabled, effortHint),
-  h('p', { className: 'dim-helpHint' }, NEW_SESSION_ONLY_NOTE),
+  // Every description belongs to the row it explains; the new-session note used to
+  // float under the group with no row to attach it to.
+  row('model', '模型', entry?.name ?? (current ? modelSelectionId(current) : localizeText('跟随默认模型')), false, NEW_SESSION_ONLY_NOTE),
+  row('effort', '思考强度', effortLabel, effortDisabled, effortHint, true),
   pane ? h('div', { ref: menuRef, id: `${id}-menu`, role: 'menu',
     'aria-label': pane === 'model' ? '模型' : '思考强度', 'aria-busy': saving,
     className: 'dim-modelMenu' },

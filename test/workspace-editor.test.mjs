@@ -858,7 +858,7 @@ test('AgentPresetEditor lists Host presets and moves its session guidance into a
       onSave() {},
     }),
   ));
-  const select = renderer.root.findByProps({ className: 'dim-presetSelect' });
+  const select = renderer.root.findByProps({ className: 'dim-presetSelect dim-rowControl' });
   assert.equal(select.props.value, 'coding');
   assert.deepEqual(optionValues(select), ['', 'coding', 'default']);
   assert.equal(textOf(select.children[0]), '跟随 Host 默认');
@@ -887,7 +887,7 @@ test('AgentPresetEditor marks a removed current preset and still allows clearing
       onSave(value) { saved.push(value); },
     }),
   ));
-  const select = renderer.root.findByProps({ className: 'dim-presetSelect' });
+  const select = renderer.root.findByProps({ className: 'dim-presetSelect dim-rowControl' });
   assert.equal(select.props.value, 'removed-preset');
   assert.deepEqual(optionValues(select), ['', 'coding', 'default', 'removed-preset']);
   assert.equal(textOf(select.children[3]), 'removed-preset（已不可用）');
@@ -921,13 +921,13 @@ test('AgentPresetEditor saves a selected preset and can follow the Host default'
     { value: PRESET_CATALOG },
     React.createElement(Harness),
   ));
-  const select = renderer.root.findByProps({ className: 'dim-presetSelect' });
+  const select = renderer.root.findByProps({ className: 'dim-presetSelect dim-rowControl' });
   await act(async () => {
     select.props.onChange({ target: { value: 'coding' } });
     await flushMicrotasks();
   });
   await act(async () => {
-    renderer.root.findByProps({ className: 'dim-presetSelect' })
+    renderer.root.findByProps({ className: 'dim-presetSelect dim-rowControl' })
       .props.onChange({ target: { value: '' } });
     await flushMicrotasks();
   });
@@ -969,7 +969,7 @@ test('Discord settings save an Agent Preset through bot.preset.set', async (t) =
   });
   const card = renderer.root.findByProps({ 'data-bot-id': 'discord_test' });
   await act(async () => {
-    card.findByProps({ className: 'dim-presetSelect' })
+    card.findByProps({ className: 'dim-presetSelect dim-rowControl' })
       .props.onChange({ target: { value: 'coding' } });
     await flushMicrotasks();
   });

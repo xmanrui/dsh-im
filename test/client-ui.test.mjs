@@ -570,10 +570,15 @@ test('shared QR cards stay square and stack within the narrow combined-channel p
   const styles = await readFile(STYLES_URL, 'utf8');
   assert.match(styles, /\.dim-panel \{ min-width: 0; container-type: inline-size; \}/);
   assert.match(styles, /\.dim-panel \.dim-qrFrame \{[^}]*width: min\(270px, 100%\);[^}]*height: auto;[^}]*aspect-ratio: 1;/);
+  // The panel is a fixed 564px overlay, so this query was true at every window
+  // size and the rule it guarded was never a narrow-width adaptation - it was the
+  // layout. The wrapper is gone and the rule is unconditional, which is what this
+  // now pins: the stacking holds, and no layout is left behind a container query.
   assert.match(
     styles,
-    /@container \(max-width: 680px\)[\s\S]*\.dim-panel \.ddt-qrLayout \{ grid-template-columns: minmax\(0, 1fr\); justify-items: center;/,
+    /\.dim-panel \.ddt-qrLayout \{ grid-template-columns: minmax\(0, 1fr\); justify-items: center;/,
   );
+  assert.doesNotMatch(styles, /@container/);
   assert.match(styles, /\.dim-panel \.ddt-qrFrame, \.dim-panel \.ddt-countdown \{ width: min\(270px, 100%\); \}/);
   assert.match(styles, /\.dim-panel \.ddt-qrColumn \{ width: 100%; min-width: 0; \}/);
   assert.match(styles, /\.dim-panel \.ddt-qrCopy \{ width: 100%; min-width: 0; overflow-wrap: anywhere; \}/);
@@ -617,7 +622,9 @@ test('Feishu bot cards place the application identifier under the bot name', asy
   assert.doesNotMatch(markup, /custom-bot-avatar/);
   assert.match(markup, /class="dim-botHealthGroup"[^]*class="dim-lastChecked"><span>最近检查<\/span>/);
   assert.doesNotMatch(markup, /消息通道|dim-botMetric/);
-  assert.match(markup, /class="dim-presetSelect"/);
+  // The preset select is a control in the row's right slot now, not a full-width
+  // stacked field - so it carries the slot class alongside its own.
+  assert.match(markup, /class="dim-presetSelect dim-rowControl"/);
   assert.doesNotMatch(markup, />应用标识<|>飞书机器人</);
   assert.doesNotMatch(styles, /\.bxf-statusGrid|\.bxf-metric/);
   assert.match(styles, /\.bxf-repairAction:hover \.bxf-repairTooltip,[^]*\.bxf-repairAction:focus-within \.bxf-repairTooltip \{[^}]*visibility: visible;/);
@@ -792,7 +799,10 @@ test('credential binding is a distinct secondary action beside QR binding in fou
   // the online badge (measured 9.2px overlap at vw 560).
   assert.match(styles, /\.dim-panel \.dim-bindActions \{[^}]*flex-wrap: wrap;/);
   assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: var\(--dim-radius-14\);[^}]*background: transparent;/);
-  assert.match(styles, /\.dim-panel \.dim-actionIcon \{[^}]*flex: 0 0 15px;/);
+  // 13px, not 15px: the panel is a fixed 564px overlay, so the rule that used to
+  // narrow this icon behind @container (max-width: 680px) was never conditional. The
+  // wide 15px declaration it overrode is gone, and this pins what actually applies.
+  assert.match(styles, /\.dim-panel \.dim-actionIcon \{[^}]*width: 13px;[^}]*flex-basis: 13px;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-credentialPanel \{[^}]*border-left:/);
 });
 
@@ -937,8 +947,12 @@ test('all channel settings states use the DingTalk page treatment', async () => 
   assert.match(styles, /\.dim-panel \.dim-botList \{[^}]*gap: var\(--dim-gap-12\);/);
   assert.match(styles, /\.dim-panel \.dim-surfaceCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-16\);[^}]*background: none;/);
   assert.match(styles, /\.dim-panel \.dim-loadingView \{[^}]*padding: 38px;[^}]*text-align: center;/);
-  assert.match(styles, /\.dim-panel \.dim-emptyView \{[^}]*grid-template-columns: minmax\(0, 1fr\) 180px;[^}]*gap: var\(--dim-gap-30\);/);
-  assert.match(styles, /\.dim-panel \.dim-qrLayout \{[^}]*grid-template-columns: 300px minmax\(0, 1fr\);[^}]*gap: var\(--dim-gap-34\);[^}]*align-items: start;/);
+  // Single column, always: the two-column value lived outside the query and was
+  // overridden by it at every window size, so it was dead. See the sibling test
+  // above on the same always-true query.
+  assert.match(styles, /\.dim-panel \.dim-emptyView \{[^}]*display: grid;[^}]*gap: var\(--dim-gap-30\);/);
+  assert.match(styles, /\.dim-panel \.dim-emptyView \{[^}]*min-height: 0;[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(styles, /\.dim-panel \.dim-qrLayout \{[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*justify-items: center;[^}]*gap: var\(--dim-gap-24\);/);
   assert.match(styles, /\.dim-panel \.dim-viewActions \.bxf-button,[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: var\(--dim-radius-14\);[^}]*font-size: var\(--dim-font-12\);/);
   assert.match(styles, /\.dim-panel \.dim-inlineError \{[^}]*padding: 22px;[^}]*background:/);
   assert.match(styles, /\.dim-panel \.dim-confirm \{[^}]*padding: 18px 24px;[^}]*border-top: 0\.5px solid/);
@@ -973,7 +987,7 @@ test('bot cards reuse the same channel brand logos as the channel rail', () => {
   assert.match(accountMarkup, /class="dxw-avatar dim-botAvatar"[^]*data-im-channel-logo="weixin"/);
   assert.match(accountMarkup, /class="dxw-health dim-botHealth"/);
   assert.match(accountMarkup, /class="dxw-accountFooter dim-cardFooter"/);
-  assert.match(accountMarkup, /class="dim-presetSelect"/);
+  assert.match(accountMarkup, /class="dim-presetSelect dim-rowControl"/);
   assert.doesNotMatch(accountMarkup, /dim-cardSummary|微信消息长轮询运行正常/);
   assert.equal((accountMarkup.match(/dim-cardAction(?: |")/g) ?? []).length, 2);
   assert.match(accountMarkup, /class="dim-botHealthGroup"[^]*class="dim-lastChecked"><span>最近检查<\/span>/);
@@ -1121,7 +1135,9 @@ test('all channel bot cards use the DingTalk card treatment', async () => {
   assert.match(styles, /\.dim-panel \.dim-botCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-16\);[^}]*background: none;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-botCard \{[^}]*box-shadow:/);
   assert.match(styles, /\.dim-panel \.dim-botCard:hover \{ border-color: var\(--dsw-alias-label-dimmed,/);
-  assert.match(styles, /\.dim-panel \.dim-botCardBody \{[^}]*padding: 0 16px;/);
+  // 24px, matching SettingsRoot.module.css:224 - the host's settings content inset.
+  // 16px read cramped next to native.
+  assert.match(styles, /\.dim-panel \.dim-botCardBody \{[^}]*padding: 0 24px;/);
   assert.match(styles, /\.dim-collapsibleBodyInner > \* \+ \* \{ border-top: 0\.5px solid var\(--dsw-alias-border-l2,/);
   assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*align-items: flex-start;[^}]*gap: var\(--dim-gap-6\);/);
   assert.match(styles, /\.dim-panel \.dim-botAvatar \{[^}]*width: 38px;[^}]*height: 38px;[^}]*border-radius: var\(--dim-radius-12\);/);

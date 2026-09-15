@@ -109,8 +109,10 @@ test('a disabled selector keeps its surface and dims only what it says', () => {
   // instead (PermissionRow keeps the pill; FontSizeRow dims the glyph). Fading the
   // whole row made the disabled pill read as a different control rather than the same
   // control switched off.
+  // The disabled state lives on the control now, not the row: the row is a plain
+  // container and the pill is the button, so this looks at the pill.
   const disabled = rules.filter(rule =>
-    rule.selectors.some(s => s.startsWith('.dim-modelRow') && s.includes(':disabled')));
+    rule.selectors.some(s => s.startsWith('.dim-modelSelector') && s.includes(':disabled')));
   assert.ok(disabled.length, 'the disabled selector keeps a rule');
   for (const rule of disabled) {
     assert.equal(
@@ -268,14 +270,58 @@ test('a tooltip foreground and background are decided as a pair', () => {
   }
 });
 
+
+test('the settings row has one anatomy, declared once and never per channel', () => {
+  // Native builds every settings row the same way: a left text slot (title over
+  // description, 4px apart), a right control that sizes to its own content, and a
+  // 0.5px border-l2 hairline between rows. Measured on 3080 at the host's own rows.
+  // Two plugin families now go through it - model-setting and agent-preset - and the
+  // point of pinning it here is that the third one cannot invent its own.
+  const slot = rules.filter(r => r.selectors.includes('.dim-rowText') && r.selectors.includes('.dim-rowText'));
+  assert.equal(slot.length, 1, 'the text slot is declared once, for the whole family');
+  assert.equal(declared(slot[0], 'display'), 'grid');
+  assert.equal(declared(slot[0], 'gap'), 'var(--dim-gap-4)', 'title and description sit 4px apart, as native does');
+
+  const desc = rulesFor('.dim-rowDesc')[0];
+  assert.ok(desc, '.dim-rowDesc exists');
+  assert.equal(declared(desc, 'font-size'), 'var(--dim-font-12)');
+  assert.equal(declared(desc, 'line-height'), 'var(--dim-line-12)');
+  assert.match(declared(desc, 'color'), /--dsw-alias-label-tertiary/);
+
+  // Scoped to .dim-panel on purpose: at (0,1,0) it loses to
+  // .dim-panel .dim-presetSelect { width: 100% } and a control stays full-width
+  // with no visible error. That bug was real once already.
+  const control = rulesFor('.dim-panel .dim-rowControl');
+  assert.equal(control.length, 1, 'the right slot is declared once, and scoped so it can win');
+  assert.equal(declared(control[0], 'flex'), 'none');
+  assert.equal(declared(control[0], 'width'), 'auto');
+  assert.equal(declared(control[0], 'max-width'), '60%');
+
+  const divider = rulesFor('.dim-rowDivider')[0];
+  assert.ok(divider, '.dim-rowDivider exists');
+  assert.match(declared(divider, 'border-top'), /^0\.5px solid var\(--dsw-alias-border-l2/);
+
+  // Channels must not declare any of it: one anatomy means one author.
+  const anatomy = /dim-rowText|dim-rowDesc|dim-rowControl|dim-rowDivider|dim-rowText/;
+  for (const rule of channelRules) {
+    const wrong = rule.declarations.filter(([property]) => ['display', 'gap', 'flex', 'max-width', 'border-top'].includes(property));
+    for (const selector of rule.selectors) {
+      assert.ok(
+        !anatomy.test(selector),
+        'a channel sheet must not declare the row anatomy: ' + selector,
+      );
+    }
+    void wrong;
+  }
+});
 test('the settings-row family keeps one form: title over description, 4px apart', () => {
   // Native's row text slot is a 4px-gap column, the title at 14/22 over a 12/18
   // tertiary description - measured on 3080 at the host's oY77xG_rowText. The plugin
   // used to put the description in a separate paragraph below the whole block, which
   // is what made .dim-modelSetting 184px tall. Every row in the family shares this one
   // slot, so the values live here once instead of per row.
-  const slot = rulesFor('.dim-modelRowText')[0];
-  assert.ok(slot, '.dim-modelRowText exists');
+  const slot = rulesFor('.dim-rowText')[0];
+  assert.ok(slot, '.dim-rowText exists');
   assert.equal(declared(slot, 'display'), 'grid');
   assert.equal(declared(slot, 'gap'), 'var(--dim-gap-4)', 'title and description sit 4px apart, as native does');
   assert.equal(declared(slot, 'text-align'), 'left');
