@@ -78,12 +78,16 @@ export function AgentPresetEditor({ agentPreset = '', disabled = false, onSave }
   };
 
   return h('div', { className: 'dim-preset' },
-    h('div', { className: 'dim-presetHeader' },
-      h('span', { className: 'dim-presetTitle' },
-        h('span', null, 'Agent Preset')),
-      saving ? h('span', { className: 'dim-presetStatus' }, '保存中…') : null),
-    React.createElement('select', {
-      className: 'dim-presetSelect',
+    // Native row anatomy: the setting's name is the row's title on the left, the
+    // control sits in the right slot at its own width. The heading keeps only the
+    // save status, so the title is not stated twice.
+    saving ? h('div', { className: 'dim-presetHeader' },
+      h('span', { className: 'dim-presetStatus' }, '保存中…')) : null,
+    h('label', { className: 'dim-modelRow' },
+      h('span', { className: 'dim-rowText' },
+        h('span', { className: 'dim-modelRowLabel' }, 'Agent Preset')),
+      React.createElement('select', {
+      className: 'dim-presetSelect dim-rowControl',
       value: current,
       disabled: disabled || saving,
       'aria-label': 'Agent Preset',
@@ -97,7 +101,7 @@ export function AgentPresetEditor({ agentPreset = '', disabled = false, onSave }
           ? [item.id, '（已不可用）']
           : item.label && item.label !== item.id ? `${item.label}（${item.id}）` : item.id,
       )),
-    ),
+      )),
     error || currentUnavailable ? h(
       'p',
       { className: 'dim-presetError', role: error ? 'alert' : 'status' },

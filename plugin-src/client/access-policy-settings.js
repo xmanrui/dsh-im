@@ -167,9 +167,11 @@ function ScenePolicyEditor({
         h('p', null, '此区域无需配置，保存私聊设置时会保留现有群聊策略。'))
     : h(React.Fragment, null,
         h('div', { className: 'dim-accessControls', 'data-mode': policy.mode },
-          h('label', { className: 'dim-accessField' },
-            h('span', null, '访问模式'),
+          h('label', { className: 'dim-accessField dim-modelRow' },
+            h('span', { className: 'dim-rowText' },
+              h('span', { className: 'dim-modelRowLabel' }, '访问模式')),
             h('select', {
+              className: 'dim-rowControl',
               value: policy.mode,
               disabled,
               'aria-label': [localizeText(title), localizeText('访问模式')].join(' '),
@@ -177,9 +179,11 @@ function ScenePolicyEditor({
             },
             h('option', { value: 'open' }, '允许所有用户'),
             h('option', { value: 'allowlist' }, '仅白名单用户'))),
-          allowlist ? null : h('label', { className: 'dim-accessField' },
-              h('span', null, '默认命令权限'),
+          allowlist ? null : h('label', { className: 'dim-accessField dim-modelRow' },
+              h('span', { className: 'dim-rowText' },
+                h('span', { className: 'dim-modelRowLabel' }, '默认命令权限')),
               h('select', {
+                className: 'dim-rowControl',
                 value: policy.open.defaultCanExecuteCommands ? 'allow' : 'deny',
                 disabled,
                 'aria-label': [localizeText(title), localizeText('默认命令权限')].join(' '),
