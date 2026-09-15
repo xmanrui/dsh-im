@@ -56,6 +56,16 @@ function cssOf(source) {
  * @param css - stylesheet text.
  * @returns the parsed rules.
  */
+/**
+ * CSS comments carry prose, not rules. Dropping them before parsing keeps a
+ * comment that sits above a rule from being read as part of its selector.
+ * @param css - stylesheet text.
+ * @returns the same text without comments.
+ */
+function stripComments(css) {
+  return css.replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
 function parseRules(css) {
   const rules = [];
   const block = /([^{}]+)\{([^{}]*)\}/g;
@@ -78,7 +88,7 @@ function parseRules(css) {
 /** Load every client rule once; the assertions below all read from it. */
 const rules = [];
 for (const file of await clientSources()) {
-  const css = cssOf(await readFile(file, 'utf8'));
+  const css = stripComments(cssOf(await readFile(file, 'utf8')));
   if (!css) continue;
   const name = basename(file.pathname);
   for (const rule of parseRules(css)) rules.push({ file: name, ...rule });
@@ -146,4 +156,31 @@ test('the shared account chevron renders the vendored native glyph', async () =>
       `the chevron slot draws no border of its own (found ${property})`,
     );
   }
+});
+test('the plugin token layer is declared on body, where the host publishes --dsw-*', () => {
+  // Two constraints, and only body satisfies both. The layer cannot live on
+  // .dim-page: five surfaces portal to <body>, outside that subtree, and would
+  // see no token at all. It cannot live on :root either: a custom property is
+  // substituted on the element that declares it, and the host publishes --dsw-*
+  // on <body>, not on <html>, so every alias declared on :root substitutes
+  // against a missing token and freezes to its literal fallback.
+  //
+  // Measured while it was on :root: --dim-field-border resolved to
+  // rgb(0 0 0 / 16%), its fallback, while the host token was #00000029, and
+  // redefining the host token on body changed nothing. Light mode still looked
+  // correct because the fallbacks match the light values, which is why reading
+  // the source did not catch it.
+  const declaring = rules.filter(rule =>
+    rule.declarations.some(([property]) => property.startsWith('--dim-')));
+  assert.deepEqual(
+    declaring.map(rule => rule.selectors.join(', ')),
+    ['body'],
+    "the --dim-* layer is declared once, on body",
+  );
+  const tokens = declaring[0].declarations
+    .filter(([property]) => property.startsWith('--dim-'));
+  assert.ok(
+    tokens.length > 40,
+    "the single declaring rule is the token layer",
+  );
 });
