@@ -65,6 +65,12 @@ function matchPair(s, i) {
   let depth = 0;
   for (; i < s.length; i++) {
     const c = s[i];
+    // Comments are skipped here as well as in parseStylesheet. Without this, an
+    // apostrophe inside a trailing comment - "WeChat's list is 13/20" - was read as the
+    // opening quote of a string, so the scan jumped to the NEXT apostrophe and swallowed
+    // every rule in between into one body: 55 of feishu's 123 rules and 47 of dingtalk's
+    // 96 were never parsed at all, which silently shrank the DEAD bucket.
+    if (c === '/' && s[i + 1] === '*') { const e = s.indexOf('*/', i + 2); i = (e < 0 ? s.length : e + 2) - 1; continue; }
     if (c === '"' || c === "'") { i = skipString(s, i) - 1; continue; }
     if (c === open) depth++;
     else if (c === close) { depth--; if (!depth) return i + 1; }
@@ -180,9 +186,32 @@ function splitTopLevel(s, sep) {
   return out.map((x) => x.trim()).filter(Boolean);
 }
 
+/** Blank out comments, newlines kept, so a ";" inside one cannot split a declaration. */
+function withoutComments(text) {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      out += text.slice(i, stop).replace(/[^\n]/g, ' ');
+      i = stop;
+      continue;
+    }
+    if (text[i] === '"' || text[i] === "'") { const j = skipString(text, i); out += text.slice(i, j); i = j; continue; }
+    out += text[i];
+    i++;
+  }
+  return out;
+}
+
 function parseDecls(body) {
   const out = [];
-  for (const chunk of splitTopLevel(body, ';')) {
+  // A trailing comment may itself contain a ";": "width: 8px; /* owner: ... (index.js:212,301);
+  // host status dots are 8px too */ height: 8px;" split there, and the fragment before the
+  // colon did not look like a property, so "height" was dropped and the rule looked deader
+  // than it was. Comments are blanked before the split; nothing else about the body moves.
+  for (const chunk of splitTopLevel(withoutComments(body), ';')) {
     const idx = chunk.indexOf(':');
     if (idx < 0) continue;
     const prop = chunk.slice(0, idx).trim().toLowerCase();

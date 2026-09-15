@@ -15,8 +15,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Changed / 变更
 
-- 设置页按宿主 DSH 的原生角色重新收敛：行解剖统一为「左侧文字块 + 右侧控件」，右侧下拉全部改为宿主那种按钮加菜单的形态（原生 `<select>` 展开后的选项列表由操作系统绘制，无法跟随主题与设计令牌），三条标签栏合并采用宿主 tablist 的同一份值，行文字的鼠标指针恢复为文本光标并可选中复制，卡片工具条恢复垂直居中，展开箭头与文字的间距统一。展开式诊断详情不再内联样式，改用与设置页一致的具名角色（[#213](https://github.com/xmanrui/dsh-im/issues/213)）。
-  The settings page was converged onto the host's own roles: rows share one anatomy of left text block and right control, every selector on the right is now the host's button-plus-menu form (a native `<select>`'s option list is drawn by the operating system and cannot follow the theme or the tokens), the three tab strips take the same host tablist values, row text reads as text again with an I-beam cursor and selectable runs, card tool bars are centred again, and every disclosure chevron shares one gap to its text. The expandable diagnostic details no longer carry inline chrome and use the same named roles as the rest of the page ([#213](https://github.com/xmanrui/dsh-im/issues/213)).
+- 设置页按宿主 DSH 的原生角色重新收敛：行解剖统一为「左侧文字块 + 右侧控件」，右侧下拉全部改为宿主那种按钮加菜单的形态（原生 `<select>` 展开后的选项列表由操作系统绘制，无法跟随主题与设计令牌），三条标签栏合并采用宿主 tablist 的同一份值，行文字的鼠标指针恢复为文本光标并可选中复制，卡片工具条恢复垂直居中，展开箭头与文字的间距统一。展开式诊断详情不再内联样式，改用与设置页一致的具名角色；飞书「群聊」标签页最后两个字段级下拉也并入行控件，没有使用者的 `.dim-fieldSelect` 皮肤随之删除；解释控件或区块标题的灰色说明段落全部改挂「?」帮助浮窗（共 8 处），浮窗渲染在最顶层（portal 到 `document.body`）因而不会被所在卡片裁切或遮挡，两个帮助按钮类名族合并为唯一一份皮肤；「Agent Preset」在中文界面按 i18n 惯例改回「Agent 预设」（[#213](https://github.com/xmanrui/dsh-im/issues/213)）。
+  The settings page was converged onto the host's own roles: rows share one anatomy of left text block and right control, every selector on the right is now the host's button-plus-menu form (a native `<select>`'s option list is drawn by the operating system and cannot follow the theme or the tokens), the three tab strips take the same host tablist values, row text reads as text again with an I-beam cursor and selectable runs, card tool bars are centred again, and every disclosure chevron shares one gap to its text. The expandable diagnostic details no longer carry inline chrome and use the same named roles as the rest of the page, the last two field-level selects in the Feishu group tab joined the row controls, retiring the now-unused `.dim-fieldSelect` skin, every grey paragraph that explained a labelled control or a block title now hangs off a shared help "?" panel (eight sites in all) rendered in the top layer so the card it belongs to can neither clip nor cover it, the two former help-button class families merged into one skin, and the Agent Preset row reads Agent 预设 in Chinese as the rest of the dictionary does ([#213](https://github.com/xmanrui/dsh-im/issues/213)).
 
 - 字符与间距：11px 一档按宿主的两类角色拆开（提示为 12/18、标签为 11/16），分区标题与字段标签各归其位，五条面内分隔线改用宿主同一令牌。
   Type and spacing: the 11px tier was split into the host's two roles (hints at 12/18, labels at 11/16), section titles and field labels each took their own host role, and five in-surface dividers moved onto the token the host uses for them.
@@ -41,10 +41,10 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 - 新增 #213 设置页角色类比收敛的方案与实测记录，含宿主设计令牌与组件的逐字抄录、每条裁决背后的实测数据，以及 ADR 中新增的样式契约条目。
 
-- 验证规模：改样式后的门禁为 14 个文件 199 例，其中 5 个契约测试 32 例；每个契约都用变异测试验证过有牙（先确认文件真被改动，各恰好打中应打的一条）。`npm run check`（构建 + 全量测试 + 包校验）在 CI 上通过。
+- 验证规模：改样式后的门禁为 16 个文件 212 例，其中 5 个契约测试 32 例；每个契约都用变异测试验证过有牙（先确认文件真被改动，各恰好打中应打的一条）；全量在 Windows 本机的既有失败集合经 HEAD 基线逐名比对，确认无新增。`npm run check`（构建 + 全量测试 + 包校验）在 CI 上通过。
   Added the plan and measurement record for #213, including the host's design tokens and component values transcribed verbatim, the measurements behind every decision, and the new style-contract entries in the ADR.
 
-- Verification: the post-change gate is 199 cases across 14 files, of which 32 are the five contract tests. Every contract was proven to have teeth by mutation, each confirmed to have really changed the file and each failing exactly the guard it should. `npm run check` (build, full suite, package verification) passes on CI.
+- Verification: the post-change gate is 212 cases across 16 files, of which 32 are the five contract tests. Every contract was proven to have teeth by mutation, each confirmed to have really changed the file and each failing exactly the guard it should, and the pre-existing Windows-only failures in the full suite were compared name by name against a HEAD baseline to confirm none were added. `npm run check` (build, full suite, package verification) passes on CI.
 
 - 同步中英文交互与批量命令说明、贡献者名单、渠道徽章和截图，并完善跨平台测试及 Windows 包校验兼容性。
   Updated bilingual interaction and batch-command guidance, contributor lists, channel badges, and screenshots, and improved cross-platform tests and Windows package verification.

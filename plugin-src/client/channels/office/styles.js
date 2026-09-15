@@ -36,8 +36,6 @@ const CSS = `
    never styled, so the paragraph fell back to the browser default. Native gives a
    field its hint paragraph this exact shape (ui-settings-plugins .hint). */
 .dof-hooksEmpty { margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
-.dof-actions { display: flex; flex-wrap: wrap; gap: var(--dim-gap-8); margin-top: 14px; }
-.dof-actions .ddt-button[data-kind="primary"] { border: var(--dim-control-border); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; }
 .dof-error, .dof-notice { margin: 10px 0 0; padding: 9px 11px; border-radius: var(--dim-radius-8); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 /* error-secondary is red-400 in both themes while error-primary is red-400 in dark,
    so this text and its own background resolved to one colour: 1.00:1, invisible.

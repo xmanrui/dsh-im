@@ -99,6 +99,50 @@ function cssOf(source) {
   return out.join('\n');
 }
 
+/**
+ * Every comment blanked out, with each newline left in place so that a character
+ * offset still maps to the line it did before.
+ *
+ * The rule scanner below reads a rule as "everything up to a brace, then the brace".
+ * A block comment sitting directly above a rule carries no braces, so it was read as
+ * part of the SELECTOR: .bxf-qrCopy > p has such a comment above it and landed in a
+ * key of its own, which by construction has one sheet and therefore never reaches the
+ * comparison. Quoted strings are stepped over first so the single data: URI in the
+ * shared sheet - it contains "//" - is not mistaken for a line comment.
+ */
+function stripComments(css) {
+  const blank = (s) => s.replace(/[^\n]/g, ' ');
+  let out = '';
+  let i = 0;
+  while (i < css.length) {
+    const c = css[i];
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < css.length && css[j] !== c) j += css[j] === '\\' ? 2 : 1;
+      out += css.slice(i, Math.min(j + 1, css.length));
+      i = j + 1;
+      continue;
+    }
+    if (c === '/' && css[i + 1] === '*') {
+      const end = css.indexOf('*/', i + 2);
+      const stop = end < 0 ? css.length : end + 2;
+      out += blank(css.slice(i, stop));
+      i = stop;
+      continue;
+    }
+    if (c === '/' && css[i + 1] === '/' && css[i - 1] !== ':') {
+      const end = css.indexOf('\n', i);
+      const stop = end < 0 ? css.length : end;
+      out += blank(css.slice(i, stop));
+      i = stop;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
 /** The class prefixes a sheet actually uses, longest first. */
 function prefixesOf(css) {
   const counts = new Map();
@@ -174,7 +218,7 @@ function sheets() {
 const groups = new Map();
 const skipped = [];
 for (const sheet of sheets()) {
-  const css = cssOf(readFileSync(sheet.file, 'utf8'));
+  const css = stripComments(cssOf(readFileSync(sheet.file, 'utf8')));
   if (!css) { skipped.push(sheet.name); continue; }
   const prefixes = prefixesOf(css);
   if (sheet.name !== 'shared' && prefixes.length === 0) { skipped.push(sheet.name); continue; }

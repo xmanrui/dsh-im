@@ -4,7 +4,6 @@ const CSS = String.raw`
 .dsl-page.dim-channelPage { --ddt-accent: #4a154b; --ddt-accent-deep: #321033; --ddt-accent-wash: #f7eef7; }
 .dsl-avatar.dim-botAvatar { background: linear-gradient(145deg, #fff, #f8fafb); border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .dsl-avatar svg { display: block; }
-.dsl-setup { display: grid; gap: var(--dim-gap-18); }
 .dsl-guide { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--dim-gap-18); padding: 16px; border: 0.5px solid color-mix(in srgb, #4a154b 18%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); border-radius: var(--dim-radius-12); background: color-mix(in srgb, #4a154b 4%, var(--dsw-alias-bg-layer-1, #fff)); }
 .dsl-guideCopy { min-width: 0; }
 .dsl-guideCopy strong { display: block; margin-bottom: 5px; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); }

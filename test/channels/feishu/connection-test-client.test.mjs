@@ -126,15 +126,12 @@ test('Feishu group settings page saves both migrated group controls', async () =
     }));
     await flushMicrotasks();
   });
-  const select = renderer.root.findByProps({ 'aria-label': '群聊响应方式' });
-  assert.equal(select.type, 'select');
+  const select = renderer.root.findByProps({ label: '群聊响应方式' });
   assert.equal(select.props.value, 'mention');
-  assert.deepEqual(select.findAllByType('option').map((option) => option.props.value), [
-    'mention', 'all',
-  ]);
+  assert.deepEqual(select.props.options.map((option) => option.value), ['mention', 'all']);
 
   await act(async () => {
-    select.props.onChange({ target: { value: 'all' } });
+    select.props.onChange('all');
     await flushMicrotasks();
   });
   assert.ok(calls.some(({ endpoint, payload }) => (
@@ -142,12 +139,12 @@ test('Feishu group settings page saves both migrated group controls', async () =
       && payload.botId === 'bot-mode-test'
       && payload.groupResponseMode === 'all'
   )));
-  assert.equal(renderer.root.findByProps({ 'aria-label': '群聊响应方式' }).props.value, 'all');
+  assert.equal(renderer.root.findByProps({ label: '群聊响应方式' }).props.value, 'all');
 
-  const topicSelect = renderer.root.findByProps({ 'aria-label': '群聊以话题方式回复' });
+  const topicSelect = renderer.root.findByProps({ label: '群聊以话题方式回复' });
   assert.equal(topicSelect.props.value, 'off');
   await act(async () => {
-    topicSelect.props.onChange({ target: { value: 'on' } });
+    topicSelect.props.onChange('on');
     await flushMicrotasks();
   });
   assert.ok(calls.some(({ endpoint, payload }) => (
@@ -156,7 +153,7 @@ test('Feishu group settings page saves both migrated group controls', async () =
       && payload.groupTopicReply === true
   )));
   assert.equal(
-    renderer.root.findByProps({ 'aria-label': '群聊以话题方式回复' }).props.value,
+    renderer.root.findByProps({ label: '群聊以话题方式回复' }).props.value,
     'on',
   );
   await act(async () => renderer.unmount());
@@ -263,9 +260,9 @@ test('selecting all group messages opens the official permission flow before sav
     }));
     await flushMicrotasks();
   });
-  const select = renderer.root.findByProps({ 'aria-label': '群聊响应方式' });
+  const select = renderer.root.findByProps({ label: '群聊响应方式' });
   await act(async () => {
-    select.props.onChange({ target: { value: 'all' } });
+    select.props.onChange('all');
     await flushMicrotasks();
   });
 
@@ -280,7 +277,7 @@ test('selecting all group messages opens the official permission flow before sav
   assert.equal(permissionPanel.findByType('a').props.href,
     'https://open.feishu.cn/page/launcher?tp=sdk&clientID=cli_permission&addons=encoded');
   assert.match(textOf(permissionPanel), /只增量开通“获取群组中所有消息”权限/);
-  assert.equal(renderer.root.findByProps({ 'aria-label': '群聊响应方式' }).props.value, 'mention');
+  assert.equal(renderer.root.findByProps({ label: '群聊响应方式' }).props.value, 'mention');
   await act(async () => renderer.unmount());
 });
 

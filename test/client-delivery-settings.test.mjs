@@ -350,11 +350,15 @@ test('only Feishu adds a group tab and it contains only the two migrated control
   });
 
   const groupSettings = renderer.root.findByProps({ className: 'dim-feishuGroupSettings' });
-  assert.equal(groupSettings.findAllByProps({ className: 'dim-feishuGroupControl' }).length, 2);
+  assert.equal(groupSettings.findAll((node) => (
+    typeof node.props?.className === 'string'
+      && node.props.className.split(/\s+/).includes('dim-feishuGroupControl')
+  )).length, 2);
   assert.equal(groupSettings.findAllByType('h2').length, 0);
   assert.doesNotMatch(textOf(groupSettings), /这些设置只影响|刷新群聊设置/);
-  assert.equal(groupSettings.findByProps({ 'aria-label': '群聊响应方式' }).props.value, 'all');
-  assert.equal(groupSettings.findByProps({ 'aria-label': '群聊以话题方式回复' }).props.value, 'on');
+  // Both settings are rows, so their value lives on the row's own selector.
+  assert.equal(groupSettings.findByProps({ label: '群聊响应方式' }).props.value, 'all');
+  assert.equal(groupSettings.findByProps({ label: '群聊以话题方式回复' }).props.value, 'on');
 });
 
 test('access settings preserve independent mode drafts and save direct and group atomically', async (t) => {
@@ -385,9 +389,9 @@ test('access settings preserve independent mode drafts and save direct and group
   assert.equal(renderer.root.findAllByProps({ role: 'tab' }).length, 3);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessScene' }).length, 2);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessOwnerNotice' }).length, 0);
-  // The owner rule is inline hint text now, so neither scene carries a "?"
-  // trigger; the sentence itself is asserted below.
-  assert.equal(accessHelpButtons(renderer.root).length, 0);
+  // The owner rule is help now: each scene carries the shared "?" trigger beside its
+  // title and the sentence lives in the panel that trigger points at.
+  assert.equal(accessHelpButtons(renderer.root).length, 2);
   for (const [scene, title] of [['direct', '私聊'], ['group', '群聊']]) {
     const sceneEditor = renderer.root.findByProps({ 'data-scene': scene });
     // Grouping is carried by role=group + aria-labelledby, which replaces the
@@ -397,9 +401,17 @@ test('access settings preserve independent mode drafts and save direct and group
     const sceneLegend = sceneEditor.findByProps({ className: 'dim-accessLegend' });
     assert.equal(sceneLegend.props.id, sceneEditor.props['aria-labelledby']);
     assert.match(textOf(sceneLegend), new RegExp(title));
-    // The owner rule reads in place now: no "?" trigger, no hover layer.
-    const ownerHint = sceneEditor.findByProps({ className: 'dim-helpHint' });
-    assert.match(textOf(ownerHint), /原所有者或扫码接入者始终可以访问并执行命令/);
+    const ownerHelp = accessHelpButtons(sceneEditor);
+    assert.equal(ownerHelp.length, 1, `${title} keeps one owner-rule trigger`);
+    assert.equal(ownerHelp[0].props['aria-label'], `${title} 查看访问权限说明`);
+    const ownerPanel = sceneEditor.findByProps({
+      id: ownerHelp[0].props['aria-describedby'], role: 'tooltip',
+    });
+    assert.equal(ownerPanel.props.role, 'tooltip');
+    assert.equal(
+      textOf(ownerPanel),
+      '原所有者或扫码接入者始终可以访问并执行命令；以下设置仅约束其他用户。',
+    );
   }
   assert.equal(accessHelpButtons(renderer.root.findByProps({ className: 'dim-accessActions' })).length, 0);
   assert.equal(accessHelpButtons(renderer.root.findByProps({ role: 'tablist' })).length, 0);
@@ -412,7 +424,8 @@ test('access settings preserve independent mode drafts and save direct and group
     const addUser = direct.findByProps({ 'aria-label': '私聊 新增用户' });
     assert.equal(addUser.props.title, '新增用户');
     assert.match(addUser.props.className, /dim-accessAddUser/);
-    assert.equal(textOf(addUser), '+');
+    // An icon now, not a text glyph: the '+' sat on a 20px baseline inside a 32px square.
+  assert.equal(addUser.findAllByType('svg').length, 1, 'the add button draws its plus');
     addUser.props.onClick();
     await flush();
   });
@@ -435,11 +448,13 @@ test('access settings preserve independent mode drafts and save direct and group
   // An empty allowlist is a state message about the list, not help: it reads in
   // place now instead of hiding behind a "?" trigger.
   const emptyAllowlistHint = renderer.root
-    .findAllByProps({ className: 'dim-helpHint' })
+    .findAllByProps({ className: 'dim-accessEmptyWarning' })
     .map(textOf)
     .find((text) => text === '当前没有白名单用户，保存后普通用户将无法使用机器人。');
   assert.ok(emptyAllowlistHint, 'the empty-allowlist warning is stated inline');
-  assert.equal(renderer.root.findAllByProps({ className: 'dim-accessWarning' }).length, 0);
+  // It keeps a name of its own: sharing .dim-helpHint with five pieces of real help is
+  // what let a state message look like help in the first place.
+  assert.equal(renderer.root.findAllByProps({ className: 'dim-helpHint' }).length, 0);
   assert.match(
     textOf(renderer.root.findByProps({ 'data-scene': 'direct' })),
     /白名单用户/,
@@ -465,7 +480,7 @@ test('access settings preserve independent mode drafts and save direct and group
     await flush();
   });
   assert.ok(
-    renderer.root.findAllByProps({ className: 'dim-helpHint' })
+    renderer.root.findAllByProps({ className: 'dim-accessEmptyWarning' })
       .map(textOf)
       .some((text) => text === '当前没有白名单用户，保存后普通用户将无法使用机器人。'),
     'the group scene states the empty-allowlist consequence inline',

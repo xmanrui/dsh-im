@@ -13,7 +13,7 @@ const CSS = String.raw`
   display: flex;
   flex-direction: column;
   gap: var(--dim-gap-18);
-  padding: 2px 0 28px;
+  padding: 0 0 24px; /* page padding owner: shared styles.js:323 .dim-panel .ddt-page */
   container-type: inline-size;
   color: var(--dsw-alias-label-primary, #0f1115);
   box-sizing: border-box;
@@ -41,57 +41,35 @@ const CSS = String.raw`
 .ddt-button[data-kind="primary"]:hover:not(:disabled) { border-color: var(--dim-action-fill-hover); background: var(--dim-action-fill-hover); }
 .ddt-button[data-kind="danger"] { color: var(--ddt-error); }
 .ddt-button[data-kind="quiet"] { padding: 0 10px; border-color: transparent; background: transparent; }
-.ddt-card { overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-14); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); }
+.ddt-card { overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-16); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); /* radius owner: shared styles.js:389 .dim-surfaceCard, host models .rowCard 16px */ }
 .ddt-cardBody { padding: 24px; }
-.ddt-empty { min-height: 230px; display: grid; grid-template-columns: minmax(0, 1fr) 180px; align-items: center; gap: var(--dim-gap-30); }
 .ddt-empty h3 { margin: 8px 0; font-size: var(--dim-font-18); }
 .ddt-empty p { max-width: 560px; color: var(--dsw-alias-label-secondary, #646a73); line-height: 1.65; }
 .ddt-empty .ddt-actions { margin-top: 20px; }
 .ddt-brandMark { width: 110px; height: 110px; display: grid; place-items: center; justify-self: center; border-radius: var(--dim-radius-24); color: #fff; background: linear-gradient(145deg, #2997ff, var(--ddt-accent)); box-shadow: 0 18px 45px rgb(22 119 255 / 23%); }
 .ddt-brandMark svg { filter: drop-shadow(0 3px 8px rgb(0 35 96 / 16%)); }
-.ddt-qrLayout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--dim-gap-34); align-items: start; }
-.ddt-qrColumn { display: flex; flex-direction: column; align-items: center; gap: var(--dim-gap-12); }
-.ddt-qrFrame { position: relative; width: min(270px, 100%); aspect-ratio: 1; display: grid; place-items: center; overflow: hidden; padding: 10px; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-16); background: #fff; }
 .ddt-qrFrame::before { content: ''; position: absolute; inset: 6px; border: 1px solid rgb(22 119 255 / 10%); border-radius: var(--dim-radius-12); pointer-events: none; }
-.ddt-qrFrame img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .ddt-qrFallback { padding: 24px; color: #646a73; text-align: center; }
-.ddt-countdown { width: min(270px, 100%); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); }
-.ddt-countdownTop { display: flex; justify-content: space-between; margin-bottom: 6px; }
 .ddt-countdown strong { color: var(--dsw-alias-label-primary, #0f1115); font-variant-numeric: tabular-nums; }
-.ddt-progress { height: 4px; overflow: hidden; border-radius: var(--dim-radius-full); background: #eef0f3; }
-.ddt-progress span { display: block; width: var(--ddt-progress); height: 100%; background: var(--dim-action-fill); transition: width .2s linear; }
-.ddt-stateLabel { display: inline-flex; align-items: center; gap: var(--dim-gap-8); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); font-weight: var(--dim-weight-600); }
-.ddt-qrCopy { min-width: 0; overflow-wrap: anywhere; }
-.ddt-qrCopy h3 { margin: 9px 0 8px; font-size: var(--dim-font-18); }
 .ddt-qrCopy > p { color: var(--dsw-alias-label-secondary, #646a73); line-height: 1.65; }
-.ddt-steps { margin: 18px 0 16px; padding: 0; list-style: none; counter-reset: ddt-step; }
-.ddt-steps li { position: relative; min-height: 28px; padding: 3px 0 3px 36px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); counter-increment: ddt-step; }
-.ddt-steps li::before { content: counter(ddt-step); position: absolute; left: 0; top: 1px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: var(--dim-radius-8); color: var(--ddt-accent-deep); background: var(--ddt-accent-wash); font-size: var(--dim-font-12); font-weight: var(--dim-weight-600); }
+.ddt-steps li { position: relative; min-height: 28px; padding: 3px 0 3px 36px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); counter-increment: ddt-step; /* 13/20 is what every other step list in the plugin uses (this rule is shared by qq/wecom/whatsapp, and WeChat's list is 13/20 too); the one 12/18 sheet was the outlier */ }
 .ddt-loading { padding: 38px; color: var(--dsw-alias-label-secondary, #646a73); text-align: center; }
 .ddt-loading h3 { margin: 0 0 7px; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-16); }
 .ddt-loading p { line-height: 1.6; }
 .ddt-spinner { width: 24px; height: 24px; margin: 0 auto 13px; border: 3px solid #e6e8eb; border-top-color: var(--dim-action-fill); border-radius: 50%; animation: ddt-spin .8s linear infinite; }
-.ddt-statusNotice, .ddt-inlineError { display: flex; align-items: flex-start; gap: var(--dim-gap-10); padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--ddt-error) 28%, transparent); border-radius: var(--dim-radius-10); color: var(--ddt-error); background: color-mix(in srgb, var(--ddt-error) 7%, transparent); font-size: var(--dim-font-13); }
-.ddt-inlineError { flex-direction: column; padding: 22px; }
-.ddt-inlineError h3 { font-size: var(--dim-font-16); overflow-wrap: anywhere; }
-.ddt-inlineError p { line-height: 1.55; overflow-wrap: anywhere; }
+.ddt-inlineError { display: flex; align-items: flex-start; flex-direction: column; gap: var(--dim-gap-10); padding: 22px; border: 1px solid color-mix(in srgb, var(--ddt-error) 28%, transparent); border-radius: var(--dim-radius-10); color: var(--ddt-error); background: color-mix(in srgb, var(--ddt-error) 7%, transparent); font-size: var(--dim-font-13); /* owner: shared styles.js:469 .dim-inlineError, which the element carries (index.js:196,915) */ }
 .ddt-errorCode { font: 11px var(--dim-font-mono); opacity: .8; overflow-wrap: anywhere; }
 .ddt-errorDiagnostic { display: grid; gap: var(--dim-gap-5); color: var(--ddt-error); overflow-wrap: anywhere; }
 .ddt-errorHint { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); overflow-wrap: anywhere; }
 .ddt-listHeading { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 9px; }
 .ddt-listHeading h3 { margin: 0; font-size: var(--dim-font-14); }
-.ddt-list { display: grid; gap: var(--dim-gap-12); margin: 0; padding: 0; list-style: none; }
-.ddt-accountTop { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--dim-gap-16); }
-.ddt-accountIdentity { min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-12); }
 .ddt-avatar { display: grid; place-items: center; flex: none; color: #fff; background: linear-gradient(145deg, #2997ff, var(--ddt-accent)); }
 .ddt-accountIdentity h3 { overflow: hidden; font-size: var(--dim-font-15); text-overflow: ellipsis; white-space: nowrap; }
 .ddt-accountIdentity p { margin-top: 4px; color: var(--dsw-alias-label-secondary, #646a73); font: 12px var(--dim-font-mono); }
 .ddt-health { display: inline-flex; align-items: center; gap: var(--dim-gap-7); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); white-space: nowrap; }
-.ddt-accountFooter { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-15); padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .ddt-accountFooter .ddt-actions { flex: none; flex-wrap: nowrap; gap: var(--dim-gap-8); margin-top: 0; }
 .ddt-accountFooter .ddt-button { flex: none; white-space: nowrap; }
 .ddt-summary { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); }
-.ddt-confirm { padding: 18px 24px; border-top: 1px solid color-mix(in srgb, var(--ddt-error) 25%, transparent); background: color-mix(in srgb, var(--ddt-error) 5%, transparent); }
 .ddt-confirm strong { display: block; margin-bottom: 6px; font-size: var(--dim-font-14); }
 .ddt-confirm p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .ddt-confirm .ddt-actions { margin-top: 13px; }
@@ -102,19 +80,10 @@ const CSS = String.raw`
   .ddt-tools { width: 100%; flex-wrap: nowrap; gap: var(--dim-gap-6); }
   .ddt-tools .ddt-badge { padding-inline: 8px; }
   .ddt-tools .ddt-button { flex: none; white-space: nowrap; }
-  .ddt-empty { grid-template-columns: minmax(0, 1fr); }
-  .ddt-brandMark { display: none; }
-  .ddt-qrLayout { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: var(--dim-gap-24); }
-  .ddt-qrColumn { width: 100%; min-width: 0; }
-  .ddt-qrCopy { width: 100%; }
 }
 @media (max-width: 720px) {
   .ddt-heading, .ddt-accountTop { flex-direction: column; align-items: stretch; }
   .ddt-heading p { white-space: normal; }
-  .ddt-empty { grid-template-columns: minmax(0, 1fr); }
-  .ddt-brandMark { display: none; }
-  .ddt-qrLayout { grid-template-columns: minmax(0, 1fr); justify-items: center; }
-  .ddt-qrCopy { width: 100%; }
   .ddt-cardBody { padding: 20px; }
 }
 @media (prefers-reduced-motion: reduce) {

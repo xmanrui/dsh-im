@@ -16,6 +16,7 @@ import {
   WhatsappLogoGlyph,
   IMessageLogoGlyph,
 } from './channel-logos.js';
+import { FlaskGlyph } from './ui-glyphs.js';
 import { DINGTALK_RPC_CHANNEL } from './channels/dingtalk/api.js';
 import { DingtalkSettingsTab } from './channels/dingtalk/index.js';
 import { DISCORD_RPC_CHANNEL } from './channels/discord/api.js';
@@ -100,9 +101,9 @@ const CHANNELS = Object.freeze([
   { id: 'telegram', label: 'Telegram' },
   { id: 'discord', label: 'Discord' },
   { id: 'whatsapp', label: 'WhatsApp' },
-  { id: 'wecomApp', label: '企业微信应用', note: '（实验功能）' },
-  { id: 'imessage', label: 'iMessage', note: '（实验功能）' },
-  { id: 'office', label: 'AI Office', note: '（实验功能）' },
+  { id: 'wecomApp', label: '企业微信应用', experimental: true },
+  { id: 'imessage', label: 'iMessage', experimental: true },
+  { id: 'office', label: 'AI Office', experimental: true },
 ]);
 
 function WeixinLogo() {
@@ -369,7 +370,13 @@ export function IMSettingsTab({
         h(ChannelLogo, { channel: channel.id }),
         h('span', { className: 'dim-channelCopy' },
           h('strong', null, channel.label),
-          channel.note ? h('small', { className: 'dim-channelNote' }, channel.note) : null,
+          /* The badge is an icon, not a word: "(Experimental)" written out took a second
+             line's width on every card that carries it and said the same thing three times.
+             role=img + aria-label keeps the name for anyone not reading the picture. */
+          channel.experimental ? h('span', {
+            className: 'dim-channelBadge', role: 'img',
+            'aria-label': '实验功能', title: '实验功能',
+          }, h(FlaskGlyph, { size: 14 })) : null,
         )))),
       h('main', {
         className: 'dim-panel',
