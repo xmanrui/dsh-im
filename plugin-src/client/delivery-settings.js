@@ -1,5 +1,7 @@
 import * as React from 'react';
 
+import { ChevronLeftGlyph, ExternalLinkGlyph } from './ui-glyphs.js';
+
 import { AccessPolicySettingsPage } from './access-policy-settings.js';
 import { FeishuGroupSettingsPage } from './channels/feishu/group-settings.js';
 import { h, isEnglish, localizeText } from './i18n.js';
@@ -684,7 +686,7 @@ export function DeliveryTargetSettingsPage({
 
   if (!definition) {
     return h('section', { className: 'dim-deliveryPage' },
-      h(DeliveryButton, { className: 'dim-deliveryBack', onClick: onBack }, '← 返回机器人列表'),
+      h(DeliveryButton, { className: 'dim-deliveryBack', onClick: onBack }, h(ChevronLeftGlyph, { size: 14 }), '返回机器人列表'),
       h('p', { role: 'alert' }, '当前渠道暂不支持投递目标。'));
   }
 
@@ -757,7 +759,7 @@ export function DeliveryTargetSettingsPage({
     'aria-label': `${account.botName || definition.label}机器人设置`,
   },
   h('header', { className: 'dim-deliveryHeader' },
-    h(DeliveryButton, { className: 'dim-deliveryBack', onClick: onBack }, '← 返回机器人列表')),
+    h(DeliveryButton, { className: 'dim-deliveryBack', onClick: onBack }, h(ChevronLeftGlyph, { size: 14 }), '返回机器人列表')),
   h('div', { className: 'dim-botSettingsTabsBar' },
     h('nav', {
       className: 'dim-botSettingsTabs',
@@ -805,7 +807,7 @@ export function DeliveryTargetSettingsPage({
         'aria-label': '打开主动投递使用文档',
       },
       h('span', null, '使用文档'),
-      h('span', { 'aria-hidden': 'true' }, '↗'))),
+      h(ExternalLinkGlyph, { size: 14 }))),
     h('div', { className: 'dim-deliveryBotId' },
       h('span', null, 'Bot ID'),
       h('code', { title: account.botId }, account.botId),

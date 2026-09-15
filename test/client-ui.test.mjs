@@ -314,7 +314,7 @@ test('channel switching is a wrapped tab strip instead of a second navigation co
   assert.doesNotMatch(styles, /\.dim-rail \{[^}]*display: grid;/);
 
   // Tabs read as native selector pills: no border, no fill, no shadow at rest.
-  assert.match(styles, /\.dim-channel \{ max-width: 100%; min-height: 28px; display: inline-flex;[^}]*border: 0;[^}]*border-radius: 14px;[^}]*corner-shape: round;/);
+  assert.match(styles, /\.dim-channel \{ max-width: 100%; min-height: 28px; display: inline-flex;[^}]*border: 0;[^}]*border-radius: 14px;/);
   assert.doesNotMatch(styles, /\.dim-channel \{[^}]*box-shadow:/);
   assert.match(styles, /\.dim-channel:hover \{ color: var\(--dsw-alias-label-primary, #0f1115\); background: var\(--dsw-alias-interactive-bg-hover/);
   assert.match(styles, /\.dim-channel:focus-visible \{ outline: 2px solid var\(--dsw-alias-brand-primary, #0f1115\); outline-offset: 2px; \}/);
@@ -548,9 +548,11 @@ test('all channel styles use the current Harness theme tokens', async () => {
   assert.match(styles, /--dsw-alias-border-l1/);
   assert.match(styles, /--dsw-alias-border-l2/);
   assert.match(styles, /--dim-blue: var\(--dsw-alias-state-business-primary, #3370ff\)/);
+  // The selected chip uses the nav-active fill, not the module fill: at
+  // #F5F6F7 on a white panel a selected tab was indistinguishable from an idle one.
   assert.match(
     styles,
-    /\.dim-channel\[aria-selected="true"\][^}]*var\(--dsw-alias-bg-module-platform/,
+    /\.dim-channel\[aria-selected="true"\][^}]*var\(--dsw-specific-sidebar-nav-item-active/,
   );
   assert.match(
     styles,
@@ -877,8 +879,7 @@ test('bot list headings omit the total already shown by the online badge', async
   }
 });
 
-test('channel connection details live in an accessible heading tooltip', async () => {
-  const styles = await readFile(STYLES_URL, 'utf8');
+test('channel connection details are stated inline instead of behind a tooltip', async () => {
   const markup = renderToStaticMarkup(React.createElement(ChannelListHeading, {
     className: 'dxw-listHeading',
     title: '已接入的微信账号',
@@ -886,9 +887,9 @@ test('channel connection details live in an accessible heading tooltip', async (
   }));
 
   assert.match(markup, /<h3>已接入的微信账号<\/h3>/);
-  assert.match(markup, /aria-label="查看消息通道说明"/);
-  assert.match(markup, /role="tooltip"><span>消息通道<\/span><strong>iLink 长轮询<\/strong>/);
-  assert.match(styles, /\.dim-panel \.dim-channelHelp:hover \.dim-channelTooltip, \.dim-panel \.dim-channelHelp:focus-within \.dim-channelTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
+  assert.match(markup, /<span class="dim-listConnection">iLink 长轮询<\/span>/);
+  // Two words of help do not justify a hover-only layer.
+  assert.doesNotMatch(markup, /dim-channelHelpButton|role="tooltip"|查看消息通道说明/);
 });
 
 test('all channel settings states use the DingTalk page treatment', async () => {
@@ -1153,7 +1154,7 @@ test('bot cards keep Agent Preset guidance in a keyboard-accessible help tooltip
   assert.match(styles, /\.dim-panel \.dim-presetHelpButton:focus-visible \{[^}]*box-shadow:/);
   assert.match(styles, /\.dim-panel \.dim-presetTooltip \{[^}]*position: absolute;[^}]*width: min\(320px, 100%\);[^}]*white-space: normal;[^}]*opacity: 0;[^}]*visibility: hidden;[^}]*pointer-events: none;/);
   assert.match(styles, /\.dim-panel \.dim-presetHelp:hover \.dim-presetTooltip, \.dim-panel \.dim-presetHelp:focus-within \.dim-presetTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.match(styles, /\.dim-panel \.dim-presetSelect \{[^}]*height: 36px;[^}]*border: none;[^}]*border-radius: 18px;[^}]*corner-shape: round;[^}]*background-color: var\(--dim-module-fill\);/);
+  assert.match(styles, /\.dim-panel \.dim-presetSelect \{[^}]*height: 36px;[^}]*border: none;[^}]*border-radius: 18px;[^}]*background-color: var\(--dim-module-fill\);/);
   assert.match(styles, /\.dim-panel \.dim-presetError \{[^}]*margin: 6px 0 0;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-presetHelp \{[^}]*grid-row: 3;/);
 });

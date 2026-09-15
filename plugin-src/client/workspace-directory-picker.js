@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { ChevronRightGlyph } from './ui-glyphs.js';
 import { createPortal } from 'react-dom';
 
 import { h } from './i18n.js';
@@ -183,7 +184,7 @@ export function WorkspaceDirectoryPicker({
     listing
       ? h('nav', { className: 'dim-directoryCrumbs', 'aria-label': '当前目录' },
           crumbs.map((crumb, index) => h(React.Fragment, { key: crumb.path },
-            index > 0 ? h('span', { className: 'dim-directoryCrumbSeparator', 'aria-hidden': 'true' }, '›') : null,
+            index > 0 ? h('span', { className: 'dim-directoryCrumbSeparator', 'aria-hidden': 'true' }, h(ChevronRightGlyph, { size: 14 })) : null,
             React.createElement('button', {
               type: 'button',
               title: crumb.path,

@@ -7,7 +7,7 @@ const CSS = `
 .dof-heroCopy { min-width: 0; }
 .dof-heroCopy h3 { margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: 15px; line-height: 22px; font-weight: 600; }
 .dof-heroCopy p { margin: 4px 0 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: 12px; line-height: 18px; }
-.dof-status { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: none; border-radius: 12px; corner-shape: round; background: var(--dsw-alias-bg-layer-2, #fff); color: var(--dsw-alias-label-secondary, #61666b); font-size: 12px; line-height: 18px; white-space: nowrap; }
+.dof-status { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: none; border-radius: 12px; background: var(--dsw-alias-bg-layer-2, #fff); color: var(--dsw-alias-label-secondary, #61666b); font-size: 12px; line-height: 18px; white-space: nowrap; }
 .dof-dot { width: 8px; height: 8px; border-radius: 50%; corner-shape: round; background: var(--dsw-alias-state-warn-primary, #f59e0b); }
 .dof-status[data-connected="true"] .dof-dot { background: var(--dsw-alias-state-success-primary, #22c55e); }
 .dof-card { margin-top: 12px; padding: 16px; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: 16px; background: none; }
@@ -28,7 +28,7 @@ const CSS = `
 .dof-hook strong { color: var(--dsw-alias-label-secondary, #61666b); font-size: 12px; font-weight: 500; }
 .dof-hook code { overflow: hidden; color: var(--dsw-alias-label-primary, #1f2329); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .dof-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.dof-actions .ddt-button[data-kind="primary"] { border: none; color: var(--dsw-alias-label-primary-foreground, #fff); background: var(--dsw-alias-button-primary-fill, #0f1115); }
+.dof-actions .ddt-button[data-kind="primary"] { border: var(--dim-control-border); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; }
 .dof-error, .dof-notice { margin: 10px 0 0; padding: 9px 11px; border-radius: 8px; font-size: 12px; line-height: 1.5; }
 .dof-error { color: var(--dsw-alias-state-error-primary, #d54941); background: var(--dsw-alias-state-error-secondary, #fff0ef); }
 .dof-notice { color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-interactive-bg-hover, #f7f8fa); }

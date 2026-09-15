@@ -127,6 +127,7 @@ function ScenePolicyEditor({
   unsupported = false,
   onChange,
 }) {
+  const legendId = React.useId();
   const ownerHelpId = React.useId();
   const emptyAllowlistHelpId = React.useId();
   const allowlist = policy.mode === 'allowlist';
@@ -145,13 +146,18 @@ function ScenePolicyEditor({
       userIndex === index ? { ...user, ...patch } : user
     )));
 
-  return h('fieldset', {
+  // role="group" + aria-labelledby carries the same grouping semantics as
+  // fieldset/legend without the legend notching the card border. display:
+  // contents is deliberately NOT used: it strips the group from the
+  // accessibility tree in several browser/screen-reader pairings.
+  return h('div', {
     className: 'dim-accessScene',
-    disabled,
+    role: 'group',
+    'aria-labelledby': legendId,
+    'aria-disabled': disabled || undefined,
     'data-scene': scene,
-    'aria-label': localizeText(title),
   },
-  h('legend', null,
+  h('div', { id: legendId, className: 'dim-accessLegend' },
     h('span', { className: 'dim-accessLegendContent' },
       h('span', null, title),
       h('span', { className: 'dim-channelHelp dim-accessLegendHelp' },
@@ -176,6 +182,7 @@ function ScenePolicyEditor({
             h('span', null, '访问模式'),
             h('select', {
               value: policy.mode,
+              disabled,
               'aria-label': [localizeText(title), localizeText('访问模式')].join(' '),
               onChange: (event) => onChange({ ...policy, mode: event.target.value }),
             },
@@ -185,6 +192,7 @@ function ScenePolicyEditor({
               h('span', null, '默认命令权限'),
               h('select', {
                 value: policy.open.defaultCanExecuteCommands ? 'allow' : 'deny',
+                disabled,
                 'aria-label': [localizeText(title), localizeText('默认命令权限')].join(' '),
                 onChange: (event) => onChange({
                   ...policy,
@@ -216,6 +224,7 @@ function ScenePolicyEditor({
                 : null),
             h('button', {
               type: 'button',
+              disabled,
               className: 'dim-deliveryButton dim-accessAddUser',
               'aria-label': [localizeText(title), localizeText('新增用户')].join(' '),
               title: localizeText('新增用户'),
@@ -234,6 +243,7 @@ function ScenePolicyEditor({
                     h('span', null, userLabel),
                     h('input', {
                       value: user.id,
+                      disabled,
                       maxLength: 256,
                       required: true,
                       autoCapitalize: 'none',
@@ -247,6 +257,7 @@ function ScenePolicyEditor({
                     h('span', null, '命令权限'),
                     h('select', {
                       value: user.canExecuteCommands ? 'allow' : 'deny',
+                      disabled,
                       'aria-label': [
                         localizeText(title), localizeText('用户'), index + 1,
                         localizeText('命令权限'),
@@ -259,6 +270,7 @@ function ScenePolicyEditor({
                     h('option', { value: 'deny' }, '不可以执行命令'))),
                   h('button', {
                     type: 'button',
+                    disabled,
                     className: 'dim-deliveryButton dim-accessDeleteUser',
                     'data-kind': 'danger',
                     'aria-label': [

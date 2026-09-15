@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { CheckGlyph } from './ui-glyphs.js';
 
 import {
   EMPTY_MODEL_CATALOG,
@@ -102,7 +103,7 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
   h('span', { className: 'dim-modelOptionCopy' },
     h('span', { className: 'dim-modelOptionName' }, label),
     description ? h('span', { className: 'dim-modelDescription' }, description) : null),
-  h('span', { className: 'dim-modelCheck', 'aria-hidden': true }, selected ? '✓' : ''));
+  h('span', { className: 'dim-modelCheck', 'aria-hidden': true }, selected ? h(CheckGlyph, { size: 16 }) : null));
 
   const row = (key, label, value, blocked = false) => h('button', {
     type: 'button', className: 'dim-modelRow', disabled: disabled || saving || blocked,
