@@ -149,6 +149,20 @@ body {
   --dim-disclosure-ease: var(--ds-ease-in-out, cubic-bezier(.4, 0, .2, 1));
   --dim-danger: var(--dsw-alias-state-error-primary, #ec1313);
   --dim-danger-hover: var(--dsw-alias-interactive-bg-hover-danger, rgb(236 19 19 / 5%));
+  /* The filled-action pair, taken whole from the host so the fill and the text on it can
+     never drift apart. --dsw-alias-button-primary-fill is --dsw-alias-brand-primary
+     (bluish-1000 #0f1115 light / bluish-50 #f9fafb dark) and
+     --dsw-alias-label-primary-foreground is its matched label (#fff light / #0f1115 dark):
+     18.90:1 and 18.08:1. Every control that paints a fill reads this pair, so no channel
+     brand colour reaches a control - brand survives on identity marks only. */
+  --dim-action-fill: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary, #0f1115));
+  --dim-action-fill-hover: var(--dsw-alias-button-primary-hover, var(--dsw-alias-brand-primary, #0f1115));
+  --dim-action-on-fill: var(--dsw-alias-label-primary-foreground, #fff);
+  /* The QR frame is deliberately white in every theme - a code has to be dark on
+     white to scan - so anything written on it must be frozen too, or it turns
+     near-white in dark and disappears. .dim-qrExpired already did this. */
+  --dim-on-qr: var(--dsw-static-neutral-bluish-1000, #0f1115);
+  --dim-on-qr-muted: #646a73;
   /* The stacking ladder. Layers that exist as a concept get a name; the local 1s
      and 2s stay literal because they are per-component stacking contexts rather
      than a layer of the app. */
@@ -220,7 +234,7 @@ body {
 .dim-updateCopyCopied { color: var(--dsw-alias-state-success-primary, #20a162); }
 .dim-updateFooter { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--dim-gap-8); padding: 14px 24px; border-top: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); }
 .dim-updateFooter .dim-updateButton:first-child { margin-right: auto; }
-.dim-updatePrimary, .dim-updatePrimary:hover:not(:disabled) { border-color: var(--dsw-alias-state-business-primary, #4176e6); color: #fff; background: var(--dsw-alias-state-business-primary, #4176e6); }
+.dim-updatePrimary, .dim-updatePrimary:hover:not(:disabled) { border-color: var(--dsw-alias-state-business-primary, #4176e6); color: var(--dim-action-on-fill, #fff); background: var(--dsw-alias-state-business-primary, #4176e6); }
 .dim-githubAction { position: relative; display: inline-flex; flex: none; }
 .dim-githubLink { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; flex: none; padding: 0; border: none; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-tertiary, #81858c); background: transparent; font-size: var(--dim-font-12); line-height: normal; text-decoration: none; transition: color .15s ease, background .15s ease; }
 .dim-githubLink:hover { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover); }
@@ -281,12 +295,19 @@ body {
    the theme's own layer and only the content colour flips, so the QR glyph inside
    rides currentColor and stays legible in both themes. */
 .dim-panel .bxf-headingTools .dim-scanButton, .dim-panel .dxw-tools .dim-scanButton, .dim-panel .ddt-tools .dim-scanButton { flex: none; height: 28px; display: inline-flex; align-items: center; justify-content: center; justify-self: start; gap: var(--dim-gap-6); padding: 0 10px; border: var(--dim-control-border); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; box-shadow: none; font: inherit; font-size: var(--dim-font-12); line-height: 18px; white-space: nowrap; cursor: pointer; }
-.dim-panel .bxf-headingTools .dim-scanButton:hover:not(:disabled), .dim-panel .dxw-tools .dim-scanButton:hover:not(:disabled), .dim-panel .ddt-tools .dim-scanButton:hover:not(:disabled) { background: var(--dim-hover-solid); }
+/* The scan and credential capsules are native's .outline button: the surface moves on
+   hover and the border does not. They carry data-kind="primary" in the markup, so the
+   channel sheets' [data-kind="primary"] rules reach them at (0,2,0)/(0,4,0) and paint the
+   BORDER with --dim-action-fill - near-white in dark, near-black in light - around a
+   surface this rule had already made neutral. Two owners, one capsule. Declaring the
+   resting border colour here at (0,5,0) closes it: the fill rules can no longer reach
+   the capsule, and the border keeps the value --dim-control-border already gave it. */
+.dim-panel .bxf-headingTools .dim-scanButton:hover:not(:disabled), .dim-panel .dxw-tools .dim-scanButton:hover:not(:disabled), .dim-panel .ddt-tools .dim-scanButton:hover:not(:disabled) { background: var(--dim-hover-solid); border-color: var(--dsw-alias-border-l3, rgb(0 0 0 / 12%)); }
 .dim-panel .dim-credentialButton { flex: none; height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: var(--dim-gap-6); padding: 0 10px; border: var(--dim-control-border); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: 18px; white-space: nowrap; cursor: pointer; }
 .dim-panel .dim-actionIcon { width: 15px; height: 15px; flex: 0 0 15px; }
-.dim-panel .dim-credentialButton:hover:not(:disabled) { background: var(--dim-hover-solid); }
+.dim-panel .dim-credentialButton:hover:not(:disabled) { background: var(--dim-hover-solid); border-color: var(--dsw-alias-border-l3, rgb(0 0 0 / 12%)); }
 .dim-panel .dim-credentialButton[aria-pressed="true"] { border-color: transparent; background: var(--dsw-specific-sidebar-nav-item-active, #ebeef2); }
-.dim-panel .bxf-headingTools .dim-onlineBadge, .dim-panel .dxw-tools .dim-onlineBadge, .dim-panel .ddt-tools .dim-onlineBadge { height: 24px; display: inline-flex; align-items: center; justify-self: end; gap: var(--dim-gap-4); padding: 0 8px; border: none; border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-2, #fff); font: inherit; font-size: var(--dim-font-12); font-weight: 400; line-height: 18px; white-space: nowrap; }
+.dim-panel .bxf-headingTools .dim-onlineBadge, .dim-panel .dxw-tools .dim-onlineBadge, .dim-panel .ddt-tools .dim-onlineBadge { height: 24px; min-height: 24px; display: inline-flex; align-items: center; justify-self: end; gap: var(--dim-gap-4); padding: 0 8px; border: none; border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-2, #fff); font: inherit; font-size: var(--dim-font-12); font-weight: 400; line-height: 18px; white-space: nowrap; }
 .dim-panel .dim-channelPage { min-width: 0; width: 100%; max-width: none; display: flex; flex-direction: column; gap: var(--dim-gap-12); padding: 0 0 24px; color: var(--dsw-alias-label-primary, #0f1115); box-sizing: border-box; }
 .dim-panel select.dim-presetSelect, .dim-panel .dim-targetField select, .dim-panel .dim-accessField select,
 .dim-panel .dim-targetSuggestionField select, .dim-panel .dim-feishuGroupSelect, .dim-panel .bxf-responseModeSelect {
@@ -307,7 +328,7 @@ body {
 .dim-panel .dim-credentialField { min-width: 0; display: grid; gap: var(--dim-gap-6); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: 22px; font-weight: 500; }
 .dim-panel .dim-credentialField input { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); outline: none; color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; transition: border-color .16s ease; }
 .dim-panel .dim-credentialField input:focus { outline: none; border-color: var(--dim-focus); }
-.dim-panel .dim-credentialField input::placeholder { color: var(--dsw-alias-label-dimmed, #e1e5ee); font-family: inherit; }
+.dim-panel .dim-credentialField input::placeholder { color: var(--dsw-alias-label-caption, #adb2b8); font-family: inherit; }
 .dim-panel .dim-credentialError, .dim-panel .dim-credentialActions { grid-column: 1 / -1; }
 .dim-panel .dim-credentialError { margin: 0; color: var(--dsw-alias-state-error-primary, #d54941); font-size: var(--dim-font-12); line-height: 1.5; }
 .dim-panel .dim-credentialActions { margin-top: 0; }
@@ -350,7 +371,7 @@ body {
 .dim-panel .dim-qrFrame::before { display: none; }
 .dim-panel .dim-qrFrame::after { display: none; }
 .dim-panel .dim-qrFrame img { position: relative; z-index: 1; width: 100%; height: 100%; display: block; object-fit: contain; }
-.dim-panel .dim-qrFallback { position: relative; z-index: 1; display: grid; place-items: center; gap: var(--dim-gap-8); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-14); line-height: 22px; text-align: center; }
+.dim-panel .dim-qrFallback { position: relative; z-index: 1; display: grid; place-items: center; gap: var(--dim-gap-8); color: var(--dim-on-qr-muted, #646a73); font-size: var(--dim-font-14); line-height: 22px; text-align: center; }
 .dim-panel .dim-qrExpired { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 20px; color: var(--dsw-static-neutral-bluish-1000, #0f1115); background: rgb(255 255 255 / 92%); font-size: var(--dim-font-15); line-height: 1.6; font-weight: 600; text-align: center; white-space: pre-line; backdrop-filter: blur(3px); }
 .dim-panel .dim-countdown { width: min(270px, 100%); margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: normal; }
 .dim-panel .dim-countdownTop { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-12); margin-bottom: 6px; }
@@ -387,9 +408,13 @@ body {
 .dim-panel .dim-workspaceEdit:hover:not(:disabled) { background: var(--dim-hover); }
 .dim-panel .dim-workspaceEdit:disabled { cursor: not-allowed; opacity: 0.4; }
 .dim-panel .dim-workspacePath { min-width: 0; max-width: 100%; grid-column: 1 / -1; grid-row: 2; display: block; overflow: hidden; color: var(--dsw-alias-label-secondary, #646a73); font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; white-space: normal; }
-.dim-panel .dim-preset { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--dim-gap-8); margin: 0; padding: 16px 0; border: 0; background: none; }
+/* Agent Preset is a saved value, so it takes the plugin's stacked-field form
+   (.dim-credentialField): label above, field below, full width. As a settings ROW the
+   select was capped at max-width: 60%, which truncated the longer preset labels - the
+   one thing a preset picker has to keep readable. */
+.dim-panel .dim-preset { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--dim-gap-6); margin: 0; padding: 16px 0; border: 0; background: none; }
 .dim-panel .dim-preset > .dim-helpHint { flex: 1 1 100%; }
-.dim-panel .dim-presetHeader { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-8); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: 22px; font-weight: 400; }
+.dim-panel .dim-presetHeader { position: relative; min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-8); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: 22px; font-weight: 500; }
 .dim-panel .dim-presetTitle { min-width: 0; display: inline-flex; align-items: center; gap: var(--dim-gap-8); white-space: nowrap; }
 .dim-panel .dim-presetHelp { display: inline-flex; align-items: center; flex: none; }
 .dim-panel .dim-presetHelpButton { width: 16px; height: 16px; display: grid; place-items: center; padding: 0; border: none; border-radius: 50%; corner-shape: round; color: var(--dsw-alias-label-tertiary, #81858c); background: transparent; font: inherit; font-size: var(--dim-font-11); line-height: 1; font-weight: 500; cursor: help; transition: color .15s ease, background .15s ease; }
@@ -398,7 +423,8 @@ body {
 .dim-panel .dim-presetTooltip { position: absolute; top: calc(100% + 7px); left: 0; z-index: var(--dim-z-tooltip); width: min(320px, 100%); overflow-wrap: anywhere; white-space: normal; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
 .dim-panel .dim-presetHelp:hover .dim-presetTooltip, .dim-panel .dim-presetHelp:focus-within .dim-presetTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .dim-panel .dim-presetStatus { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: 18px; white-space: nowrap; }
-.dim-panel .dim-presetSelect { flex: none; max-width: 60%; height: 36px; padding: 0 34px 0 14px; border: none; border-radius: var(--dim-radius-18); color: var(--dsw-alias-label-primary, #0f1115); background-color: var(--dim-module-fill); appearance: none; font: inherit; font-size: var(--dim-font-14); line-height: 22px; cursor: pointer; }
+.dim-panel .dim-presetSelect { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background-color: var(--dsw-alias-bg-layer-1, #fff); appearance: none; font: inherit; font-size: var(--dim-font-14); line-height: 22px; cursor: pointer; transition: border-color .16s ease; }
+.dim-panel .dim-presetSelect:focus { outline: none; border-color: var(--dim-focus); }
 .dim-panel .dim-presetSelect:disabled { cursor: not-allowed; opacity: 0.4; }
 .dim-panel .dim-modelSetting { display: block; padding: 16px 0; }
 .dim-modelSetting > .dim-presetHeader { padding: 0 0 8px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: 18px; font-weight: 500; }
@@ -500,13 +526,13 @@ body {
 .dim-contextTextActions button { min-height: 30px; padding: 4px 0; border: 0; border-radius: var(--dim-radius-8); color: var(--dsw-alias-state-business-primary, #4176e6); background: transparent; font: inherit; font-size: var(--dim-font-12); cursor: pointer; }
 .dim-contextTextActions button:hover:not(:disabled) { text-decoration: underline; }
 .dim-contextGuidance textarea { display: block; width: 100%; min-height: 88px; margin-top: 6px; padding: 8px 12px; resize: vertical; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: 22px; }
-.dim-contextGuidance textarea::placeholder { color: var(--dsw-alias-label-dimmed, #e1e5ee); opacity: 1; }
+.dim-contextGuidance textarea::placeholder { color: var(--dsw-alias-label-caption, #adb2b8); opacity: 1; }
 .dim-contextHint { margin: 5px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 1.5; overflow-wrap: anywhere; }
 .dim-contextError { margin: 12px 0 0; color: var(--dsw-alias-state-error-primary, #d54941); font-size: var(--dim-font-12); line-height: 1.5; overflow-wrap: anywhere; }
 .dim-contextFooter { display: flex; justify-content: flex-end; gap: var(--dim-gap-8); margin-top: 0; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); }
 .dim-contextFooter button { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: 18px; white-space: nowrap; cursor: pointer; }
 .dim-contextFooter button:hover:not(:disabled) { background: var(--dim-hover); }
-.dim-contextFooter .dim-contextSave, .dim-contextFooter .dim-contextSave:hover:not(:disabled) { border-color: var(--dsw-alias-state-business-primary, #4176e6); color: #fff; background: var(--dsw-alias-state-business-primary, #4176e6); }
+.dim-contextFooter .dim-contextSave, .dim-contextFooter .dim-contextSave:hover:not(:disabled) { border-color: var(--dsw-alias-state-business-primary, #4176e6); color: var(--dim-action-on-fill, #fff); background: var(--dsw-alias-state-business-primary, #4176e6); }
 .dim-contextEntry:focus-visible, .dim-contextDialog button:focus-visible, .dim-contextDialog input:focus-visible, .dim-contextDialog textarea:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
 .dim-contextEntry:disabled, .dim-contextDialog button:disabled, .dim-contextDialog input:disabled, .dim-contextDialog textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 @media (pointer: coarse) {
@@ -534,7 +560,7 @@ body {
 .dim-directoryPathMeta span { min-width: 0; overflow: hidden; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); text-overflow: ellipsis; white-space: nowrap; }
 .dim-directoryPathControl { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: var(--dim-gap-8); }
 .dim-directoryPathInput { min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
-.dim-directoryPathInput::placeholder { color: var(--dsw-alias-label-tertiary, #81858c); }
+.dim-directoryPathInput::placeholder { color: var(--dsw-alias-label-caption, #adb2b8); }
 
 .dim-directoryPathInput:focus { outline: none; border-color: var(--dim-focus); }
 .dim-directoryPathInput[aria-invalid="true"] { border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 62%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); }
@@ -669,11 +695,11 @@ body {
 .dim-feishuGroupQrColumn { min-width: 0; }
 .dim-feishuGroupQrFrame { position: relative; width: 176px; height: 176px; display: grid; place-items: center; padding: 10px; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-12); background: #fff; box-shadow: 0 6px 18px rgb(31 35 41 / 7%); }
 .dim-feishuGroupQrFrame img { width: 100%; height: 100%; display: block; object-fit: contain; }
-.dim-feishuGroupQrFallback { width: 100%; height: 100%; display: grid; place-content: center; justify-items: center; gap: var(--dim-gap-7); border-radius: var(--dim-radius-8); color: var(--dsw-alias-state-business-primary, #4176e6); background: #f7f9ff; text-align: center; }
-.dim-feishuGroupQrFallback span { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
-.dim-feishuGroupQrExpired { position: absolute; inset: 10px; display: grid; place-content: center; gap: var(--dim-gap-2); border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-primary, #0f1115); background: rgb(255 255 255 / 94%); backdrop-filter: blur(3px); text-align: center; }
+.dim-feishuGroupQrFallback { width: 100%; height: 100%; display: grid; place-content: center; justify-items: center; gap: var(--dim-gap-7); border-radius: var(--dim-radius-8); color: var(--dim-on-qr-muted, #646a73); background: #f7f9ff; text-align: center; }
+.dim-feishuGroupQrFallback span { color: var(--dim-on-qr-muted, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
+.dim-feishuGroupQrExpired { position: absolute; inset: 10px; display: grid; place-content: center; gap: var(--dim-gap-2); border-radius: var(--dim-radius-8); color: var(--dim-on-qr, #0f1115); background: rgb(255 255 255 / 94%); backdrop-filter: blur(3px); text-align: center; }
 .dim-feishuGroupQrExpired span { font-size: var(--dim-font-13); line-height: 20px; font-weight: 600; }
-.dim-feishuGroupQrExpired small { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
+.dim-feishuGroupQrExpired small { color: var(--dim-on-qr-muted, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
 .dim-feishuGroupCountdown { width: 176px; display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: var(--dim-gap-5) 10px; margin-top: 9px; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 17px; font-variant-numeric: tabular-nums; }
 .dim-feishuGroupCountdown strong { color: var(--dsw-alias-label-secondary, #646a73); font-weight: 600; }
 .dim-feishuGroupProgress { grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: var(--dim-radius-full); background: var(--dsw-alias-bg-module-platform, #f5f6f7); }
@@ -810,7 +836,12 @@ body {
 .dim-globalTtlInput:focus { outline: none; border-color: var(--dim-focus); }
 .dim-globalTtlInput[aria-invalid="true"] { border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 62%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); }
 .dim-globalTtlInput:disabled { cursor: not-allowed; opacity: 0.4; }
-.dim-globalSaveButton { min-width: 58px; min-height: 34px; }
+/* The save capsule is the same role as .dim-globalSweepButton beside it, so it takes the
+   same 28px action rung from .dim-deliveryButton. Declaring min-height: 34px here did not
+   "raise" that height - height and min-height are different longhands and never compete, so
+   the used value was max(28, 34) = 34px, which made the row 34 / 32 / 28 across three
+   controls that should be two ladders: 32px fields, 28px capsule actions. */
+.dim-globalSaveButton { min-width: 58px; }
 .dim-globalSweepAction { position: relative; display: inline-flex; flex: none; margin-left: auto; }
 .dim-globalSweepButton { flex: none; }
 .dim-globalSweepConfirm { position: absolute; top: calc(100% + 8px); right: 0; z-index: var(--dim-z-popover); width: 218px; padding: 11px 12px; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-8); background: var(--dsw-alias-bg-layer-3, #fff); box-shadow: 0 12px 30px rgb(31 35 41 / 18%); }
@@ -826,7 +857,21 @@ body {
 @container (max-width: 680px) {
   .dim-panel .bxf-headingTools, .dim-panel .dxw-tools, .dim-panel .ddt-tools { gap: var(--dim-gap-8); }
   .dim-panel .dim-bindActions { gap: var(--dim-gap-6); }
-  .dim-panel .bxf-headingTools .dim-scanButton, .dim-panel .dxw-tools .dim-scanButton, .dim-panel .ddt-tools .dim-scanButton, .dim-panel .dim-credentialButton { gap: var(--dim-gap-5); padding-inline: 8px; font-size: var(--dim-font-12); }
+    /* No padding here. The scan button and the credential button are one role - a
+     28px capsule action in the heading toolbar - and their inline padding belongs
+     to that role's own rules (292 / 294), not to a container query. This line used
+     to set 8px on both, which is how the two buttons in the SAME row ended up
+     rendering different paddings: a value expressed on a container query competes
+     with the role's own rule, so the winner follows sheet order rather than intent.
+
+     Sheet order is not "channel after shared". client/index.js:445-459 installs the
+     eleven channel sheets first and the shared sheet LAST, so at equal specificity
+     the shared sheet wins against all eleven - which is why this block, injected
+     with the shared sheet, beat feishu. DingTalk is the exception: it is not in
+     that list and installs later (mount, or via a peer channel), so dingtalk wins
+     equal-specificity ties against the shared sheet. Any future tie-break has to
+     be reasoned from that order, not from "the channel sheet came second". */
+  .dim-panel .bxf-headingTools .dim-scanButton, .dim-panel .dxw-tools .dim-scanButton, .dim-panel .ddt-tools .dim-scanButton, .dim-panel .dim-credentialButton { gap: var(--dim-gap-5); font-size: var(--dim-font-12); }
   .dim-panel .dim-actionIcon { width: 13px; height: 13px; flex-basis: 13px; }
 
   .dim-panel .dim-credentialForm { grid-template-columns: minmax(0, 1fr); }

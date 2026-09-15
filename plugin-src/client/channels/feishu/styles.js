@@ -66,7 +66,6 @@ const CSS = String.raw`
 }
 
 .bxf-totalBadge {
-  min-height: 28px;
   display: inline-flex;
   align-items: baseline;
   gap: var(--dim-gap-3);
@@ -207,9 +206,14 @@ const CSS = String.raw`
   transition: background .15s var(--ds-ease-in-out, ease), border-color .15s var(--ds-ease-in-out, ease), transform .15s var(--ds-ease-in-out, ease);
 }
 
+/* One hover treatment for every outline capsule in the plugin, owned by the shared
+   sheet: the surface moves to --dim-hover-solid and the resting border is left alone.
+   These three channel rules used to disagree - feishu took --dim-hover (a translucent
+   blue-tinted rgb(38 49 72 / 6%)) with a #c9cdd4 border, dingtalk and weixin took the
+   same translucent fill with a hardcoded #aeb3bb border - so the identical button
+   changed hue depending on which channel page it sat on. */
 .bxf-button:hover:not(:disabled) {
-  background: var(--dim-hover);
-  border-color: var(--dsw-alias-border-l1, #c9cdd4);
+  background: var(--dim-hover-solid);
 }
 
 .bxf-button:active:not(:disabled) { transform: translateY(1px); }
@@ -223,7 +227,7 @@ const CSS = String.raw`
 
 .bxf-button[data-kind="primary"] {
   border-color: var(--bxf-accent);
-  color: #fff;
+  color: var(--dim-action-on-fill, #fff);
   background: var(--bxf-accent);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--bxf-accent) 24%, transparent);
 }
@@ -234,7 +238,11 @@ const CSS = String.raw`
 }
 
 .bxf-button[data-kind="danger"] { color: var(--bxf-error); }
-.bxf-button[data-size="small"] { min-height: 32px; padding: 5px 10px; font-size: var(--dim-font-12); }
+/* 'small' was 32px against a 28px base, so it beat the shared .dim-scanButton
+   height and made Feishu's Scan QR / Manual setup row 4px taller than every
+   other channel's - a visible jitter when switching channels. The shared layer
+   puts this whole family at 28px, so the variant stays a size marker only. */
+.bxf-button[data-size="small"] { min-height: 28px; padding: 0 10px; font-size: var(--dim-font-12); }
 .bxf-bindButton { flex: none; white-space: nowrap; }
 
 .bxf-provisionCard {
@@ -513,8 +521,7 @@ const CSS = String.raw`
 @container (max-width: 620px) {
   .bxf-headingTools { gap: var(--dim-gap-6); }
   .bxf-headingTools .bxf-totalBadge { padding-inline: 8px; }
-  .bxf-headingTools .bxf-bindButton { padding-inline: 10px; }
-}
+  }
 
 @media (max-width: 680px) {
   .bxf-intro { grid-template-columns: minmax(0, 1fr); }

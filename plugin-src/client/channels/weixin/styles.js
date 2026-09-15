@@ -24,18 +24,18 @@ const CSS = String.raw`
 .dxw-heading p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: 20px; margin-top: 5px; white-space: nowrap; }
 .dxw-tools, .dxw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--dim-gap-10); }
 .dxw-tools { width: 100%; justify-content: space-between; flex-wrap: nowrap; }
-.dxw-badge { display: inline-flex; align-items: center; gap: var(--dim-gap-7); min-height: 30px; padding: 0 11px; border-radius: var(--dim-radius-full); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f5f6f7); font-size: var(--dim-font-12); white-space: nowrap; }
+.dxw-badge { display: inline-flex; align-items: center; gap: var(--dim-gap-7); padding: 0 11px; border-radius: var(--dim-radius-full); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f5f6f7); font-size: var(--dim-font-12); white-space: nowrap; }
 .dxw-dot { width: 8px; height: 8px; border-radius: 50%; background: #aeb3bb; flex: none; }
 .dxw-dot[data-tone="success"] { background: var(--dxw-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dxw-success) 14%, transparent); }
 .dxw-dot[data-tone="warning"] { background: var(--dxw-warning); }
 .dxw-dot[data-tone="error"] { background: var(--dxw-error); }
 .dxw-button { height: 28px; border: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-14); padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: var(--dim-gap-4); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); font-weight: 400; cursor: pointer; text-decoration: none; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
-.dxw-button:hover:not(:disabled) { border-color: #aeb3bb; background: var(--dim-hover); }
+.dxw-button:hover:not(:disabled) { background: var(--dim-hover-solid); }
 .dxw-button:active:not(:disabled) { transform: translateY(1px); }
 .dxw-button:focus-visible, .dxw-input:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
 .dxw-button:disabled { cursor: not-allowed; opacity: 0.4; }
-.dxw-button[data-kind="primary"] { color: white; border-color: var(--dxw-accent); background: var(--dxw-accent); }
-.dxw-button[data-kind="primary"]:hover:not(:disabled) { border-color: var(--dxw-accent-dark); background: var(--dxw-accent-dark); }
+.dxw-button[data-kind="primary"] { color: var(--dim-action-on-fill, #fff); border-color: var(--dim-action-fill); background: var(--dim-action-fill); }
+.dxw-button[data-kind="primary"]:hover:not(:disabled) { border-color: var(--dim-action-fill-hover); background: var(--dim-action-fill-hover); }
 .dxw-button[data-kind="danger"] { color: var(--dxw-error); }
 .dxw-card { overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-14); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); }
 .dxw-cardBody { padding: 24px; }
@@ -54,7 +54,7 @@ const CSS = String.raw`
 .dxw-countdown { width: 270px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); }
 .dxw-countdown div { display: flex; justify-content: space-between; margin-bottom: 6px; }
 .dxw-progress { height: 4px; overflow: hidden; border-radius: var(--dim-radius-full); background: #eef0f3; }
-.dxw-progress span { display: block; width: var(--dxw-progress); height: 100%; background: var(--dxw-accent); transition: width .2s linear; }
+.dxw-progress span { display: block; width: var(--dxw-progress); height: 100%; background: var(--dim-action-fill); transition: width .2s linear; }
 .dxw-qrCopy h3 { margin: 9px 0 8px; font-size: var(--dim-font-18); }
 .dxw-qrCopy > p { color: var(--dsw-alias-label-secondary, #646a73); line-height: 1.65; }
 .dxw-steps { margin: 18px 0 22px; padding-left: 22px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: 1.9; }
@@ -86,7 +86,7 @@ const CSS = String.raw`
 .dxw-confirm p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: 1.55; }
 .dxw-confirm .dxw-actions { margin-top: 13px; }
 .dxw-loading { padding: 36px; color: var(--dsw-alias-label-secondary, #646a73); text-align: center; }
-.dxw-spinner { width: 24px; height: 24px; margin: 0 auto 12px; border: 3px solid #e6e8eb; border-top-color: var(--dxw-accent); border-radius: 50%; animation: dxw-spin .8s linear infinite; }
+.dxw-spinner { width: 24px; height: 24px; margin: 0 auto 12px; border: 3px solid #e6e8eb; border-top-color: var(--dim-action-fill); border-radius: 50%; animation: dxw-spin .8s linear infinite; }
 .dxw-visuallyHidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @keyframes dxw-spin { to { transform: rotate(360deg); } }
 @media (max-width: 720px) {

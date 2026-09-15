@@ -34,7 +34,10 @@ const CSS = `
 .dof-actions { display: flex; flex-wrap: wrap; gap: var(--dim-gap-8); margin-top: 14px; }
 .dof-actions .ddt-button[data-kind="primary"] { border: var(--dim-control-border); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; }
 .dof-error, .dof-notice { margin: 10px 0 0; padding: 9px 11px; border-radius: var(--dim-radius-8); font-size: var(--dim-font-12); line-height: 1.5; }
-.dof-error { color: var(--dsw-alias-state-error-primary, #d54941); background: var(--dsw-alias-state-error-secondary, #fff0ef); }
+/* error-secondary is red-400 in both themes while error-primary is red-400 in dark,
+   so this text and its own background resolved to one colour: 1.00:1, invisible.
+   It is the tinted-notice pattern the rest of the sheet already uses. */
+.dof-error { color: var(--dim-danger); background: color-mix(in srgb, var(--dim-danger) 8%, var(--dsw-alias-bg-layer-1, #fff)); }
 .dof-notice { color: var(--dsw-alias-label-secondary, #646a73); background: var(--dim-hover); }
 .dof-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--dim-gap-8); margin-top: 12px; }
 .dof-metric { min-width: 0; padding: 9px 10px; border-radius: var(--dim-radius-12); background: var(--dsw-alias-bg-module-platform, #f5f6f7); }

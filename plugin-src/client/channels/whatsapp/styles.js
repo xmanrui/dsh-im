@@ -1,8 +1,8 @@
 export const WHATSAPP_STYLE_ID = 'xmanrui-dsh-im-whatsapp-settings';
 
 const CSS = String.raw`
-.dwa-page { --ddt-accent: #25d366; --ddt-accent-deep: #128c7e; --ddt-accent-wash: #eafbf0; }
-.dwa-avatar { color: #fff; background: #25d366; }
+.dwa-page.dim-channelPage { --ddt-accent: #25d366; --ddt-accent-deep: #128c7e; --ddt-accent-wash: #eafbf0; }
+.dwa-avatar.dim-botAvatar, .dwa-avatar.dim-emptyBrand { color: #fff; background: #25d366; }
 .dwa-avatar svg { display: block; }
 `;
 

@@ -1155,14 +1155,20 @@ test('bot cards wrap full workspace paths without horizontal scrolling', async (
 test('bot cards keep Agent Preset guidance in a keyboard-accessible help tooltip', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
 
-  // Native Setting-Cell: label left, selector pill right.
-  assert.match(styles, /\.dim-panel \.dim-preset \{[^}]*display: flex;[^}]*align-items: center;[^}]*gap: var\(--dim-gap-8\);[^}]*padding: 16px 0;[^}]*border: 0;[^}]*background: none;/);
-  assert.match(styles, /\.dim-panel \.dim-presetHeader \{[^}]*position: relative;[^}]*flex: 1;[^}]*display: flex;[^}]*align-items: center;/);
+  // Stacked field, not a Setting-Cell: the label sits above the control and the select
+  // spans the column. The label is the wide one, so the value keeps its full label instead
+  // of being clipped by a fixed-width pill.
+  assert.match(styles, /\.dim-panel \.dim-preset \{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*gap: var\(--dim-gap-6\);[^}]*padding: 16px 0;[^}]*border: 0;[^}]*background: none;/);
+  assert.doesNotMatch(styles, /\.dim-panel \.dim-preset \{[^}]*display: flex;/);
+  assert.match(styles, /\.dim-panel \.dim-presetHeader \{[^}]*position: relative;[^}]*display: flex;[^}]*align-items: center;/);
+  assert.doesNotMatch(styles, /\.dim-panel \.dim-presetHeader \{[^}]*flex: 1;/);
   assert.match(styles, /\.dim-panel \.dim-presetTitle \{[^}]*display: inline-flex;[^}]*gap: var\(--dim-gap-8\);[^}]*white-space: nowrap;/);
   assert.match(styles, /\.dim-panel \.dim-presetHelpButton:focus-visible \{[^}]*box-shadow:/);
   assert.match(styles, /\.dim-panel \.dim-presetTooltip \{[^}]*position: absolute;[^}]*width: min\(320px, 100%\);[^}]*white-space: normal;[^}]*opacity: 0;[^}]*visibility: hidden;[^}]*pointer-events: none;/);
   assert.match(styles, /\.dim-panel \.dim-presetHelp:hover \.dim-presetTooltip, \.dim-panel \.dim-presetHelp:focus-within \.dim-presetTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.match(styles, /\.dim-panel \.dim-presetSelect \{[^}]*height: 36px;[^}]*border: none;[^}]*border-radius: var\(--dim-radius-18\);[^}]*background-color: var\(--dim-module-fill\);/);
+  // The field ladder (32px, field border/radius, layer-1 fill) - not the 36px module pill.
+  assert.match(styles, /\.dim-panel \.dim-presetSelect \{[^}]*width: 100%;[^}]*height: 32px;[^}]*border: var\(--dim-field-border\);[^}]*border-radius: var\(--dim-field-radius\);[^}]*background-color: var\(--dsw-alias-bg-layer-1, #fff\);/);
+  assert.doesNotMatch(styles, /\.dim-panel \.dim-presetSelect \{[^}]*max-width: 60%;/);
   assert.match(styles, /\.dim-panel \.dim-presetError \{[^}]*margin: 6px 0 0;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-presetHelp \{[^}]*grid-row: 3;/);
 });

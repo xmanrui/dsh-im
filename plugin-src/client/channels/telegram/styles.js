@@ -1,8 +1,8 @@
 export const TELEGRAM_STYLE_ID = 'xmanrui-dsh-im-telegram-settings';
 
 const CSS = String.raw`
-.dtg-page { --ddt-accent: #229ed9; --ddt-accent-deep: #1687bd; --ddt-accent-wash: #eaf7fd; }
-.dtg-avatar { color: #fff; background: #229ed9; }
+.dtg-page.dim-channelPage { --ddt-accent: #229ed9; --ddt-accent-deep: #1687bd; --ddt-accent-wash: #eaf7fd; }
+.dtg-avatar.dim-botAvatar { color: #fff; background: #229ed9; }
 .dtg-avatar svg { display: block; }
 `;
 
