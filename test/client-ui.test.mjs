@@ -239,13 +239,13 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   assert.match(settingsButtonMarkup, /data-im-icon="global-settings"/);
   assert.doesNotMatch(settingsButtonMarkup, /通用设置/);
   assert.match(styles, /\.dim-title \{[^}]*margin: 0 0 12px;/);
-  assert.match(styles, /\.dim-title p \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-size: 13px;[^}]*line-height: 20px;[^}]*font-weight: 400;/);
+  assert.match(styles, /\.dim-title p \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-size: var\(--dim-font-13\);[^}]*line-height: 20px;[^}]*font-weight: 400;/);
   assert.match(styles, /\.dim-brand \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*align-items: flex-start;[^}]*gap: 1px;/);
   assert.match(styles, /\.dim-brandHeading \{[^}]*display: flex;[^}]*align-items: center;[^}]*gap: 8px;[^}]*white-space: nowrap;/);
   // Native section title role: 18/600 with no letter-spacing, not a 20/800 wordmark.
-  assert.match(styles, /\.dim-brandName \{[^}]*font-size: 18px;[^}]*line-height: 25px;[^}]*font-weight: 600;[^}]*letter-spacing: 0;/);
+  assert.match(styles, /\.dim-brandName \{[^}]*font-size: var\(--dim-font-18\);[^}]*line-height: 25px;[^}]*font-weight: 600;[^}]*letter-spacing: 0;/);
   // The version renders as a native Tag: r999 capsule, 0.5px l4 outline, 11/17/500.
-  assert.match(styles, /\.dim-brandVersion \{[^}]*padding: 1px 8px;[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: 999px;[^}]*corner-shape: round;[^}]*font: 500 11px\/17px/);
+  assert.match(styles, /\.dim-brandVersion \{[^}]*padding: 1px 8px;[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-full\);[^}]*corner-shape: round;[^}]*font: 500 11px\/17px/);
   assert.doesNotMatch(styles, /dim-versionTooltip|\.dim-brand:focus-visible/);
   assert.doesNotMatch(styles, /\.dim-brandLogo/);
   // Header actions are native icon buttons: 28px, no border, transparent at rest.
@@ -314,11 +314,11 @@ test('channel switching is a wrapped tab strip instead of a second navigation co
   assert.doesNotMatch(styles, /\.dim-rail \{[^}]*display: grid;/);
 
   // Tabs read as native selector pills: no border, no fill, no shadow at rest.
-  assert.match(styles, /\.dim-channel \{ max-width: 100%; min-height: 28px; display: inline-flex;[^}]*border: 0;[^}]*border-radius: 14px;/);
+  assert.match(styles, /\.dim-channel \{ max-width: 100%; min-height: 28px; display: inline-flex;[^}]*border: 0;[^}]*border-radius: var\(--dim-radius-14\);/);
   assert.doesNotMatch(styles, /\.dim-channel \{[^}]*box-shadow:/);
   assert.match(styles, /\.dim-channel:hover \{ color: var\(--dsw-alias-label-primary, #0f1115\); background: var\(--dsw-alias-interactive-bg-hover/);
   assert.match(styles, /\.dim-channel:focus-visible \{ outline: 2px solid var\(--dsw-alias-brand-primary, #0f1115\); outline-offset: 2px; \}/);
-  assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: 13px;[^}]*font-weight: 500;/);
+  assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: var\(--dim-font-13\);[^}]*font-weight: 500;/);
   assert.match(styles, /\.dim-channelNote \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-weight: 400;/);
 });
 
@@ -550,7 +550,10 @@ test('all channel styles use the current Harness theme tokens', async () => {
   assert.match(styles, /--dsw-alias-interactive-bg-hover/);
   assert.match(styles, /--dsw-alias-border-l1/);
   assert.match(styles, /--dsw-alias-border-l2/);
-  assert.match(styles, /--dim-blue: var\(--dsw-alias-state-business-primary, #3370ff\)/);
+  // The fallback now carries the token's real light-mode value. DSH defines
+  // --dsw-alias-state-business-primary in both themes, so the fallback never
+  // paints; normalising it only removed the illusion that the values differed.
+  assert.match(styles, /--dim-blue: var\(--dsw-alias-state-business-primary, #4176e6\)/);
   // The selected chip uses the nav-active fill, not the module fill: at
   // #F5F6F7 on a white panel a selected tab was indistinguishable from an idle one.
   assert.match(
@@ -788,7 +791,7 @@ test('credential binding is a distinct secondary action beside QR binding in fou
   // The action row wraps now: at narrow widths the secondary button slid under
   // the online badge (measured 9.2px overlap at vw 560).
   assert.match(styles, /\.dim-panel \.dim-bindActions \{[^}]*flex-wrap: wrap;/);
-  assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: 14px;[^}]*background: transparent;/);
+  assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: var\(--dim-radius-14\);[^}]*background: transparent;/);
   assert.match(styles, /\.dim-panel \.dim-actionIcon \{[^}]*flex: 0 0 15px;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-credentialPanel \{[^}]*border-left:/);
 });
@@ -853,9 +856,9 @@ test('scan actions align left while online totals align right in every channel',
   assert.doesNotMatch(weixinHeading, /dxw-dot/);
   assert.doesNotMatch(dingtalkHeading, /ddt-dot/);
   // The channel CTA is a theme-following capsule so its QR glyph rides currentColor.
-  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-scanButton,[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: 14px;[^}]*color: var\(--dsw-alias-label-primary, #0f1115\);[^}]*background: transparent;[^}]*box-shadow: none;/);
+  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-scanButton,[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: var\(--dim-radius-14\);[^}]*color: var\(--dsw-alias-label-primary, #0f1115\);[^}]*background: transparent;[^}]*box-shadow: none;/);
   // Native Pill: h24 r12, bg-layer-2 fill, 12/18.
-  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-onlineBadge,[^}]*height: 24px;[^}]*border-radius: 12px;[^}]*background: var\(--dsw-alias-bg-layer-2, #fff\);[^}]*font-size: 12px;/);
+  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-onlineBadge,[^}]*height: 24px;[^}]*border-radius: var\(--dim-radius-12\);[^}]*background: var\(--dsw-alias-bg-layer-2, #fff\);[^}]*font-size: var\(--dim-font-12\);/);
 });
 
 test('channel headings omit the redundant local credential badge', () => {
@@ -932,11 +935,11 @@ test('all channel settings states use the DingTalk page treatment', async () => 
   assert.match(styles, /\.dim-panel \.dim-channelPage \{[^}]*flex-direction: column;[^}]*gap: 12px;/);
   assert.match(styles, /\.dim-panel \.dim-listHeading \{[^}]*margin: 0 0 8px;/);
   assert.match(styles, /\.dim-panel \.dim-botList \{[^}]*gap: 12px;/);
-  assert.match(styles, /\.dim-panel \.dim-surfaceCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: 16px;[^}]*background: none;/);
+  assert.match(styles, /\.dim-panel \.dim-surfaceCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-16\);[^}]*background: none;/);
   assert.match(styles, /\.dim-panel \.dim-loadingView \{[^}]*padding: 38px;[^}]*text-align: center;/);
   assert.match(styles, /\.dim-panel \.dim-emptyView \{[^}]*grid-template-columns: minmax\(0, 1fr\) 180px;[^}]*gap: 30px;/);
   assert.match(styles, /\.dim-panel \.dim-qrLayout \{[^}]*grid-template-columns: 300px minmax\(0, 1fr\);[^}]*gap: 34px;[^}]*align-items: start;/);
-  assert.match(styles, /\.dim-panel \.dim-viewActions \.bxf-button,[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: 14px;[^}]*font-size: 12px;/);
+  assert.match(styles, /\.dim-panel \.dim-viewActions \.bxf-button,[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: var\(--dim-radius-14\);[^}]*font-size: var\(--dim-font-12\);/);
   assert.match(styles, /\.dim-panel \.dim-inlineError \{[^}]*padding: 22px;[^}]*background:/);
   assert.match(styles, /\.dim-panel \.dim-confirm \{[^}]*padding: 18px 24px;[^}]*border-top: 0\.5px solid/);
 });
@@ -1063,7 +1066,7 @@ test('all IM channel cards keep localized actions visible above full-width feedb
   assert.match(imStyles, /\.dim-panel \.dim-cardFooterLayout > \.dim-cardActions \{[^}]*align-self: stretch;/);
   assert.match(imStyles, /\.dim-panel \.dim-cardActions \{[^}]*width: 100%;[^}]*justify-content: flex-end;[^}]*flex-wrap: wrap;/);
   assert.match(imStyles, /\.dim-panel \.dim-cardFeedback \{[^}]*width: 100%;[^}]*overflow-wrap: anywhere;[^}]*white-space: normal;/);
-  assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction \{[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: 14px;[^}]*font-size: 12px;/);
+  assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction \{[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: var\(--dim-radius-14\);[^}]*font-size: var\(--dim-font-12\);/);
   assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction\[data-kind="danger"\] \{[^}]*var\(--dim-danger\)/);
 
   const account = {
@@ -1115,17 +1118,17 @@ test('all channel bot cards use the DingTalk card treatment', async () => {
   // One outline level per card: a 0.5px l4 hairline on the panel fill, exactly
   // like the native plugin card. A fill or a shadow here would be a second
   // chrome level and would break in light mode, where every layer token is white.
-  assert.match(styles, /\.dim-panel \.dim-botCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: 16px;[^}]*background: none;/);
+  assert.match(styles, /\.dim-panel \.dim-botCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-16\);[^}]*background: none;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-botCard \{[^}]*box-shadow:/);
   assert.match(styles, /\.dim-panel \.dim-botCard:hover \{ border-color: var\(--dsw-alias-label-dimmed,/);
   assert.match(styles, /\.dim-panel \.dim-botCardBody \{[^}]*padding: 0 16px;/);
   assert.match(styles, /\.dim-collapsibleBodyInner > \* \+ \* \{ border-top: 0\.5px solid var\(--dsw-alias-border-l2,/);
   assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*align-items: flex-start;[^}]*gap: 6px;/);
-  assert.match(styles, /\.dim-panel \.dim-botAvatar \{[^}]*width: 38px;[^}]*height: 38px;[^}]*border-radius: 12px;/);
-  assert.match(styles, /\.dim-panel \.dim-botName h3 \{[^}]*font-size: 15px;/);
+  assert.match(styles, /\.dim-panel \.dim-botAvatar \{[^}]*width: 38px;[^}]*height: 38px;[^}]*border-radius: var\(--dim-radius-12\);/);
+  assert.match(styles, /\.dim-panel \.dim-botName h3 \{[^}]*font-size: var\(--dim-font-15\);/);
   assert.match(styles, /\.dim-panel \.dim-botHealthGroup \{[^}]*display: grid;[^}]*justify-items: end;[^}]*gap: 2px;/);
-  assert.match(styles, /\.dim-panel \.dim-botCard \.dim-botHealth \{[^}]*background: transparent;[^}]*font-size: 12px;[^}]*font-weight: 400;/);
-  assert.match(styles, /\.dim-panel \.dim-lastChecked \{[^}]*display: inline-flex;[^}]*font-size: 12px;[^}]*white-space: nowrap;/);
+  assert.match(styles, /\.dim-panel \.dim-botCard \.dim-botHealth \{[^}]*background: transparent;[^}]*font-size: var\(--dim-font-12\);[^}]*font-weight: 400;/);
+  assert.match(styles, /\.dim-panel \.dim-lastChecked \{[^}]*display: inline-flex;[^}]*font-size: var\(--dim-font-12\);[^}]*white-space: nowrap;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-botMetrics|\.dim-panel \.dim-botMetric/);
 });
 
@@ -1159,7 +1162,7 @@ test('bot cards keep Agent Preset guidance in a keyboard-accessible help tooltip
   assert.match(styles, /\.dim-panel \.dim-presetHelpButton:focus-visible \{[^}]*box-shadow:/);
   assert.match(styles, /\.dim-panel \.dim-presetTooltip \{[^}]*position: absolute;[^}]*width: min\(320px, 100%\);[^}]*white-space: normal;[^}]*opacity: 0;[^}]*visibility: hidden;[^}]*pointer-events: none;/);
   assert.match(styles, /\.dim-panel \.dim-presetHelp:hover \.dim-presetTooltip, \.dim-panel \.dim-presetHelp:focus-within \.dim-presetTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.match(styles, /\.dim-panel \.dim-presetSelect \{[^}]*height: 36px;[^}]*border: none;[^}]*border-radius: 18px;[^}]*background-color: var\(--dim-module-fill\);/);
+  assert.match(styles, /\.dim-panel \.dim-presetSelect \{[^}]*height: 36px;[^}]*border: none;[^}]*border-radius: var\(--dim-radius-18\);[^}]*background-color: var\(--dim-module-fill\);/);
   assert.match(styles, /\.dim-panel \.dim-presetError \{[^}]*margin: 6px 0 0;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-presetHelp \{[^}]*grid-row: 3;/);
 });

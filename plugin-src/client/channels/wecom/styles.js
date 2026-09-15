@@ -2,7 +2,7 @@ export const WECOM_STYLE_ID = 'xmanrui-dsh-im-wecom-settings';
 
 const CSS = String.raw`
 .dwecom-page { --ddt-accent: #3370ff; --ddt-accent-deep: #245bdb; --ddt-accent-wash: #eef4ff; }
-.dwecom-avatar, .dwecom-brand { color: #3370ff; background: #fff; border: 0.5px solid var(--dsw-alias-border-l2, #e5e6eb); }
+.dwecom-avatar, .dwecom-brand { color: #3370ff; background: #fff; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .dwecom-avatar svg, .dwecom-brand svg { display: block; }
 `;
 
