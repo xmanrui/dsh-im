@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { h } from './i18n.js';
+import { RowSelect } from './row-selector.js';
 
 export const SET_AGENT_PRESET_ENDPOINT = 'bot.preset.set';
 
@@ -63,8 +64,7 @@ export function AgentPresetEditor({ agentPreset = '', disabled = false, onSave }
 
   const inheritLabel = '跟随 Host 默认';
 
-  const change = async (event) => {
-    const next = event.target.value;
+  const change = async (next) => {
     if (next === current || saving || disabled) return;
     setSaving(true);
     setError(null);
@@ -86,22 +86,22 @@ export function AgentPresetEditor({ agentPreset = '', disabled = false, onSave }
     h('label', { className: 'dim-modelRow' },
       h('span', { className: 'dim-rowText' },
         h('span', { className: 'dim-modelRowLabel' }, 'Agent Preset')),
-      React.createElement('select', {
-      className: 'dim-presetSelect dim-rowControl',
-      value: current,
-      disabled: disabled || saving,
-      'aria-label': 'Agent Preset',
-      onChange: (event) => { void change(event); },
-    },
-      h('option', { value: '' }, inheritLabel),
-      ...items.map((item) => h(
-        'option',
-        { key: item.id, value: item.id },
-        item.unavailable
-          ? [item.id, '（已不可用）']
-          : item.label && item.label !== item.id ? `${item.label}（${item.id}）` : item.id,
-      )),
-      )),
+      h(RowSelect, {
+        className: 'dim-presetSelect dim-rowControl',
+        value: current,
+        disabled: disabled || saving,
+        label: 'Agent Preset',
+        onChange: (next) => { void change(next); },
+        options: [
+          { value: '', label: inheritLabel },
+          ...items.map((item) => ({
+            value: item.id,
+            label: item.unavailable
+              ? item.id + '（已不可用）'
+              : item.label && item.label !== item.id ? `${item.label}（${item.id}）` : item.id,
+          })),
+        ],
+      })),
     error || currentUnavailable ? h(
       'p',
       { className: 'dim-presetError', role: error ? 'alert' : 'status' },

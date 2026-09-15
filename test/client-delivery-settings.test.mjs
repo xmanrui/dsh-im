@@ -1,4 +1,12 @@
 import assert from 'node:assert/strict';
+import { RowSelect } from '../plugin-src/client/row-selector.js';
+
+/** The row selectors are buttons + menus now, so reach their contract by label. */
+const accessRow = (root, label) => {
+  const node = root.findAllByType(RowSelect).find((candidate) => candidate.props.label === label);
+  assert.ok(node, label + ' is rendered');
+  return { props: { value: node.props.value, onChange: (event) => node.props.onChange(typeof event === 'string' ? event : event.target.value) } };
+};
 import test from 'node:test';
 
 import React from 'react';
@@ -412,14 +420,14 @@ test('access settings preserve independent mode drafts and save direct and group
     renderer.root.findByProps({ 'aria-label': '私聊 飞书 Open ID 1' }).props.onChange({
       target: { value: '  ou_override  ' },
     });
-    renderer.root.findByProps({ 'aria-label': '群聊 默认命令权限' }).props.onChange({
+    accessRow(renderer.root, '群聊 默认命令权限').props.onChange({
       target: { value: 'allow' },
     });
     await flush();
   });
 
   await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '私聊 访问模式' }).props.onChange({
+    accessRow(renderer.root, '私聊 访问模式').props.onChange({
       target: { value: 'allowlist' },
     });
     await flush();
@@ -451,7 +459,7 @@ test('access settings preserve independent mode drafts and save direct and group
     0,
   );
   await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '群聊 访问模式' }).props.onChange({
+    accessRow(renderer.root, '群聊 访问模式').props.onChange({
       target: { value: 'allowlist' },
     });
     await flush();
@@ -463,7 +471,7 @@ test('access settings preserve independent mode drafts and save direct and group
     'the group scene states the empty-allowlist consequence inline',
   );
   await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '群聊 访问模式' }).props.onChange({
+    accessRow(renderer.root, '群聊 访问模式').props.onChange({
       target: { value: 'open' },
     });
     await flush();
@@ -482,7 +490,7 @@ test('access settings preserve independent mode drafts and save direct and group
   });
 
   await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '私聊 访问模式' }).props.onChange({
+    accessRow(renderer.root, '私聊 访问模式').props.onChange({
       target: { value: 'open' },
     });
     await flush();
@@ -496,12 +504,12 @@ test('access settings preserve independent mode drafts and save direct and group
     'deny',
   );
   assert.equal(
-    renderer.root.findByProps({ 'aria-label': '私聊 默认命令权限' }).props.value,
+    accessRow(renderer.root, '私聊 默认命令权限').props.value,
     'allow',
   );
 
   await act(async () => {
-    renderer.root.findByProps({ 'aria-label': '私聊 访问模式' }).props.onChange({
+    accessRow(renderer.root, '私聊 访问模式').props.onChange({
       target: { value: 'allowlist' },
     });
     await flush();

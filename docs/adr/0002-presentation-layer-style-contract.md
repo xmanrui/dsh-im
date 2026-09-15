@@ -99,15 +99,135 @@ updated: 2026-09-15
   以 footer 结尾的卡片有底部内边距、禁用选择器保留表面只压暗文字、弹窗滚正文不滚自身 chrome、placeholder 用原生 placeholder token。
 - `test/client-toolbar-role-contract.test.mjs`——标题栏的两个按钮共用一份 padding，且没有别的规则给它们单独的内联 padding。
 
-改样式后至少跑这一条门禁（174 例）：
+改样式后至少跑这一条门禁（189 例）：
 
 ```sh
 node --test test/client-native-border-contract.test.mjs test/client-role-form-contract.test.mjs \
   test/client-toolbar-role-contract.test.mjs test/client-ui.test.mjs \
   test/context-enhancement-ui.test.mjs test/client-delivery-settings.test.mjs \
   test/model-setting-ui.test.mjs test/workspace-editor.test.mjs test/bot-alias-ui.test.mjs \
-  test/channels/dingtalk/client-ui.test.mjs test/channels/telegram/client-ui.test.mjs
+  test/channels/dingtalk/client-ui.test.mjs test/channels/telegram/client-ui.test.mjs \
+  test/client-disclosure-contract.test.mjs test/channels/weixin/client-api.test.mjs
 ```
+
+### 决策：内嵌展开只有一个机制（本轮）
+
+设置页里「点一下、内容就地展开」这个手势曾经有**三个作者**：9 处渠道卡片走 `CollapsibleAccountSection`，
+Context enhancement 手搓了一套触发器 + 面板，微信诊断详情直接用原生 `<details>/<summary>` 加两句内联样式。
+三者互不相干，所以「展开时长」「箭头旋转」这类改动不可能一次覆盖全部。
+
+收敛后只剩一套词表，声明在 `styles.js` 一处：
+
+| 类 | 角色 |
+| --- | --- |
+| `dim-collapsible`（+ `is-open` / `data-open`） | 根，状态写在它身上 |
+| `dim-collapsibleHead` | 触发器 |
+| `dim-collapsibleChevron`（`DisclosureChevron` 是唯一渲染点） | 箭头，旋转是对根类的纯 CSS 反应 |
+| `dim-collapsibleBody` / `dim-collapsibleBodyInner` | 内容区与裁剪 |
+
+**没有合并的部分是刻意的**：渠道头部的 `dim-collapsibleHead` 是 `div[role=button]`，
+因为头部里**含按钮**，换成真 `<button>` 会嵌套交互元素；
+而 Context enhancement 的入口是真 `<button>` 且带 `disabled` 契约。
+把后者塞进前者会丢掉禁用语义——那属于「功能丢失」，不允许。因此两者共享根类、箭头与展开时长，
+各自保留自己的触发器元素。
+
+**判据的可复跑形式**：`test/client-disclosure-contract.test.mjs`。
+第 4 条断言全表 `rotate(90deg)` 恰好 1 处、`--dim-disclosure-duration` 恰好 1 个，
+第 5 条全量扫描 `plugin-src/client`，禁止任何 `h('details')` / `h('summary')` 复活。
+
+两次变异均已用哈希证明落地、各自只打中应打的守卫，并已还原：
+
+- `styles.js` `05DB7154` → `B6984E4A`（`rotate(90deg)`→`180deg`）→ 4 pass / 1 fail（第 4 条）→ 还原 `05DB7154`，5/5。
+- `collapsible-account.js` `F1F2B6A7` → `E7849E36`（给箭头加内联 `transform`）→ 4 pass / 1 fail（第 1 条）→ 还原 `F1F2B6A7`，5/5。
+
+### 官方词汇表（从 bundle 实测提取，可直接引用）
+
+宿主设置页的样式不是文档，而是打包进
+`node_modules/@deepseek-ai/dsh-client-ui-settings-models/lib/client.js` 的一条压缩 CSS。
+下面这些值是**从那条 CSS 里逐字抄出来的**，不是推断；需要对齐宿主时以此为准，不要再凭截图猜。
+
+| 角色 | 官方声明 |
+| --- | --- |
+| 行卡片 | `border:.5px solid var(--dsw-alias-border-l4); border-radius:16px; flex-direction:column; gap:12px; padding:12px 14px` |
+| 行头 | `align-items:center; gap:10px` |
+| 行名 | `color:label-primary; font-size:14px; font-weight:500; line-height:22px` |
+| 行尾标签 | `border:.5px solid border-l3; color:label-secondary; border-radius:4px; padding:1px 6px; font-size:11px; line-height:16px` |
+| 行操作区 | `align-items:center; gap:4px; margin-left:auto` |
+| **图标按钮** | `width:28px; height:28px; color:label-tertiary; background:0 0; border:none; border-radius:6px`；**静止态无底色**，hover 才 `background:interactive-bg-hover` + `color:label-primary`；disabled `opacity:.4`；focus-visible `box-shadow:0 0 0 2px var(--dsw-alias-border-l3)` |
+| 内联编辑面板 | `background:var(--dsw-alias-bg-module-platform); border-radius:12px; flex-direction:column; gap:14px; padding:14px 16px` |
+| 面板标题 | `color:label-primary; font-size:14px; font-weight:500; line-height:22px` |
+| 面板副题 | `color:label-tertiary; font-size:12px; line-height:18px` |
+| 字段 | `flex-direction:column; gap:6px` |
+| 字段标签 | `color:label-secondary; align-items:center; gap:10px; font-size:12px; font-weight:500; line-height:18px` |
+| 高级网格 | `grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; padding:8px 4px 2px` |
+| 网格内字段 | `flex-direction:column; gap:4px`；其标签 `color:label-tertiary; font-size:12px; line-height:18px` |
+| 提示行 | `color:label-tertiary; margin:0; font-size:12px; line-height:18px` |
+| 文字按钮 | `height:28px; color:label-tertiary; background:0 0; border:none; border-radius:14px; padding:0 10px; font-size:12px; line-height:18px` |
+| 按钮族 | 基准 `height:36px; border-radius:18px; padding:0 14px; font-size:14px; line-height:22px`；放进行操作区缩为 `height:28px; border-radius:14px; padding:0 10px; font-size:12px` |
+| **板块级展开** | 官方用**原生 `details/summary`**：`summary{list-style:none; cursor:pointer; width:fit-content; color:label-secondary; border-radius:6px; padding:2px 4px; gap:6px; font-size:12px; font-weight:500; line-height:18px}` + `summary::-webkit-details-marker{display:none}`，三角用双 border 画：`:before{content:"";border-bottom:1.5px solid;border-right:1.5px solid;width:5px;height:5px;transition:transform .12s;transform:rotate(-45deg) translate(-1px,-1px)}`，`[open]` 时转 `rotate(45deg)` |
+
+两点容易搞反的结论：
+
+1. **官方有两套展开**，不是一套。行级用 `iconButton` + `aria-expanded` 的按钮；板块级用原生 `details/summary`。
+   所以「插件用 `details` 就是不对」这个判断本身是错的——错的是**没有皮肤、用内联样式当皮肤**。
+2. **图标按钮静止态没有底色。** 插件里凡是给这类按钮常驻底色的写法都是漂移。
+
+### 本轮：行解剖的最后两处漂移
+
+**Task progress display** 原本是 `display:grid; grid-template-columns:minmax(0,1fr)` 的堆叠块：标题在上、全宽 field 皮肤的 select 在中、说明在下，
+和其余设置行的左右模板毫无关系。现在它是 `.dim-modelRow`（左 `.dim-rowText`：标题 14/22/400 + 实时状态 + 说明 + 错误；右 `.dim-rowControl` select），
+并且 `.dim-feishuGroupControl` **不再声明任何几何**——一个布局只有一个作者。
+
+**Context enhancement 展开态**曾重复它自己的标题，还带着弹窗时代的关闭按钮。现在：标题去掉、说明文字**降级为提示行而不是删除**、
+入口变成真开关（收起仍然丢弃草稿，与关闭按钮原行为一致）。来源字段网格改用官方高级网格的数值，列宽不再由最长的那条注解决定。
+
+**幽灵 tooltip 族**（`dim-channelTooltip`、`dim-globalTtlTooltip`、`dim-globalTtlHelp`、`dim-contextHeaderTooltip`、
+`dim-contextFieldTooltip`、`dim-contextLegendTooltip`、`dim-accessLegendHelp`、`dim-accessUsersHelp`、`dim-contextFieldHelp`）
+共 21 行声明被删除。证据是双向的：静态全仓扫描这 9 个类在 `plugin-src` 里**零 JS 引用**，动态探针在 3 个状态下**零元素**。
+其中两条 `position: static` 覆盖唯一的作用就是给这些幽灵重新定位。守卫见 `test/client-row-control-contract.test.mjs` 第 5 条。
+
+### 收口：审计口径的两处纠正与死代码清理
+
+**「79 条 truly dead」这个说法不成立，已作废。** 重跑 `scripts/dead-rule-audit.mjs`（3 次逐字相同）：
+DEAD / PARTIAL / uncertain **三个桶全是 0**，脚本里根本没有 "truly dead" 这个词。真实存在的是第四个信息桶
+「类的渲染点为零」。所以本轮的工作不是「删被层叠压掉的规则」——那种规则一条都没有——而是**删真正无人渲染的类**。
+
+该桶从 **41 → 5**，删掉 **36 条**（飞书 34 + 微信 2）：连接中的 orbit/connecting 整块、加载骨架整块、
+未挂载的 responseMode 整块、以及零散的 note/eyebrow/headingCopy/errorIcon 等。删除前对 11 个类前缀**逐一独立复核**
+（非样式 JS 引用数均为 0），并连带清掉两条只被它们使用的 `@keyframes bxf-pulse` / `bxf-shimmer`；
+`bxf-rotate`（:276 仍在用）与 `bxf-revealProvision`（:438 仍在用）**必须保留**。
+
+**剩下 5 条是假阳性，永不删。** 它们经 `avatarClass` 之类的 prop 插值真实落到 DOM
+（`token-channel.js:97`、`:461` 的 className 模板），无渲染点桶**不看 dirty 标记**才把它们算了进来。
+
+### 收口：诊断展开区的角色
+
+微信诊断展开区的皮肤原本是**三条内联 style**（dl 的 grid、每个 dd 的 margin、降级 textarea 的 width）。
+style 属性里的东西无法与表里其余决策一起重构——这正是它一路漂移的原因。现在键/值网格取宿主最近的两个角色
+（键=字段标签，值=字段正文），兜底提示、剪贴板提示、只读 textarea 分别取 notice / hint / 字段输入框。
+字段清单、剪贴板降级路径、`role=status`、`readOnly`/`aria-label`/`rows` 一字未动。
+
+### 收口：本轮踩到并修掉的两个自伤
+
+1. **浏览器夹具被我改哑了。** `b76883d` 移除原生 `summary` 后，`test/browser/weixin-diagnostics.fixture.js:79`
+   仍在 `querySelector('summary').click()`，会抛 TypeError。它不在 `npm test` 的 glob 里，所以 CI 看不见——
+   **「不在门禁里」不等于「没坏」**。已改点 `.dim-collapsibleHead`。
+2. **我自己写的守卫过宽。** 它曾禁止 `plugin-src/client` 出现任何 `details/summary`，而**宿主自己的板块级展开就是
+   原生 `details/summary`**。守卫已收窄为：禁止**用内联样式给原生展开当皮肤**——那才是当初真正的缺陷。
+
+### 收口：实测能力的解锁与它立刻抓到的两处缺陷
+
+本机此前没有可用的浏览器自动化，导致「实测优先于读源码」这条纪律长期只能靠人工。现已确认
+**Python 3.12 + Playwright + Chromium 可用**，并写了两个可复用探针（浅/深两主题各跑一遍）。
+
+它第一次跑就打脸了源码阅读，抓到两个只有渲染才看得见的问题：
+
+1. 飞书 select 在改成行控件后**掉回 UA 表单字体 `13.3333px/normal` 与原生下拉箭头**——因为它的 `font: inherit`
+   随旧皮肤一起被删、又不在 chevron 选择器组里。现由共享的 `select.dim-rowControl` 一处接住。
+2. Model 胶囊的 `color` **取的是 UA 系统色**：浅色纯黑 `#000`、深色纯白 `#fff`，而不是 `label-primary`
+   （`#0f1115` / `#f9fafb`）。差得很小，但它是「同一排四个控件里有一个颜色不一样」的真实来源。
+
+修后四控件实测逐项相同：`36px` / 圆角 `18px` / 同底色 / `border 0` / `14px-22px` / `appearance:none`。
 
 ## Considered Options
 

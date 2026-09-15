@@ -8,18 +8,10 @@ const CSS = String.raw`
 .dim-githubTooltip,
 .dim-generalSettingsTooltip,
 .dim-generalSettingsButton[aria-current="page"] + .dim-generalSettingsTooltip,
-.dim-panel .dim-channelTooltip,
 .dim-panel .dim-presetTooltip,
-.dim-contextHeaderTooltip,
-.dim-contextTooltip.dim-contextFieldTooltip,
-.dim-contextField:nth-child(odd) .dim-contextFieldTooltip,
 .dim-contextTooltip,
-.dim-contextTooltip.dim-contextLegendTooltip,
 .dim-contextTooltip.dim-contextGuidanceTooltip,
 .dim-botSettingsTooltip,
-.dim-accessLegendHelp .dim-channelTooltip,
-.dim-accessUsersHelp .dim-channelTooltip,
-.dim-globalTtlTooltip,
 .dim-githubTooltip,
 .bxf-repairTooltip {
   padding: 3px 7px;
@@ -359,15 +351,33 @@ body {
 .dim-panel .dim-credentialButton[aria-pressed="true"] { border-color: transparent; background: var(--dsw-specific-sidebar-nav-item-active, #ebeef2); }
 .dim-panel .bxf-headingTools .dim-onlineBadge, .dim-panel .dxw-tools .dim-onlineBadge, .dim-panel .ddt-tools .dim-onlineBadge { height: 24px; min-height: 24px; display: inline-flex; align-items: center; justify-self: end; gap: var(--dim-gap-4); padding: 0 8px; border: none; border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-2, #fff); font: inherit; font-size: var(--dim-font-12); font-weight: var(--dim-weight-400); line-height: var(--dim-line-12); white-space: nowrap; }
 .dim-panel .dim-channelPage { min-width: 0; width: 100%; max-width: none; display: flex; flex-direction: column; gap: var(--dim-gap-12); padding: 0 0 24px; color: var(--dsw-alias-label-primary, #0f1115); box-sizing: border-box; }
-.dim-panel select.dim-presetSelect, .dim-panel .dim-targetField select, .dim-panel .dim-accessField select,
-.dim-panel .dim-targetSuggestionField select, .dim-panel .dim-feishuGroupSelect, .dim-panel .bxf-responseModeSelect {
-  appearance: none;
-  padding-right: 32px;
-  background-image: var(--dim-chevron);
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 12px 12px;
+/* An enum inside a .field is a real select in the host too - settings-models
+   bundle:1300-1305, :1680-1685, :2093-2098 render one inside .field with
+   className "input selectInput". These take that skin verbatim (.input is
+   border-l4 .5px, radius 8, bg-layer-1, 32px, padding 0 10px, 14/22; select.input
+   adds cursor:pointer and max-width:240px; .selectInput adds the 12px chevron at
+   right 12px). Only the right padding is ours: a background arrow needs the room,
+   and the host's own padding-left of 10px would run text under it. */
+.dim-panel .dim-targetField select,
+.dim-panel .dim-targetSuggestionField select,
+.dim-panel .dim-accessField select,
+.dim-panel .dim-fieldSelect {
+  box-sizing: border-box; width: 100%; min-width: 0; max-width: 240px; height: 32px;
+  padding: 0 28px 0 10px; appearance: none;
+  border: var(--dim-field-border); border-radius: var(--dim-field-radius);
+  color: var(--dsw-alias-label-primary, #0f1115); background-color: var(--dsw-alias-bg-layer-1, #fff);
+  background-image: var(--dim-chevron); background-repeat: no-repeat;
+  background-position: right 12px center; background-size: 12px 12px;
+  font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); cursor: pointer;
 }
+.dim-panel .dim-targetField select:focus,
+.dim-panel .dim-targetSuggestionField select:focus,
+.dim-panel .dim-accessField select:focus,
+.dim-panel .dim-fieldSelect:focus { outline: none; border-color: var(--dim-focus); }
+.dim-panel .dim-targetField select:disabled,
+.dim-panel .dim-targetSuggestionField select:disabled,
+.dim-panel .dim-accessField select:disabled,
+.dim-panel .dim-fieldSelect:disabled { opacity: 0.6; cursor: default; }
 .dim-panel .dim-surfaceCard { position: relative; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: var(--dim-radius-16); background: none; }
 .dim-panel .dim-surfaceCard::before { display: none; }
 .dim-panel .dim-surfaceBody { padding: 24px; }
@@ -392,8 +402,6 @@ body {
    heading's. It is a section title, so it takes the section-title role. */
 .dim-panel .dim-listHeading h3 { margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-400); }
 .dim-panel .dim-listTitle { min-width: 0; display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
-.dim-panel .dim-channelTooltip { position: absolute; top: calc(100% + 7px); left: 0; z-index: var(--dim-z-tooltip); width: max-content; max-width: min(280px, calc(100vw - 48px)); display: flex; align-items: baseline; gap: var(--dim-gap-5); white-space: normal; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
-.dim-panel .dim-channelTooltip strong { color: var(--dsw-static-neutral-bluish-00, #f9fafb); font-weight: var(--dim-weight-600); white-space: nowrap; }
 .dim-panel .dim-botList { min-width: 0; width: 100%; max-width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--dim-gap-12); margin: 0; padding: 0; list-style: none; }
 .dim-panel .dim-botList > li { min-width: 0; max-width: 100%; }
 .dim-panel .dim-loadingView { padding: 38px; color: var(--dsw-alias-label-tertiary, #81858c); text-align: center; }
@@ -488,16 +496,16 @@ body {
 .dim-panel .dim-presetTooltip { position: absolute; top: calc(100% + 7px); left: 0; z-index: var(--dim-z-tooltip); width: min(320px, 100%); overflow-wrap: anywhere; white-space: normal; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
 .dim-panel .dim-presetHelp:hover .dim-presetTooltip, .dim-panel .dim-presetHelp:focus-within .dim-presetTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .dim-panel .dim-presetStatus { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); white-space: nowrap; }
-.dim-panel .dim-presetSelect { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background-color: var(--dsw-alias-bg-layer-1, #fff); appearance: none; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); cursor: pointer; transition: border-color .16s ease; }
-.dim-panel .dim-presetSelect:focus { outline: none; border-color: var(--dim-focus); }
-.dim-panel .dim-presetSelect:disabled { cursor: not-allowed; opacity: 0.4; }
 /* The row owns its vertical padding now (native: padding 16px 0 per row), so the
    block must not add a second copy - otherwise the hairline between two rows gets
    32px of air on one side and 16px on the other. */
 .dim-panel .dim-modelSetting { display: block; padding: 0; }
 .dim-modelSetting > .dim-presetHeader { padding: 0 0 8px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-500); }
 /* Native "Setting-Cell" cell: 14/22 label on the left, control hard right. */
-.dim-modelRow { display: flex; align-items: center; gap: var(--dim-gap-8); width: 100%; min-height: 36px; padding: 16px 0; border: 0; background: transparent; color: var(--dsw-alias-label-primary, #0f1115); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; cursor: pointer; }
+/* A row is a container, so it does not claim to be clickable: the hand belongs to
+   the control on the right, which is the only hit target (model-setting.js:108-110).
+   The host does the same - .rowCard and .rowName declare no cursor, only buttons do. */
+.dim-modelRow { display: flex; align-items: center; gap: var(--dim-gap-8); width: 100%; min-height: 36px; padding: 16px 0; border: 0; background: transparent; color: var(--dsw-alias-label-primary, #0f1115); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; }
 /* The row's text side is native's .rowText: a column of title + description with a
    4px gap, so a row carrying a description grows instead of pushing a separate
    paragraph below the block. Measured on 3080: the host's oY77xG_rowText is
@@ -507,25 +515,47 @@ body {
    own content, and a 0.5px border-l2 hairline between rows. Measured on 3080 at the
    host's own rows: title 14/22/400 primary, description 12/18/400 tertiary, row
    padding 16px 0, control 36px auto. Nothing else may declare these. ---- */
-.dim-rowText { flex: 1 1 auto; min-width: 0; display: grid; gap: var(--dim-gap-4); justify-items: start; text-align: left; }
+/* A row's left slot is text, so it reads as text: the I-beam cursor and a selectable
+   run. The host's own rows are plain text (.rowName, .fieldLabel declare no cursor and
+   nothing sets user-select), and nothing on the left is a hit target - the control on
+   the right is - so the hand never belonged there. One declaration covers every row,
+   because a control that wants the hand sets its own cursor (see .dim-rowControl). */
+.dim-rowText { flex: 1 1 auto; min-width: 0; display: grid; gap: var(--dim-gap-4); justify-items: start; text-align: left; -webkit-user-select: text; user-select: text; }
+/* The I-beam belongs to the text runs, not to the slot that holds them: on the block it
+   also changed over the gap between the label and the control. The slot is a grid with
+   justify-items: start, so its children are exactly as wide as the text they hold. */
+.dim-rowText > * { cursor: text; }
+.dim-modelRow { -webkit-user-select: text; user-select: text; }
 /* The hairline rides on every row but the first, as native does - not on a
    separator element of its own. */
 .dim-rowDivider { border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 /* A control in the right slot sizes to its content and never goes full width. The
    native select stays a native select; only its slot changes. */
-/* Scoped to .dim-panel so it can outrank .dim-panel .dim-presetSelect's width: 100%.
+/* Scoped to .dim-panel so a channel sheet cannot outrank it at equal specificity.
    At (0,1,0) it would lose and the select would silently stay full-width; at (0,2,0)
    it ties and wins on sheet order, because this block comes later. */
 /* The row's control looks the same whatever element provides it. Model and Reasoning
    effort use a button pill; Agent Preset uses a native select. Same slot, same skin -
    36px, pill radius, module fill, no border - so the three rows read as one control
    rather than two designs. The element is still a native select. */
-.dim-panel .dim-rowControl { flex: none; width: auto; max-width: 60%; min-width: 0; }
-.dim-panel select.dim-rowControl { height: 36px; padding: 0 32px 0 14px; border: 0; border-radius: var(--dim-radius-18); background-color: var(--dim-module-fill); }
+/* Every control in a row wears this, so a select cannot half-adopt the skin and
+   fall back to the UA font (13.33px) and the system dropdown arrow. */
+/* The skin is element-agnostic so a button and a select in the same slot cannot
+   drift apart; :not() counts its argument, so the states below are (0,3,0). */
+.dim-panel .dim-rowControl { flex: none; width: auto; min-width: 0; max-width: 60%; height: 36px; padding: 0 14px; border: 0; border-radius: var(--dim-radius-18); appearance: none; color: var(--dsw-alias-label-primary, #0f1115); background-color: var(--dim-module-fill); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); cursor: pointer; }
+.dim-panel .dim-rowControl:hover:not(:disabled) { background-color: var(--dim-hover); }
+.dim-panel .dim-rowControl:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
+/* The host keeps a disabled selector's surface and dims what it says rather than
+   fading the whole row. */
+.dim-panel .dim-rowControl:disabled { cursor: default; color: var(--dsw-alias-label-tertiary, #81858c); }
+/* A select has no chevron element, so it reserves room for the background one. */
+.dim-panel select.dim-rowControl { padding-right: 32px; background-image: var(--dim-chevron); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px; }
 .dim-modelRowLabel { min-width: 0; }
 .dim-rowDesc { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-400); }
 /* Native selector pill (LanguageRow .selector): h36 r18, module fill, gap 12. */
-.dim-modelSelector { flex: none; cursor: pointer; font: inherit; border: 0; max-width: 60%; display: inline-flex; align-items: center; gap: var(--dim-gap-12); height: 36px; padding: 0 14px; border-radius: var(--dim-radius-18); background: var(--dim-module-fill); }
+/* Geometry, shape, colour and type come from .dim-rowControl; only the flex row
+   that holds the value and the inline chevron is button-specific. */
+.dim-modelSelector { display: inline-flex; align-items: center; gap: var(--dim-gap-12); }
 .dim-modelValue { min-width: 0; overflow: hidden; color: var(--dsw-alias-label-primary, #0f1115); text-overflow: ellipsis; white-space: nowrap; }
 .dim-modelChevron { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); }
 /* Hover and focus belong to the control, not the row: the row is not the hit target. */
@@ -538,8 +568,10 @@ body {
 .dim-modelSelector:disabled { cursor: default; }
 .dim-modelSelector:disabled .dim-modelValue { color: var(--dsw-alias-label-tertiary, #81858c); }
 .dim-modelOption:disabled { opacity: 0.4; cursor: default; }
-/* In-flow lists avoid clipping by collapsed-card and settings scroll containers. */
-.dim-modelMenu { max-height: calc(100vh - 24px); overflow-y: auto; margin: 4px; padding: 4px; border: 0; border-radius: var(--dim-radius-20); background: var(--dsw-specific-menu, #fff); --dsw-elevation-stroke-color: var(--dsw-alias-border-l1, rgb(0 0 0 / 4%)); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); scrollbar-width: thin; }
+/* Native's own list is a portal at fixed position, which is how it escapes the
+   collapsed card and the settings scroll container. In flow it dropped below the
+   sibling row instead of below its own trigger. */
+.dim-modelMenu { position: fixed; z-index: var(--dim-z-portal); max-height: calc(100vh - 24px); overflow-y: auto; margin: 0; padding: 4px; border: 0; border-radius: var(--dim-radius-20); background: var(--dsw-specific-menu, #fff); --dsw-elevation-stroke-color: var(--dsw-alias-border-l1, rgb(0 0 0 / 4%)); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); scrollbar-width: thin; }
 .dim-modelGroupTitle { padding: 8px 10px; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-500); }
 .dim-modelOption { display: flex; align-items: center; gap: var(--dim-gap-8); width: 100%; min-height: 40px; padding: 8px 10px; border: none; border-radius: var(--dim-radius-10); background: transparent; color: inherit; text-align: left; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); cursor: pointer; }
 .dim-modelOptionCopy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--dim-gap-2); }
@@ -548,43 +580,51 @@ body {
 .dim-modelCheck { flex: 0 0 18px; text-align: center; }
 .dim-helpHint { margin: 6px 0 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-panel .dim-presetError { margin: 6px 0 0; color: var(--dim-danger); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
-.dim-contextEntry { width: 100%; min-height: 40px; display: grid; grid-template-columns: 16px minmax(0, 1fr) max-content; align-items: center; gap: var(--dim-gap-9); margin: 0; padding: 14px 0; border: 0; border-radius: 0; color: var(--dsw-alias-label-primary, #0f1115); background: none; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; cursor: pointer; }
+.dim-contextEntry { width: 100%; min-height: 40px; display: grid; grid-template-columns: 16px minmax(0, 1fr) max-content max-content; align-items: center; gap: var(--dim-gap-9); margin: 0; padding: 14px 0; border: 0; border-radius: 0; color: var(--dsw-alias-label-primary, #0f1115); background: none; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; cursor: pointer; }
 .dim-contextEntry:hover:not(:disabled) { background: none; color: var(--dim-blue); }
 .dim-contextEntry > svg { color: var(--dsw-alias-label-secondary, #646a73); }
 .dim-contextLabel { min-width: 0; overflow-wrap: anywhere; }
 .dim-contextStatus { height: 24px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dim-module-fill); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-400); white-space: nowrap; }
 .dim-contextStatus[data-active="true"] { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-button-ghost-active-fill, #ebeeF2); box-shadow: inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border, #979da6); }
-.dim-contextBackdrop { position: fixed; inset: 0; z-index: var(--dim-z-portal); display: grid; place-items: center; padding: 12px; background: var(--dsw-alias-bg-mask-1, rgb(0 0 0 / 24%)); backdrop-filter: var(--dsw-mask-blur, blur(2px)); }
-.dim-contextBackdrop, .dim-contextBackdrop *, .dim-contextBackdrop *::before, .dim-contextBackdrop *::after { box-sizing: border-box; }
+.dim-contextPanel, .dim-contextPanel *, .dim-contextPanel *::before, .dim-contextPanel *::after { box-sizing: border-box; }
 /* Three rows: a fixed header, a scrolling body, a fixed footer. The card used to be
    the only scroll region, so in a short viewport the tab strip that names the scope
    and the primary action both scrolled off the bottom edge. The plugin's own
    directory picker already uses this shape. */
-.dim-contextDialog { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(450px, 100%); min-width: 0; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 16px; border: 0; border-radius: var(--dim-radius-24); background: var(--dsw-alias-bg-layer-2, #fff); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; }
-.dim-contextDialog:focus { outline: none; }
-.dim-contextHeader, .dim-contextEditorHeader { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-8); }
-.dim-contextHeader { position: relative; align-items: flex-start; }
-/* The description is a paragraph, not a peer of the title: side by side the
-   inline-flex squeezed the h3 into a 92px column and wrapped it. */
-.dim-contextHeaderTitle { min-width: 0; display: grid; justify-items: start; gap: var(--dim-gap-3); }
-.dim-contextHeader h3 { margin: 0; font-size: var(--dim-font-16); line-height: var(--dim-line-16); font-weight: var(--dim-weight-500); }
-.dim-contextHeaderTooltip { width: min(340px, calc(100vw - 72px)); }
-.dim-contextClose { width: 28px; height: 28px; flex: none; display: grid; place-items: center; padding: 0; border: none; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-secondary, #646a73); background: transparent; cursor: pointer; }
-.dim-contextClose:hover:not(:disabled) { background: var(--dim-hover); }
-.dim-contextTabs { display: flex; gap: var(--dim-gap-22); margin-top: 12px; border-bottom: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
-/* The negative margin lets the scrollbar sit on the card edge while the content keeps
-   the card's 16px inset. */
-.dim-contextBody { min-height: 0; overflow-y: auto; margin: 0 -16px; padding: 0 16px; scrollbar-width: thin; }
-.dim-contextTab { position: relative; min-width: 0; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 7px 1px 9px; border: none; border-radius: 0; color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); cursor: pointer; transition: color .15s ease; }
-.dim-contextTab:hover:not(:disabled):not([aria-selected="true"]) { color: var(--dsw-alias-label-primary, #0f1115); }
-.dim-contextTab[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); }
-.dim-contextTab::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: var(--dim-radius-indicator); background: transparent; transition: background .15s ease; }
-.dim-contextTab[aria-selected="true"]::after { background: var(--dsw-alias-label-primary, #0f1115); }
+/* Inline, not a dialog: it expands where the trigger sits and the page keeps
+   scrolling behind it. Native does the same in ModelListEditor.tsx:407 - a plain
+   sibling region, no portal, no backdrop, no elevation. The hairline above is the
+   host separator between a trigger and what it discloses. */
+.dim-contextPanel { display: grid; grid-template-rows: auto auto; width: 100%; min-width: 0; margin-top: 12px; padding: 12px 0 0; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); background: transparent; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; }
+.dim-contextPanel:focus { outline: none; }
+.dim-contextEditorHeader { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--dim-gap-8); }
+/* The trigger already names the section, so the opened region carries no second
+   title and no close button: it is an inline editor, not a dialog. */
+.dim-contextIntro { margin: 0 0 var(--dim-gap-12); }
+/* Host tablist, adopted verbatim (settings-plugins bundle:377 .tabs/.tab). One strip
+   anatomy now serves both of the plugin's tab strips, so a change here moves Context
+   enhancement and the General page together. The host's inactive tab is
+   label-tertiary at the inherited weight, its bar exists only while active, and it
+   declares no min-height. */
+.dim-contextTabs, .dim-generalSettingsTabs, .dim-botSettingsTabs { min-width: 0; display: flex; align-items: flex-end; gap: var(--dim-gap-22); margin-top: 2px; border-bottom: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
+.dim-contextTab, .dim-generalSettingsTab, .dim-botSettingsTab { position: relative; min-width: 0; flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 7px 1px 9px; border: 0; border-radius: 0; color: var(--dsw-alias-label-tertiary, #81858c); background: none; font: inherit; font-size: var(--dim-font-13); line-height: var(--dim-line-13); white-space: nowrap; cursor: pointer; }
+.dim-contextTab:hover:not(:disabled):not([aria-selected="true"]), .dim-generalSettingsTab:hover:not([aria-selected="true"]), .dim-botSettingsTab:hover:not([aria-selected="true"]) { color: var(--dsw-alias-label-primary, #0f1115); }
+.dim-contextTab[aria-selected="true"], .dim-generalSettingsTab[aria-selected="true"], .dim-botSettingsTab[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); }
+.dim-contextTab::after, .dim-generalSettingsTab::after, .dim-botSettingsTab::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: 2px 2px 0 0; background: transparent; }
+.dim-contextTab[aria-selected="true"]::after, .dim-generalSettingsTab[aria-selected="true"]::after, .dim-botSettingsTab[aria-selected="true"]::after { background: var(--dsw-alias-label-primary, #0f1115); }
+.dim-contextTab:focus-visible, .dim-generalSettingsTab:focus-visible, .dim-botSettingsTab:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, var(--dim-blue)); outline-offset: 2px; border-radius: 2px; color: var(--dsw-alias-label-primary, #0f1115); }
+/* Inline now: no height cap and no chrome of its own, so the page is the only scroll
+   region. The old negative margin existed to let a scrollbar sit on the dialog's edge;
+   a dialog edge no longer exists, so it is gone too. */
+.dim-contextBody { min-height: 0; scrollbar-width: thin; }
 .dim-contextTabPanel[hidden] { display: none; }
 .dim-contextSection { min-width: 0; margin: 0; padding: 0; border: 0; }
 .dim-contextScope { margin-top: 12px; padding: 12px 14px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
 .dim-contextScopeBlock { margin-top: 12px; }
+/* Same section role as the guidance title below it, so the same weight. Two 14px
+   titles at 400 and 500 inside one panel is what made it read as two systems. */
 .dim-contextLegend { position: relative; display: grid; justify-items: start; gap: var(--dim-gap-3); }
+.dim-contextLegend > span:first-child { font-weight: var(--dim-weight-500); }
 .dim-contextSwitchRow { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-8); min-height: 34px; cursor: pointer; }
 .dim-contextSwitchLabel { min-width: 0; display: inline-flex; align-items: baseline; gap: var(--dim-gap-5); flex-wrap: wrap; }
 .dim-contextUnavailable { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 16px; font-weight: var(--dim-weight-400); }
@@ -595,19 +635,19 @@ body {
 .dim-contextSwitch::before { content: ""; display: block; width: 16px; height: 16px; margin: 2px; border-radius: 50%; corner-shape: round; background: var(--dsw-alias-label-primary-foreground, #fff); transition: transform .12s ease; }
 .dim-contextSwitch:checked { background: var(--dsw-alias-brand-primary, #0f1115); }
 .dim-contextSwitch:checked::before { transform: translateX(16px); }
-.dim-contextFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--dim-gap-3) 12px; }
+/* Official modelAdvanced: auto-fit tracks so the columns stay equal instead of
+   being sized by whichever caveat happens to be longest. */
+.dim-contextFields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--dim-gap-8); padding: 8px 4px 2px; }
 /* align-items: center centred the checkbox against the whole hint block, so a
    long hint pushed the control 57-81px below the label it belongs to. */
 .dim-contextField { position: relative; min-width: 0; min-height: 30px; display: flex; align-items: flex-start; gap: var(--dim-gap-6); }
 .dim-contextField input { flex: none; width: 14px; height: 14px; margin: 2px 0 0; accent-color: var(--dim-blue); }
-.dim-contextFieldText { min-width: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; column-gap: var(--dim-gap-5); overflow-wrap: anywhere; }
-.dim-contextFieldName { min-width: 0; line-height: 17px; cursor: pointer; }
+/* One track: the name took the first, and the hint and the key both span 1 / -1, so the
+   second track never held anything. */
+.dim-contextFieldText { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; overflow-wrap: anywhere; }
+.dim-contextFieldName { min-width: 0; line-height: var(--dim-line-14); }
 .dim-contextFieldHint { grid-column: 1 / -1; margin: 2px 0 0; font-size: var(--dim-font-11); line-height: 16px; }
-.dim-contextFieldKey { min-width: 0; grid-column: 1 / -1; color: var(--dsw-alias-label-tertiary, #81858c); font: 11px/16px var(--dim-font-mono); overflow-wrap: anywhere; cursor: pointer; }
-.dim-contextFieldHelp { position: static; }
-.dim-contextTooltip.dim-contextFieldTooltip { top: calc(100% + 6px); right: 0; left: auto; width: min(280px, calc(100vw - 72px)); }
-.dim-contextField:nth-child(odd) .dim-contextFieldTooltip { right: auto; left: 0; }
-.dim-contextEditorHeader { position: relative; flex-wrap: wrap; }
+.dim-contextFieldKey { min-width: 0; grid-column: 1 / -1; color: var(--dsw-alias-label-tertiary, #81858c); font: 11px/16px var(--dim-font-mono); overflow-wrap: anywhere; }
 .dim-contextEditorTitle { min-width: 0; display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
 .dim-contextEditorTitle > label { font-weight: var(--dim-weight-500); }
 .dim-contextHelp { display: inline-flex; align-items: center; flex: none; }
@@ -616,13 +656,15 @@ body {
 .dim-contextTooltip { position: absolute; top: calc(100% + 7px); left: 0; z-index: var(--dim-z-tooltip); width: min(330px, calc(100vw - 72px)); display: grid; gap: var(--dim-gap-5); overflow-wrap: anywhere; white-space: normal; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
 .dim-contextTooltip strong { font-weight: var(--dim-weight-600); }
 .dim-contextTooltipExample { padding: 7px 8px; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-module-fill); font-family: var(--dim-font-mono); white-space: pre-wrap; }
-.dim-contextTooltip.dim-contextLegendTooltip { width: min(350px, calc(100vw - 72px)); }
 .dim-contextTooltip.dim-contextGuidanceTooltip { top: auto; bottom: calc(100% + 7px); width: min(380px, calc(100vw - 72px)); max-height: calc(100dvh - 48px); overflow-y: auto; }
 .dim-contextHelp:hover .dim-contextTooltip, .dim-contextHelp:focus-within .dim-contextTooltip { opacity: 1; visibility: visible; transform: translateY(0); pointer-events: auto; }
 .dim-contextTextActions { display: flex; gap: var(--dim-gap-10); margin-left: auto; }
 .dim-contextTextActions button { min-height: 30px; padding: 4px 0; border: 0; border-radius: var(--dim-radius-8); color: var(--dim-blue); background: transparent; font: inherit; font-size: var(--dim-font-12); cursor: pointer; }
 .dim-contextTextActions button:hover:not(:disabled) { text-decoration: underline; }
-.dim-contextGuidance textarea { display: block; width: 100%; min-height: 88px; margin-top: 6px; padding: 8px 12px; resize: vertical; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
+/* Same chrome as the diagnostic's textarea - the host's .input padding of 10px on the
+   horizontal. The font differs on purpose: this one holds prose the user writes, that
+   one holds a machine-formatted diagnostic block, so it stays monospaced. */
+.dim-contextGuidance textarea { display: block; width: 100%; min-height: 88px; margin-top: 6px; padding: 8px 10px; resize: vertical; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
 .dim-contextGuidance textarea::placeholder { color: var(--dsw-alias-label-caption, #adb2b8); opacity: 1; }
 /* The host's hint/description role is label-tertiary, not secondary: ui-settings-plugins
    fields.module.css:88-92 (.hint) and every settings-row .desc - TranscriptViewRow.module.css:27,
@@ -631,17 +673,20 @@ body {
    Fifteen of the host's twenty hint/description rules are tertiary; these four were the plugin's
    only hint-named rules still on secondary, and its own .dim-helpHint/.dim-modelDescription
    were already tertiary. */
-.dim-contextHint { margin: 5px 0 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 1.5; overflow-wrap: anywhere; }
 .dim-contextError { margin: 12px 0 0; color: var(--dim-danger); font-size: var(--dim-font-12); line-height: var(--dim-line-12); overflow-wrap: anywhere; }
-.dim-contextFooter { display: flex; justify-content: flex-end; gap: var(--dim-gap-8); margin-top: 0; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); }
-.dim-contextFooter button { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: var(--dim-line-12); white-space: nowrap; cursor: pointer; }
+.dim-contextFooter { display: flex; justify-content: flex-end; gap: var(--dim-gap-8); margin-top: 0; padding-top: 12px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
+/* A panel footer is the host's .editorActions role, not a row's inline action, so it
+   takes the form action size: 36px, radius 18, padding 0 14, 14/22 (settings-models
+   bundle: the primaryButton/secondaryButton family). The 28px variant belongs to
+   .rowActions. */
+.dim-contextFooter button { height: 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0 14px; border: var(--dim-control-border); border-radius: var(--dim-radius-18); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); white-space: nowrap; cursor: pointer; }
 .dim-contextFooter button:hover:not(:disabled) { background: var(--dim-hover); }
 .dim-contextFooter .dim-contextSave, .dim-contextFooter .dim-contextSave:hover:not(:disabled) { border-color: var(--dim-blue); color: var(--dim-action-on-fill, #fff); background: var(--dim-blue); }
-.dim-contextEntry:focus-visible, .dim-contextDialog button:focus-visible, .dim-contextDialog input:focus-visible, .dim-contextDialog textarea:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
-.dim-contextEntry:disabled, .dim-contextDialog button:disabled, .dim-contextDialog input:disabled, .dim-contextDialog textarea:disabled { opacity: 0.4; cursor: not-allowed; }
+.dim-contextEntry:focus-visible, .dim-contextPanel button:focus-visible, .dim-contextPanel input:focus-visible, .dim-contextPanel textarea:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
+.dim-contextEntry:disabled, .dim-contextPanel button:disabled, .dim-contextPanel input:disabled, .dim-contextPanel textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 @media (pointer: coarse) {
-  .dim-contextEntry, .dim-contextTab, .dim-contextClose, .dim-contextFooter button, .dim-contextTextActions button, .dim-contextField, .dim-contextSwitchRow { min-height: 44px; }
-  .dim-contextClose, .dim-contextTextActions button { min-width: 44px; }
+  .dim-contextEntry, .dim-contextTab, .dim-contextFooter button, .dim-contextTextActions button, .dim-contextField, .dim-contextSwitchRow { min-height: 44px; }
+  .dim-contextTextActions button { min-width: 44px; }
   .dim-contextGuidance textarea { font-size: var(--dim-font-16); }
 }
 /* No local token rebinds: the picker is portalled, but the token layer lives on
@@ -733,24 +778,43 @@ body {
    seven competing boxes. */
 .dim-collapsibleHead { padding: 16px 0; }
 .dim-collapsibleBodyInner > * + * { border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
+/* The diagnostic's label/value grid has no host counterpart, so it takes the two
+   nearest official roles: the key reads as a field label, the value as the text of
+   the field it labels. Its chrome used to be three inline styles. */
+/* Official .customizedSummary supplies the text role for a plain disclosure
+   trigger; the row-card headers keep their own richer typography. */
+.dim-diagnosticSummary { font-weight: var(--dim-weight-500); }
+.dim-diagnosticFields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 0; }
+.dim-diagnosticFields dt { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
+.dim-diagnosticValue { margin: 0; color: var(--dsw-alias-label-primary, #0f1115); overflow-wrap: anywhere; }
+.dim-diagnosticNotice { margin: 0; color: var(--dsw-alias-state-warn-label, #b45309); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
+.dim-diagnosticHint { margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
+.dim-diagnosticTextarea { display: block; width: 100%; margin-top: 6px; padding: 8px 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: var(--dim-font-12)/var(--dim-line-12) var(--dim-font-mono); resize: vertical; }
 .dim-collapsibleBodyInner > .dim-cardFooter { border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
-.dim-collapsibleAccount { min-width: 0; display: flex; flex-direction: column; }
-.dim-collapsibleHead { min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-4); cursor: pointer; user-select: none; -webkit-user-select: none; }
+/* One disclosure mechanism for the whole plugin: a root that carries is-open,
+   a head that toggles, a chevron that rotates, and a body clipped while closed.
+   The IM channel cards, the context-enhancement editor and the diagnostic
+   details disclosure all render through these four classes, so the gesture is
+   declared here once. */
+.dim-collapsible { min-width: 0; display: flex; flex-direction: column; }
+/* The head toggles, but its text stays text: the host's own disclosure summary sets
+   no user-select, so a bot name here is selectable and copyable like any other run. */
+.dim-collapsibleHead { min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-4); cursor: pointer; -webkit-user-select: text; user-select: text; }
 .dim-collapsibleHead:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; border-radius: var(--dim-radius-8); }
 .dim-collapsibleHeaderContent { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; }
 .dim-collapsibleChevron { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; color: var(--dsw-alias-label-tertiary, #81858c); transition: transform var(--dim-disclosure-duration) var(--dim-disclosure-ease); transform-origin: 50% 50%; }
 .dim-collapsibleChevron svg { display: block; }
-.dim-collapsibleAccount.is-open .dim-collapsibleChevron { transform: rotate(90deg); }
+.dim-collapsible.is-open .dim-collapsibleChevron { transform: rotate(90deg); }
 /* Animate height without measuring content; hide collapsed controls from focus and accessibility. */
 .dim-collapsibleBody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dim-disclosure-duration) var(--dim-disclosure-ease); }
-.dim-collapsibleAccount.is-open > .dim-collapsibleBody { grid-template-rows: 1fr; }
+.dim-collapsible.is-open > .dim-collapsibleBody { grid-template-rows: 1fr; }
 /* clip rather than hidden, plus a clip margin: the collapse animation still
    needs the box clipped, but hidden also swallowed the 2px focus ring of every
    control inside, leaving those rows with no visible focus at all. The margin
    lets the ring paint; browsers without overflow-clip-margin fall back to the
    old behaviour rather than to something worse. */
 .dim-collapsibleBodyInner { min-height: 0; overflow: clip; overflow-clip-margin: 4px; }
-.dim-collapsibleAccount:not(.is-open) .dim-collapsibleBodyInner { visibility: hidden; }
+.dim-collapsible:not(.is-open) .dim-collapsibleBodyInner { visibility: hidden; }
 /* Reclaim horizontal spacing for names while keeping status on the same row,
    including when a channel's mobile stylesheet requests a column layout. */
 .dim-panel .dim-botCardTop { min-width: 0; width: 100%; max-width: 100%; display: flex; flex-direction: row; flex-wrap: nowrap; align-items: flex-start; justify-content: space-between; gap: var(--dim-gap-6); }
@@ -777,27 +841,18 @@ body {
 .dim-botSettingsAction:hover .dim-botSettingsTooltip, .dim-botSettingsAction:focus-within .dim-botSettingsTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .dim-deliveryPage { min-width: 0; display: grid; }
 .dim-deliveryHeader { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-16); }
-.dim-botSettingsTabsBar { min-width: 0; margin-top: 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
-.dim-botSettingsTabs { min-width: 0; display: flex; align-items: flex-end; gap: var(--dim-gap-22); overflow-x: auto; scrollbar-width: none; }
+.dim-botSettingsTabs { overflow-x: auto; scrollbar-width: none; }
 .dim-botSettingsTabs::-webkit-scrollbar { display: none; }
-.dim-botSettingsTab { position: relative; min-height: 34px; flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 6px 2px 8px; border: none; color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); white-space: nowrap; cursor: pointer; transition: color .15s ease; }
-.dim-botSettingsTab::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: var(--dim-radius-indicator); background: transparent; transform: scaleX(.45); transition: background .15s ease, transform .15s ease; }
-.dim-botSettingsTab:hover:not([aria-selected="true"]) { color: var(--dsw-alias-label-primary, #0f1115); }
-.dim-botSettingsTab[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); }
-.dim-botSettingsTab[aria-selected="true"]::after { background: var(--dsw-alias-label-primary, #0f1115); transform: scaleX(1); }
-.dim-botSettingsTab:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: -2px; border-radius: var(--dim-radius-8); }
+.dim-botSettingsTabsBar { min-width: 0; margin-top: 10px; }
 .dim-botSettingsTabPanel { min-width: 0; display: grid; gap: var(--dim-gap-12); padding-top: 12px; }
 .dim-feishuGroupSettings { min-width: 0; display: grid; gap: var(--dim-gap-12); }
 .dim-feishuGroupControls { min-width: 0; display: grid; gap: var(--dim-gap-12); }
-.dim-feishuGroupControl { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--dim-gap-8); padding: 16px 0; border: 0; border-radius: 0; background: none; }
-.dim-feishuGroupControlHeader { position: relative; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-12); }
-.dim-feishuGroupControlHeader h3 { min-width: 0; margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); }
-.dim-feishuGroupControlStatus { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 17px; }
-.dim-feishuGroupSelect { min-width: 0; width: 100%; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); cursor: pointer; transition: border-color .15s ease; }
-
-.dim-feishuGroupSelect:focus-visible { outline: none; border-color: var(--dim-focus); }
-.dim-feishuGroupSelect:disabled { cursor: not-allowed; opacity: 0.4; }
-.dim-feishuGroupHelp { margin: -2px 0 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
+/* Row anatomy supplies the geometry; this class only names the block. */
+.dim-feishuGroupControl { min-width: 0; }
+.dim-feishuGroupControlHeader { position: relative; min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-6); }
+.dim-feishuGroupControlHeader h3 { min-width: 0; margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-400); }
+.dim-feishuGroupControlStatus { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 17px; }
+.dim-feishuGroupHelp { margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-feishuGroupPermissionAction { display: flex; justify-content: flex-start; }
 .dim-feishuGroupPermissionAction .dim-deliveryButton { color: var(--dim-blue); border-color: color-mix(in srgb, var(--dim-blue) 30%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); }
 .dim-feishuGroupError, .dim-feishuGroupRefreshError { margin: 0; padding: 9px 11px; border-radius: var(--dim-radius-8); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
@@ -877,15 +932,13 @@ body {
 .dim-targetSuggestionState p { margin: 4px 0; }
 .dim-targetSuggestionState strong { color: var(--dsw-alias-label-primary, #0f1115); }
 .dim-targetSuggestionField { min-width: 0; display: grid; gap: var(--dim-gap-6); margin-top: 12px; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); }
-.dim-targetSuggestionField select { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); cursor: pointer; }
-.dim-targetSuggestionField select:focus { outline: none; border-color: var(--dim-focus); }
 .dim-targetForm { margin-top: 14px; padding: 14px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
 .dim-targetFormHeading h3 { margin: 0; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
 .dim-targetFormHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
 .dim-targetFormGrid { display: grid; gap: var(--dim-gap-11) 12px; margin-top: 12px; }
 .dim-targetField { min-width: 0; display: grid; align-content: start; gap: var(--dim-gap-6); padding: 12px 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); }
-.dim-targetField input, .dim-targetField select { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
-.dim-targetField input:focus, .dim-targetField select:focus { outline: none; border-color: var(--dim-focus); }
+.dim-targetField input { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
+.dim-targetField input:focus { outline: none; border-color: var(--dim-focus); }
 .dim-targetField input[readonly] { color: var(--dsw-alias-label-tertiary, #81858c); background: var(--dim-module-fill); }
 .dim-targetFormError { margin: 10px 0 0; font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-targetFormActions { display: flex; justify-content: flex-end; gap: var(--dim-gap-7); margin-top: 12px; }
@@ -895,8 +948,6 @@ body {
 /* Ordinary group heading inside the card. A fieldset legend would notch the card border, which no native surface does. */
 .dim-accessLegend { margin: 0 0 4px; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); }
 .dim-accessLegendContent { display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
-.dim-panel .dim-accessLegendHelp { position: static; }
-.dim-accessLegendHelp .dim-channelTooltip { top: 20px; right: auto; left: 16px; width: min(320px, calc(100% - 32px)); max-width: none; }
 .dim-accessControls { display: grid; gap: var(--dim-gap-12); }
 .dim-accessControls[data-mode="allowlist"] { grid-template-columns: minmax(0, 1fr); }
 /* The stacked form survives only inside the multi-column user editor, where a cell is
@@ -904,16 +955,14 @@ body {
    one anatomy, not two - so the geometry and typography are scoped to that editor. */
 .dim-accessUserRow .dim-accessField { display: grid; align-content: start; gap: var(--dim-gap-6); padding: 12px 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); }
 .dim-accessField { min-width: 0; }
-.dim-accessField input, .dim-accessField select { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
-.dim-accessField input:focus, .dim-accessField select:focus { outline: none; border-color: var(--dim-focus); }
+.dim-accessField input { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
+.dim-accessField input:focus { outline: none; border-color: var(--dim-focus); }
 .dim-accessUsers { min-width: 0; margin-top: 14px; padding-top: 14px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .dim-accessUsersHeading { position: relative; min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--dim-gap-12); }
 .dim-accessUsersHeading > div { min-width: 0; }
 .dim-accessUsersTitle { display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
 .dim-accessUsersHeading strong { color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-600); }
 .dim-accessUsersHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
-.dim-panel .dim-accessUsersHelp { position: static; }
-.dim-accessUsersHelp .dim-channelTooltip { top: calc(100% + 7px); right: auto; left: 0; width: min(320px, 100%); max-width: none; }
 .dim-accessAddUser { width: 32px; height: 32px; min-height: 32px; flex: 0 0 32px; padding: 0; font-size: var(--dim-font-20); line-height: var(--dim-line-20); }
 .dim-accessUsersEmpty { margin-top: 10px; padding: 15px 12px; border: 1px dashed var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); text-align: center; }
 .dim-accessUserList { display: grid; gap: var(--dim-gap-9); margin: 10px 0 0; padding: 0; list-style: none; }
@@ -930,23 +979,15 @@ body {
 .dim-generalSettingsPage { min-width: 0; display: grid; }
 .dim-generalSettingsHeader { min-width: 0; margin: 0 0 8px; }
 .dim-generalSettingsHeader h2 { margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-18); line-height: var(--dim-line-18); font-weight: var(--dim-weight-600); }
-.dim-generalSettingsTabsBar { min-width: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
-.dim-generalSettingsTabs { min-width: 0; display: flex; align-items: flex-end; gap: var(--dim-gap-22); overflow-x: auto; scrollbar-width: none; }
+/* The strip scrolls sideways when the General page has more tabs than fit. */
+.dim-generalSettingsTabs { overflow-x: auto; scrollbar-width: none; }
 .dim-generalSettingsTabs::-webkit-scrollbar { display: none; }
-.dim-generalSettingsTab { position: relative; min-height: 34px; flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 6px 2px 8px; border: none; color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); white-space: nowrap; cursor: pointer; transition: color .15s ease; }
-.dim-generalSettingsTab::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: var(--dim-radius-indicator); background: transparent; transform: scaleX(.45); transition: background .15s ease, transform .15s ease; }
-.dim-generalSettingsTab:hover:not([aria-selected="true"]) { color: var(--dsw-alias-label-primary, #0f1115); }
-.dim-generalSettingsTab[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); }
-.dim-generalSettingsTab[aria-selected="true"]::after { background: var(--dsw-alias-label-primary, #0f1115); transform: scaleX(1); }
-.dim-generalSettingsTab:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: -2px; border-radius: var(--dim-radius-8); }
+.dim-generalSettingsTabsBar { min-width: 0; }
 .dim-generalSettingsTabPanel { min-width: 0; padding-top: 2px; }
 .dim-globalSection { min-width: 0; padding: 14px 16px; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: var(--dim-radius-16); background: none; }
 .dim-globalHead { min-width: 0; display: flex; align-items: center; }
 .dim-globalHeadTitle { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--dim-gap-6); }
 .dim-globalHead h3 { min-width: 0; overflow: hidden; margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-15); line-height: var(--dim-line-15); font-weight: var(--dim-weight-600); text-overflow: ellipsis; white-space: nowrap; }
-.dim-globalTtlHelp { position: relative; display: inline-flex; flex: none; }
-.dim-globalTtlTooltip { position: absolute; top: calc(100% + 7px); left: 0; z-index: var(--dim-z-tooltip); width: max-content; max-width: min(280px, calc(100vw - 48px)); opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
-.dim-globalTtlHelp:hover .dim-globalTtlTooltip, .dim-globalTtlHelpButton:focus-visible + .dim-globalTtlTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .dim-globalTtlHints { display: grid; gap: var(--dim-gap-4); margin: 0; padding: 0; list-style: none; }
 .dim-globalTtlHints li { min-width: 0; display: flex; align-items: baseline; gap: var(--dim-gap-8); }
 .dim-globalTtlHints code { flex: none; min-width: 44px; padding: 0 6px; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-module-fill); font: 11px/16px var(--dim-font-mono); text-align: center; }

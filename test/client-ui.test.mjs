@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { RowSelect } from '../plugin-src/client/row-selector.js';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 
@@ -161,7 +162,7 @@ test('removing the first account preserves collapse styles and toggling for rema
       },
     })));
   const collapseStyles = () => [...styles].find((style) =>
-    style.textContent.includes('.dim-collapsibleAccount:not(.is-open)'));
+    style.textContent.includes('.dim-collapsible:not(.is-open)'));
   let renderer;
   let disposeStyles;
   try {
@@ -257,9 +258,9 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   assert.match(styles, /\.dim-generalSettingsAction:hover \.dim-generalSettingsTooltip, \.dim-generalSettingsButton:focus-visible \+ \.dim-generalSettingsTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
   assert.match(styles, /\.dim-generalSettingsButton\[aria-current="page"\] \+ \.dim-generalSettingsTooltip \{[^}]*opacity: 0;[^}]*visibility: hidden;/);
   assert.doesNotMatch(styles, /\.dim-generalSettingsAction:focus-within \.dim-generalSettingsTooltip/);
-  assert.match(styles, /\.dim-globalTtlTooltip \{[^}]*position: absolute;[^}]*opacity: 0;[^}]*visibility: hidden;/);
-  assert.match(styles, /\.dim-globalTtlHelp:hover \.dim-globalTtlTooltip, \.dim-globalTtlHelpButton:focus-visible \+ \.dim-globalTtlTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.doesNotMatch(styles, /\.dim-globalTtlHelp:focus-within \.dim-globalTtlTooltip/);
+  // The retention hover layer is gone: its rule family had no render point left, so
+  // the sheet must not carry the skin for a tooltip nothing can mount.
+  assert.doesNotMatch(styles, /dim-globalTtlTooltip|dim-globalTtlHelp/);
   assert.match(styles, /\.dim-globalSweepAction \{[^}]*position: relative;[^}]*margin-left: auto;/);
   assert.match(styles, /\.dim-globalSweepConfirm \{[^}]*position: absolute;[^}]*top: calc\(100% \+ 8px\);[^}]*right: 0;/);
   assert.doesNotMatch(markup, /\d+ 个渠道|dim-channelCount/);
@@ -710,16 +711,39 @@ test('Feishu bot settings render one step-push select with three presentations',
     await flushTasks();
   });
 
-  // Rendering: one select with the three presentations, defaulting to off.
-  const stepPushSelect = () => renderer.root.findByProps({ 'aria-label': '任务过程展示' });
-  assert.equal(stepPushSelect().type, 'select');
-  assert.equal(stepPushSelect().props.value, 'off');
+  // Rendering: one selector with the three presentations, defaulting to off. It is a
+  // button + menu now, like the host's own row selectors, so it is driven the way a
+  // user drives it: press the trigger, then press the presentation you want.
+  const PRESENTATIONS = [
+    ['off', '不显示过程（只发送最终答案）'],
+    ['streaming_card', '实时过程卡（全程一张卡片动态更新）'],
+    ['post', '逐步直播（每一步单独发一条消息）'],
+  ];
+  // Both the trigger and its menu carry this label, so name the element we mean.
+  const stepPushButton = () => renderer.root.findAll((node) => node.type === 'button'
+    && node.props['aria-label'] === '任务过程展示')[0];
+  const shownPresentation = () => PRESENTATIONS
+    .find(([, copy]) => nodeText(stepPushButton()).includes(copy))[0];
+  const choosePresentation = async (value) => {
+    await act(async () => { stepPushButton().props.onClick(); });
+    const copy = PRESENTATIONS.find(([id]) => id === value)[1];
+    const option = renderer.root.findAllByProps({ role: 'menuitemradio' })
+      .find((node) => nodeText(node).includes(copy));
+    assert.ok(option, value + ' is offered');
+    await act(async () => { option.props.onClick(); });
+  };
+  assert.equal(stepPushButton().type, 'button', 'the trigger is a button, not a select');
+  assert.equal(stepPushButton().props['aria-haspopup'], 'menu');
+  assert.equal(stepPushButton().props['aria-expanded'], false);
+  assert.equal(shownPresentation(), 'off');
   assert.ok(renderer.root.findAllByType('h3')
     .some((heading) => nodeText(heading) === '任务过程展示'));
+  await act(async () => { stepPushButton().props.onClick(); });
   assert.deepEqual(
-    stepPushSelect().findAllByType('option').map((option) => option.props.value),
-    ['off', 'streaming_card', 'post'],
+    renderer.root.findAllByProps({ role: 'menuitemradio' }).map((node) => nodeText(node)),
+    PRESENTATIONS.map(([, copy]) => copy),
   );
+  await act(async () => { stepPushButton().props.onClick(); });
   const helpNodes = renderer.root.findAll(
     (node) => node.props?.className === 'dim-feishuGroupHelp',
   );
@@ -729,7 +753,7 @@ test('Feishu bot settings render one step-push select with three presentations',
   // off -> streaming_card: the flag write must land before the mode write so
   // the runtime never sees a mode without step push enabled.
   await act(async () => {
-    stepPushSelect().props.onChange({ target: { value: 'streaming_card' } });
+    await choosePresentation('streaming_card');
     await flushTasks();
   });
   const flagIndex = calls.findIndex(({ endpoint, payload }) => (
@@ -745,23 +769,23 @@ test('Feishu bot settings render one step-push select with three presentations',
   assert.ok(flagIndex >= 0, 'the enable flag is saved');
   assert.ok(modeIndex >= 0, 'the presentation mode is saved');
   assert.ok(flagIndex < modeIndex, 'the flag must be saved before the mode');
-  assert.equal(stepPushSelect().props.value, 'streaming_card');
+  assert.equal(shownPresentation(), 'streaming_card');
 
   // streaming_card -> post: only the mode endpoint is called.
   const afterEnable = calls.length;
   await act(async () => {
-    stepPushSelect().props.onChange({ target: { value: 'post' } });
+    await choosePresentation('post');
     await flushTasks();
   });
   const postCalls = calls.slice(afterEnable);
   assert.equal(postCalls.filter(({ endpoint }) => endpoint === FEISHU_ENDPOINTS.setStepPushMode).length, 1);
   assert.equal(postCalls.filter(({ endpoint }) => endpoint === FEISHU_ENDPOINTS.setStepPush).length, 0);
-  assert.equal(stepPushSelect().props.value, 'post');
+  assert.equal(shownPresentation(), 'post');
 
   // post -> off: only the flag endpoint is called, with false.
   const afterPost = calls.length;
   await act(async () => {
-    stepPushSelect().props.onChange({ target: { value: 'off' } });
+    await choosePresentation('off');
     await flushTasks();
   });
   const offCalls = calls.slice(afterPost);
@@ -769,7 +793,7 @@ test('Feishu bot settings render one step-push select with three presentations',
     endpoint === FEISHU_ENDPOINTS.setStepPush && payload.stepPush === false
   )).length, 1);
   assert.equal(offCalls.filter(({ endpoint }) => endpoint === FEISHU_ENDPOINTS.setStepPushMode).length, 0);
-  assert.equal(stepPushSelect().props.value, 'off');
+  assert.equal(shownPresentation(), 'off');
   await act(async () => renderer.unmount());
 });
 
@@ -1182,9 +1206,10 @@ test('bot cards keep Agent Preset guidance in a keyboard-accessible help tooltip
   assert.match(styles, /\.dim-panel \.dim-presetHelpButton:focus-visible \{[^}]*box-shadow:/);
   assert.match(styles, /\.dim-panel \.dim-presetTooltip \{[^}]*position: absolute;[^}]*width: min\(320px, 100%\);[^}]*white-space: normal;[^}]*opacity: 0;[^}]*visibility: hidden;[^}]*pointer-events: none;/);
   assert.match(styles, /\.dim-panel \.dim-presetHelp:hover \.dim-presetTooltip, \.dim-panel \.dim-presetHelp:focus-within \.dim-presetTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  // The field ladder (32px, field border/radius, layer-1 fill) - not the 36px module pill.
-  assert.match(styles, /\.dim-panel \.dim-presetSelect \{[^}]*width: 100%;[^}]*height: 32px;[^}]*border: var\(--dim-field-border\);[^}]*border-radius: var\(--dim-field-radius\);[^}]*background-color: var\(--dsw-alias-bg-layer-1, #fff\);/);
-  assert.doesNotMatch(styles, /\.dim-panel \.dim-presetSelect \{[^}]*max-width: 60%;/);
+  // The preset selector owns a whole row, so it is the module pill (36px, radius 18,
+  // module fill) and declares no rule of its own - it is a .dim-rowControl button now.
+  assert.ok(!styles.includes('.dim-panel .dim-presetSelect'), 'the row trigger declares nothing of its own');
+  assert.match(styles, /\.dim-panel \.dim-rowControl \{[^}]*height: 36px;[^}]*border-radius: var\(--dim-radius-18\);[^}]*background-color: var\(--dim-module-fill\);/);
   assert.match(styles, /\.dim-panel \.dim-presetError \{[^}]*margin: 6px 0 0;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-presetHelp \{[^}]*grid-row: 3;/);
 });
