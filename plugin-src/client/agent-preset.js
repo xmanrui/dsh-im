@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { h } from './i18n.js';
+import { RowSelect } from './row-selector.js';
 
 export const SET_AGENT_PRESET_ENDPOINT = 'bot.preset.set';
 
@@ -63,57 +64,52 @@ export function AgentPresetEditor({ agentPreset = '', disabled = false, onSave }
 
   const inheritLabel = '跟随 Host 默认';
 
-  const change = async (event) => {
-    const next = event.target.value;
+  const change = async (next) => {
     if (next === current || saving || disabled) return;
     setSaving(true);
     setError(null);
     try {
       await onSave?.(next || null);
     } catch (cause) {
-      setError(cause?.message ?? 'Agent Preset 修改失败，请重试。');
+      setError(cause?.message ?? 'Agent 预设修改失败，请重试。');
     } finally {
       setSaving(false);
     }
   };
 
   return h('div', { className: 'dim-preset' },
-    h('div', { className: 'dim-presetHeader' },
-      h('span', { className: 'dim-presetTitle' },
-        h('span', null, 'Agent Preset'),
-        h('span', { className: 'dim-presetHelp' },
-          h('button', {
-            type: 'button',
-            className: 'dim-presetHelpButton',
-            'aria-label': '查看 Agent Preset 说明',
-            'aria-describedby': helpId,
-          }, h('span', { 'aria-hidden': 'true' }, '?')),
-          h('span', {
-            id: helpId,
-            className: 'dim-presetTooltip',
-            role: 'tooltip',
-          }, '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。'))),
-      saving ? h('span', { className: 'dim-presetStatus' }, '保存中…') : null),
-    React.createElement('select', {
-      className: 'dim-presetSelect',
-      value: current,
-      disabled: disabled || saving,
-      'aria-label': 'Agent Preset',
-      onChange: (event) => { void change(event); },
-    },
-      h('option', { value: '' }, inheritLabel),
-      ...items.map((item) => h(
-        'option',
-        { key: item.id, value: item.id },
-        item.unavailable
-          ? [item.id, '（已不可用）']
-          : item.label && item.label !== item.id ? `${item.label}（${item.id}）` : item.id,
-      )),
-    ),
+    // Native row anatomy: the setting's name is the row's title on the left, the
+    // control sits in the right slot at its own width. The heading keeps only the
+    // save status, so the title is not stated twice.
+    saving ? h('div', { className: 'dim-presetHeader' },
+      h('span', { className: 'dim-presetStatus' }, '保存中…')) : null,
+    /* A div, not a label. A label wrapping a row makes a click anywhere in the row - the
+       setting's own name included - activate the control it labels, so the menu opened
+       from the text. The host's rows are not labels either: only the control is
+       clickable. The selector carries its own accessible name (label: 'Agent 预设'). */
+    h('div', { className: 'dim-modelRow' },
+      h('span', { className: 'dim-rowText' },
+        h('span', { className: 'dim-modelRowLabel' }, 'Agent 预设')),
+      h(RowSelect, {
+        className: 'dim-presetSelect dim-rowControl',
+        value: current,
+        disabled: disabled || saving,
+        label: 'Agent 预设',
+        onChange: (next) => { void change(next); },
+        options: [
+          { value: '', label: inheritLabel },
+          ...items.map((item) => ({
+            value: item.id,
+            label: item.unavailable
+              ? item.id + '（已不可用）'
+              : item.label && item.label !== item.id ? `${item.label}（${item.id}）` : item.id,
+          })),
+        ],
+      })),
     error || currentUnavailable ? h(
       'p',
       { className: 'dim-presetError', role: error ? 'alert' : 'status' },
-      error ?? '当前 Agent Preset 已不可用，请选择其他 Preset 或跟随 Host 默认。',
+      error ?? '当前 Agent 预设已不可用，请选择其他预设或跟随 Host 默认。',
     ) : null,
   );
 }

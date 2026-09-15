@@ -70,7 +70,8 @@ test('Enterprise WeChat cards keep check time with status and omit repeated chan
   assert.match(markup, /class="dim-botHealthGroup"[^]*class="dim-lastChecked"><span>最近检查<\/span>/);
   assert.doesNotMatch(markup, /消息通道|dim-botMetric/);
   assert.match(markup, />检查连接<[^]*>移除接入</);
-  assert.match(markup, /class="dim-presetSelect"/);
+  // The preset selector is a button + menu now, so it carries the row-control class too.
+  assert.match(markup, /class="dim-presetSelect dim-rowControl"/);
   assert.doesNotMatch(markup, /收到\s*\/\s*回复|dim-cardSummary|企业微信 WebSocket 长连接运行正常/);
 });
 

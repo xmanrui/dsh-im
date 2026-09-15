@@ -4,7 +4,9 @@ import * as React from "react";
 import { FeishuLogoGlyph } from "../../channel-logos.js";
 import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from "../../credential-binding.js";
 import { CollapsibleAccountSection } from "../shared/collapsible-account.js";
+import { RowSelect } from "../../row-selector.js";
 import { h } from "../../i18n.js";
+import { HelpTip } from '../../help-tip.js';
 import {
   FEISHU_ENDPOINTS,
   FEISHU_REGISTRATION_OPERATIONS,
@@ -162,7 +164,6 @@ function Heading({ totals, onAdd, onCredential, credentialOpen, adding, busy, ad
     h("div", { className: "bxf-headingTools" },
       h("div", { className: "dim-bindActions" },
         h(Button, {
-          kind: "primary",
           size: "small",
           className: "bxf-bindButton dim-scanButton",
           onClick: onAdd,
@@ -486,8 +487,7 @@ function StepPushEditor({ value = false, mode = "post", disabled = false, onSave
     }
   };
 
-  const change = (event) => {
-    const next = event.target.value;
+  const change = (next) => {
     if (next === current) return;
     void save(async () => {
       if (next === "off") {
@@ -511,42 +511,34 @@ function StepPushEditor({ value = false, mode = "post", disabled = false, onSave
       : "每一步都单独发一条消息（含工具调用和过程说明）；注意长任务会连续发送较多消息";
 
   return h("section", {
-    className: "dim-feishuGroupControl",
+    className: "dim-feishuGroupControl dim-modelRow",
     "aria-labelledby": titleId,
   },
-  h("div", { className: "dim-feishuGroupControlHeader" },
-    h("div", { className: "dim-presetTitle" },
+  h("div", { className: "dim-rowText" },
+    h("div", { className: "dim-feishuGroupControlHeader" },
       h("h3", { id: titleId }, "任务过程展示"),
-      h("span", { className: "dim-presetHelp" },
-        h("button", {
-          type: "button",
-          className: "dim-presetHelpButton",
-          "aria-label": "查看分步直推说明",
-          "aria-describedby": helpId,
-        }, h("span", { "aria-hidden": "true" }, "?")),
-        h("span", {
-          id: helpId,
-          className: "dim-presetTooltip",
-          role: "tooltip",
-        }, "设置任务执行过程的呈现方式：不显示、实时卡片或逐步消息"))),
+      h(HelpTip, { id: helpId, label: "查看分步直推说明" },
+        "设置任务执行过程的呈现方式：不显示、实时卡片或逐步消息")),
     saving
       ? h("span", { className: "dim-feishuGroupControlStatus", role: "status" }, "保存中…")
-      : null),
-  h("select", {
-    className: "dim-feishuGroupSelect",
+      : null,
+    h("p", { className: "dim-feishuGroupHelp" }, helpText),
+    error ? h("p", {
+      className: "dim-feishuGroupError",
+      role: "alert",
+    }, error) : null),
+  h(RowSelect, {
+    className: "dim-feishuGroupSelect dim-rowControl",
     value: current,
     disabled: disabled || saving,
-    "aria-label": "任务过程展示",
+    label: "任务过程展示",
     onChange: change,
-  },
-  h("option", { value: "off" }, "不显示过程（只发送最终答案）"),
-  h("option", { value: "streaming_card" }, "实时过程卡（全程一张卡片动态更新）"),
-  h("option", { value: "post" }, "逐步直播（每一步单独发一条消息）")),
-  h("p", { className: "dim-feishuGroupHelp" }, helpText),
-  error ? h("p", {
-    className: "dim-feishuGroupError",
-    role: "alert",
-  }, error) : null);
+    options: [
+      { value: "off", label: "不显示过程（只发送最终答案）" },
+      { value: "streaming_card", label: "实时过程卡（全程一张卡片动态更新）" },
+      { value: "post", label: "逐步直播（每一步单独发一条消息）" },
+    ],
+  }));
 }
 
 export function BotCard({

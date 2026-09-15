@@ -1,0 +1,130 @@
+import * as React from 'react';
+
+const h = React.createElement;
+
+function dimensions(size) {
+  return size === undefined ? {} : { width: size, height: size };
+}
+
+/**
+ * Vendored from the native DSH icon set
+ * (packages/client/ui-primitives/src/icons). The plugin cannot import
+ * ui-primitives without widening its client-inject manifest and the whole
+ * compatibility matrix, so the exact paths live here: native grid,
+ * currentColor, native stroke weight. Text glyphs (arrows, checks,
+ * breadcrumb carets) rendered differently on every platform and were the last
+ * place the page still looked foreign.
+ */
+export function ChevronRightGlyph({ size } = {}) {
+  return h('svg', {
+    ...dimensions(size),
+    viewBox: '0 0 14 14',
+    fill: 'none',
+    focusable: 'false',
+    'aria-hidden': 'true',
+    'data-im-icon': 'chevronright',
+  },
+  h('path', { fill: 'currentColor', d: 'M5.5 2.15137L5.92383 2.57617L8.65137 5.30273C8.90706 5.55843 9.13382 5.78438 9.29785 5.98828C9.46883 6.20088 9.61756 6.44405 9.66602 6.75C9.69222 6.91565 9.69222 7.08435 9.66602 7.25C9.61756 7.55595 9.46883 7.79912 9.29785 8.01172C9.13382 8.21561 8.90706 8.44157 8.65137 8.69727L5.92383 11.4238L5.5 11.8486L4.65137 11L5.07617 10.5762L7.80273 7.84863C8.07732 7.57405 8.24849 7.40124 8.3623 7.25977C8.46904 7.12709 8.47813 7.07728 8.48047 7.0625C8.48703 7.02105 8.48703 6.97895 8.48047 6.9375C8.47813 6.92272 8.46904 6.87291 8.3623 6.74023C8.24848 6.59876 8.07732 6.42595 7.80273 6.15137L5.07617 3.42383L4.65137 3L5.5 2.15137Z' }));
+}
+
+export function ChevronLeftGlyph({ size } = {}) {
+  return h('svg', {
+    ...dimensions(size),
+    viewBox: '0 0 14 14',
+    fill: 'none',
+    focusable: 'false',
+    'aria-hidden': 'true',
+    'data-im-icon': 'chevronleft',
+  },
+  h('path', { fill: 'currentColor', d: 'M8.5 2.15137L8.07617 2.57617L5.34863 5.30273C5.09294 5.55843 4.86618 5.78438 4.70215 5.98828C4.53117 6.20088 4.38244 6.44405 4.33398 6.75C4.30778 6.91565 4.30778 7.08435 4.33398 7.25C4.38244 7.55595 4.53117 7.79912 4.70215 8.01172C4.86618 8.21561 5.09294 8.44157 5.34863 8.69727L8.07617 11.4238L8.5 11.8486L9.34863 11L8.92383 10.5762L6.19727 7.84863C5.92268 7.57405 5.75151 7.40124 5.6377 7.25977C5.53096 7.12709 5.52187 7.07728 5.51953 7.0625C5.51297 7.02105 5.51297 6.97895 5.51953 6.9375C5.52187 6.92272 5.53096 6.87291 5.6377 6.74023C5.75152 6.59876 5.92268 6.42595 6.19727 6.15137L8.92383 3.42383L9.34863 3L8.5 2.15137Z' }));
+}
+
+export function CheckGlyph({ size } = {}) {
+  return h('svg', {
+    ...dimensions(size),
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    focusable: 'false',
+    'aria-hidden': 'true',
+    'data-im-icon': 'check',
+  },
+  h('path', { fill: 'currentColor', d: 'M15.0498 3.92579L8.49512 12.3818C8.25774 12.6881 8.04517 12.9645 7.84668 13.1689C7.63957 13.3823 7.38732 13.5841 7.04492 13.6719C6.86373 13.7183 6.6757 13.7346 6.48926 13.7197C6.13666 13.6915 5.8528 13.5355 5.6123 13.3604C5.38201 13.1926 5.12573 12.9567 4.83984 12.6953L1.03125 9.21289L1.96875 8.1875L5.77734 11.6699C6.08684 11.9529 6.27773 12.1249 6.43066 12.2363C6.50183 12.2882 6.54699 12.3135 6.57324 12.3252C6.58525 12.3305 6.59269 12.3322 6.5957 12.333C6.59802 12.3336 6.59961 12.334 6.59961 12.334C6.63317 12.3367 6.66758 12.3335 6.7002 12.3252C6.7002 12.3252 6.70211 12.3251 6.7041 12.3242C6.70698 12.3229 6.71348 12.319 6.72461 12.3115C6.74849 12.2956 6.78843 12.2642 6.84961 12.2012C6.98138 12.0654 7.13957 11.8628 7.39648 11.5313L13.9502 3.07422L15.0498 3.92579Z' }));
+}
+
+export function PlusGlyph({ size } = {}) {
+  return h('svg', {
+    ...dimensions(size),
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    focusable: 'false',
+    'aria-hidden': 'true',
+    'data-im-icon': 'plus',
+  },
+  h('path', { fill: 'currentColor', d: 'M8.64453 1.5V7.34961H14.5V8.65039H8.64453V14.5H7.34473V8.65039H1.5V7.34961H7.34473V1.5H8.64453Z' }));
+}
+
+/**
+ * The one glyph here that is NOT vendored: the native set has no flask, and "(Experimental)"
+ * written out as text cost a second line's worth of width on every card that carries it.
+ * Drawn to the same rules as the rest - 16 grid, currentColor, native stroke weight.
+ */
+export function FlaskGlyph({ size } = {}) {
+  return h('svg', {
+    ...dimensions(size),
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    focusable: 'false',
+    'aria-hidden': 'true',
+    'data-im-icon': 'flask',
+  },
+  h('path', {
+    d: 'M6.4 1.7v3.95l-3.72 6.4a1.3 1.3 0 0 0 1.13 1.95h8.38a1.3 1.3 0 0 0 1.13-1.95L9.6 5.65V1.7M5.45 1.7h5.1',
+    stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round',
+  }));
+}
+
+export function ExternalLinkGlyph({ size } = {}) {
+  return h('svg', {
+    ...dimensions(size),
+    viewBox: '0 0 14 14',
+    fill: 'none',
+    focusable: 'false',
+    'aria-hidden': 'true',
+    'data-im-icon': 'externallink',
+  },
+  h('path', { fill: 'currentColor', d: 'M8.19727 5.86969C9.2092 6.90067 9.20969 8.55271 8.19727 9.58338L6.88871 10.8919C5.85801 11.9039 4.20584 11.9037 3.17502 10.8919L3.10873 10.8243C2.09622 9.7934 2.09626 8.14148 3.10873 7.11058L4.36757 5.85174C4.28261 6.33758 4.30355 6.84354 4.44077 7.33362L3.89249 7.88053C3.30043 8.48348 3.30108 9.4507 3.89318 10.0536L3.94566 10.1061C4.54861 10.698 5.51521 10.6981 6.11808 10.1061L7.41283 8.81275C8.00484 8.21002 8.00504 7.24267 7.41352 6.63964L7.35966 6.58716C7.21975 6.44976 7.05995 6.34434 6.89009 6.27089L7.70009 5.4609C7.85176 5.55768 7.99607 5.67091 8.1296 5.80202L8.19727 5.86969Z' }),
+  h('path', { fill: 'currentColor', d: 'M5.80913 8.12648C4.79584 7.09547 4.79591 5.44245 5.80913 4.41141C5.81733 4.40304 5.82707 4.39209 5.8409 4.37826L7.07833 3.14082C7.09224 3.12693 7.10311 3.11729 7.11148 3.10906C8.14253 2.09591 9.79557 2.09579 10.8266 3.10906L10.8908 3.17328C11.9041 4.20425 11.9039 5.85727 10.8908 6.88835L9.63193 8.14581C9.70566 7.66581 9.67564 7.16895 9.53456 6.68948L10.1063 6.11772C10.6989 5.51458 10.6992 4.54691 10.1063 3.94391L10.0552 3.8942C9.45215 3.30157 8.48446 3.30151 7.88142 3.8942L6.59358 5.18204C6.00081 5.78507 6.00092 6.75274 6.59358 7.35584L6.6433 7.40694C6.77998 7.54132 6.93555 7.64528 7.10112 7.71837L6.29251 8.52699C6.14446 8.43127 6.00395 8.31906 5.87335 8.1907L5.80913 8.12648Z' }));
+}
+
+/**
+ * Native question mark (ic_ds_question_outline_14): the ring plus the question
+ * glyph. The help triggers used to draw a bare "?" text character, which
+ * renders at a different weight and shape from every other mark on the page.
+ */
+export function QuestionGlyph({ size } = {}) {
+  return h('svg', {
+    ...dimensions(size),
+    viewBox: '0 0 14 14',
+    fill: 'none',
+    focusable: 'false',
+    'aria-hidden': 'true',
+    'data-im-icon': 'question',
+  },
+  h('path', { fill: 'currentColor', d: 'M12.5757 7.00012C12.5757 3.92085 10.0794 1.42463 7.00012 1.42456C3.9208 1.42456 1.42456 3.9208 1.42456 7.00012C1.42463 10.0794 3.92085 12.5757 7.00012 12.5757C10.0793 12.5756 12.5756 10.0793 12.5757 7.00012ZM13.8002 7.00012C13.8001 10.7559 10.7559 13.8001 7.00012 13.8002C3.2443 13.8002 0.199291 10.7559 0.199219 7.00012C0.199219 3.24426 3.24426 0.199219 7.00012 0.199219C10.7559 0.199291 13.8002 3.2443 13.8002 7.00012Z' }),
+  h('path', { fill: 'currentColor', d: 'M6.18042 8.68184C6.18043 8.09153 6.32893 7.34655 6.92127 6.8481C7.28566 6.54148 7.76104 6.27318 8.0022 6.10811C8.28964 5.91137 8.42234 5.76562 8.48328 5.58944C8.57774 5.31609 8.53121 5.00904 8.34912 4.76741C8.17409 4.53522 7.83879 4.32222 7.28186 4.32222C5.99668 4.32225 5.46969 5.11832 5.46949 5.78939H4.24414C4.24436 4.39942 5.36327 3.09691 7.28186 3.09688C8.17773 3.09688 8.89489 3.45606 9.32752 4.02999C9.75287 4.59438 9.86938 5.32775 9.64026 5.99019C9.44847 6.5444 9.04722 6.87743 8.69434 7.11898C8.29506 7.39226 8.02318 7.52192 7.70996 7.78548C7.51943 7.94582 7.40577 8.24899 7.40577 8.68184V8.75533H6.18042V8.68184Z' }),
+  h('path', { fill: 'currentColor', d: 'M7.39455 9.44026V10.8109H6.16921V9.44026H7.39455Z' }));
+}
+
+/** Native close mark (ic_ds_close_outline_16). */
+export function CloseGlyph({ size } = {}) {
+  return h('svg', {
+    ...dimensions(size),
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    focusable: 'false',
+    'aria-hidden': 'true',
+    'data-im-icon': 'close',
+  },
+  h('path', { fill: 'currentColor', d: 'M14.1168 13.197L13.197 14.1167L1.8833 2.80303L2.80309 1.88324L14.1168 13.197Z' }),
+  h('path', { fill: 'currentColor', d: 'M13.197 1.88326L14.1168 2.80305L2.80309 14.1168L1.8833 13.197L13.197 1.88326Z' }));
+}

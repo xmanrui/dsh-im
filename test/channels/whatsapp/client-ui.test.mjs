@@ -70,7 +70,8 @@ test('WhatsApp account card uses the unified compact channel layout', () => {
   assert.doesNotMatch(markup, /WhatsApp Web|消息通道|dim-botMetric/);
   assert.match(markup, /检查连接/);
   assert.match(markup, /移除接入/);
-  assert.match(markup, /class="dim-presetSelect"/);
+  // The preset selector is a button + menu now, so it carries the row-control class too.
+  assert.match(markup, /class="dim-presetSelect dim-rowControl"/);
   assert.match(markup, /aria-label="更多机器人设置"/);
   assert.doesNotMatch(markup, /仅自己模式（默认）|指定联系人模式|开放响应模式/);
   assert.match(markup, /role="status"[^>]*>测试消息已发送/);

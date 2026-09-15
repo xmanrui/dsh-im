@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { createPortal } from 'react-dom';
+import { DisclosureChevron } from './channels/shared/collapsible-account.js';
+import { HelpTip } from './help-tip.js';
 
 import {
   CONTEXT_DIRECT_GUIDANCE_EXAMPLE,
@@ -10,6 +11,9 @@ import {
   validateContextEnhancementConfig,
 } from '../../src/channels/shared/context-enhancement.mjs';
 import { h, localizeText } from './i18n.js';
+
+/** One save per pause, not one per keystroke. */
+const SAVE_DELAY = 450;
 
 const FIELD_LABELS = Object.freeze({
   channel: '渠道',
@@ -22,22 +26,23 @@ const FIELD_LABELS = Object.freeze({
   botId: '机器人标识',
 });
 
+/* Only the field-specific half lives here. Every one of these four hints used
+   to open with the same sentence and close with the same sentence, differing
+   only in the middle clause: measured, those shared halves were 380px of a
+   1028px dialog. The shared rule is stated once, on the section, where it
+   covers every field at once. */
 const FIELD_HELP = Object.freeze({
-  senderName: Object.freeze({
-    labelKey: 'senderNameHelpLabel',
-    text: '该字段不是每个渠道都能提供。当前消息没有发送者昵称时，即使已选择该字段，<dsh_im_source> 中也会省略 senderName。',
-  }),
   conversationTitle: Object.freeze({
     labelKey: 'conversationTitleHelpLabel',
-    text: '该字段不是每个渠道都能提供。钉钉群聊会带上群名。当前消息没有会话标题时，即使已选择该字段，<dsh_im_source> 中也会省略 conversationTitle。',
+    text: '钉钉群聊会带上群名。',
   }),
   chatId: Object.freeze({
     labelKey: 'chatIdHelpLabel',
-    text: '该字段不是每个渠道都能提供。会话标识用于区分不同的群组或私聊，飞书群聊会带上群 ID。当前消息没有会话标识时，即使已选择该字段，<dsh_im_source> 中也会省略 chatId。',
+    text: '用于区分不同的群组或私聊；飞书群聊会带上群 ID。',
   }),
   threadId: Object.freeze({
     labelKey: 'threadIdHelpLabel',
-    text: '该字段不是每个渠道都能提供。飞书话题群的消息会带上话题 ID，用于区分同一群组内的不同话题；当前消息不在话题中时，即使已选择该字段，<dsh_im_source> 中也会省略 threadId。',
+    text: '飞书话题群的消息会带上话题 ID，用于区分同一群组内的不同话题。',
   }),
 });
 
@@ -114,6 +119,11 @@ function ContextEnhancementScopeEditor({
   h('label', { className: 'dim-contextSwitchRow' },
     h('span', { className: 'dim-contextSwitchLabel' },
       h('span', null, copy.enable),
+      /* P2: name the scope on the row itself. The tab strip above already shows which panel is
+         open, but the switch is what actually writes the value, so it states its own scope
+         rather than relying on the reader to connect the two. copy.title is the same localised
+         scope name the tab uses, so no new strings are introduced. */
+      h('span', { className: 'dim-contextSwitchScope' }, copy.title),
       !supported ? h('span', {
         id: unavailableId, className: 'dim-contextUnavailable',
       }, '（当前渠道不支持群聊）') : null),
@@ -126,14 +136,11 @@ function ContextEnhancementScopeEditor({
     })),
   h('div', { className: 'dim-contextScopeBlock' },
     h('div', { className: 'dim-contextLegend' },
-      h('span', null, '来源字段'),
-      h('span', { className: 'dim-contextHelp dim-contextLegendHelp' },
-        h('button', {
-          type: 'button', className: 'dim-contextHelpButton', disabled,
-          'aria-label': copy.fieldsHelpLabel, 'aria-describedby': fieldsHelpId,
-        }, h('span', { 'aria-hidden': 'true' }, '?')),
-        h('span', { id: fieldsHelpId, className: 'dim-contextTooltip dim-contextLegendTooltip', role: 'tooltip' },
-          '增强提示词中请使用字段名（如 senderId、conversationType）引用这些信息。只发送当前会话中勾选且可用的字段，不会额外查询或补全。'))),
+      h('span', { className: 'dim-helpRow' },
+        h('span', null, '来源字段'),
+        h(HelpTip, {
+          id: fieldsHelpId, label: copy.fieldsHelpLabel, disabled,
+        }, '增强提示词中请使用字段名（如 senderId、conversationType）引用这些信息。只发送当前会话中勾选且可用的字段，不会额外查询或补全；某字段在当前渠道或当前消息中不存在时，即使已勾选，<dsh_im_source> 中也会省略。'))),
     h('div', { className: 'dim-contextFields' }, CONTEXT_ENHANCEMENT_FIELDS.map((field) => {
       const fieldId = `${idPrefix}-${kind}-field-${field}`;
       return h('div', { key: field, className: 'dim-contextField' },
@@ -144,38 +151,32 @@ function ContextEnhancementScopeEditor({
             ? [...scope.fields, field] : scope.fields.filter((value) => value !== field)),
         }),
         h('span', { className: 'dim-contextFieldText' },
-          h('label', { className: 'dim-contextFieldName', htmlFor: fieldId }, FIELD_LABELS[field]),
-          FIELD_HELP[field] ? h('span', { className: 'dim-contextHelp dim-contextFieldHelp' },
-            h('button', {
-              type: 'button', className: 'dim-contextHelpButton dim-contextFieldHelpButton', disabled,
-              'aria-label': copy[FIELD_HELP[field].labelKey],
-              'aria-describedby': `${idPrefix}-${kind}-${field}-help`,
-            }, h('span', { 'aria-hidden': 'true' }, '?')),
-            h('span', {
-              id: `${idPrefix}-${kind}-${field}-help`,
-              className: 'dim-contextTooltip dim-contextFieldTooltip',
-              role: 'tooltip',
-            }, FIELD_HELP[field].text)) : null,
+          h('span', { className: 'dim-helpRow' },
+            h('label', { className: 'dim-contextFieldName', htmlFor: fieldId }, FIELD_LABELS[field]),
+            FIELD_HELP[field]
+              ? h(HelpTip, {
+                id: `${fieldId}-help`,
+                label: copy[FIELD_HELP[field].labelKey],
+                disabled,
+              }, FIELD_HELP[field].text)
+              : null),
           h('label', { className: 'dim-contextFieldKey', htmlFor: fieldId }, field)));
     }))),
   h('div', { className: 'dim-contextGuidance dim-contextScopeBlock' },
     h('div', { className: 'dim-contextEditorHeader' },
       h('span', { className: 'dim-contextEditorTitle' },
         h('label', { htmlFor: guidanceId }, copy.guidanceLabel),
-        h('span', { className: 'dim-contextHelp' },
-          h('button', {
-            type: 'button', className: 'dim-contextHelpButton', disabled,
-            'aria-label': copy.guidanceHelpLabel, 'aria-describedby': guidanceHelpId,
-          }, h('span', { 'aria-hidden': 'true' }, '?')),
-          h('span', { id: guidanceHelpId, className: 'dim-contextTooltip dim-contextGuidanceTooltip', role: 'tooltip' },
-            h('strong', null, '使用说明'),
-            h('span', null, copy.guidanceUsage),
-            h('strong', null, '生效规则'),
-            h('span', null, copy.guidanceBehavior),
-            h('strong', null, '隐私提示'),
-            h('span', null, '发送者标识可能包含平台用户 ID 或电话号码形式的标识。关闭开关不会删除已经写入会话历史的信息。'),
-            h('strong', null, '使用示例'),
-            h('span', { className: 'dim-contextTooltipExample' }, example)))),
+        h(HelpTip, {
+          id: guidanceHelpId, label: copy.guidanceHelpLabel, place: 'above', disabled,
+        },
+        h('strong', null, '使用说明'),
+        h('span', null, copy.guidanceUsage),
+        h('strong', null, '生效规则'),
+        h('span', null, copy.guidanceBehavior),
+        h('strong', null, '隐私提示'),
+        h('span', null, '发送者标识可能包含平台用户 ID 或电话号码形式的标识。关闭开关不会删除已经写入会话历史的信息。'),
+        h('strong', null, '使用示例'),
+        h('span', { className: 'dim-helpExample' }, example))),
       h('div', { className: 'dim-contextTextActions' },
         h('button', { type: 'button', disabled, onClick: () => onChange('guidance', example) }, '填入示例'),
         h('button', { type: 'button', disabled, onClick: () => onChange('guidance', '') }, '清空'))),
@@ -200,43 +201,113 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
     };
   });
   const [saving, setSaving] = React.useState(false);
+  const [justSaved, setJustSaved] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [activeScope, setActiveScope] = React.useState('direct');
   const savingRef = React.useRef(false);
+  /* Every edit saves itself, so the draft is only the working copy the controls render
+     from. There is no committed/draft split any more, and therefore nothing to cancel.
+     The ref exists because a debounced save has to read the LATEST draft, not the one
+     that was current when the timer was set. */
+  const draftRef = React.useRef(draft);
+  const queuedRef = React.useRef(false);
+  const timerRef = React.useRef(null);
+  const justSavedTimerRef = React.useRef(null);
   const dialogRef = React.useRef(null);
   const mountedRef = React.useRef(true);
   const groupTabRef = React.useRef(null);
   const directTabRef = React.useRef(null);
-  const titleId = React.useId();
   const descriptionId = React.useId();
   const scopeIdPrefix = React.useId();
   const groupGuidanceExample = localizeText(CONTEXT_GROUP_GUIDANCE_EXAMPLE);
   const directGuidanceExample = localizeText(CONTEXT_DIRECT_GUIDANCE_EXAMPLE);
-  const busy = disabled || saving;
+  /* The card marks itself busy for the whole of every RPC - including the ones this region
+     starts itself, which is now one per pause in typing. Taking that as "disabled" made the
+     guidance box untypeable: the sheet dims disabled controls to 40%, so the panel blinked on
+     every save and the box lost what was being typed into it. An in-flight save of our own is
+     therefore not a reason to disable anything here; saves are serialised by savingRef, which
+     is the part that actually needs the guard. A genuine card-level busy (a reconnect, a
+     delete) still arrives with saving === false and disables the region as before. */
+  const busy = disabled && !saving;
   const scopeKinds = ['direct', 'group'];
   const tabRefs = { group: groupTabRef, direct: directTabRef };
 
+  React.useEffect(() => { draftRef.current = draft; }, [draft]);
+
+  /* One writer for the whole region. A save already in flight wins; the next one is
+     queued rather than dropped, so a fast typist cannot outrun it. */
+  const saveNow = React.useCallback(async () => {
+    if (savingRef.current) { queuedRef.current = true; return; }
+    savingRef.current = true;
+    // The unmount flush runs after the region is gone; state updates there are pointless.
+    if (mountedRef.current) { setSaving(true); setError(null); }
+    try {
+      await onSave(validateContextEnhancementConfig(draftRef.current));
+      if (mountedRef.current) {
+        setJustSaved(true);
+        if (justSavedTimerRef.current) globalThis.clearTimeout(justSavedTimerRef.current);
+        justSavedTimerRef.current = globalThis.setTimeout(() => {
+          if (mountedRef.current) setJustSaved(false);
+        }, 2000);
+      }
+    } catch (cause) {
+      if (mountedRef.current) setError(cause?.message ?? '上下文增强保存失败，请重试。');
+    } finally {
+      savingRef.current = false;
+      if (mountedRef.current) setSaving(false);
+      if (queuedRef.current) {
+        queuedRef.current = false;
+        void saveNow();
+      }
+    }
+  }, [onSave]);
+
+  // Debounced so a sentence in the guidance box is one save, not one per keystroke.
+  const scheduleSave = () => {
+    if (timerRef.current) globalThis.clearTimeout(timerRef.current);
+    timerRef.current = globalThis.setTimeout(() => {
+      timerRef.current = null;
+      void saveNow();
+    }, SAVE_DELAY);
+  };
+
+  /* The flush closure, kept in a ref so the effect below can stay a MOUNT effect. Putting
+     saveNow in its dependencies re-ran it whenever onSave changed identity - which the card
+     does on every busy flip, i.e. on every save - and each re-run ran the cleanup, which hands
+     focus back to the entry button. The guidance box lost the caret mid-sentence and the next
+     space closed the panel. */
+  const saveNowRef = React.useRef(saveNow);
+  React.useEffect(() => { saveNowRef.current = saveNow; }, [saveNow]);
+
   React.useEffect(() => {
     mountedRef.current = true;
+    // Inline disclosure, not a modal: focus moves in on open and returns to the trigger
+    // on close, but it is NOT trapped. A trap exists because a dialog covers the page;
+    // this region does not, so pulling focus back would fight the user.
     dialogRef.current?.focus?.();
-    const keepFocus = (event) => {
-      if (dialogRef.current && !dialogRef.current.contains(event.target)) dialogRef.current.focus();
-    };
-    globalThis.document?.addEventListener?.('focusin', keepFocus);
     return () => {
       mountedRef.current = false;
-      globalThis.document?.removeEventListener?.('focusin', keepFocus);
+      // Collapsing must not lose the last edit: a debounce still pending is flushed
+      // here. setState is skipped afterwards because the region is already gone.
+      if (timerRef.current) {
+        globalThis.clearTimeout(timerRef.current);
+        timerRef.current = null;
+        void saveNowRef.current?.();
+      }
+      if (justSavedTimerRef.current) globalThis.clearTimeout(justSavedTimerRef.current);
       queueMicrotask(() => returnFocusRef.current?.focus?.());
     };
   }, [returnFocusRef]);
 
   const changeScope = (kind, key, value) => {
-    if (busy || savingRef.current) return;
+    // busy, not disabled: a queued edit made while our own save is in flight must land.
+    if (busy) return;
     setDraft((current) => ({
       ...current,
       [kind]: { ...current[kind], [key]: value },
     }));
     setError(null);
+    scheduleSave();
   };
 
   const cancel = () => {
@@ -262,34 +333,14 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
     activateScope(next, true);
   };
 
-  const save = async () => {
-    if (busy || savingRef.current) return;
-    savingRef.current = true;
-    setSaving(true);
-    setError(null);
-    dialogRef.current?.focus?.();
-    try {
-      const next = validateContextEnhancementConfig(draft);
-      await onSave(next);
-      if (mountedRef.current) onClose();
-    } catch (cause) {
-      if (mountedRef.current) setError(cause?.message ?? '上下文增强保存失败，请重试。');
-    } finally {
-      savingRef.current = false;
-      if (mountedRef.current) setSaving(false);
-    }
-  };
-
-  const content = h('div', {
-    className: 'dim-contextBackdrop',
-    onMouseDown: (event) => { if (event.target === event.currentTarget) cancel(); },
-  }, h('section', {
+  // Inline region, rendered where the trigger sits - native expands in place
+  // (ModelListEditor.tsx:407) instead of covering the page. No portal, no backdrop, and
+  // no role=dialog: aria-modal would claim the page behind is inert, which is false.
+  const content = h('section', {
     id,
     ref: dialogRef,
-    className: 'dim-contextDialog',
-    role: 'dialog',
-    'aria-modal': 'true',
-    'aria-labelledby': titleId,
+    className: 'dim-contextPanel',
+    'aria-label': '上下文增强',
     'aria-describedby': descriptionId,
     'aria-busy': saving,
     tabIndex: -1,
@@ -299,86 +350,64 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
         event.stopPropagation();
         cancel();
       }
-      if (event.key !== 'Tab') return;
-      const controls = dialogRef.current?.querySelectorAll?.(
-        'button:not(:disabled), input:not(:disabled), textarea:not(:disabled)',
-      );
-      if (!controls?.length) {
-        event.preventDefault();
-        dialogRef.current?.focus?.();
-        return;
-      }
-      const first = controls[0];
-      const last = controls[controls.length - 1];
-      const active = globalThis.document?.activeElement;
-      if (event.shiftKey && (active === first || active === dialogRef.current)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (active === last || active === dialogRef.current)) {
-        event.preventDefault();
-        first.focus();
-      }
     },
   },
-  h('header', { className: 'dim-contextHeader' },
-    h('div', { className: 'dim-contextHeaderTitle' },
-      h('h3', { id: titleId }, '上下文增强'),
-      h('span', { className: 'dim-contextHelp dim-contextHeaderHelp' },
-        h('button', {
-          type: 'button', className: 'dim-contextHelpButton', disabled: busy,
-          'aria-label': '查看上下文增强说明', 'aria-describedby': descriptionId,
-        }, h('span', { 'aria-hidden': 'true' }, '?')),
-        h('span', { id: descriptionId, className: 'dim-contextTooltip dim-contextHeaderTooltip', role: 'tooltip' },
-          '选择在哪些会话中启用、提供哪些来源字段，以及如何使用这些信息。仅使用已有消息元数据，不查询平台 API。'))),
-    h('button', {
-      type: 'button', className: 'dim-contextClose', 'aria-label': '关闭弹窗',
-      disabled: saving, onClick: cancel,
-    }, h(ContextIcon, { kind: 'close' }))),
-  h('div', { className: 'dim-contextTabs', role: 'tablist', 'aria-label': '上下文增强范围' },
-    scopeKinds.map((kind) => {
-      const selected = activeScope === kind;
-      return h('button', {
-        key: kind,
-        id: `${scopeIdPrefix}-${kind}-tab`,
-        ref: tabRefs[kind],
-        type: 'button',
-        role: 'tab',
-        className: 'dim-contextTab',
-        'data-context-kind': kind,
-        'aria-selected': selected,
-        'aria-controls': `${scopeIdPrefix}-${kind}-panel`,
-        tabIndex: selected ? 0 : -1,
-        disabled: busy,
-        onClick: () => activateScope(kind),
-        onKeyDown: (event) => handleTabKeyDown(event, kind),
-      }, SCOPE_COPY[kind].title);
-    })),
-  scopeKinds.map((kind) => h('div', {
-    key: kind,
-    id: `${scopeIdPrefix}-${kind}-panel`,
-    className: 'dim-contextTabPanel',
-    role: 'tabpanel',
-    'data-context-kind': kind,
-    'aria-labelledby': `${scopeIdPrefix}-${kind}-tab`,
-    hidden: activeScope !== kind,
-  }, h(ContextEnhancementScopeEditor, {
-    kind,
-    scope: draft[kind],
-    example: kind === 'group' ? groupGuidanceExample : directGuidanceExample,
-    supported: kind === 'group' ? groupSupported : true,
-    busy,
-    idPrefix: scopeIdPrefix,
-    onChange: (key, value) => changeScope(kind, key, value),
-  }))),
-  error ? h('p', { className: 'dim-contextError', role: 'alert' }, error) : null,
-  h('footer', { className: 'dim-contextFooter' },
-    h('button', { type: 'button', disabled: saving, onClick: cancel }, '取消'),
-    h('button', {
-      type: 'button', className: 'dim-contextSave', disabled: busy,
-      onClick: () => { void save(); },
-    }, saving ? '保存中…' : '保存'))));
+  h('div', { className: 'dim-contextBody' },
+    /* The strip and its help button share a row. The button must NOT go inside the
+       tablist: a tablist's only permitted children are tabs, and a stray button there
+       breaks that contract for every screen reader. The row is also the positioned
+       anchor the tip needs - without it the panel resolves against the bot card and
+       opens below the whole card. */
+    h('div', { className: 'dim-contextTabsRow' },
+    h('div', { className: 'dim-contextTabs', role: 'tablist', 'aria-label': '上下文增强范围' },
+      scopeKinds.map((kind) => {
+        const selected = activeScope === kind;
+        return h('button', {
+          key: kind,
+          id: `${scopeIdPrefix}-${kind}-tab`,
+          ref: tabRefs[kind],
+          type: 'button',
+          role: 'tab',
+          className: 'dim-contextTab',
+          'data-context-kind': kind,
+          'aria-selected': selected,
+          'aria-controls': `${scopeIdPrefix}-${kind}-panel`,
+          tabIndex: selected ? 0 : -1,
+          disabled: busy,
+          onClick: () => activateScope(kind),
+          onKeyDown: (event) => handleTabKeyDown(event, kind),
+        }, SCOPE_COPY[kind].title);
+      })),
+    /* The panel's own description. It used to be a stacked paragraph at the top of
+       the body; the region carries no second title (the entry above names it), so
+       the tip hangs to the right of the strip that names the scope instead. */
+    h(HelpTip, {
+      id: descriptionId, label: '查看上下文增强说明', disabled: busy,
+    }, '选择在哪些会话中启用、提供哪些来源字段，以及如何使用这些信息。仅使用已有消息元数据，不查询平台 API。')),
+    scopeKinds.map((kind) => h('div', {
+      key: kind,
+      id: `${scopeIdPrefix}-${kind}-panel`,
+      className: 'dim-contextTabPanel',
+      role: 'tabpanel',
+      'data-context-kind': kind,
+      'aria-labelledby': `${scopeIdPrefix}-${kind}-tab`,
+      hidden: activeScope !== kind,
+    }, h(ContextEnhancementScopeEditor, {
+      kind,
+      scope: draft[kind],
+      example: kind === 'group' ? groupGuidanceExample : directGuidanceExample,
+      supported: kind === 'group' ? groupSupported : true,
+      busy,
+      idPrefix: scopeIdPrefix,
+      onChange: (key, value) => changeScope(kind, key, value),
+    }))),
+    error ? h('p', { className: 'dim-contextError', role: 'alert' }, error) : null,),
+  /* No buttons: there is nothing to confirm and nothing to cancel. What is left is the
+     one thing a form without a Save button owes the reader - telling them it saved. */
+  h('div', { className: 'dim-contextFooter', role: 'status' },
+    saving ? '保存中…' : justSaved ? '已保存' : '更改会自动保存'));
 
-  return globalThis.document?.body ? createPortal(content, document.body) : content;
+  return content;
 }
 
 export function ContextEnhancementEditor({ config, groupSupported = true, disabled = false, onSave }) {
@@ -391,18 +420,23 @@ export function ContextEnhancementEditor({ config, groupSupported = true, disabl
     ...saved, group: { ...saved.group, enabled: false },
   });
 
-  return h(React.Fragment, null,
+  // The shared disclosure root: `is-open` drives the chevron rotation and the
+  // body's grid-template-rows, so this editor reacts to the same two
+  // declarations as every channel card.
+  return h('div', { className: `dim-collapsible${open ? ' is-open' : ''}`, 'data-open': open ? 'true' : 'false' },
     h('button', {
       type: 'button', ref: entryRef, className: 'dim-contextEntry', disabled,
       'aria-label': '上下文增强', 'aria-describedby': statusId,
-      'aria-haspopup': 'dialog', 'aria-expanded': open, 'aria-controls': open ? dialogId : undefined,
-      onClick: () => setOpen(true),
+      'aria-expanded': open, 'aria-controls': open ? dialogId : undefined,
+      onClick: () => setOpen((value) => !value),
     }, h(ContextIcon),
     h('span', { className: 'dim-contextLabel' }, '上下文增强'),
     h('span', { id: statusId, className: 'dim-contextStatus', 'data-active': label !== '未开启', 'aria-live': 'polite' }, label),
-    h(ContextIcon, { kind: 'chevron' })),
-    open ? h(ContextEnhancementDialog, {
-      id: dialogId, config, groupSupported, disabled, onSave,
-      onClose: () => setOpen(false), returnFocusRef: entryRef,
-    }) : null);
+    h(DisclosureChevron)),
+    open ? h('div', { className: 'dim-collapsibleBody' },
+      h('div', { className: 'dim-collapsibleBodyInner' },
+        h(ContextEnhancementDialog, {
+          id: dialogId, config, groupSupported, disabled, onSave,
+          onClose: () => setOpen(false), returnFocusRef: entryRef,
+        }))) : null);
 }

@@ -116,7 +116,16 @@ test('ModelEditor lists provider groups, explains new-session semantics and clea
     }),
   });
   assert.match(textOf(renderer.root), /removed\/old-model/u);
-  assert.match(textOf(renderer.root.findByProps({ role: 'tooltip' })), /先发送 \/new/u);
+  // The new-session sentence is the Model row's own description now: it sits in the
+  // row's left text slot, under that row's title, instead of floating below the group
+  // with nothing to attach it to. Native's rows carry their description the same way.
+  const modelRow = renderer.root.findAllByProps({ className: 'dim-modelRow' })[0];
+  const slot = modelRow.findByProps({ className: 'dim-rowText' });
+  assert.match(textOf(slot), /先发送 \/new/u);
+  assert.equal(slot.findAllByProps({ className: 'dim-rowDesc' }).length, 1, 'the description lives inside the row');
+  // The second row carries the divider; the first does not.
+  const rows = renderer.root.findAllByProps({ className: 'dim-modelRow dim-rowDivider' });
+  assert.equal(rows.length, 1, 'exactly one row in the group carries the hairline');
   assert.match(textOf(renderer.root.findByProps({ role: 'status' })), /当前模型已不可用/u);
   await openMenu(renderer.root, '模型');
   assert.equal(renderer.root.findByProps({ role: 'group' }).props['aria-label'], 'OpenAI');

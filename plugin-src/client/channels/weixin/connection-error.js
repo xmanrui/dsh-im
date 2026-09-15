@@ -2,6 +2,7 @@ import * as React from 'react';
 import { h, localizeText } from '../../i18n.js';
 import { normalizeConnectionError } from './api.js';
 import { CONFIG_ISSUE_LABELS } from '../../../../src/channels/weixin/diagnostic-details.mjs';
+import { CollapsibleAccountSection } from '../shared/collapsible-account.js';
 
 const STAGE_LABELS = {
   'startup.load': '加载微信配置', 'qr.begin': '申请二维码', 'qr.encode': '生成二维码图片', 'qr.poll': '查询扫码状态',
@@ -56,16 +57,19 @@ export function WeixinConnectionError({ error: value, warning = false }) {
   return h('div', { className: 'dxw-summary dim-cardSummary', 'data-weixin-diagnostic': true, role: warning ? 'status' : undefined },
     h('p', null, error.message),
     details.hint ? h('p', null, details.hint) : null,
-    h('details', { style: { marginTop: 8 } },
-      h('summary', { style: { cursor: 'pointer' } }, '诊断详情'),
-      h('dl', { style: { display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '4px 12px', margin: '10px 0' } },
+    h(CollapsibleAccountSection, {
+      className: 'dim-diagnosticDisclosure',
+      toggleLabel: null,
+      header: h('span', { className: 'dim-diagnosticSummary' }, '诊断详情'),
+    },
+      h('dl', { className: 'dim-diagnosticFields' },
         ...fields.flatMap(([label, text]) => [h('dt', { key: `${label}-label` }, label),
-          React.createElement('dd', { key: label, style: { margin: 0, overflowWrap: 'anywhere' } }, String(text))])),
-      !details.referenceId ? h('p', null, '未取得 Host 诊断参考号。') : null,
+          React.createElement('dd', { key: label, className: 'dim-diagnosticValue' }, String(text))])),
+      !details.referenceId ? h('p', { className: 'dim-diagnosticNotice' }, '未取得 Host 诊断参考号。') : null,
       h('div', { className: 'dim-viewActions' },
         h('button', { type: 'button', className: 'dxw-button', onClick: copy }, copyState === 'copied' ? '诊断信息已复制' : '复制诊断信息')),
       copyState === 'manual' ? h('div', null,
-        h('p', null, '无法访问剪贴板，请选择并复制以下诊断信息。'),
+        h('p', { className: 'dim-diagnosticHint' }, '无法访问剪贴板，请选择并复制以下诊断信息。'),
         React.createElement('textarea', { readOnly: true, value: formatWeixinDiagnostic(error), rows: 7,
-          'aria-label': localizeText('诊断信息'), style: { width: '100%', boxSizing: 'border-box', marginTop: 8 } })) : null));
+          'aria-label': localizeText('诊断信息'), className: 'dim-diagnosticTextarea' })) : null));
 }

@@ -564,8 +564,9 @@ test('DingTalk settings save an Agent Preset through bot.preset.set', async (t) 
     await flushMicrotasks();
   });
   await act(async () => {
-    renderer.root.findByProps({ className: 'dim-presetSelect' })
-      .props.onChange({ target: { value: 'coding' } });
+    // The selector is a RowSelect now, so drive its contract rather than a select's event.
+    renderer.root.findAllByProps({ className: 'dim-presetSelect dim-rowControl' })
+      .find((node) => typeof node.props.onChange === 'function').props.onChange('coding');
     await flushMicrotasks();
   });
 

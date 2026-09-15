@@ -6,6 +6,7 @@ import {
   DingtalkLogoGlyph,
   DiscordLogoGlyph,
   FeishuLogoGlyph,
+  GithubMarkGlyph,
   OfficeLogoGlyph,
   QqLogoGlyph,
   SlackLogoGlyph,
@@ -15,6 +16,7 @@ import {
   WhatsappLogoGlyph,
   IMessageLogoGlyph,
 } from './channel-logos.js';
+import { FlaskGlyph } from './ui-glyphs.js';
 import { DINGTALK_RPC_CHANNEL } from './channels/dingtalk/api.js';
 import { DingtalkSettingsTab } from './channels/dingtalk/index.js';
 import { DISCORD_RPC_CHANNEL } from './channels/discord/api.js';
@@ -99,9 +101,9 @@ const CHANNELS = Object.freeze([
   { id: 'telegram', label: 'Telegram' },
   { id: 'discord', label: 'Discord' },
   { id: 'whatsapp', label: 'WhatsApp' },
-  { id: 'wecomApp', label: '企业微信应用', note: '（实验功能）' },
-  { id: 'imessage', label: 'iMessage', note: '（实验功能）' },
-  { id: 'office', label: 'AI Office', note: '（实验功能）' },
+  { id: 'wecomApp', label: '企业微信应用', experimental: true },
+  { id: 'imessage', label: 'iMessage', experimental: true },
+  { id: 'office', label: 'AI Office', experimental: true },
 ]);
 
 function WeixinLogo() {
@@ -216,6 +218,7 @@ export function IMSettingsTab({
   const [loopbackRecovery, setLoopbackRecovery] = React.useState(null);
   const [runningVersion, setRunningVersion] = React.useState(IM_PLUGIN_VERSION);
   const [deliverySettings, setDeliverySettings] = React.useState(null);
+  const railTabRefs = React.useRef([]);
   const githubTooltipId = React.useId();
   const generalSettingsTooltipId = React.useId();
   const globalSettingsSelected = selected === GLOBAL_SETTINGS_TAB_ID;
@@ -226,6 +229,22 @@ export function IMSettingsTab({
   const activePanelId = globalSettingsSelected
     ? `dim-panel-${GLOBAL_SETTINGS_TAB_ID}`
     : `dim-panel-${active.id}`;
+  // WAI-ARIA tabs pattern: one Tab stop for the strip, the arrow keys move
+  // within it, Home/End jump to the ends. Selection follows focus, which is the
+  // behaviour the pattern prescribes for a strip whose panels are cheap to show.
+  const onRailKeyDown = (event) => {
+    const { key } = event;
+    if (key !== 'ArrowRight' && key !== 'ArrowLeft' && key !== 'Home' && key !== 'End') return;
+    const count = CHANNELS.length;
+    const from = Math.max(0, CHANNELS.findIndex((channel) => channel.id === selected));
+    const next = key === 'Home' ? 0
+      : key === 'End' ? count - 1
+        : (from + (key === 'ArrowRight' ? 1 : -1) + count) % count;
+    event.preventDefault();
+    setSelected(CHANNELS[next].id);
+    setDeliverySettings(null);
+    railTabRefs.current[next]?.focus?.();
+  };
   const reportLoopbackRecovery = React.useCallback((recovery) => {
     setLoopbackRecovery((current) => current?.url === recovery.url ? current : recovery);
   }, []);
@@ -296,8 +315,7 @@ export function IMSettingsTab({
           'aria-label': 'dsh-im GitHub',
           'aria-describedby': githubTooltipId,
         },
-        h('span', null, 'GitHub'),
-        h('span', { className: 'dim-githubArrow', 'aria-hidden': 'true' }, '↗')),
+        h(GithubMarkGlyph, { size: 16 })),
         h('span', {
           id: githubTooltipId,
           className: 'dim-githubTooltip',
@@ -324,14 +342,25 @@ export function IMSettingsTab({
         }, '通用设置'))),
     ),
     h('div', { className: 'dim-layout' },
-      h('nav', { className: 'dim-rail', role: 'tablist', 'aria-label': 'IM 设置导航' },
-        CHANNELS.map((channel) => h('button', {
+      h('nav', {
+        className: 'dim-rail',
+        role: 'tablist',
+        'aria-label': 'IM 设置导航',
+        onKeyDown: onRailKeyDown,
+      },
+        CHANNELS.map((channel, index) => h('button', {
+          ref: (node) => { railTabRefs.current[index] = node; },
           key: channel.id,
           type: 'button',
           role: 'tab',
           id: `dim-tab-${channel.id}`,
           className: 'dim-channel',
           'aria-selected': !globalSettingsSelected && channel.id === active.id,
+          // Roving tabindex: one Tab stop for the whole strip; the arrow keys
+          // move within it. With nothing selected (the general settings page is
+          // showing) the first tab holds the stop so the strip stays reachable.
+          tabIndex: (!globalSettingsSelected && channel.id === active.id)
+            || (globalSettingsSelected && channel.id === CHANNELS[0].id) ? 0 : -1,
           'aria-controls': `dim-panel-${channel.id}`,
           onClick: () => {
             setSelected(channel.id);
@@ -341,9 +370,14 @@ export function IMSettingsTab({
         h(ChannelLogo, { channel: channel.id }),
         h('span', { className: 'dim-channelCopy' },
           h('strong', null, channel.label),
-          channel.note ? h('small', { className: 'dim-channelNote' }, channel.note) : null,
+          /* The badge is an icon, not a word: "(Experimental)" written out took a second
+             line's width on every card that carries it and said the same thing three times.
+             role=img + aria-label keeps the name for anyone not reading the picture. */
+          channel.experimental ? h('span', {
+            className: 'dim-channelBadge', role: 'img',
+            'aria-label': '实验功能', title: '实验功能',
+          }, h(FlaskGlyph, { size: 14 })) : null,
         )))),
-      h('div', { className: 'dim-divider', 'aria-hidden': 'true' }),
       h('main', {
         className: 'dim-panel',
         role: 'tabpanel',

@@ -5,7 +5,10 @@ import {
   normalizeAccessPolicy,
   validateAccessPolicy,
 } from '../../src/channels/shared/access-policy.mjs';
+import { HelpTip } from './help-tip.js';
 import { h, localizeText } from './i18n.js';
+import { RowSelect } from './row-selector.js';
+import { PlusGlyph } from './ui-glyphs.js';
 
 export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
 
@@ -127,6 +130,7 @@ function ScenePolicyEditor({
   unsupported = false,
   onChange,
 }) {
+  const legendId = React.useId();
   const ownerHelpId = React.useId();
   const emptyAllowlistHelpId = React.useId();
   const allowlist = policy.mode === 'allowlist';
@@ -145,77 +149,77 @@ function ScenePolicyEditor({
       userIndex === index ? { ...user, ...patch } : user
     )));
 
-  return h('fieldset', {
+  // role="group" + aria-labelledby carries the same grouping semantics as
+  // fieldset/legend without the legend notching the card border. display:
+  // contents is deliberately NOT used: it strips the group from the
+  // accessibility tree in several browser/screen-reader pairings.
+  return h('div', {
     className: 'dim-accessScene',
-    disabled,
+    role: 'group',
+    'aria-labelledby': legendId,
+    'aria-disabled': disabled || undefined,
     'data-scene': scene,
-    'aria-label': localizeText(title),
   },
-  h('legend', null,
-    h('span', { className: 'dim-accessLegendContent' },
-      h('span', null, title),
-      h('span', { className: 'dim-channelHelp dim-accessLegendHelp' },
-        h('button', {
-          type: 'button',
-          className: 'dim-channelHelpButton',
-          'aria-label': [localizeText(title), localizeText('查看访问权限说明')].join(' '),
-          'aria-describedby': ownerHelpId,
-        }, h('span', { 'aria-hidden': true }, '?')),
-        h('span', {
-          id: ownerHelpId,
-          className: 'dim-channelTooltip dim-accessHelpTooltip',
-          role: 'tooltip',
-        }, '原所有者或扫码接入者始终可以访问并执行命令；以下设置仅约束其他用户。')))),
+  h('div', { id: legendId, className: 'dim-accessLegend' },
+    h('div', { className: 'dim-helpRow' },
+      h('span', { className: 'dim-accessLegendContent' },
+        h('span', null, title)),
+      h(HelpTip, {
+        id: ownerHelpId,
+        label: [localizeText(title), localizeText('查看访问权限说明')].join(' '),
+        disabled,
+      }, '原所有者或扫码接入者始终可以访问并执行命令；以下设置仅约束其他用户。'))),
   unsupported
     ? h('div', { className: 'dim-accessUnsupported', role: 'note' },
         h('strong', null, '当前渠道不支持群聊'),
         h('p', null, '此区域无需配置，保存私聊设置时会保留现有群聊策略。'))
     : h(React.Fragment, null,
         h('div', { className: 'dim-accessControls', 'data-mode': policy.mode },
-          h('label', { className: 'dim-accessField' },
-            h('span', null, '访问模式'),
-            h('select', {
+          /* Both policy rows are divs, not labels: a label wrapping the row makes a click
+             on the row's own name open the menu, which is not how any other row behaves.
+             The selector names itself through its own aria-label. */
+          h('div', { className: 'dim-accessField dim-modelRow' },
+            h('span', { className: 'dim-rowText' },
+              h('span', { className: 'dim-modelRowLabel' }, '访问模式')),
+            h(RowSelect, {
               value: policy.mode,
-              'aria-label': [localizeText(title), localizeText('访问模式')].join(' '),
-              onChange: (event) => onChange({ ...policy, mode: event.target.value }),
-            },
-            h('option', { value: 'open' }, '允许所有用户'),
-            h('option', { value: 'allowlist' }, '仅白名单用户'))),
-          allowlist ? null : h('label', { className: 'dim-accessField' },
-              h('span', null, '默认命令权限'),
-              h('select', {
+              disabled,
+              label: [localizeText(title), localizeText('访问模式')].join(' '),
+              onChange: (next) => onChange({ ...policy, mode: next }),
+              options: [
+                { value: 'open', label: '允许所有用户' },
+                { value: 'allowlist', label: '仅白名单用户' },
+              ],
+            })),
+          allowlist ? null : h('div', { className: 'dim-accessField dim-modelRow' },
+              h('span', { className: 'dim-rowText' },
+                h('span', { className: 'dim-modelRowLabel' }, '默认命令权限')),
+              h(RowSelect, {
                 value: policy.open.defaultCanExecuteCommands ? 'allow' : 'deny',
-                'aria-label': [localizeText(title), localizeText('默认命令权限')].join(' '),
-                onChange: (event) => onChange({
+                disabled,
+                label: [localizeText(title), localizeText('默认命令权限')].join(' '),
+                onChange: (next) => onChange({
                   ...policy,
                   open: {
                     ...policy.open,
-                    defaultCanExecuteCommands: commandValue(event.target.value),
+                    defaultCanExecuteCommands: commandValue(next),
                   },
                 }),
-              },
-              h('option', { value: 'allow' }, '可以执行命令'),
-              h('option', { value: 'deny' }, '不可以执行命令')))),
+                options: [
+                  { value: 'allow', label: '可以执行命令' },
+                  { value: 'deny', label: '不可以执行命令' },
+                ],
+              }))),
         h('div', { className: 'dim-accessUsers' },
           h('div', { className: 'dim-accessUsersHeading' },
             h('div', { className: 'dim-accessUsersTitle' },
               h('strong', null, allowlist ? '白名单用户' : '命令权限例外'),
               emptyAllowlist
-                ? h('span', { className: 'dim-channelHelp dim-accessUsersHelp' },
-                    h('button', {
-                      type: 'button',
-                      className: 'dim-channelHelpButton',
-                      'aria-label': [localizeText(title), localizeText('查看白名单说明')].join(' '),
-                      'aria-describedby': emptyAllowlistHelpId,
-                    }, h('span', { 'aria-hidden': true }, '?')),
-                    h('span', {
-                      id: emptyAllowlistHelpId,
-                      className: 'dim-channelTooltip dim-accessEmptyAllowlistTooltip',
-                      role: 'tooltip',
-                    }, '当前没有白名单用户，保存后普通用户将无法使用机器人。'))
+                ? h('p', { className: 'dim-accessEmptyWarning' }, '当前没有白名单用户，保存后普通用户将无法使用机器人。')
                 : null),
             h('button', {
               type: 'button',
+              disabled,
               className: 'dim-deliveryButton dim-accessAddUser',
               'aria-label': [localizeText(title), localizeText('新增用户')].join(' '),
               title: localizeText('新增用户'),
@@ -225,7 +229,7 @@ function ScenePolicyEditor({
                   ? false
                   : !policy.open.defaultCanExecuteCommands,
               }]),
-            }, h('span', { 'aria-hidden': true }, '+'))),
+            }, h(PlusGlyph, { size: 16 }))),
           users.length === 0
             ? h('div', { className: 'dim-accessUsersEmpty' }, '尚未添加用户')
             : h('ul', { className: 'dim-accessUserList' }, users.map((user, index) =>
@@ -234,6 +238,7 @@ function ScenePolicyEditor({
                     h('span', null, userLabel),
                     h('input', {
                       value: user.id,
+                      disabled,
                       maxLength: 256,
                       required: true,
                       autoCapitalize: 'none',
@@ -247,6 +252,7 @@ function ScenePolicyEditor({
                     h('span', null, '命令权限'),
                     h('select', {
                       value: user.canExecuteCommands ? 'allow' : 'deny',
+                      disabled,
                       'aria-label': [
                         localizeText(title), localizeText('用户'), index + 1,
                         localizeText('命令权限'),
@@ -259,6 +265,7 @@ function ScenePolicyEditor({
                     h('option', { value: 'deny' }, '不可以执行命令'))),
                   h('button', {
                     type: 'button',
+                    disabled,
                     className: 'dim-deliveryButton dim-accessDeleteUser',
                     'data-kind': 'danger',
                     'aria-label': [
