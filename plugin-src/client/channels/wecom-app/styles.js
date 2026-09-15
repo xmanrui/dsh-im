@@ -2,7 +2,7 @@ export const WECOM_APP_STYLE_ID = 'xmanrui-dsh-im-wecom-app-settings';
 
 const CSS = String.raw`
 .dwecomapp-page { --ddt-accent: #07c160; --ddt-accent-deep: #059a4c; --ddt-accent-wash: #eefaf3; }
-.dwecomapp-avatar, .dwecomapp-brand { color: #07c160; background: #fff; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); }
+.dwecomapp-avatar, .dwecomapp-brand { color: #07c160; background: #fff; border: 0.5px solid var(--dsw-alias-border-l2, #e5e6eb); }
 .dwecomapp-avatar svg, .dwecomapp-brand svg { display: block; }
 .dim-appFieldGrid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .dim-callbackBox { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px dashed var(--dsw-alias-border-l2, #e5e6eb); border-radius: 8px; }

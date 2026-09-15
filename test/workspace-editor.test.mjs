@@ -863,17 +863,15 @@ test('AgentPresetEditor lists Host presets and moves its session guidance into a
   assert.deepEqual(optionValues(select), ['', 'coding', 'default']);
   assert.equal(textOf(select.children[0]), '跟随 Host 默认');
   assert.equal(textOf(select.children[1]), 'Coding（coding）');
-  const helpButton = renderer.root.findByProps({
-    'aria-label': '查看 Agent Preset 说明',
-  });
-  const tooltip = renderer.root.findByProps({ role: 'tooltip' });
-  assert.equal(helpButton.props.type, 'button');
-  assert.ok(tooltip.props.id);
-  assert.equal(helpButton.props['aria-describedby'], tooltip.props.id);
+  // The guidance is inline hint text now. Native settings surfaces carry no help
+  // trigger at all, so the "?" button and its tooltip were removed rather than
+  // restyled; the sentence itself is unchanged and still announced.
+  const hint = renderer.root.findByProps({ className: 'dim-helpHint' });
   assert.equal(
-    textOf(tooltip),
+    textOf(hint),
     '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。',
   );
+  assert.equal(renderer.root.findAll(node => node.props?.['aria-label'] === '查看 Agent Preset 说明').length, 0);
   assert.equal(renderer.root.findAllByType('small').length, 0);
   renderer.unmount();
 });

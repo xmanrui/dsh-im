@@ -84,9 +84,13 @@ const CSS = String.raw`
 .bxf-card {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--dsw-alias-border-l2, #dee0e3);
   border-radius: 14px;
   background: var(--dsw-alias-bg-layer-3, #fff);
+  /* The hairline belongs to the convergence layer, which paints every card in
+     this plugin through .dim-panel .dim-surfaceCard / .dim-botCard. Drawing a
+     stroke here as well — as a layout border or inside the shadow via
+     --dsw-elevation-stroke — gave the card two outlines. Only the soft drop
+     shadow is local. */
   box-shadow: var(--dsw-shadow-lv1, 0 3px 12px rgba(31, 35, 41, .05));
 }
 
@@ -189,7 +193,7 @@ const CSS = String.raw`
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border: 1px solid var(--dsw-alias-border-l2, #dee0e3);
+  border: 0.5px solid var(--dsw-alias-border-l2, #dee0e3);
   border-radius: 8px;
   padding: 7px 13px;
   color: var(--dsw-alias-label-primary, #1f2329);
@@ -254,7 +258,7 @@ const CSS = String.raw`
 
 .bxf-markStage::before {
   inset: 12px;
-  border: 1px solid color-mix(in srgb, var(--bxf-accent) 18%, var(--dsw-alias-border-l2, #dee0e3));
+  border: 0.5px solid color-mix(in srgb, var(--bxf-accent) 18%, var(--dsw-alias-border-l2, #dee0e3));
   background: color-mix(in srgb, var(--bxf-accent) 4%, var(--dsw-alias-bg-layer-1, #fff));
 }
 
@@ -292,7 +296,7 @@ const CSS = String.raw`
   height: 222px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--dsw-alias-border-l2, #dee0e3);
+  border: 0.5px solid var(--dsw-alias-border-l2, #dee0e3);
   border-radius: 14px;
   padding: 13px;
   background: #fff;
@@ -350,7 +354,7 @@ const CSS = String.raw`
 }
 
 .bxf-countdownTop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.bxf-progress { height: 3px; overflow: hidden; border-radius: 99px; background: var(--dsw-alias-bg-module-platform, #f2f3f5); margin-top: 6px; }
+.bxf-progress { height: 3px; overflow: hidden; border-radius: 999px; background: var(--dsw-alias-bg-module-platform, #f2f3f5); margin-top: 6px; }
 .bxf-progress > span { display: block; width: var(--bxf-progress, 100%); height: 100%; border-radius: inherit; background: var(--bxf-accent); transition: width 1s linear; }
 
 .bxf-qrCopy h3 { font-size: 20px; line-height: 29px; font-weight: 600; }
@@ -358,7 +362,7 @@ const CSS = String.raw`
 
 .bxf-steps { counter-reset: bxf-step; display: flex; flex-direction: column; gap: 11px; margin: 20px 0 0; padding: 0; list-style: none; }
 .bxf-steps li { counter-increment: bxf-step; display: grid; grid-template-columns: 23px minmax(0, 1fr); align-items: start; gap: 9px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 19px; }
-.bxf-steps li::before { content: counter(bxf-step); width: 21px; height: 21px; display: grid; place-items: center; border: 1px solid var(--dsw-alias-border-l2, #dee0e3); border-radius: 50%; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font-size: 11px; font-weight: 600; }
+.bxf-steps li::before { content: counter(bxf-step); width: 21px; height: 21px; display: grid; place-items: center; border: 0.5px solid var(--dsw-alias-border-l2, #dee0e3); border-radius: 50%; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font-size: 11px; font-weight: 600; }
 
 .bxf-connecting { min-height: 292px; display: grid; place-items: center; text-align: center; padding: 36px 24px; }
 .bxf-connectingCopy { max-width: 430px; }
@@ -393,7 +397,7 @@ const CSS = String.raw`
 
 .bxf-connectedTop { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .bxf-botIdentity { min-width: 0; display: flex; align-items: center; gap: 13px; }
-.bxf-avatar { flex: none; width: 48px; height: 48px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 3px rgb(31 35 41 / 7%); }
+.bxf-avatar { flex: none; width: 48px; height: 48px; display: grid; place-items: center; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l2, #e5e6eb); border-radius: 14px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 3px rgb(31 35 41 / 7%); }
 .bxf-botName { min-width: 0; }
 .bxf-botName h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; line-height: 24px; font-weight: 600; }
 .bxf-botName p { overflow: hidden; color: var(--dsw-alias-label-tertiary, #8f959e); font-family: var(--ds-font-family-code, monospace); font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
@@ -403,7 +407,7 @@ const CSS = String.raw`
 .bxf-healthPill[data-health="offline"], .bxf-healthPill[data-health="error"] { color: var(--bxf-error); background: color-mix(in srgb, var(--bxf-error) 10%, transparent); }
 
 
-.bxf-responseMode { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; column-gap: 10px; row-gap: 5px; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 8px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.bxf-responseMode { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; column-gap: 10px; row-gap: 5px; margin-top: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 8px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
 .bxf-responseModeHeader { display: contents; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: normal; }
 .bxf-responseModeHeader > span:first-child { grid-column: 1; grid-row: 1; white-space: nowrap; }
 .bxf-responseModeStatus { grid-column: 2; grid-row: 1; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; white-space: nowrap; }
@@ -447,7 +451,7 @@ const CSS = String.raw`
 .bxf-botProvision .bxf-actions { margin-top: 16px; }
 .bxf-botProvision .bxf-inlineError { min-height: 160px; padding: 22px; }
 
-.bxf-connectedFooter { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.bxf-connectedFooter { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 20px; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); }
 .bxf-healthSummary { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
 .bxf-healthSummary[data-error="true"] { color: var(--bxf-error); }
 .bxf-botActions { position: relative; flex: none; width: 100%; flex-wrap: wrap; gap: 8px; margin-top: 0; justify-content: flex-end; }
@@ -461,7 +465,7 @@ const CSS = String.raw`
 .bxf-repairAction:focus-within .bxf-repairTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 
 .bxf-confirm {
-  border-top: 1px solid var(--dsw-alias-border-l2, #dee0e3);
+  border-top: 0.5px solid var(--dsw-alias-border-l2, #dee0e3);
   background: color-mix(in srgb, var(--bxf-error) 4%, var(--dsw-alias-bg-module-platform, #f7f8fa));
   padding: 17px 24px 20px;
 }
@@ -480,7 +484,7 @@ const CSS = String.raw`
   display: flex;
   align-items: center;
   gap: 9px;
-  border: 1px solid color-mix(in srgb, var(--bxf-warning) 28%, var(--dsw-alias-border-l2, #dee0e3));
+  border: 0.5px solid color-mix(in srgb, var(--bxf-warning) 28%, var(--dsw-alias-border-l2, #dee0e3));
   border-radius: 10px;
   padding: 9px 11px;
   color: var(--dsw-alias-label-secondary, #646a73);

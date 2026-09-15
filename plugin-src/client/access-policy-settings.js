@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { QuestionGlyph } from './ui-glyphs.js';
 
 import {
   DEFAULT_ACCESS_POLICY,
@@ -166,7 +167,7 @@ function ScenePolicyEditor({
           className: 'dim-channelHelpButton',
           'aria-label': [localizeText(title), localizeText('查看访问权限说明')].join(' '),
           'aria-describedby': ownerHelpId,
-        }, h('span', { 'aria-hidden': true }, '?')),
+        }, h(QuestionGlyph, { size: 14 })),
         h('span', {
           id: ownerHelpId,
           className: 'dim-channelTooltip dim-accessHelpTooltip',
@@ -215,7 +216,7 @@ function ScenePolicyEditor({
                       className: 'dim-channelHelpButton',
                       'aria-label': [localizeText(title), localizeText('查看白名单说明')].join(' '),
                       'aria-describedby': emptyAllowlistHelpId,
-                    }, h('span', { 'aria-hidden': true }, '?')),
+                    }, h(QuestionGlyph, { size: 14 })),
                     h('span', {
                       id: emptyAllowlistHelpId,
                       className: 'dim-channelTooltip dim-accessEmptyAllowlistTooltip',

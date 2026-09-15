@@ -2,7 +2,7 @@ export const OFFICE_STYLE_ID = 'xmanrui-dsh-im-office-settings';
 
 const CSS = `
 .dof-page { --dof-accent: var(--dsw-alias-brand-primary, #3964fe); }
-.dof-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; margin-bottom: 12px; padding: 16px; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: 16px; background: none 62%); }
+.dof-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; margin-bottom: 12px; padding: 16px; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: 16px; background: none; }
 .dof-hero::after { display: none; }
 .dof-heroCopy { min-width: 0; }
 .dof-heroCopy h3 { margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: 15px; line-height: 22px; font-weight: 600; }
@@ -27,6 +27,10 @@ const CSS = `
 .dof-hook { min-width: 0; display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: var(--dsw-alias-bg-module-platform, #f5f6f7); }
 .dof-hook strong { color: var(--dsw-alias-label-secondary, #61666b); font-size: 12px; font-weight: 500; }
 .dof-hook code { overflow: hidden; color: var(--dsw-alias-label-primary, #1f2329); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+/* The hook preview's empty state had no rule at all - the class was mounted and
+   never styled, so the paragraph fell back to the browser default. Native gives a
+   field its hint paragraph this exact shape (ui-settings-plugins .hint). */
+.dof-hooksEmpty { margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: 12px; line-height: 1.5; }
 .dof-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .dof-actions .ddt-button[data-kind="primary"] { border: var(--dim-control-border); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; }
 .dof-error, .dof-notice { margin: 10px 0 0; padding: 9px 11px; border-radius: 8px; font-size: 12px; line-height: 1.5; }

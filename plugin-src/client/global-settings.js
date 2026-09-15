@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { QuestionGlyph } from './ui-glyphs.js';
 
 import {
   DEFAULT_INBOUND_TTL_HOURS,
@@ -240,7 +241,7 @@ export function GlobalSettingsPanel({ rpcCall }) {
             className: 'dim-channelHelpButton dim-globalTtlHelpButton',
             'aria-label': '查看附件保留时长说明',
             'aria-describedby': ttlHintsId,
-          }, h('span', { 'aria-hidden': 'true' }, '?')),
+          }, h(QuestionGlyph, { size: 14 })),
           h('div', {
             id: ttlHintsId,
             className: 'dim-globalTtlTooltip',
