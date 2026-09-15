@@ -10,16 +10,16 @@ const CSS = String.raw`
 .dim-callbackRow { display: flex; gap: var(--dim-gap-8); align-items: center; }
 /* Every other input in the plugin carries the field language; this one declared
    none of it, so it fell back to the UA default beside a 28px capsule button. */
-.dim-callbackRow input { flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--dim-font-12); }
+.dim-callbackRow input { flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font-family: var(--dim-font-mono, monospace); font-size: var(--dim-font-12); }
 .dim-appSwitchRow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--dim-gap-8); font-size: var(--dim-font-13); }
 /* Both were mounted with no rule at all (wecom-app/index.js:161,190), so the
    text fell back to the browser default. Native gives help text under a
    control this shape (ui-settings-plugins .hint). */
-.dim-switchHint, .dim-callbackHint { flex: 1 1 100%; margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: 1.5; }
+.dim-switchHint, .dim-callbackHint { flex: 1 1 100%; margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 /* The streaming toggle is a labelled boolean, so it takes the native outline
    capsule every other action in the panel uses, plus the native pressed
    surface - the same pair .dim-credentialButton already uses. */
-.dim-streamToggle { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font-size: var(--dim-font-12); line-height: 18px; cursor: pointer; }
+.dim-streamToggle { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font-size: var(--dim-font-12); line-height: var(--dim-line-12); cursor: pointer; }
 .dim-streamToggle:hover:not(:disabled) { background: var(--dim-hover-solid); }
 .dim-streamToggle[aria-pressed="true"] { border-color: transparent; background: var(--dsw-specific-sidebar-nav-item-active, #ebeef2); }
 `;

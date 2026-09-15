@@ -8,7 +8,7 @@ const CSS = String.raw`
 .dsl-guide { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--dim-gap-18); padding: 16px; border: 0.5px solid color-mix(in srgb, #4a154b 18%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); border-radius: var(--dim-radius-12); background: color-mix(in srgb, #4a154b 4%, var(--dsw-alias-bg-layer-1, #fff)); }
 .dsl-guideCopy { min-width: 0; }
 .dsl-guideCopy strong { display: block; margin-bottom: 5px; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); }
-.dsl-guideCopy p { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: 1.6; }
+.dsl-guideCopy p { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dsl-guideActions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: var(--dim-gap-8); }
 .dsl-guideActions .ddt-button { white-space: nowrap; }
 .dsl-copyState { color: var(--dsw-alias-state-success-primary, #20a162); }

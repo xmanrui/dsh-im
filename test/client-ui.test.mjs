@@ -239,11 +239,11 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   assert.match(settingsButtonMarkup, /data-im-icon="global-settings"/);
   assert.doesNotMatch(settingsButtonMarkup, /通用设置/);
   assert.match(styles, /\.dim-title \{[^}]*margin: 0 0 12px;/);
-  assert.match(styles, /\.dim-title p \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-size: var\(--dim-font-13\);[^}]*line-height: 20px;[^}]*font-weight: 400;/);
+  assert.match(styles, /\.dim-title p \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-size: var\(--dim-font-13\);[^}]*line-height: var\(--dim-line-13\);[^}]*font-weight: var\(--dim-weight-400\);/);
   assert.match(styles, /\.dim-brand \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*align-items: flex-start;[^}]*gap: var\(--dim-gap-1\);/);
   assert.match(styles, /\.dim-brandHeading \{[^}]*display: flex;[^}]*align-items: center;[^}]*gap: var\(--dim-gap-8\);[^}]*white-space: nowrap;/);
   // Native section title role: 18/600 with no letter-spacing, not a 20/800 wordmark.
-  assert.match(styles, /\.dim-brandName \{[^}]*font-size: var\(--dim-font-18\);[^}]*line-height: 25px;[^}]*font-weight: 600;[^}]*letter-spacing: 0;/);
+  assert.match(styles, /\.dim-brandName \{[^}]*font-size: var\(--dim-font-18\);[^}]*line-height: 25px;[^}]*font-weight: var\(--dim-weight-600\);[^}]*letter-spacing: 0;/);
   // The version renders as a native Tag: r999 capsule, 0.5px l4 outline, 11/17/500.
   assert.match(styles, /\.dim-brandVersion \{[^}]*padding: 1px 8px;[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-full\);[^}]*corner-shape: round;[^}]*font: 500 11px\/17px/);
   assert.doesNotMatch(styles, /dim-versionTooltip|\.dim-brand:focus-visible/);
@@ -318,8 +318,8 @@ test('channel switching is a wrapped tab strip instead of a second navigation co
   assert.doesNotMatch(styles, /\.dim-channel \{[^}]*box-shadow:/);
   assert.match(styles, /\.dim-channel:hover \{ color: var\(--dsw-alias-label-primary, #0f1115\); background: var\(--dim-hover\); \}/);
   assert.match(styles, /\.dim-channel:focus-visible \{ outline: 2px solid var\(--dsw-alias-brand-primary, #0f1115\); outline-offset: 2px; \}/);
-  assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: var\(--dim-font-13\);[^}]*font-weight: 500;/);
-  assert.match(styles, /\.dim-channelNote \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-weight: 400;/);
+  assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: var\(--dim-font-13\);[^}]*font-weight: var\(--dim-weight-500\);/);
+  assert.match(styles, /\.dim-channelNote \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-weight: var\(--dim-weight-400\);/);
 });
 
 test('the general settings gear sits to the right of GitHub and outside the channel rail', () => {
@@ -1127,7 +1127,7 @@ test('all channel bot cards use the DingTalk card treatment', async () => {
   assert.match(styles, /\.dim-panel \.dim-botAvatar \{[^}]*width: 38px;[^}]*height: 38px;[^}]*border-radius: var\(--dim-radius-12\);/);
   assert.match(styles, /\.dim-panel \.dim-botName h3 \{[^}]*font-size: var\(--dim-font-15\);/);
   assert.match(styles, /\.dim-panel \.dim-botHealthGroup \{[^}]*display: grid;[^}]*justify-items: end;[^}]*gap: var\(--dim-gap-2\);/);
-  assert.match(styles, /\.dim-panel \.dim-botCard \.dim-botHealth \{[^}]*background: transparent;[^}]*font-size: var\(--dim-font-12\);[^}]*font-weight: 400;/);
+  assert.match(styles, /\.dim-panel \.dim-botCard \.dim-botHealth \{[^}]*background: transparent;[^}]*font-size: var\(--dim-font-12\);[^}]*font-weight: var\(--dim-weight-400\);/);
   assert.match(styles, /\.dim-panel \.dim-lastChecked \{[^}]*display: inline-flex;[^}]*font-size: var\(--dim-font-12\);[^}]*white-space: nowrap;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-botMetrics|\.dim-panel \.dim-botMetric/);
 });
