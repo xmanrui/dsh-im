@@ -180,7 +180,7 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
       close();
     },
   },
-  h('div', { className: 'dim-presetHeader' },
+  h('div', { className: 'dim-presetHeader dim-blockTitle' },
     h('span', { className: 'dim-presetTitle' }, '模型与思考强度'),
     saving ? h('span', { className: 'dim-presetStatus', role: 'status' }, '保存中…') : null),
   // Every description belongs to the row it explains; the new-session note used to

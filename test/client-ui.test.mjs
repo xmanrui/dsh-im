@@ -315,11 +315,14 @@ test('channel switching is a wrapped tab strip instead of a second navigation co
   assert.doesNotMatch(styles, /\.dim-rail \{[^}]*display: grid;/);
 
   // Tabs read as native selector pills: no border, no fill, no shadow at rest.
-  assert.match(styles, /\.dim-channel \{ max-width: 100%; min-height: 28px; display: inline-flex;[^}]*border: 0;[^}]*border-radius: var\(--dim-radius-14\);/);
+  // The channel cell is the host's .navCell: 40px, radius 12, that padding, that gap.
+  assert.match(styles, /\.dim-channel \{[^}]*height: 40px;[^}]*gap: var\(--dim-gap-8\);[^}]*padding: 9px 16px 9px 12px;[^}]*border-radius: var\(--dim-radius-12\);/);
   assert.doesNotMatch(styles, /\.dim-channel \{[^}]*box-shadow:/);
-  assert.match(styles, /\.dim-channel:hover \{ color: var\(--dsw-alias-label-primary, #0f1115\); background: var\(--dim-hover\); \}/);
+  // The hover fill is the host's own nav-cell token, not the generic hover.
+  assert.match(styles, /\.dim-channel:hover \{ color: var\(--dsw-alias-label-primary, #0f1115\); background: var\(--dsw-specific-sidebar-nav-item-hover, var\(--dim-hover\)\); \}/);
   assert.match(styles, /\.dim-channel:focus-visible \{ outline: 2px solid var\(--dsw-alias-brand-primary, #0f1115\); outline-offset: 2px; \}/);
-  assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: var\(--dim-font-13\);[^}]*font-weight: var\(--dim-weight-500\);/);
+  // The label takes the host's .navCell type: 14/22 at the inherited weight.
+  assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: var\(--dim-font-14\);[^}]*line-height: var\(--dim-line-14\);[^}]*font-weight: var\(--dim-weight-400\);/);
   assert.match(styles, /\.dim-channelNote \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-weight: var\(--dim-weight-400\);/);
 });
 
@@ -967,8 +970,8 @@ test('all channel settings states use the DingTalk page treatment', async () => 
   }
 
   assert.match(styles, /\.dim-panel \.dim-channelPage \{[^}]*flex-direction: column;[^}]*gap: var\(--dim-gap-12\);/);
-  assert.match(styles, /\.dim-panel \.dim-listHeading \{[^}]*margin: 0 0 8px;/);
-  assert.match(styles, /\.dim-panel \.dim-botList \{[^}]*gap: var\(--dim-gap-12\);/);
+  assert.match(styles, /\.dim-panel \.dim-listHeading \{[^}]*margin: 0;/);
+  assert.match(styles, /\.dim-panel \.dim-botList \{[^}]*gap: var\(--dim-gap-10\);/);
   assert.match(styles, /\.dim-panel \.dim-surfaceCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-16\);[^}]*background: none;/);
   assert.match(styles, /\.dim-panel \.dim-loadingView \{[^}]*padding: 38px;[^}]*text-align: center;/);
   // Single column, always: the two-column value lived outside the query and was
@@ -1163,7 +1166,9 @@ test('all channel bot cards use the DingTalk card treatment', async () => {
   // 16px read cramped next to native.
   assert.match(styles, /\.dim-panel \.dim-botCardBody \{[^}]*padding: 0 24px;/);
   assert.match(styles, /\.dim-collapsibleBodyInner > \* \+ \* \{ border-top: 0\.5px solid var\(--dsw-alias-border-l2,/);
-  assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*align-items: flex-start;[^}]*gap: var\(--dim-gap-6\);/);
+  // Centred, not flex-start: with flex-start the tool cluster sat against the top edge of a
+  // two-line header. The host's own .rowHead is align-items: center.
+  assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*align-items: center;[^}]*gap: var\(--dim-gap-6\);/);
   assert.match(styles, /\.dim-panel \.dim-botAvatar \{[^}]*width: 38px;[^}]*height: 38px;[^}]*border-radius: var\(--dim-radius-12\);/);
   assert.match(styles, /\.dim-panel \.dim-botName h3 \{[^}]*font-size: var\(--dim-font-15\);/);
   assert.match(styles, /\.dim-panel \.dim-botHealthGroup \{[^}]*display: grid;[^}]*justify-items: end;[^}]*gap: var\(--dim-gap-2\);/);
@@ -1175,7 +1180,7 @@ test('all channel bot cards use the DingTalk card treatment', async () => {
 test('bot card status stays in the top-right corner at every responsive breakpoint', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
 
-  assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*display: flex;[^}]*align-items: flex-start;[^}]*justify-content: space-between;/);
+  assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*display: flex;[^}]*align-items: center;[^}]*justify-content: space-between;/);
   assert.match(styles, /\.dim-panel \.dim-botIdentity \{[^}]*min-width: 0;[^}]*flex: 1 1 0;/);
   assert.match(styles, /\.dim-panel \.dim-botHealthGroup \{[^}]*flex: none;[^}]*justify-items: end;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-botCardTop \{ flex-direction: column;/);
