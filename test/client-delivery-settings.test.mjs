@@ -253,7 +253,7 @@ test('the card gear opens a bot-scoped page in the current channel panel and ret
     '微信通知助手',
   );
   const docsLink = identity.findByProps({ className: 'dim-deliveryDocsLink' });
-  assert.equal(textOf(docsLink), '使用文档↗');
+  assert.equal(textOf(docsLink), '使用文档');
   assert.equal(
     docsLink.props.href,
     'https://github.com/xmanrui/dsh-im/blob/main/PROACTIVE_DELIVERY.md',
@@ -267,7 +267,7 @@ test('the card gear opens a bot-scoped page in the current channel panel and ret
   }]);
 
   await act(async () => {
-    button(page, '← 返回机器人列表').props.onClick();
+    button(page, '返回机器人列表').props.onClick();
     await flush();
   });
   assert.ok(renderer.root.findByProps({ 'data-bot-id': 'wx_stable_bot' }));
@@ -380,7 +380,13 @@ test('access settings preserve independent mode drafts and save direct and group
   assert.equal(accessHelpButtons(renderer.root).length, 2);
   for (const [scene, title] of [['direct', '私聊'], ['group', '群聊']]) {
     const sceneEditor = renderer.root.findByProps({ 'data-scene': scene });
-    assert.equal(sceneEditor.props['aria-label'], title);
+    // Grouping is carried by role=group + aria-labelledby, which replaces the
+    // fieldset/legend that used to notch the card border.
+    assert.equal(sceneEditor.props.role, 'group');
+    assert.ok(sceneEditor.props['aria-labelledby'], `${title} scene keeps an accessible name`);
+    const sceneLegend = sceneEditor.findByProps({ className: 'dim-accessLegend' });
+    assert.equal(sceneLegend.props.id, sceneEditor.props['aria-labelledby']);
+    assert.match(textOf(sceneLegend), new RegExp(title));
     const accessHelpButton = sceneEditor.findByProps({
       'aria-label': `${title} 查看访问权限说明`,
     });
@@ -603,7 +609,8 @@ test('WeChat keeps the shared access page but disables its unsupported group sec
   });
 
   const group = renderer.root.findByProps({ 'data-scene': 'group' });
-  assert.equal(group.props.disabled, true);
+  // fieldset.disabled used to cascade; the group now says so explicitly.
+  assert.equal(group.props['aria-disabled'], true);
   assert.match(textOf(group), /当前渠道不支持群聊/);
   assert.equal(group.findAllByType('select').length, 0);
   assert.ok(renderer.root.findByProps({ 'data-scene': 'direct' }));
@@ -914,7 +921,7 @@ test('recent conversation names remain platform data in the English UI', async (
     /Choose from conversations/,
   );
   const docsLink = renderer.root.findByProps({ className: 'dim-deliveryDocsLink' });
-  assert.equal(textOf(docsLink), 'User guide↗');
+  assert.equal(textOf(docsLink), 'User guide');
   assert.equal(
     docsLink.props.href,
     'https://github.com/xmanrui/dsh-im/blob/main/PROACTIVE_DELIVERY.en.md',

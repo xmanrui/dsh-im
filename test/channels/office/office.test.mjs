@@ -366,7 +366,11 @@ test('AI Office settings renders connection fields and fixed hook preview', () =
   assert.doesNotMatch(markup, /fission\.gridmind\.ai/);
   assert.match(markup, /Device Token/);
   assert.match(markup, /Workspace 映射/);
-  assert.match(markup, /Base URL 无效/);
+  // One cause, stated once: an empty Base URL yields a single section hint and
+  // quiet rows, instead of repeating the same error in all four rows.
+  assert.match(markup, /填写有效的 Office Base URL 后，这里会显示四个派生地址。/);
+  assert.doesNotMatch(markup, /Base URL 无效/);
+  // With no Base URL there are no derived addresses to show at all.
 });
 
 test('AI Office Job executor claims, reports, approves, and returns one Harness result', async () => {

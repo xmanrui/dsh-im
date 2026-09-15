@@ -29,8 +29,8 @@ const CSS = String.raw`
 .dim-aliasFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-top: 24px; }
 .dim-aliasRestore { padding: 4px 0; border: 0; color: var(--dsw-alias-state-business-primary, #3370ff); background: transparent; }
 .dim-aliasActions { display: flex; gap: 8px; margin-left: auto; }
-.dim-aliasActions button { padding: 7px 14px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 6px; color: inherit; background: var(--dsw-alias-bg-layer-1, #fff); }
-.dim-aliasActions .dim-aliasSave { color: #fff; border-color: var(--dsw-alias-state-business-primary, #3370ff); background: var(--dsw-alias-state-business-primary, #3370ff); }
+.dim-aliasActions button { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.dim-aliasActions .dim-aliasSave { border-color: var(--dsw-alias-border-l3, rgb(0 0 0 / 12%)); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; }
 .dim-aliasEdit:disabled, .dim-aliasDialog button:disabled, .dim-aliasDialog input:disabled { opacity: .55; cursor: not-allowed; }
 .dim-aliasEdit:focus-visible, .dim-aliasDialog button:focus-visible, .dim-aliasDialog input:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: 2px; }
 @media (pointer: coarse) { .dim-aliasEdit, .dim-aliasDialog button { min-width: 44px; min-height: 44px; } .dim-aliasDialog input { font-size: 16px; } }
@@ -51,9 +51,6 @@ const CSS = String.raw`
   --dim-focus: var(--dsw-alias-brand-primary, #0f1115);
   --dim-focus-ring: 2px solid var(--dsw-alias-brand-primary, #0f1115);
   --dim-focus-shadow: 0 0 0 2px var(--dsw-alias-border-l3, rgb(0 0 0 / 12%));
-  --dim-primary-fill: var(--dsw-alias-button-primary-fill, #0f1115);
-  --dim-primary-hover: var(--dsw-alias-button-primary-hover, #43454a);
-  --dim-primary-fg: var(--dsw-alias-label-primary-foreground, #fff);
   --dim-danger: var(--dsw-alias-state-error-primary, #ec1313);
   --dim-danger-hover: var(--dsw-alias-interactive-bg-hover-danger, rgb(236 19 19 / 5%));
   /* Native select chrome: the OS arrow is replaced by the 12px chevron
@@ -73,7 +70,7 @@ const CSS = String.raw`
 .dim-brandVersion { display: inline-flex; align-items: center; padding: 1px 8px; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: 999px; corner-shape: round; color: var(--dsw-alias-label-tertiary, #81858c); font: 500 11px/17px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .dim-title p { margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: 13px; line-height: 20px; font-weight: 400; white-space: nowrap; }
 .dim-titleActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-.dim-updateButton { height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; corner-shape: round; color: var(--dsw-alias-label-secondary, #61666b); background: transparent; font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+.dim-updateButton { height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; color: var(--dsw-alias-label-secondary, #61666b); background: transparent; font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
 .dim-updateButton:hover:not(:disabled) { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover-solid); }
 .dim-updateButton:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
 .dim-updateButton:disabled { opacity: .55; cursor: default; }
@@ -129,9 +126,9 @@ const CSS = String.raw`
    223px out of the 564px the shell hands to a page. */
 .dim-layout { display: block; }
 .dim-rail { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 0 12px; padding: 0; }
-.dim-channel { max-width: 100%; min-height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px 0 4px; border: 0; border-radius: 14px; corner-shape: round; color: var(--dsw-alias-label-secondary, #61666b); background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background .16s ease, color .16s ease; }
+.dim-channel { max-width: 100%; min-height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px 0 4px; border: 0; border-radius: 14px; color: var(--dsw-alias-label-secondary, #61666b); background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background .16s ease, color .16s ease; }
 .dim-channel:hover { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-interactive-bg-hover, rgb(38 49 72 / 6%)); }
-.dim-channel[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-module-platform, #f5f6f7); }
+.dim-channel[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); font-weight: 500; background: var(--dsw-specific-sidebar-nav-item-active, #ebeef2); }
 .dim-channel:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #0f1115); outline-offset: 2px; }
 .dim-logo { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: 6px; }
 .dim-logo svg { display: block; width: 14px; height: 14px; }
@@ -157,8 +154,8 @@ const CSS = String.raw`
 .dim-loopbackRecoveryCopy strong { display: block; font-size: 14px; line-height: 20px; font-weight: 600; }
 .dim-loopbackRecoveryCopy p { margin: 3px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
 .dim-loopbackRecoveryCopy code { display: block; overflow: hidden; margin-top: 5px; color: var(--dsw-alias-label-secondary, #646a73); font: 11px/16px ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.dim-loopbackRecoveryAction { flex: none; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: none; border-radius: 14px; corner-shape: round; color: var(--dim-primary-fg); background: var(--dim-primary-fill); font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
-.dim-loopbackRecoveryAction:hover { background: var(--dim-primary-hover); }
+.dim-loopbackRecoveryAction { flex: none; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.dim-loopbackRecoveryAction:hover { background: var(--dim-hover-solid); }
 .dim-loopbackRecoveryAction:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
 .dim-panel .bxf-page, .dim-panel .dxw-page, .dim-panel .ddt-page, .dim-panel .dqq-page, .dim-panel .dwecom-page, .dim-panel .dsl-page, .dim-panel .dwa-page { width: 100%; max-width: none; padding: 0 0 24px; }
 .dim-panel .bxf-heading, .dim-panel .dxw-heading, .dim-panel .ddt-heading { justify-content: flex-end; }
@@ -168,13 +165,13 @@ const CSS = String.raw`
 /* Theme-following action capsule (native Button .outline): the surface stays on
    the theme's own layer and only the content colour flips, so the QR glyph inside
    rides currentColor and stays legible in both themes. */
-.dim-panel .bxf-headingTools .dim-scanButton, .dim-panel .dxw-tools .dim-scanButton, .dim-panel .ddt-tools .dim-scanButton { flex: none; height: 28px; display: inline-flex; align-items: center; justify-content: center; justify-self: start; gap: 6px; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; corner-shape: round; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; box-shadow: none; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.dim-panel .bxf-headingTools .dim-scanButton, .dim-panel .dxw-tools .dim-scanButton, .dim-panel .ddt-tools .dim-scanButton { flex: none; height: 28px; display: inline-flex; align-items: center; justify-content: center; justify-self: start; gap: 6px; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; box-shadow: none; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
 .dim-panel .bxf-headingTools .dim-scanButton:hover:not(:disabled), .dim-panel .dxw-tools .dim-scanButton:hover:not(:disabled), .dim-panel .ddt-tools .dim-scanButton:hover:not(:disabled) { background: var(--dim-hover-solid); }
-.dim-panel .dim-credentialButton { flex: none; height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; corner-shape: round; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.dim-panel .dim-credentialButton { flex: none; height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
 .dim-panel .dim-actionIcon { width: 15px; height: 15px; flex: 0 0 15px; }
 .dim-panel .dim-credentialButton:hover:not(:disabled) { background: var(--dim-hover-solid); }
-.dim-panel .dim-credentialButton[aria-pressed="true"] { background: var(--dim-module-fill); }
-.dim-panel .bxf-headingTools .dim-onlineBadge, .dim-panel .dxw-tools .dim-onlineBadge, .dim-panel .ddt-tools .dim-onlineBadge { height: 24px; display: inline-flex; align-items: center; justify-self: end; gap: 4px; padding: 0 8px; border: none; border-radius: 12px; corner-shape: round; color: var(--dsw-alias-label-secondary, #61666b); background: var(--dsw-alias-bg-layer-2, #fff); font: inherit; font-size: 12px; font-weight: 400; line-height: 18px; white-space: nowrap; }
+.dim-panel .dim-credentialButton[aria-pressed="true"] { border-color: transparent; background: var(--dsw-specific-sidebar-nav-item-active, #ebeef2); }
+.dim-panel .bxf-headingTools .dim-onlineBadge, .dim-panel .dxw-tools .dim-onlineBadge, .dim-panel .ddt-tools .dim-onlineBadge { height: 24px; display: inline-flex; align-items: center; justify-self: end; gap: 4px; padding: 0 8px; border: none; border-radius: 12px; color: var(--dsw-alias-label-secondary, #61666b); background: var(--dsw-alias-bg-layer-2, #fff); font: inherit; font-size: 12px; font-weight: 400; line-height: 18px; white-space: nowrap; }
 .dim-panel .dim-channelPage { min-width: 0; width: 100%; max-width: none; display: flex; flex-direction: column; gap: 12px; padding: 0 0 24px; color: var(--dsw-alias-label-primary, #1f2329); box-sizing: border-box; }
 .dim-panel select.dim-presetSelect, .dim-panel .dim-targetField select, .dim-panel .dim-accessField select,
 .dim-panel .dim-targetSuggestionField select, .dim-panel .dim-feishuGroupSelect, .dim-panel .bxf-responseModeSelect {
@@ -201,6 +198,7 @@ const CSS = String.raw`
 .dim-panel .dim-credentialActions { margin-top: 0; }
 .dim-panel .dim-listSection { min-width: 0; width: 100%; max-width: 100%; display: flex; flex-direction: column; gap: 0; }
 .dim-panel .dim-listHeading { min-height: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 8px; padding: 0; }
+.dim-panel .dim-listConnection { color: var(--dsw-alias-label-tertiary, #81858c); font-size: 12px; line-height: 18px; }
 .dim-panel .dim-listHeading h3 { margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: 14px; line-height: 22px; font-weight: 400; }
 .dim-panel .dim-listTitle { min-width: 0; display: inline-flex; align-items: center; gap: 6px; }
 .dim-panel .dim-channelHelp { position: relative; display: inline-flex; flex: none; }
@@ -228,7 +226,7 @@ const CSS = String.raw`
 .dim-panel .dim-stateDot[data-tone="warning"] { background: var(--dsw-alias-state-warn-primary, #d97706); }
 .dim-panel .dim-stateDot[data-tone="error"] { background: var(--dsw-alias-state-error-primary, #d54941); }
 .dim-panel .dim-viewActions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
-.dim-panel .dim-viewActions .bxf-button, .dim-panel .dim-viewActions .dxw-button, .dim-panel .dim-viewActions .ddt-button { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; corner-shape: round; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; box-shadow: none; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.dim-panel .dim-viewActions .bxf-button, .dim-panel .dim-viewActions .dxw-button, .dim-panel .dim-viewActions .ddt-button { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; box-shadow: none; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
 .dim-panel .dim-viewActions .bxf-button[data-kind="primary"], .dim-panel .dim-viewActions .dxw-button[data-kind="primary"], .dim-panel .dim-viewActions .ddt-button[data-kind="primary"] { border: var(--dim-control-border); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; box-shadow: none; }
 .dim-panel .dim-viewActions .bxf-button[data-kind="danger"], .dim-panel .dim-viewActions .dxw-button[data-kind="danger"], .dim-panel .dim-viewActions .ddt-button[data-kind="danger"] { color: var(--dsw-alias-state-error-primary, #d54941); }
 .dim-panel .dim-qrLayout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 34px; align-items: start; }
@@ -249,7 +247,7 @@ const CSS = String.raw`
 .dim-panel .dim-qrCopy > p { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); line-height: 1.65; }
 .dim-panel .dim-steps { margin: 18px 0 16px; padding: 0; list-style: none; counter-reset: dim-step; }
 .dim-panel .dim-steps li { position: relative; min-height: 28px; display: flex; align-items: center; padding: 5px 0 5px 36px; color: var(--dsw-alias-label-secondary, #646a73); line-height: 1.5; counter-increment: dim-step; }
-.dim-panel .dim-steps li::before { content: counter(dim-step); position: absolute; left: 0; top: 4px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 12px; corner-shape: round; color: var(--dsw-alias-state-business-primary, #4176e6); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent); font-size: 12px; font-weight: 500; }
+.dim-panel .dim-steps li::before { content: counter(dim-step); position: absolute; left: 0; top: 4px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 12px; color: var(--dsw-alias-state-business-primary, #4176e6); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent); font-size: 12px; font-weight: 500; }
 .dim-panel .dim-specialView { padding: 32px; text-align: center; }
 .dim-panel .dim-statusNotice { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 22%, var(--dsw-alias-border-l2, #dfe1e5)); border-radius: 10px; color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 8%, var(--dsw-alias-bg-layer-1, #fff)); font-size: 14px; line-height: 22px; }
 .dim-panel .dim-inlineError { display: flex; align-items: flex-start; flex-direction: column; gap: 10px; padding: 22px; color: var(--dsw-alias-state-error-primary, #d54941); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d54941) 8%, var(--dsw-alias-bg-layer-1, #fff)); }
@@ -263,7 +261,7 @@ const CSS = String.raw`
 .dim-panel .dim-workspace { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; column-gap: 12px; row-gap: 4px; margin: 0; padding: 16px 0; border: 0; background: none; }
 .dim-panel .dim-workspaceHeader { display: contents; color: var(--dsw-alias-label-primary, #0f1115); font-size: 13px; line-height: 20px; font-weight: 500; }
 .dim-panel .dim-workspaceHeader > span { grid-column: 1; grid-row: 1; white-space: nowrap; }
-.dim-panel .dim-workspaceEdit { grid-column: 2; grid-row: 1; height: 28px; padding: 0 10px; border: none; border-radius: 14px; corner-shape: round; color: var(--dsw-alias-link, #4176e6); background: transparent; font: inherit; font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.dim-panel .dim-workspaceEdit { grid-column: 2; grid-row: 1; height: 28px; padding: 0 10px; border: none; border-radius: 14px; color: var(--dsw-alias-link, #4176e6); background: transparent; font: inherit; font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .dim-panel .dim-workspaceEdit:hover:not(:disabled) { background: var(--dim-hover, rgb(38 49 72 / 6%)); }
 .dim-panel .dim-workspaceEdit:disabled { cursor: not-allowed; opacity: .4; }
 .dim-panel .dim-workspacePath { min-width: 0; max-width: 100%; grid-column: 1 / -1; grid-row: 2; display: block; overflow: hidden; color: var(--dsw-alias-label-secondary, #61666b); font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; white-space: normal; }
@@ -277,7 +275,7 @@ const CSS = String.raw`
 .dim-panel .dim-presetTooltip { position: absolute; top: calc(100% + 7px); left: 0; z-index: 30; width: min(320px, 100%); overflow-wrap: anywhere; white-space: normal; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; padding: 3px 7px; border: 0; border-radius: 8px; color: var(--dsw-static-neutral-bluish-00, #f9fafb); background: var(--dsw-alias-tooltip-bg, #2c2c2e); box-shadow: none; font-size: 13px; line-height: 20px; font-weight: 400; }
 .dim-panel .dim-presetHelp:hover .dim-presetTooltip, .dim-panel .dim-presetHelp:focus-within .dim-presetTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .dim-panel .dim-presetStatus { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); font-size: 12px; line-height: 18px; white-space: nowrap; }
-.dim-panel .dim-presetSelect { flex: none; max-width: 60%; height: 36px; padding: 0 34px 0 14px; border: none; border-radius: 18px; corner-shape: round; color: var(--dsw-alias-label-primary, #0f1115); background-color: var(--dim-module-fill); appearance: none; font: inherit; font-size: 14px; line-height: 22px; cursor: pointer; }
+.dim-panel .dim-presetSelect { flex: none; max-width: 60%; height: 36px; padding: 0 34px 0 14px; border: none; border-radius: 18px; color: var(--dsw-alias-label-primary, #0f1115); background-color: var(--dim-module-fill); appearance: none; font: inherit; font-size: 14px; line-height: 22px; cursor: pointer; }
 .dim-panel .dim-presetSelect:disabled { cursor: not-allowed; opacity: .55; }
 .dim-panel .dim-modelSetting { display: block; padding: 16px 0; }
 .dim-modelSetting > .dim-presetHeader { padding: 0 0 8px; color: var(--dsw-alias-label-secondary, #61666b); font-size: 12px; line-height: 18px; font-weight: 500; }
@@ -285,7 +283,7 @@ const CSS = String.raw`
 .dim-modelRow { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0; border: 0; background: transparent; color: var(--dsw-alias-label-primary, #0f1115); font: inherit; font-size: 14px; line-height: 22px; text-align: left; cursor: pointer; }
 .dim-modelRowLabel { flex: 1; min-width: 0; }
 /* Native selector pill (LanguageRow .selector): h36 r18, module fill, gap 12. */
-.dim-modelSelector { flex: none; max-width: 60%; display: inline-flex; align-items: center; gap: 12px; height: 36px; padding: 0 14px; border-radius: 18px; corner-shape: round; background: var(--dim-module-fill); }
+.dim-modelSelector { flex: none; max-width: 60%; display: inline-flex; align-items: center; gap: 12px; height: 36px; padding: 0 14px; border-radius: 18px; background: var(--dim-module-fill); }
 .dim-modelValue { min-width: 0; overflow: hidden; color: var(--dsw-alias-label-primary, #0f1115); text-overflow: ellipsis; white-space: nowrap; }
 .dim-modelChevron { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); }
 .dim-modelRow:hover:not(:disabled) .dim-modelSelector, .dim-modelOption:hover:not(:disabled) { background: var(--dim-hover); }
@@ -306,7 +304,7 @@ const CSS = String.raw`
 .dim-contextEntry:hover:not(:disabled) { background: none; color: var(--dsw-alias-state-business-primary, #3370ff); }
 .dim-contextEntry > svg { color: var(--dsw-alias-label-secondary, #646a73); }
 .dim-contextLabel { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
-.dim-contextStatus { height: 24px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 12px; corner-shape: round; color: var(--dsw-alias-label-secondary, #61666b); background: var(--dsw-alias-bg-layer-2, #fff); font-size: 12px; line-height: 18px; font-weight: 400; white-space: nowrap; }
+.dim-contextStatus { height: 24px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 12px; color: var(--dsw-alias-label-secondary, #61666b); background: var(--dsw-alias-bg-layer-2, #fff); font-size: 12px; line-height: 18px; font-weight: 400; white-space: nowrap; }
 .dim-contextStatus[data-active="true"] { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-button-ghost-active-fill, #ebeeF2); box-shadow: inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border, #979da6); }
 .dim-contextBackdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 12px; background: var(--dsw-alias-bg-mask-1, rgb(0 0 0 / 24%)); backdrop-filter: var(--dsw-mask-blur, blur(2px)); }
 .dim-contextBackdrop, .dim-contextBackdrop *, .dim-contextBackdrop *::before, .dim-contextBackdrop *::after { box-sizing: border-box; }
@@ -366,7 +364,7 @@ const CSS = String.raw`
 .dim-contextHint { margin: 5px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .dim-contextError { margin: 12px 0 0; color: var(--dsw-alias-state-error-primary, #d54941); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .dim-contextFooter { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.dim-contextFooter button { min-height: 34px; padding: 6px 15px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 7px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; cursor: pointer; }
+.dim-contextFooter button { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
 .dim-contextFooter button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
 .dim-contextFooter .dim-contextSave, .dim-contextFooter .dim-contextSave:hover:not(:disabled) { border-color: var(--dsw-alias-state-business-primary, #3370ff); color: #fff; background: var(--dsw-alias-state-business-primary, #3370ff); }
 .dim-contextEntry:focus-visible, .dim-contextDialog button:focus-visible, .dim-contextDialog input:focus-visible, .dim-contextDialog textarea:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: 2px; }
@@ -426,8 +424,8 @@ const CSS = String.raw`
 .dim-directoryHidden[aria-pressed="true"] .dim-directoryHiddenBox::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .dim-directoryPickerNotice { min-width: 0; margin: 0; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 1.45; text-align: right; }
 .dim-directoryPickerActions { display: flex; gap: 8px; }
-.dim-directoryPickerActions button { min-height: 36px; padding: 0 14px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
-.dim-directoryPickerActions .dim-directoryPickerPrimary { border-color: var(--dim-blue); color: #fff; background: var(--dim-blue); }
+.dim-directoryPickerActions button { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.dim-directoryPickerActions .dim-directoryPickerPrimary { border-color: var(--dsw-alias-border-l3, rgb(0 0 0 / 12%)); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; }
 .dim-directoryPickerActions button:hover:not(:disabled) { filter: brightness(.97); }
 .dim-directoryPickerActions button:disabled { cursor: not-allowed; opacity: .52; }
 .dim-panel .dim-cardSummary { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font: inherit; font-size: 12px; font-weight: 400; line-height: normal; overflow-wrap: anywhere; white-space: normal; }
@@ -435,7 +433,7 @@ const CSS = String.raw`
 .dim-panel .dim-cardFooterLayout > .dim-cardActions { align-self: stretch; }
 .dim-panel .dim-cardFeedback { width: 100%; padding: 8px 10px; border-radius: 8px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f7f8fa); font: inherit; font-size: 12px; font-weight: 400; line-height: 18px; overflow-wrap: anywhere; white-space: normal; }
 .dim-panel .dim-cardActions { flex: none; width: 100%; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin: 0; }
-.dim-panel .dim-cardActions .dim-cardAction { flex: none; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; corner-shape: round; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.dim-panel .dim-cardActions .dim-cardAction { flex: none; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: pointer; }
 .dim-panel .dim-cardActions .dim-cardAction:hover:not(:disabled) { background: var(--dim-hover-solid); }
 .dim-panel .dim-cardActions .dim-cardAction[data-kind="danger"] { border-color: transparent; color: var(--dim-danger); }
 .dim-panel .dim-cardActions .dim-cardAction[data-kind="danger"]:hover:not(:disabled) { background: var(--dim-danger-hover); }
@@ -540,12 +538,13 @@ const CSS = String.raw`
 .dim-deliveryDocsLink { min-height: 30px; flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 7px; color: var(--dsw-alias-state-business-primary, #3370ff); font-size: 12px; line-height: 18px; text-decoration: none; white-space: nowrap; }
 .dim-deliveryDocsLink:hover { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #3370ff) 8%, transparent); }
 .dim-deliveryDocsLink:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: 2px; }
-.dim-deliveryButton { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; corner-shape: round; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+.dim-deliveryButton { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: 14px; color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
 .dim-deliveryButton:hover:not(:disabled) { background: var(--dim-hover-solid); }
 .dim-deliveryButton:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
+/* Header-row create action. Native expresses emphasis on an outline button through its text colour (dangerButton), never through a fill, so the create action takes the business tone over the shared outline capsule. */
+.dim-deliveryButton[data-kind="primary"] { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 35%, var(--dsw-alias-border-l3, rgb(0 0 0 / 12%))); color: var(--dsw-alias-state-business-primary, #4176e6); background: transparent; }
+.dim-deliveryButton[data-kind="primary"]:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent); }
 .dim-deliveryButton:disabled { opacity: .5; cursor: not-allowed; }
-.dim-deliveryButton[data-kind="primary"] { border: none; color: var(--dim-primary-fg); background: var(--dim-primary-fill); }
-.dim-deliveryButton[data-kind="primary"]:hover:not(:disabled) { background: var(--dim-primary-hover); }
 .dim-deliveryButton[data-kind="danger"] { border-color: transparent; color: var(--dim-danger); }
 .dim-deliveryButton[data-kind="danger"]:hover:not(:disabled) { background: var(--dim-danger-hover); }
 .dim-deliveryBack { flex: none; border-color: transparent; background: transparent; }
@@ -600,8 +599,10 @@ const CSS = String.raw`
 .dim-targetFormError { margin: 10px 0 0; font-size: 12px; line-height: 18px; }
 .dim-targetFormActions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 12px; }
 .dim-accessPage { min-width: 0; display: grid; gap: 12px; }
+.dim-accessScene[aria-disabled="true"] { opacity: .6; }
 .dim-accessScene { position: relative; min-width: 0; margin: 0; padding: 16px; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: 16px; background: none; }
-.dim-accessScene > legend { padding: 0 6px; color: var(--dsw-alias-label-primary, #1f2329); font-size: 15px; line-height: 22px; font-weight: 600; }
+/* Ordinary group heading inside the card. A fieldset legend would notch the card border, which no native surface does. */
+.dim-accessLegend { margin: 0 0 4px; color: var(--dsw-alias-label-primary, #0f1115); font-size: 14px; line-height: 22px; font-weight: 500; }
 .dim-accessLegendContent { display: inline-flex; align-items: center; gap: 6px; }
 .dim-panel .dim-accessLegendHelp { position: static; }
 .dim-accessLegendHelp .dim-channelTooltip { top: 20px; right: auto; left: 16px; width: min(320px, calc(100% - 32px)); max-width: none; padding: 3px 7px; border: 0; border-radius: 8px; color: var(--dsw-static-neutral-bluish-00, #f9fafb); background: var(--dsw-alias-tooltip-bg, #2c2c2e); box-shadow: none; font-size: 13px; line-height: 20px; font-weight: 400; }
@@ -667,15 +668,15 @@ const CSS = String.raw`
 .dim-globalSweepConfirm { position: absolute; top: calc(100% + 8px); right: 0; z-index: 35; width: 218px; padding: 11px 12px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; background: var(--dsw-alias-bg-layer-3, #fff); box-shadow: 0 12px 30px rgb(31 35 41 / 18%); }
 .dim-globalSweepConfirm p { margin: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; line-height: 18px; }
 .dim-globalSweepConfirmActions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 10px; }
-.dim-deliveryButton.dim-globalSweepConfirmButton { border: none; color: var(--dim-primary-fg); background: var(--dim-danger); }
-.dim-deliveryButton.dim-globalSweepConfirmButton:hover:not(:disabled) { background: color-mix(in srgb, var(--dim-danger) 88%, #000); }
+.dim-deliveryButton.dim-globalSweepConfirmButton { border-color: transparent; color: var(--dim-danger); }
+.dim-deliveryButton.dim-globalSweepConfirmButton:hover:not(:disabled) { background: var(--dim-danger-hover); }
 .dim-globalInline { flex: 1 0 100%; min-width: 0; margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
 .dim-globalInline[data-tone="error"] { color: var(--dsw-alias-state-error-primary, #d54941); }
 .dim-panel .dim-botCard .dim-cardFooter { margin-top: 0; }
 .dim-panel .ddt-headingCopy { display: none; }
 .dim-panel .ddt-qrFrame, .dim-panel .ddt-countdown { width: min(270px, 100%); }
 @container (max-width: 680px) {
-  .dim-panel .bxf-headingTools, .dim-panel .dxw-tools, .dim-panel .ddt-tools { gap: 6px; }
+  .dim-panel .bxf-headingTools, .dim-panel .dxw-tools, .dim-panel .ddt-tools { gap: 8px; }
   .dim-panel .dim-bindActions { gap: 6px; }
   .dim-panel .bxf-headingTools .dim-scanButton, .dim-panel .dxw-tools .dim-scanButton, .dim-panel .ddt-tools .dim-scanButton, .dim-panel .dim-credentialButton { gap: 5px; padding-inline: 8px; font-size: 12px; }
   .dim-panel .dim-actionIcon { width: 13px; height: 13px; flex-basis: 13px; }
