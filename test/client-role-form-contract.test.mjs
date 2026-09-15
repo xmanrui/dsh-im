@@ -82,7 +82,7 @@ test('the group caption keeps the native caption role', () => {
   // The one label that IS 12px/500 natively: a caption heading a sub-block
   // (ModelsSection .modelCatalogTitle, .fieldLabel). It must not be promoted to the
   // row-title spec just because it sits above rows.
-  const caption = rulesFor('.dim-modelSetting > .dim-presetHeader');
+  const caption = rulesFor('.dim-panel .dim-blockTitle');
   assert.equal(caption.length, 1, 'the group caption keeps its rule');
   assert.equal(declared(caption[0], 'font-size'), 'var(--dim-font-12)');
   assert.equal(declared(caption[0], 'font-weight'), 'var(--dim-weight-500)');

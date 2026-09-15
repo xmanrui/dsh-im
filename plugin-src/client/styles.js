@@ -35,7 +35,7 @@ const CSS = String.raw`
 .dim-aliasEdit svg { opacity: .55; transition: opacity .15s ease; }
 .dim-aliasName:hover .dim-aliasEdit:not(:disabled) svg, .dim-aliasEdit:focus-visible svg { opacity: 1; }
 .dim-aliasEdit:hover:not(:disabled), .dim-aliasEdit:focus-visible { color: var(--dim-blue); background: var(--dim-hover); }
-.dim-aliasDialog { box-sizing: border-box; width: min(380px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 22px; border: 0; border-radius: var(--dim-radius-24); background: var(--dsw-alias-bg-layer-2, #fff); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.dim-aliasDialog { box-sizing: border-box; width: min(380px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 22px; border: 0; border-radius: var(--dim-radius-32); background: var(--dsw-alias-bg-layer-2, #fff); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .dim-aliasDialog * { box-sizing: border-box; }
 .dim-aliasDialog::backdrop { background: var(--dsw-alias-bg-mask-1, rgb(0 0 0 / 24%)); backdrop-filter: var(--dsw-mask-blur, blur(2px)); }
 .dim-aliasHeader { display: flex; justify-content: space-between; align-items: center; gap: var(--dim-gap-12); margin-bottom: 18px; }
@@ -102,9 +102,9 @@ body {
   --dim-radius-18: 18px;
   --dim-radius-20: 20px;
   --dim-radius-24: 24px;
+  --dim-radius-32: 32px;
   /* Genuinely round, and the tab indicator shape - neither is a rung. */
   --dim-radius-full: 999px;
-  --dim-radius-indicator: 2px 2px 0 0;
   /* The gap scale. */
   --dim-gap-1: 1px;
   --dim-gap-2: 2px;
@@ -163,8 +163,9 @@ body {
      than a layer of the app. */
   --dim-z-tooltip-page: 20;
   --dim-z-tooltip: 30;
-  --dim-z-popover: 35;
+  --dim-z-popover: 40;
   --dim-z-portal: 1000;
+  --dim-z-menu: 1100;
   /* The type scale, declared once. Every size below was already on the native
      ladder; this only gives the ladder one address. */
   --dim-font-11: 11px;
@@ -194,6 +195,9 @@ body {
      because the host's own component CSS pairs it even though the ladder skips it; 11 and
      15 still have no host answer and keep their literal, which is what the census found
      (11px text runs at 16px and 17px with nothing to copy). */
+  /* The label tier's line height. The host's 11px roles are 11/16 (.rowTag,
+     .cardIdentity); the 17px some of these carried was the plugin's own. */
+  --dim-line-11: 16px;
   --dim-line-12: 18px;
   --dim-line-13: 20px;
   --dim-line-14: 22px;
@@ -233,7 +237,7 @@ body {
 .dim-updateTrigger { white-space: nowrap; }
 .dim-updateBackdrop { position: fixed; inset: 0; z-index: var(--dim-z-portal); display: grid; place-items: center; padding: 24px; background: var(--dsw-alias-bg-mask-1, rgb(0 0 0 / 24%)); backdrop-filter: var(--dsw-mask-blur, blur(2px)); }
 .dim-updateBackdrop, .dim-updateBackdrop * { box-sizing: border-box; }
-.dim-updateDialog { width: min(480px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; border: 0; border-radius: var(--dim-radius-24); background: var(--dsw-alias-bg-layer-2, #fff); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); text-align: left; }
+.dim-updateDialog { width: min(480px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; border: 0; border-radius: var(--dim-radius-32); background: var(--dsw-alias-bg-layer-2, #fff); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); text-align: left; }
 .dim-updateDialog:focus { outline: none; }
 .dim-updateDialog h3 { margin: 22px 24px 8px; font-size: var(--dim-font-16); line-height: var(--dim-line-16); font-weight: var(--dim-weight-500); }
 .dim-updateDescription { margin: 0 24px; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-13); line-height: var(--dim-line-13); }
@@ -248,7 +252,7 @@ body {
 .dim-updateHint, .dim-updateError { margin: 12px 0 0; font-size: var(--dim-font-12); line-height: var(--dim-line-12); overflow-wrap: anywhere; }
 .dim-updateHint { color: var(--dsw-alias-label-tertiary, #81858c); }
 .dim-updateError { color: var(--dim-danger); }
-.dim-updateManual { margin-top: 18px; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); }
+.dim-updateManual { margin-top: 18px; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .dim-updateManualHeading { margin: 0; font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); }
 .dim-updateManualHint { margin: 8px 0 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-updateCommandRow { display: flex; align-items: center; gap: var(--dim-gap-8); margin-top: 10px; padding: 10px 12px; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-8); background: var(--dsw-alias-bg-layer-1, #f7f8fa); }
@@ -259,7 +263,7 @@ body {
 .dim-updateCopy:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
 .dim-updateCopy:disabled { opacity: 0.4; cursor: default; }
 .dim-updateCopyCopied { color: var(--dsw-alias-state-success-primary, #20a162); }
-.dim-updateFooter { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--dim-gap-8); padding: 14px 24px; border-top: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); }
+.dim-updateFooter { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--dim-gap-8); padding: 14px 24px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .dim-updateFooter .dim-updateButton:first-child { margin-right: auto; }
 .dim-updatePrimary, .dim-updatePrimary:hover:not(:disabled) { border-color: var(--dim-blue); color: var(--dim-action-on-fill, #fff); background: var(--dim-blue); }
 .dim-githubAction { position: relative; display: inline-flex; flex: none; }
@@ -282,9 +286,9 @@ body {
    223px out of the 564px the shell hands to a page. */
 .dim-layout { display: block; }
 .dim-rail { display: flex; flex-wrap: wrap; align-items: center; gap: var(--dim-gap-4); margin: 0 0 12px; padding: 0; }
-.dim-channel { max-width: 100%; min-height: 28px; display: inline-flex; align-items: center; gap: var(--dim-gap-6); padding: 0 10px 0 4px; border: 0; border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background .16s ease, color .16s ease; }
-.dim-channel:hover { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover); }
-.dim-channel[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); font-weight: var(--dim-weight-500); background: var(--dsw-specific-sidebar-nav-item-active, #ebeef2); }
+.dim-channel { max-width: 100%; height: 40px; display: inline-flex; align-items: center; gap: var(--dim-gap-8); padding: 9px 16px 9px 12px; border: 0; border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.dim-channel:hover { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-specific-sidebar-nav-item-hover, var(--dim-hover)); }
+.dim-channel[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-specific-sidebar-nav-item-active, #ebeef2); }
 .dim-channel:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #0f1115); outline-offset: 2px; }
 .dim-logo { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: var(--dim-radius-8); }
 .dim-logo svg { display: block; width: 14px; height: 14px; }
@@ -302,8 +306,8 @@ body {
 .dim-logoWhatsapp { color: white; background: #25d366; }
 .dim-logoIMessage { color: white; background: linear-gradient(180deg, #5bf675 0%, #28d944 50%, #0fbd2c 100%); }
 .dim-channelCopy { min-width: 0; display: inline-flex; align-items: baseline; gap: var(--dim-gap-4); }
-.dim-channelCopy strong { overflow: hidden; color: inherit; font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); text-overflow: ellipsis; white-space: nowrap; }
-.dim-channelNote { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 16px; font-weight: var(--dim-weight-400); white-space: nowrap; }
+.dim-channelCopy strong { overflow: hidden; color: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-400); text-overflow: ellipsis; white-space: nowrap; }
+.dim-channelNote { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: var(--dim-line-11); font-weight: var(--dim-weight-400); white-space: nowrap; }
 .dim-panel { min-width: 0; container-type: inline-size; }
 .dim-loopbackRecovery { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-16); margin: 0 0 14px; padding: 14px 16px; border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 30%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-primary, #0f1115); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 8%, var(--dsw-alias-bg-layer-1, #fff)); }
 .dim-loopbackRecoveryCopy { min-width: 0; }
@@ -392,17 +396,20 @@ body {
 .dim-panel .dim-credentialError, .dim-panel .dim-credentialActions { grid-column: 1 / -1; }
 .dim-panel .dim-credentialError { margin: 0; color: var(--dim-danger); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-panel .dim-credentialActions { margin-top: 0; }
-.dim-panel .dim-listSection { min-width: 0; width: 100%; max-width: 100%; display: flex; flex-direction: column; gap: 0; }
-.dim-panel .dim-listHeading { min-height: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-16); margin: 0 0 8px; padding: 0; }
+.dim-panel .dim-listSection { min-width: 0; width: 100%; max-width: 100%; display: flex; flex-direction: column; gap: var(--dim-gap-12); }
+.dim-panel .dim-listHeading { min-height: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-16); margin: 0; padding: 0; }
 .dim-panel .dim-listConnection { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
-/* The host splits small headings into exactly two sub-roles: a group/section title
-   reads label-tertiary (MenuView .sectionTitle/.groupTitle, ModelSelect .groupTitle),
-   and a field label or catalog title reads label-secondary. This one was a third
-   treatment - 14/400 in label-primary, which is the ROW title's colour, not a
-   heading's. It is a section title, so it takes the section-title role. */
-.dim-panel .dim-listHeading h3 { margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-400); }
+/* An earlier pass moved this to label-tertiary, citing the host's .sectionTitle and
+   .groupTitle. Measured since: those are the titles INSIDE a menu or popover, and the
+   host's content pages carry no intermediate heading above a card list at all - they
+   have a page heading (h2.heading, 18/600) and nothing between it and the cards. The
+   nearest role that does exist for a heading inside a card is the host's own in-card
+   title (.editorTitle, .rowName): 14/22/500 in label-primary. This now matches
+   .dim-presetHeader's base rule, which is the same level and was the second value the
+   same level carried. */
+.dim-panel .dim-listHeading h3 { margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-500); }
 .dim-panel .dim-listTitle { min-width: 0; display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
-.dim-panel .dim-botList { min-width: 0; width: 100%; max-width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--dim-gap-12); margin: 0; padding: 0; list-style: none; }
+.dim-panel .dim-botList { min-width: 0; width: 100%; max-width: 100%; display: flex; flex-direction: column; gap: var(--dim-gap-10); margin: 0; padding: 0; list-style: none; }
 .dim-panel .dim-botList > li { min-width: 0; max-width: 100%; }
 .dim-panel .dim-loadingView { padding: 38px; color: var(--dsw-alias-label-tertiary, #81858c); text-align: center; }
 .dim-panel .dim-loadingView h3 { margin: 0 0 7px; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-16); line-height: var(--dim-line-16); font-weight: var(--dim-weight-500); }
@@ -463,7 +470,7 @@ body {
    plugin's 16px headings already had the 24px leading; only the weight was 600. */
 .dim-panel .dim-inlineError h3 { margin: 0; color: inherit; font-size: var(--dim-font-16); line-height: var(--dim-line-16); font-weight: var(--dim-weight-500); overflow-wrap: anywhere; }
 .dim-panel .dim-inlineError p { margin: 7px 0 0; color: inherit; line-height: 1.6; overflow-wrap: anywhere; }
-.dim-panel .dim-confirm { padding: 18px 24px; border-top: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); background: var(--dim-hover); }
+.dim-panel .dim-confirm { padding: 18px 24px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); background: var(--dim-hover); }
 .dim-panel .dim-confirm strong, .dim-panel .dim-confirm h4 { margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-600); }
 .dim-panel .dim-confirm p { margin: 7px 0 0; color: var(--dsw-alias-label-secondary, #646a73); line-height: 1.6; }
 /* padding-bottom was 0, so the last summary line sat flush against the card's
@@ -487,6 +494,12 @@ body {
    one thing a preset picker has to keep readable. */
 .dim-panel .dim-preset { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--dim-gap-6); margin: 0; padding: 16px 0; border: 0; background: none; }
 .dim-panel .dim-preset > .dim-helpHint { flex: 1 1 100%; }
+/* The host has two 12/18 caption roles and they are not interchangeable: label-tertiary
+   is the hint/route role (.advancedHint, .editorRoute, .modelFieldLabel), while
+   label-secondary is the caption that heads a sub-block (.fieldLabel,
+   .modelCatalogTitle, .customizedSummary). This header is the second kind, so it stays
+   secondary - an attempt to move it to tertiary cited the top-level .sectionTitle, which
+   heads a page section rather than a sub-block, and was reverted. */
 .dim-panel .dim-presetHeader { position: relative; min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-8); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-500); }
 .dim-panel .dim-presetTitle { min-width: 0; display: inline-flex; align-items: center; gap: var(--dim-gap-8); white-space: nowrap; }
 .dim-panel .dim-presetHelp { display: inline-flex; align-items: center; flex: none; }
@@ -500,7 +513,10 @@ body {
    block must not add a second copy - otherwise the hairline between two rows gets
    32px of air on one side and 16px on the other. */
 .dim-panel .dim-modelSetting { display: block; padding: 0; }
-.dim-modelSetting > .dim-presetHeader { padding: 0 0 8px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-500); }
+/* A caption that heads a sub-block inside the card. It used to be the same class name as
+   the header above, scoped by an ancestor: one name carrying two levels, which is why the
+   two kept being compared as though they were one role. */
+.dim-panel .dim-blockTitle { padding: 0 0 8px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-500); }
 /* Native "Setting-Cell" cell: 14/22 label on the left, control hard right. */
 /* A row is a container, so it does not claim to be clickable: the hand belongs to
    the control on the right, which is the only hit target (model-setting.js:108-110).
@@ -542,7 +558,10 @@ body {
    fall back to the UA font (13.33px) and the system dropdown arrow. */
 /* The skin is element-agnostic so a button and a select in the same slot cannot
    drift apart; :not() counts its argument, so the states below are (0,3,0). */
-.dim-panel .dim-rowControl { flex: none; width: auto; min-width: 0; max-width: 60%; height: 36px; padding: 0 14px; border: 0; border-radius: var(--dim-radius-18); appearance: none; color: var(--dsw-alias-label-primary, #0f1115); background-color: var(--dim-module-fill); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); cursor: pointer; }
+/* The host's own selector pill is display:flex, gap 12px, padding 0 14px, height 36px with a
+   chevron svg inside (measured on the General page's four selectors). Its inner layout lives
+   here so every row control gets it, not only the one whose class happened to carry it. */
+.dim-panel .dim-rowControl { display: inline-flex; align-items: center; gap: var(--dim-gap-12); flex: none; width: auto; min-width: 0; max-width: 60%; height: 36px; padding: 0 14px; border: 0; border-radius: var(--dim-radius-18); appearance: none; color: var(--dsw-alias-label-primary, #0f1115); background-color: var(--dim-module-fill); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); cursor: pointer; }
 .dim-panel .dim-rowControl:hover:not(:disabled) { background-color: var(--dim-hover); }
 .dim-panel .dim-rowControl:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
 /* The host keeps a disabled selector's surface and dims what it says rather than
@@ -553,9 +572,6 @@ body {
 .dim-modelRowLabel { min-width: 0; }
 .dim-rowDesc { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-400); }
 /* Native selector pill (LanguageRow .selector): h36 r18, module fill, gap 12. */
-/* Geometry, shape, colour and type come from .dim-rowControl; only the flex row
-   that holds the value and the inline chevron is button-specific. */
-.dim-modelSelector { display: inline-flex; align-items: center; gap: var(--dim-gap-12); }
 .dim-modelValue { min-width: 0; overflow: hidden; color: var(--dsw-alias-label-primary, #0f1115); text-overflow: ellipsis; white-space: nowrap; }
 .dim-modelChevron { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); }
 /* Hover and focus belong to the control, not the row: the row is not the hit target. */
@@ -571,7 +587,7 @@ body {
 /* Native's own list is a portal at fixed position, which is how it escapes the
    collapsed card and the settings scroll container. In flow it dropped below the
    sibling row instead of below its own trigger. */
-.dim-modelMenu { position: fixed; z-index: var(--dim-z-portal); max-height: calc(100vh - 24px); overflow-y: auto; margin: 0; padding: 4px; border: 0; border-radius: var(--dim-radius-20); background: var(--dsw-specific-menu, #fff); --dsw-elevation-stroke-color: var(--dsw-alias-border-l1, rgb(0 0 0 / 4%)); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); scrollbar-width: thin; }
+.dim-modelMenu { position: fixed; z-index: var(--dim-z-menu); max-height: calc(100vh - 24px); overflow-y: auto; margin: 0; padding: 4px; border: 0; border-radius: var(--dim-radius-20); background: var(--dsw-specific-menu, #fff); --dsw-elevation-stroke-color: var(--dsw-alias-border-l1, rgb(0 0 0 / 4%)); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); scrollbar-width: thin; }
 .dim-modelGroupTitle { padding: 8px 10px; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-500); }
 .dim-modelOption { display: flex; align-items: center; gap: var(--dim-gap-8); width: 100%; min-height: 40px; padding: 8px 10px; border: none; border-radius: var(--dim-radius-10); background: transparent; color: inherit; text-align: left; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); cursor: pointer; }
 .dim-modelOptionCopy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--dim-gap-2); }
@@ -580,7 +596,7 @@ body {
 .dim-modelCheck { flex: 0 0 18px; text-align: center; }
 .dim-helpHint { margin: 6px 0 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-panel .dim-presetError { margin: 6px 0 0; color: var(--dim-danger); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
-.dim-contextEntry { width: 100%; min-height: 40px; display: grid; grid-template-columns: 16px minmax(0, 1fr) max-content max-content; align-items: center; gap: var(--dim-gap-9); margin: 0; padding: 14px 0; border: 0; border-radius: 0; color: var(--dsw-alias-label-primary, #0f1115); background: none; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; cursor: pointer; }
+.dim-contextEntry { width: 100%; min-height: 40px; display: grid; grid-template-columns: 16px minmax(0, 1fr) max-content max-content; align-items: center; gap: var(--dim-gap-6); margin: 0; padding: 14px 0; border: 0; border-radius: 0; color: var(--dsw-alias-label-primary, #0f1115); background: none; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; cursor: pointer; }
 .dim-contextEntry:hover:not(:disabled) { background: none; color: var(--dim-blue); }
 .dim-contextEntry > svg { color: var(--dsw-alias-label-secondary, #646a73); }
 .dim-contextLabel { min-width: 0; overflow-wrap: anywhere; }
@@ -610,6 +626,7 @@ body {
 .dim-contextTab, .dim-generalSettingsTab, .dim-botSettingsTab { position: relative; min-width: 0; flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 7px 1px 9px; border: 0; border-radius: 0; color: var(--dsw-alias-label-tertiary, #81858c); background: none; font: inherit; font-size: var(--dim-font-13); line-height: var(--dim-line-13); white-space: nowrap; cursor: pointer; }
 .dim-contextTab:hover:not(:disabled):not([aria-selected="true"]), .dim-generalSettingsTab:hover:not([aria-selected="true"]), .dim-botSettingsTab:hover:not([aria-selected="true"]) { color: var(--dsw-alias-label-primary, #0f1115); }
 .dim-contextTab[aria-selected="true"], .dim-generalSettingsTab[aria-selected="true"], .dim-botSettingsTab[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); }
+/* border-radius 2px 2px 0 0 is the host's own tab bar (settings-plugins bundle:377). */
 .dim-contextTab::after, .dim-generalSettingsTab::after, .dim-botSettingsTab::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: 2px 2px 0 0; background: transparent; }
 .dim-contextTab[aria-selected="true"]::after, .dim-generalSettingsTab[aria-selected="true"]::after, .dim-botSettingsTab[aria-selected="true"]::after { background: var(--dsw-alias-label-primary, #0f1115); }
 .dim-contextTab:focus-visible, .dim-generalSettingsTab:focus-visible, .dim-botSettingsTab:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, var(--dim-blue)); outline-offset: 2px; border-radius: 2px; color: var(--dsw-alias-label-primary, #0f1115); }
@@ -627,10 +644,10 @@ body {
 .dim-contextLegend > span:first-child { font-weight: var(--dim-weight-500); }
 .dim-contextSwitchRow { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-8); min-height: 34px; cursor: pointer; }
 .dim-contextSwitchLabel { min-width: 0; display: inline-flex; align-items: baseline; gap: var(--dim-gap-5); flex-wrap: wrap; }
-.dim-contextUnavailable { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 16px; font-weight: var(--dim-weight-400); }
+.dim-contextUnavailable { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-400); }
 /* The scope tag on the enable switch. Same secondary treatment as the unavailable note beside
    it, so the two annotations on that row read as one tier. */
-.dim-contextSwitchScope { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 16px; font-weight: var(--dim-weight-400); }
+.dim-contextSwitchScope { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: var(--dim-line-11); font-weight: var(--dim-weight-400); }
 .dim-contextSwitch { appearance: none; flex: none; width: 36px; height: 20px; margin: 0; padding: 0; border: none; border-radius: var(--dim-radius-10); corner-shape: round; background: var(--dsw-alias-border-l3, rgb(0 0 0 / 12%)); cursor: pointer; transition: background .12s ease; }
 .dim-contextSwitch::before { content: ""; display: block; width: 16px; height: 16px; margin: 2px; border-radius: 50%; corner-shape: round; background: var(--dsw-alias-label-primary-foreground, #fff); transition: transform .12s ease; }
 .dim-contextSwitch:checked { background: var(--dsw-alias-brand-primary, #0f1115); }
@@ -646,7 +663,7 @@ body {
    second track never held anything. */
 .dim-contextFieldText { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; overflow-wrap: anywhere; }
 .dim-contextFieldName { min-width: 0; line-height: var(--dim-line-14); }
-.dim-contextFieldHint { grid-column: 1 / -1; margin: 2px 0 0; font-size: var(--dim-font-11); line-height: 16px; }
+.dim-contextFieldHint { grid-column: 1 / -1; margin: 2px 0 0; font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-contextFieldKey { min-width: 0; grid-column: 1 / -1; color: var(--dsw-alias-label-tertiary, #81858c); font: 11px/16px var(--dim-font-mono); overflow-wrap: anywhere; }
 .dim-contextEditorTitle { min-width: 0; display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
 .dim-contextEditorTitle > label { font-weight: var(--dim-weight-500); }
@@ -694,7 +711,7 @@ body {
 .dim-directoryPickerBackdrop { position: fixed; inset: 0; z-index: var(--dim-z-portal); display: grid; place-items: center; padding: 24px; background: var(--dsw-alias-bg-mask-1, rgb(0 0 0 / 24%)); backdrop-filter: var(--dsw-mask-blur, blur(2px)); }
 .dim-directoryPickerBackdrop, .dim-directoryPickerBackdrop *, .dim-directoryPickerBackdrop *::before, .dim-directoryPickerBackdrop *::after { box-sizing: border-box; }
 .dim-directoryPicker { width: min(720px, 100%); height: min(620px, calc(100vh - 48px)); min-height: 420px; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 0; border-radius: var(--dim-radius-24); background: var(--dsw-alias-bg-layer-2, #fff); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); outline: none; color: var(--dsw-alias-label-primary, #0f1115); }
-.dim-directoryPickerHeader { min-width: 0; padding: 22px 24px 17px; border-bottom: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); }
+.dim-directoryPickerHeader { min-width: 0; padding: 22px 24px 17px; border-bottom: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 /* One modal-title role. The host's own modal title is ui-primitives Modal.module.css:55-57 at
    16 / 500 / 24, which is exactly the 16px rung's pairing, so all four modal titles read that
    rung and one change to it reaches every dialog. They used to carry four different specs -
@@ -716,7 +733,7 @@ body {
 .dim-directoryPathForm { display: grid; gap: var(--dim-gap-7); margin-top: 14px; }
 .dim-directoryPathMeta { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: var(--dim-gap-12); }
 .dim-directoryPathMeta label { flex: none; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-500); }
-.dim-directoryPathMeta span { min-width: 0; overflow: hidden; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); text-overflow: ellipsis; white-space: nowrap; }
+.dim-directoryPathMeta span { min-width: 0; overflow: hidden; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); text-overflow: ellipsis; white-space: nowrap; }
 .dim-directoryPathControl { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: var(--dim-gap-8); }
 .dim-directoryPathInput { min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: 12px/1.5 var(--dim-font-mono); }
 .dim-directoryPathInput::placeholder { color: var(--dsw-alias-label-caption, #adb2b8); }
@@ -742,14 +759,14 @@ body {
 .dim-directoryPickerError { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-12); margin: 8px 0 0; padding: 10px 12px; border: 0.5px solid color-mix(in srgb, var(--dim-danger) 22%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); border-radius: var(--dim-radius-8); color: var(--dim-danger); background: color-mix(in srgb, var(--dim-danger) 7%, var(--dsw-alias-bg-layer-1, #fff)); font-size: var(--dim-font-12); line-height: var(--dim-line-12); overflow-wrap: anywhere; }
 .dim-directoryPickerError button { flex: none; padding: 4px 8px; border: 0; border-radius: var(--dim-radius-8); color: inherit; background: transparent; font: inherit; font-weight: var(--dim-weight-400); cursor: pointer; }
 .dim-directoryPickerTruncated { margin: 10px 4px 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
-.dim-directoryPickerFooter { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: center; gap: var(--dim-gap-14); padding: 16px 20px; border-top: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); background: var(--dsw-alias-bg-layer-1, #fff); }
+.dim-directoryPickerFooter { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; align-items: center; gap: var(--dim-gap-14); padding: 16px 20px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); background: var(--dsw-alias-bg-layer-1, #fff); }
 .dim-directoryHidden { display: inline-flex; align-items: center; gap: var(--dim-gap-7); padding: 2px 0; border: 0; color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: var(--dim-font-12); white-space: nowrap; cursor: pointer; }
 .dim-directoryHidden:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
 .dim-directoryHidden:disabled { cursor: not-allowed; opacity: 0.4; }
 .dim-directoryHiddenBox { position: relative; width: 15px; height: 15px; flex: 0 0 15px; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-3); background: var(--dsw-alias-bg-layer-1, #fff); }
 .dim-directoryHidden[aria-pressed="true"] .dim-directoryHiddenBox { border-color: var(--dim-blue); background: var(--dim-blue); }
 .dim-directoryHidden[aria-pressed="true"] .dim-directoryHiddenBox::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
-.dim-directoryPickerNotice { min-width: 0; margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 1.45; text-align: right; }
+.dim-directoryPickerNotice { min-width: 0; margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: 1.45; text-align: right; }
 .dim-directoryPickerActions { display: flex; gap: var(--dim-gap-8); }
 .dim-directoryPickerActions button { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: var(--dim-line-12); white-space: nowrap; cursor: pointer; }
 .dim-directoryPickerActions .dim-directoryPickerPrimary { border-color: var(--dsw-alias-border-l3, rgb(0 0 0 / 12%)); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; }
@@ -799,7 +816,7 @@ body {
 .dim-collapsible { min-width: 0; display: flex; flex-direction: column; }
 /* The head toggles, but its text stays text: the host's own disclosure summary sets
    no user-select, so a bot name here is selectable and copyable like any other run. */
-.dim-collapsibleHead { min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-4); cursor: pointer; -webkit-user-select: text; user-select: text; }
+.dim-collapsibleHead { min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-6); cursor: pointer; -webkit-user-select: text; user-select: text; }
 .dim-collapsibleHead:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; border-radius: var(--dim-radius-8); }
 .dim-collapsibleHeaderContent { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; }
 .dim-collapsibleChevron { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; color: var(--dsw-alias-label-tertiary, #81858c); transition: transform var(--dim-disclosure-duration) var(--dim-disclosure-ease); transform-origin: 50% 50%; }
@@ -817,7 +834,7 @@ body {
 .dim-collapsible:not(.is-open) .dim-collapsibleBodyInner { visibility: hidden; }
 /* Reclaim horizontal spacing for names while keeping status on the same row,
    including when a channel's mobile stylesheet requests a column layout. */
-.dim-panel .dim-botCardTop { min-width: 0; width: 100%; max-width: 100%; display: flex; flex-direction: row; flex-wrap: nowrap; align-items: flex-start; justify-content: space-between; gap: var(--dim-gap-6); }
+.dim-panel .dim-botCardTop { min-width: 0; width: 100%; max-width: 100%; display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: var(--dim-gap-6); }
 .dim-panel .dim-botIdentity { min-width: 0; flex: 1 1 0; display: flex; align-items: center; gap: var(--dim-gap-6); }
 .dim-panel .dim-botAvatar { flex: none; width: 38px; height: 38px; display: grid; place-items: center; overflow: hidden; border-radius: var(--dim-radius-12); box-shadow: none; }
 .dim-panel .dim-botAvatar svg { width: 27px; height: 27px; }
@@ -851,7 +868,7 @@ body {
 .dim-feishuGroupControl { min-width: 0; }
 .dim-feishuGroupControlHeader { position: relative; min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-6); }
 .dim-feishuGroupControlHeader h3 { min-width: 0; margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-400); }
-.dim-feishuGroupControlStatus { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 17px; }
+.dim-feishuGroupControlStatus { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-feishuGroupHelp { margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-feishuGroupPermissionAction { display: flex; justify-content: flex-start; }
 .dim-feishuGroupPermissionAction .dim-deliveryButton { color: var(--dim-blue); border-color: color-mix(in srgb, var(--dim-blue) 30%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); }
@@ -868,16 +885,16 @@ body {
 .dim-feishuGroupQrFrame { position: relative; width: 176px; height: 176px; display: grid; place-items: center; padding: 10px; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-12); background: #fff; box-shadow: 0 6px 18px rgb(31 35 41 / 7%); }
 .dim-feishuGroupQrFrame img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .dim-feishuGroupQrFallback { width: 100%; height: 100%; display: grid; place-content: center; justify-items: center; gap: var(--dim-gap-7); border-radius: var(--dim-radius-8); color: var(--dim-on-qr-muted, #646a73); background: #f7f9ff; text-align: center; }
-.dim-feishuGroupQrFallback span { color: var(--dim-on-qr-muted, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
+.dim-feishuGroupQrFallback span { color: var(--dim-on-qr-muted, #646a73); font-size: var(--dim-font-11); line-height: var(--dim-line-11); }
 .dim-feishuGroupQrExpired { position: absolute; inset: 10px; display: grid; place-content: center; gap: var(--dim-gap-2); border-radius: var(--dim-radius-8); color: var(--dim-on-qr, #0f1115); background: rgb(255 255 255 / 94%); backdrop-filter: blur(3px); text-align: center; }
 .dim-feishuGroupQrExpired span { font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); }
-.dim-feishuGroupQrExpired small { color: var(--dim-on-qr-muted, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
-.dim-feishuGroupCountdown { width: 176px; display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: var(--dim-gap-5) 10px; margin-top: 9px; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 17px; font-variant-numeric: tabular-nums; }
+.dim-feishuGroupQrExpired small { color: var(--dim-on-qr-muted, #646a73); font-size: var(--dim-font-11); line-height: var(--dim-line-11); }
+.dim-feishuGroupCountdown { width: 176px; display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: var(--dim-gap-5) 10px; margin-top: 9px; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: var(--dim-line-11); font-variant-numeric: tabular-nums; }
 .dim-feishuGroupCountdown strong { color: var(--dsw-alias-label-secondary, #646a73); font-weight: var(--dim-weight-600); }
 .dim-feishuGroupProgress { grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: var(--dim-radius-full); background: var(--dim-module-fill); }
 .dim-feishuGroupProgress > span { display: block; height: 100%; border-radius: inherit; background: var(--dim-blue); transition: width 1s linear; }
 .dim-feishuGroupAuthorizationCopy { min-width: 0; }
-.dim-feishuGroupAuthorizationEyebrow { display: block; margin-bottom: 7px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; font-weight: var(--dim-weight-600); }
+.dim-feishuGroupAuthorizationEyebrow { display: block; margin-bottom: 7px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: var(--dim-line-11); font-weight: var(--dim-weight-600); }
 .dim-feishuGroupAuthorizationCopy ol { display: grid; gap: var(--dim-gap-6); margin: 13px 0 0; padding-left: 18px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 18px; }
 .dim-feishuGroupAuthorizationActions { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: var(--dim-gap-8); margin-top: 14px; }
 .dim-feishuGroupAuthorizationLink { text-decoration: none; }
@@ -906,20 +923,20 @@ body {
 .dim-deliveryState p { margin: 5px 0; }
 .dim-deliveryEmpty strong { color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); }
 .dim-targetList { display: grid; gap: var(--dim-gap-10); margin: 14px 0 0; padding: 0; list-style: none; }
-.dim-targetRow { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: var(--dim-gap-8) 14px; padding: 13px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
+.dim-targetRow { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: var(--dim-gap-14); padding: 14px 16px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
 .dim-targetSummary { min-width: 0; }
 .dim-targetTitle { min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-7); }
 .dim-targetTitle strong { overflow: hidden; font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-600); text-overflow: ellipsis; white-space: nowrap; }
-.dim-targetTitle span { flex: none; padding: 1px 6px; border-radius: var(--dim-radius-8); color: var(--dim-blue); background: color-mix(in srgb, var(--dim-blue) 9%, transparent); font-size: var(--dim-font-11); line-height: 16px; }
+.dim-targetTitle span { flex: none; padding: 1px 6px; border-radius: var(--dim-radius-8); color: var(--dim-blue); background: color-mix(in srgb, var(--dim-blue) 9%, transparent); font-size: var(--dim-font-11); line-height: var(--dim-line-11); }
 .dim-targetSummary code { display: block; overflow: hidden; margin-top: 3px; color: var(--dsw-alias-label-secondary, #646a73); font: 11px/17px var(--dim-font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .dim-targetActions { display: flex; align-items: center; justify-content: flex-end; gap: var(--dim-gap-6); flex-wrap: wrap; }
 .dim-targetSessionSync { grid-column: 1 / -1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-12); padding-top: 9px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); cursor: pointer; }
 .dim-targetSessionSyncCopy { min-width: 0; display: grid; gap: var(--dim-gap-1); }
 .dim-targetSessionSyncCopy strong { color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-600); }
-.dim-targetSessionSyncCopy small { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; overflow-wrap: anywhere; }
+.dim-targetSessionSyncCopy small { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: var(--dim-line-11); overflow-wrap: anywhere; }
 .dim-targetSessionSync input { width: 16px; height: 16px; flex: none; margin: 0; accent-color: var(--dim-blue); }
 .dim-targetSessionSync:has(input:disabled) { cursor: default; }
-.dim-targetFeedback { grid-column: 1 / -1; margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; overflow-wrap: anywhere; }
+.dim-targetFeedback { grid-column: 1 / -1; margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); overflow-wrap: anywhere; }
 .dim-targetFeedback[data-tone="success"] { color: var(--dsw-alias-state-success-primary, #20a162); }
 .dim-targetFeedback[data-tone="error"], .dim-targetFormError { color: var(--dim-danger); overflow-wrap: anywhere; }
 .dim-targetDeleteConfirm { grid-column: 1 / -1; padding: 10px 12px; border-radius: var(--dim-radius-8); background: color-mix(in srgb, var(--dim-danger) 7%, var(--dsw-alias-bg-layer-1, #fff)); }
@@ -927,16 +944,20 @@ body {
 .dim-targetSuggestions { margin-top: 14px; padding: 14px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
 .dim-targetSuggestionHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--dim-gap-12); }
 .dim-targetSuggestionHeading h3 { margin: 0; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
-.dim-targetSuggestionHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
+.dim-targetSuggestionHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-targetSuggestionState { margin-top: 12px; padding: 18px 12px; border: 1px dashed var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); text-align: center; }
 .dim-targetSuggestionState p { margin: 4px 0; }
 .dim-targetSuggestionState strong { color: var(--dsw-alias-label-primary, #0f1115); }
-.dim-targetSuggestionField { min-width: 0; display: grid; gap: var(--dim-gap-6); margin-top: 12px; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); }
+.dim-targetSuggestionField { min-width: 0; display: grid; gap: var(--dim-gap-6); margin-top: 12px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-500); }
 .dim-targetForm { margin-top: 14px; padding: 14px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
 .dim-targetFormHeading h3 { margin: 0; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
-.dim-targetFormHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
+.dim-targetFormHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-targetFormGrid { display: grid; gap: var(--dim-gap-11) 12px; margin-top: 12px; }
-.dim-targetField { min-width: 0; display: grid; align-content: start; gap: var(--dim-gap-6); padding: 12px 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); }
+/* A field wrapper is the host's .field with a .fieldLabel: 12/18/500 in label-secondary,
+   which is a different role from a row title - measured on the live General page, a row
+   title (.hVGvvW_title, "Language") is 14/22/400 in label-primary, which is what
+   .dim-modelRowLabel already is. */
+.dim-targetField { min-width: 0; display: grid; align-content: start; gap: var(--dim-gap-6); padding: 12px 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-500); }
 .dim-targetField input { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
 .dim-targetField input:focus { outline: none; border-color: var(--dim-focus); }
 .dim-targetField input[readonly] { color: var(--dsw-alias-label-tertiary, #81858c); background: var(--dim-module-fill); }
@@ -953,7 +974,7 @@ body {
 /* The stacked form survives only inside the multi-column user editor, where a cell is
    a label over its own control. A full-width access field is a shared row instead -
    one anatomy, not two - so the geometry and typography are scoped to that editor. */
-.dim-accessUserRow .dim-accessField { display: grid; align-content: start; gap: var(--dim-gap-6); padding: 12px 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-500); }
+.dim-accessUserRow .dim-accessField { display: grid; align-content: start; gap: var(--dim-gap-6); padding: 12px 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-500); }
 .dim-accessField { min-width: 0; }
 .dim-accessField input { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
 .dim-accessField input:focus { outline: none; border-color: var(--dim-focus); }
@@ -962,11 +983,11 @@ body {
 .dim-accessUsersHeading > div { min-width: 0; }
 .dim-accessUsersTitle { display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
 .dim-accessUsersHeading strong { color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-600); }
-.dim-accessUsersHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; }
+.dim-accessUsersHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-accessAddUser { width: 32px; height: 32px; min-height: 32px; flex: 0 0 32px; padding: 0; font-size: var(--dim-font-20); line-height: var(--dim-line-20); }
 .dim-accessUsersEmpty { margin-top: 10px; padding: 15px 12px; border: 1px dashed var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); text-align: center; }
 .dim-accessUserList { display: grid; gap: var(--dim-gap-9); margin: 10px 0 0; padding: 0; list-style: none; }
-.dim-accessUserRow { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(145px, 180px) max-content; align-items: end; gap: var(--dim-gap-10); padding: 11px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
+.dim-accessUserRow { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(145px, 180px) max-content; align-items: end; gap: var(--dim-gap-14); padding: 14px 16px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
 .dim-accessDeleteUser { margin-bottom: 1px; }
 .dim-accessUnsupported { padding: 18px 14px; border: 1px dashed var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dim-module-fill); text-align: center; }
 .dim-accessUnsupported strong { color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); }
@@ -991,7 +1012,8 @@ body {
 .dim-globalTtlHints { display: grid; gap: var(--dim-gap-4); margin: 0; padding: 0; list-style: none; }
 .dim-globalTtlHints li { min-width: 0; display: flex; align-items: baseline; gap: var(--dim-gap-8); }
 .dim-globalTtlHints code { flex: none; min-width: 44px; padding: 0 6px; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-module-fill); font: 11px/16px var(--dim-font-mono); text-align: center; }
-.dim-globalTtlHints span { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 16px; }
+/* Explanation text, so the host's hint role: label-tertiary at 12/18. */
+.dim-globalTtlHints span { min-width: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-globalTtlRow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--dim-gap-4) 10px; margin-top: 12px; }
 .dim-globalTtlInput { width: min(160px, 100%); min-width: 110px; max-width: 160px; flex: 1 1 130px; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: 13px/1.5 var(--dim-font-mono); transition: border-color .16s ease; }
 
@@ -1011,7 +1033,7 @@ body {
 .dim-globalSweepConfirmActions { display: flex; justify-content: flex-end; gap: var(--dim-gap-7); margin-top: 10px; }
 .dim-deliveryButton.dim-globalSweepConfirmButton { border-color: transparent; color: var(--dim-danger); }
 .dim-deliveryButton.dim-globalSweepConfirmButton:hover:not(:disabled) { background: var(--dim-danger-hover); }
-.dim-globalInline { flex: 1 0 100%; min-width: 0; margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 16px; overflow-wrap: anywhere; }
+.dim-globalInline { flex: 1 0 100%; min-width: 0; margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); overflow-wrap: anywhere; }
 .dim-globalInline[data-tone="error"] { color: var(--dim-danger); }
 .dim-panel .dim-botCard .dim-cardFooter { margin-top: 0; }
 .dim-panel .ddt-headingCopy { display: none; }

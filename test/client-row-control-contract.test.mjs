@@ -116,3 +116,31 @@ test('the text side of a row reads as text, and only the control takes the hand'
   assert.ok(!sheet.includes('user-select: none'), 'no row text is locked out of selection');
 });
 
+test('a portaled menu carries its own type, because it inherits nothing', () => {
+  // Measured live in both themes: .dim-modelMenu computed font-size 16px / line-height
+  // normal, the UA default, because it is portaled to BODY and no longer sits inside
+  // .dim-panel. Every child happens to declare its own size today, so the cost is only
+  // visible to the next thing added; the host's own portaled list carries its own type.
+  const menu = ruleFor(sheet, '.dim-modelMenu');
+  assert.ok(menu.includes('font-size: var(--dim-font-14)'), 'the menu states its size');
+  assert.ok(menu.includes('line-height: var(--dim-line-14)'), 'and its line height');
+});
+
+test('the 11px tier is two host roles, not one', () => {
+  // The host has 11/16 (.rowTag, .cardIdentity) and 11/17 (.details dt) - label and
+  // metadata roles - and its hint role is 12/18 (.advancedHint, .hint). Treating the
+  // tier as one thing is why it had been kept whole; ADR-0002's note was right in
+  // direction and too broad in scope.
+  for (const hint of ['.dim-contextFieldHint', '.dim-contextUnavailable', '.dim-globalInline',
+    '.dim-directoryPickerNotice', '.dim-targetFeedback', '.dim-globalTtlHints span']) {
+    const rule = ruleFor(sheet, hint);
+    assert.ok(rule.includes('font-size: var(--dim-font-12)'), hint + ' takes the hint role');
+    assert.ok(!rule.includes('var(--dim-font-11)'), hint + ' left the 11px tier');
+  }
+  for (const label of ['.dim-channelNote', '.dim-contextSwitchScope', '.dim-targetTitle span',
+    '.dim-feishuGroupCountdown', '.dim-targetSessionSyncCopy small', '.dim-contextSwitchScope']) {
+    assert.ok(ruleFor(sheet, label).includes('font-size: var(--dim-font-11)'),
+      label + ' keeps the label tier the host also has');
+  }
+});
+

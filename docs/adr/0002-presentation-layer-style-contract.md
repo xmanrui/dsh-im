@@ -229,6 +229,42 @@ style 属性里的东西无法与表里其余决策一起重构——这正是�
 
 修后四控件实测逐项相同：`36px` / 圆角 `18px` / 同底色 / `border 0` / `14px-22px` / `appearance:none`。
 
+### 战役期间固化的六条证据（避免重复推理）
+
+**1. 宿主有两个 12/18 说明角色，不可互换。** `label-secondary` 是**给子块起头的说明**
+（`.fieldLabel`、`.modelCatalogTitle`、`.customizedSummary`）；`label-tertiary` 是**提示与路径**
+（`.advancedHint`、`.editorRoute`、`.modelFieldLabel`）。战役中一次「把 `.dim-presetHeader` 从 secondary 改 tertiary」
+的提案引用了 `.sectionTitle`/`.groupTitle` —— 那是**弹出菜单内部**的标题，不是卡片内子块说明，已撤销；
+现有守卫 `client-role-form-contract.test.mjs`「the group caption keeps the native caption role」把它拦下过。
+
+**2. 行标题 ≠ 字段标签（实测）。** 宿主设置行的左侧标题是 `.hVGvvW_title`（General 页 "Language"）= **14/22/400 label-primary**，
+我们的 `.dim-modelRowLabel` 正好一致，**不要动**；容易被误引的 `14/22/500` 是 `.rowName`，即 Models 页**卡片行名**，另一角色。
+字段包装才对 `.field`+`.fieldLabel` = **12/18/500 label-secondary**。
+
+**3. 宿主内容页没有中间层标题。** 实测 Plugins / General 两页只有页面标题 `h2.heading`（18/600）与导航标题（16/24 500），
+页面标题与卡片之间没有别的标题。所以「卡片列表上方的分区标题」没有直接对应物，取**卡内标题**角色
+（`.editorTitle`/`.rowName` = 14/22/500 label-primary）。`.sectionTitle`/`.groupTitle` 的 tertiary 12 不适用。
+
+**4. 原生选择器胶囊与 portal 菜单的锚定（实测）。** 宿主自己的四个行选择器是 `button[aria-haspopup=menu]`：
+`display:flex; gap:12px; padding:0 14px; height:36px`，内含 chevron svg。其 portal 菜单 `position:fixed`、`z-index:1100`、
+**右缘与触发器右缘对齐、下方 4px**、圆角 20、白底、padding 4。原生**字段内枚举**才用真 `select`（`.input`+`.selectInput`）。
+
+**5. `dead-rule-audit.mjs` 的 `.every()` 盲区。** 它的「无渲染点」桶用 `selectors.every(...)` 判定：
+选择器里**只要有一个活类，整条规则就逃出该桶**。更严的做法是**逐令牌**验证（抽出所有类令牌、全仓 grep 非样式表引用）
+并做鉴别力自检（最薄令牌应恰好命中 1 次，证明计数非恒真）。战役中据此确认两个渠道表已无真死规则。
+
+**5b. 分割线语义别名：评估后**不做**。** 想法是把四种线角色（`l4` 外框 / `l2` 面内 / `l3` 控件 / 虚线占位）
+集中成 `--dim-line-*` 别名，35 个调用点改引用。实测表里其实只有**三种拼法**且分布干净
+（`l2` 22 处、`l4` 7 处、虚线 `l3` 4 处、孤例 2 处），别名带来的是**文档价值而非一致性价值**；
+代价是约 15 条断言钉住了字面拼法（其中多数测试文件需要先读取才能改）。
+**结论：收益是注释级的，成本是跨文件的断言改写，本轮不改。** 真正的角色错位（五条面内分隔误用 `l3`）
+已在战役中修正；剩下的是命名问题，不足以justify 这次改动。若将来要做，先给三个拼法各加一条注释即可，
+不必引入 token。
+
+**6. 变异测试的还原必须用与施加同等唯一的锚点。** 一次变异把 `.dim-contextFooter button` 的尺寸改回 28px，
+还原时用的子串在表里匹配到 7 处按钮规则，**还原静默失败、表停在变异态**，直到按哈希核对才发现。
+纪律：变异与还原都用整行或唯一选择器作锚点，并在还原后再算一次哈希与 `git diff`。
+
 ## Considered Options
 
 - **逐处打补丁**：改动最小，但同一角色会在下一个渠道里再长出一个作者，缺陷反复出现。
@@ -250,9 +286,19 @@ style 属性里的东西无法与表里其余决策一起重构——这正是�
 
 这四项都不是「还没查」，而是**查完了、宿主自己也没有唯一答案**。目前一律**保留插件现值**。
 
-1. **11px 提示文字的行高。** 宿主没有 11px 提示角色（最小的正文档是 12/18），所以插件是**未采纳宿主**、自建 11px 档，
-   行高沿用插件自己实测的分布：17px 12 处、16px 8 处、无单位 1.45–1.55 共 4 处、18px 1 处；
-   另有 3 处 `line-height: 1` 属于「?」字形按钮，不属这一族，**不要动**。宿主既无该档，强行统一只会在没人要求的情况下改动 13 条规则的渲染。
+1. ~~**11px 提示文字的行高。** 宿主没有 11px 提示角色……~~ **本条已于战役中作废并拆开处理。**
+   原文说「宿主没有 11px 提示角色」——**方向对，但表述过宽，而且被当成了「整档保留」的理由**。实测宿主有两档 11px：
+   `11/16`（.rowTag、.cardIdentity）与 `11/17`（.details dt），但它们都是**标签/元信息**角色；
+   宿主的**提示**角色是 `12/18`（.advancedHint、.hint）或 `12.5/18`。
+   所以一刀切保留和一刀切收敛**都是错的**，处置如下：
+   - **提示角色 11 条 → 12/18**：.dim-contextFieldHint、.dim-contextUnavailable、.dim-targetFormHeading p、
+     .dim-targetSuggestionHeading p、.dim-accessUsersHeading p、.dim-globalInline、.dim-directoryPickerNotice、
+     .dim-targetFeedback、.dim-directoryPathMeta span、.dim-feishuGroupControlStatus、.dim-globalTtlHints span
+     （最后一条同时把颜色从 label-secondary 改为宿主提示角色的 label-tertiary）。
+   - **标签/元信息角色 9 条保留 11px**：.dim-contextSwitchScope、.dim-targetTitle span、.dim-channelNote、
+     .dim-feishuGroupAuthorizationEyebrow、.dim-feishuGroupCountdown、.dim-targetSessionSyncCopy small、
+     .dim-feishuGroupQrFallback span、.dim-feishuGroupQrExpired small、.dim-feishuGroupAuthorizationCopy ol。
+   - **2 处「?」字形按钮不动**（.dim-presetHelpButton、.dim-contextHelpButton），原判断仍然有效。
 2. **20px 区块标题的字重。** 宿主两种说法：字体阶梯给 20px/500，而组件给 15px/600 与 18px/600。
    插件现取值 20/600/28（两者的混合）——即**未采纳宿主阶梯的 500**，保留组件一侧的 600。
 3. **飞书二维码兜底块的皮肤。** `.bxf-qrFallback` 比钉钉、微信的同位规则多了 `width/height: 100%`、`border-radius: 8px`、

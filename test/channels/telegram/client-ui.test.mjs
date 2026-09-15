@@ -51,7 +51,8 @@ test('Telegram cards shrink to a narrow English panel without horizontal scrolli
     'utf8',
   );
 
-  assert.match(sharedStyles, /\.dim-panel \.dim-botList \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+  // The card list is the host's .cards role: a flex column with a 10px gap.
+  assert.match(sharedStyles, /\.dim-panel \.dim-botList \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*gap: var\(--dim-gap-10\);/);
   assert.match(sharedStyles, /\.dim-panel \.dim-botCard \{[^}]*min-width: 0;[^}]*width: 100%;[^}]*max-width: 100%;[^}]*overflow: visible;/);
   assert.match(sharedStyles, /\.dim-panel \.dim-botIdentity \{[^}]*min-width: 0;[^}]*flex: 1 1 0;/);
   assert.doesNotMatch(sharedStyles, /\.dim-panel \.dim-botCardTop \{ flex-direction: column;/);
