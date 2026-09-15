@@ -647,11 +647,11 @@ test('all nine failed save RPCs keep runtime state and drafts intact through sta
 test('the approved neutral entry and theme-aware modal keep responsive labels and touch targets', async () => {
   const styles = await readFile(new URL('../plugin-src/client/styles.js', import.meta.url), 'utf8');
   // The entry is a native row now: no border, no radius, no fill.
-  assert.match(styles, /\.dim-contextEntry \{[^}]*min-height: 40px;[^}]*minmax\(0, 1fr\)[^}]*padding: 14px 0;[^}]*border: 0;[^}]*background: none;[^}]*font-size: 13px;/);
+  assert.match(styles, /\.dim-contextEntry \{[^}]*min-height: 40px;[^}]*minmax\(0, 1fr\)[^}]*padding: 14px 0;[^}]*border: 0;[^}]*background: none;[^}]*font-size: var\(--dim-font-13\);/);
   // Native Pill active tone.
   assert.match(styles, /\.dim-contextStatus\[data-active="true"\] \{[^}]*--dsw-alias-button-ghost-active-fill/);
   // Native Modal surface: border 0, r24, layer-2, elevation-prominent.
-  assert.match(styles, /\.dim-contextDialog \{[^}]*width: min\(450px, 100%\);[^}]*overflow-y: auto;[^}]*border: 0;[^}]*border-radius: 24px;[^}]*--dsw-alias-bg-layer-2/);
+  assert.match(styles, /\.dim-contextDialog \{[^}]*width: min\(450px, 100%\);[^}]*overflow-y: auto;[^}]*border: 0;[^}]*border-radius: var\(--dim-radius-24\);[^}]*--dsw-alias-bg-layer-2/);
   // Native tablist strip, not a bespoke segmented control.
   assert.match(styles, /\.dim-contextTabs \{[^}]*display: flex;[^}]*border-bottom: 0\.5px solid var\(--dsw-alias-border-l2/);
   assert.match(styles, /\.dim-contextTab\[aria-selected="true"\] \{[^}]*--dsw-alias-label-primary/);
