@@ -372,11 +372,18 @@ body {
 .dim-panel .dim-confirm { padding: 18px 24px; border-top: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); background: var(--dim-hover); }
 .dim-panel .dim-confirm strong, .dim-panel .dim-confirm h4 { margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: 1.4; font-weight: 600; }
 .dim-panel .dim-confirm p { margin: 7px 0 0; color: var(--dsw-alias-label-secondary, #646a73); line-height: 1.6; }
-.dim-panel .dim-cardFooter { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-12); padding: 12px 0 0; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
+/* padding-bottom was 0, so the last summary line sat flush against the card's
+   bottom border (measured: hint bottom 885 == card bottom 885). The head uses
+   16px, so the foot closes the card with the same inset. */
+.dim-panel .dim-cardFooter { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-12); padding: 12px 0 16px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .dim-panel .dim-workspace { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; column-gap: var(--dim-gap-12); row-gap: var(--dim-gap-4); margin: 0; padding: 16px 0; border: 0; background: none; }
-.dim-panel .dim-workspaceHeader { display: contents; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: 20px; font-weight: 500; }
+/* The native settings-row title, byte-identical in five native modules
+   (LanguageRow, EnterBehaviorRow, FontSizeRow, AppearanceRow, PermissionRow):
+   14px / 400 / 22px / label-primary. 13px/500 is native too, but only as a
+   STACKED field label or a group caption - never as a row label. */
+.dim-panel .dim-workspaceHeader { display: contents; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: 22px; font-weight: 400; }
 .dim-panel .dim-workspaceHeader > span { grid-column: 1; grid-row: 1; white-space: nowrap; }
-.dim-panel .dim-workspaceEdit { grid-column: 2; grid-row: 1; height: 28px; padding: 0 10px; border: none; border-radius: var(--dim-radius-14); color: var(--dsw-alias-link, #4176e6); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: 18px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.dim-panel .dim-workspaceEdit { grid-column: 2; grid-row: 1; height: auto; padding: 2px 0; border: none; border-radius: var(--dim-radius-8); color: var(--dsw-alias-link, #4176e6); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: 18px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .dim-panel .dim-workspaceEdit:hover:not(:disabled) { background: var(--dim-hover); }
 .dim-panel .dim-workspaceEdit:disabled { cursor: not-allowed; opacity: 0.4; }
 .dim-panel .dim-workspacePath { min-width: 0; max-width: 100%; grid-column: 1 / -1; grid-row: 2; display: block; overflow: hidden; color: var(--dsw-alias-label-secondary, #646a73); font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; white-space: normal; }
@@ -405,7 +412,12 @@ body {
 .dim-modelRow:hover:not(:disabled) .dim-modelSelector, .dim-modelOption:hover:not(:disabled) { background: var(--dim-hover); }
 .dim-modelRow:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--dsw-alias-border-l3, rgb(0 0 0 / 12%)); }
 .dim-modelOption:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #0f1115); outline-offset: -2px; }
-.dim-modelRow:disabled, .dim-modelOption:disabled { opacity: 0.4; cursor: default; }
+/* Native keeps a disabled selector's surface and dims what it says, rather
+   than fading the whole row (PermissionRow.module.css:54-56 keeps the pill's
+   contrast; FontSizeRow.module.css:110-113 dims the glyph). */
+.dim-modelRow:disabled { cursor: default; }
+.dim-modelRow:disabled .dim-modelValue { color: var(--dsw-alias-label-tertiary, #81858c); }
+.dim-modelOption:disabled { opacity: 0.4; cursor: default; }
 /* In-flow lists avoid clipping by collapsed-card and settings scroll containers. */
 .dim-modelMenu { max-height: 280px; overflow-y: auto; margin: 4px; padding: 4px; border: 0; border-radius: var(--dim-radius-20); background: var(--dsw-specific-menu, #fff); --dsw-elevation-stroke-color: var(--dsw-alias-border-l1, rgb(0 0 0 / 4%)); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); scrollbar-width: thin; }
 .dim-modelGroupTitle { padding: 7px 8px 3px; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: 18px; font-weight: 500; }
@@ -416,24 +428,33 @@ body {
 .dim-modelCheck { flex: 0 0 18px; text-align: center; }
 .dim-modelHint, .dim-helpHint { margin: 6px 0 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: 18px; }
 .dim-panel .dim-presetError { margin: 6px 0 0; color: var(--dim-danger); font-size: var(--dim-font-12); line-height: 18px; }
-.dim-contextEntry { width: 100%; min-height: 40px; display: grid; grid-template-columns: 16px minmax(0, 1fr) max-content 16px; align-items: center; gap: var(--dim-gap-9); margin: 0; padding: 14px 0; border: 0; border-radius: 0; color: var(--dsw-alias-label-primary, #0f1115); background: none; font: inherit; font-size: var(--dim-font-13); line-height: 20px; text-align: left; cursor: pointer; }
+.dim-contextEntry { width: 100%; min-height: 40px; display: grid; grid-template-columns: 16px minmax(0, 1fr) max-content; align-items: center; gap: var(--dim-gap-9); margin: 0; padding: 14px 0; border: 0; border-radius: 0; color: var(--dsw-alias-label-primary, #0f1115); background: none; font: inherit; font-size: var(--dim-font-14); line-height: 22px; text-align: left; cursor: pointer; }
 .dim-contextEntry:hover:not(:disabled) { background: none; color: var(--dsw-alias-state-business-primary, #4176e6); }
 .dim-contextEntry > svg { color: var(--dsw-alias-label-secondary, #646a73); }
-.dim-contextLabel { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
-.dim-contextStatus { height: 24px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-2, #fff); font-size: var(--dim-font-12); line-height: 18px; font-weight: 400; white-space: nowrap; }
+.dim-contextLabel { min-width: 0; overflow-wrap: anywhere; }
+.dim-contextStatus { height: 24px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dim-module-fill); font-size: var(--dim-font-12); line-height: 18px; font-weight: 400; white-space: nowrap; }
 .dim-contextStatus[data-active="true"] { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-button-ghost-active-fill, #ebeeF2); box-shadow: inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border, #979da6); }
 .dim-contextBackdrop { position: fixed; inset: 0; z-index: var(--dim-z-portal); display: grid; place-items: center; padding: 12px; background: var(--dsw-alias-bg-mask-1, rgb(0 0 0 / 24%)); backdrop-filter: var(--dsw-mask-blur, blur(2px)); }
 .dim-contextBackdrop, .dim-contextBackdrop *, .dim-contextBackdrop *::before, .dim-contextBackdrop *::after { box-sizing: border-box; }
-.dim-contextDialog { width: min(450px, 100%); min-width: 0; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 16px; border: 0; border-radius: var(--dim-radius-24); background: var(--dsw-alias-bg-layer-2, #fff); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: 22px; text-align: left; }
+/* Three rows: a fixed header, a scrolling body, a fixed footer. The card used to be
+   the only scroll region, so in a short viewport the tab strip that names the scope
+   and the primary action both scrolled off the bottom edge. The plugin's own
+   directory picker already uses this shape. */
+.dim-contextDialog { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(450px, 100%); min-width: 0; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 16px; border: 0; border-radius: var(--dim-radius-24); background: var(--dsw-alias-bg-layer-2, #fff); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: 22px; text-align: left; }
 .dim-contextDialog:focus { outline: none; }
 .dim-contextHeader, .dim-contextEditorHeader { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-8); }
-.dim-contextHeader { position: relative; }
-.dim-contextHeaderTitle { min-width: 0; display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
+.dim-contextHeader { position: relative; align-items: flex-start; }
+/* The description is a paragraph, not a peer of the title: side by side the
+   inline-flex squeezed the h3 into a 92px column and wrapped it. */
+.dim-contextHeaderTitle { min-width: 0; display: grid; justify-items: start; gap: 3px; }
 .dim-contextHeader h3 { margin: 0; font-size: var(--dim-font-15); line-height: 22px; font-weight: 500; }
 .dim-contextHeaderTooltip { width: min(340px, calc(100vw - 72px)); }
 .dim-contextClose { width: 28px; height: 28px; flex: none; display: grid; place-items: center; padding: 0; border: none; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-secondary, #646a73); background: transparent; cursor: pointer; }
 .dim-contextClose:hover:not(:disabled) { background: var(--dim-hover); }
 .dim-contextTabs { display: flex; gap: var(--dim-gap-20); margin-top: 12px; border-bottom: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
+/* The negative margin lets the scrollbar sit on the card edge while the content keeps
+   the card's 16px inset. */
+.dim-contextBody { min-height: 0; overflow-y: auto; margin: 0 -16px; padding: 0 16px; scrollbar-width: thin; }
 .dim-contextTab { position: relative; min-width: 0; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 6px 2px; border: none; border-radius: 0; color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: var(--dim-font-13); line-height: 20px; font-weight: 500; cursor: pointer; transition: color .15s ease; }
 .dim-contextTab:hover:not(:disabled):not([aria-selected="true"]) { color: var(--dsw-alias-label-primary, #0f1115); }
 .dim-contextTab[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); }
@@ -443,7 +464,7 @@ body {
 .dim-contextSection { min-width: 0; margin: 0; padding: 0; border: 0; }
 .dim-contextScope { margin-top: 12px; padding: 12px 14px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
 .dim-contextScopeBlock { margin-top: 12px; }
-.dim-contextLegend { position: relative; display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
+.dim-contextLegend { position: relative; display: grid; justify-items: start; gap: 3px; }
 .dim-contextSwitchRow { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-8); min-height: 34px; cursor: pointer; }
 .dim-contextSwitchLabel { min-width: 0; display: inline-flex; align-items: baseline; gap: var(--dim-gap-5); flex-wrap: wrap; }
 .dim-contextUnavailable { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: 16px; font-weight: 400; }
@@ -452,8 +473,10 @@ body {
 .dim-contextSwitch:checked { background: var(--dsw-alias-brand-primary, #0f1115); }
 .dim-contextSwitch:checked::before { transform: translateX(16px); }
 .dim-contextFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--dim-gap-3) 12px; }
-.dim-contextField { position: relative; min-width: 0; min-height: 30px; display: flex; align-items: center; gap: var(--dim-gap-6); }
-.dim-contextField input { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--dsw-alias-state-business-primary, #4176e6); }
+/* align-items: center centred the checkbox against the whole hint block, so a
+   long hint pushed the control 57-81px below the label it belongs to. */
+.dim-contextField { position: relative; min-width: 0; min-height: 30px; display: flex; align-items: flex-start; gap: var(--dim-gap-6); }
+.dim-contextField input { flex: none; width: 14px; height: 14px; margin: 2px 0 0; accent-color: var(--dsw-alias-state-business-primary, #4176e6); }
 .dim-contextFieldText { min-width: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; column-gap: var(--dim-gap-5); overflow-wrap: anywhere; }
 .dim-contextFieldName { min-width: 0; line-height: 17px; cursor: pointer; }
 .dim-contextFieldHint { grid-column: 1 / -1; margin: 2px 0 0; font-size: var(--dim-font-11); line-height: 16px; }
@@ -480,7 +503,7 @@ body {
 .dim-contextGuidance textarea::placeholder { color: var(--dsw-alias-label-dimmed, #e1e5ee); opacity: 1; }
 .dim-contextHint { margin: 5px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 1.5; overflow-wrap: anywhere; }
 .dim-contextError { margin: 12px 0 0; color: var(--dsw-alias-state-error-primary, #d54941); font-size: var(--dim-font-12); line-height: 1.5; overflow-wrap: anywhere; }
-.dim-contextFooter { display: flex; justify-content: flex-end; gap: var(--dim-gap-8); margin-top: 16px; }
+.dim-contextFooter { display: flex; justify-content: flex-end; gap: var(--dim-gap-8); margin-top: 0; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); }
 .dim-contextFooter button { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: 18px; white-space: nowrap; cursor: pointer; }
 .dim-contextFooter button:hover:not(:disabled) { background: var(--dim-hover); }
 .dim-contextFooter .dim-contextSave, .dim-contextFooter .dim-contextSave:hover:not(:disabled) { border-color: var(--dsw-alias-state-business-primary, #4176e6); color: #fff; background: var(--dsw-alias-state-business-primary, #4176e6); }

@@ -97,9 +97,12 @@ export function BotStatusMeta({
       'data-tone': tone,
     }),
     h('span', null, stateLabel)),
-    h('div', { className: 'dim-lastChecked' },
+    // Without a timestamp the value is the placeholder 尚未检查, which reads as one
+    // run-on line against its own label (最近检查 尚未检查) and says nothing the status
+    // chip above does not already say. The row returns as soon as a real check runs.
+    lastCheckedAt ? h('div', { className: 'dim-lastChecked' },
       h('span', null, '最近检查'),
-      h('span', null, formatCheckedTime(lastCheckedAt))));
+      h('span', null, formatCheckedTime(lastCheckedAt))) : null);
 }
 
 export function LastMessageErrorSummary({ className = '', error }) {

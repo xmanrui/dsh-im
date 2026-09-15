@@ -1061,7 +1061,7 @@ test('all IM channel cards keep localized actions visible above full-width feedb
   assert.match(feishuStyles, /\.bxf-botActions \{[^}]*width: 100%;[^}]*flex-wrap: wrap;/);
   assert.match(weixinStyles, /\.dxw-accountFooter \.dxw-actions \{[^}]*flex-wrap: nowrap;/);
   assert.match(dingtalkStyles, /\.ddt-accountFooter \.ddt-actions \{[^}]*flex-wrap: nowrap;/);
-  assert.match(imStyles, /\.dim-panel \.dim-cardFooter \{[^}]*gap: var\(--dim-gap-12\);[^}]*padding: 12px 0 0;[^}]*border-top: 0\.5px solid/);
+  assert.match(imStyles, /\.dim-panel \.dim-cardFooter \{[^}]*gap: var\(--dim-gap-12\);[^}]*padding: 12px 0 16px;[^}]*border-top: 0\.5px solid/);
   assert.match(imStyles, /\.dim-panel \.dim-cardFooterLayout \{[^}]*width: 100%;[^}]*flex-direction: column;[^}]*align-items: stretch;/);
   assert.match(imStyles, /\.dim-panel \.dim-cardFooterLayout > \.dim-cardActions \{[^}]*align-self: stretch;/);
   assert.match(imStyles, /\.dim-panel \.dim-cardActions \{[^}]*width: 100%;[^}]*justify-content: flex-end;[^}]*flex-wrap: wrap;/);

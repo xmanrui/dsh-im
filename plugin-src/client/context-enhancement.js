@@ -23,22 +23,23 @@ const FIELD_LABELS = Object.freeze({
   botId: '机器人标识',
 });
 
+/* Only the field-specific half lives here. Every one of these four hints used
+   to open with the same sentence and close with the same sentence, differing
+   only in the middle clause: measured, those shared halves were 380px of a
+   1028px dialog. The shared rule is stated once, on the section, where it
+   covers every field at once. */
 const FIELD_HELP = Object.freeze({
-  senderName: Object.freeze({
-    labelKey: 'senderNameHelpLabel',
-    text: '该字段不是每个渠道都能提供。当前消息没有发送者昵称时，即使已选择该字段，<dsh_im_source> 中也会省略 senderName。',
-  }),
   conversationTitle: Object.freeze({
     labelKey: 'conversationTitleHelpLabel',
-    text: '该字段不是每个渠道都能提供。钉钉群聊会带上群名。当前消息没有会话标题时，即使已选择该字段，<dsh_im_source> 中也会省略 conversationTitle。',
+    text: '钉钉群聊会带上群名。',
   }),
   chatId: Object.freeze({
     labelKey: 'chatIdHelpLabel',
-    text: '该字段不是每个渠道都能提供。会话标识用于区分不同的群组或私聊，飞书群聊会带上群 ID。当前消息没有会话标识时，即使已选择该字段，<dsh_im_source> 中也会省略 chatId。',
+    text: '用于区分不同的群组或私聊；飞书群聊会带上群 ID。',
   }),
   threadId: Object.freeze({
     labelKey: 'threadIdHelpLabel',
-    text: '该字段不是每个渠道都能提供。飞书话题群的消息会带上话题 ID，用于区分同一群组内的不同话题；当前消息不在话题中时，即使已选择该字段，<dsh_im_source> 中也会省略 threadId。',
+    text: '飞书话题群的消息会带上话题 ID，用于区分同一群组内的不同话题。',
   }),
 });
 
@@ -129,7 +130,7 @@ function ContextEnhancementScopeEditor({
     h('div', { className: 'dim-contextLegend' },
       h('span', null, '来源字段'),
       h('span', { className: 'dim-helpHint dim-contextLegendHint' },
-        '增强提示词中请使用字段名（如 senderId、conversationType）引用这些信息。只发送当前会话中勾选且可用的字段，不会额外查询或补全。')),
+        '增强提示词中请使用字段名（如 senderId、conversationType）引用这些信息。只发送当前会话中勾选且可用的字段，不会额外查询或补全；某字段在当前渠道或当前消息中不存在时，即使已勾选，<dsh_im_source> 中也会省略。')),
     h('div', { className: 'dim-contextFields' }, CONTEXT_ENHANCEMENT_FIELDS.map((field) => {
       const fieldId = `${idPrefix}-${kind}-field-${field}`;
       return h('div', { key: field, className: 'dim-contextField' },
@@ -316,43 +317,44 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
       type: 'button', className: 'dim-contextClose', 'aria-label': '关闭弹窗',
       disabled: saving, onClick: cancel,
     }, h(ContextIcon, { kind: 'close' }))),
-  h('div', { className: 'dim-contextTabs', role: 'tablist', 'aria-label': '上下文增强范围' },
-    scopeKinds.map((kind) => {
-      const selected = activeScope === kind;
-      return h('button', {
-        key: kind,
-        id: `${scopeIdPrefix}-${kind}-tab`,
-        ref: tabRefs[kind],
-        type: 'button',
-        role: 'tab',
-        className: 'dim-contextTab',
-        'data-context-kind': kind,
-        'aria-selected': selected,
-        'aria-controls': `${scopeIdPrefix}-${kind}-panel`,
-        tabIndex: selected ? 0 : -1,
-        disabled: busy,
-        onClick: () => activateScope(kind),
-        onKeyDown: (event) => handleTabKeyDown(event, kind),
-      }, SCOPE_COPY[kind].title);
-    })),
-  scopeKinds.map((kind) => h('div', {
-    key: kind,
-    id: `${scopeIdPrefix}-${kind}-panel`,
-    className: 'dim-contextTabPanel',
-    role: 'tabpanel',
-    'data-context-kind': kind,
-    'aria-labelledby': `${scopeIdPrefix}-${kind}-tab`,
-    hidden: activeScope !== kind,
-  }, h(ContextEnhancementScopeEditor, {
-    kind,
-    scope: draft[kind],
-    example: kind === 'group' ? groupGuidanceExample : directGuidanceExample,
-    supported: kind === 'group' ? groupSupported : true,
-    busy,
-    idPrefix: scopeIdPrefix,
-    onChange: (key, value) => changeScope(kind, key, value),
-  }))),
-  error ? h('p', { className: 'dim-contextError', role: 'alert' }, error) : null,
+  h('div', { className: 'dim-contextBody' },
+    h('div', { className: 'dim-contextTabs', role: 'tablist', 'aria-label': '上下文增强范围' },
+      scopeKinds.map((kind) => {
+        const selected = activeScope === kind;
+        return h('button', {
+          key: kind,
+          id: `${scopeIdPrefix}-${kind}-tab`,
+          ref: tabRefs[kind],
+          type: 'button',
+          role: 'tab',
+          className: 'dim-contextTab',
+          'data-context-kind': kind,
+          'aria-selected': selected,
+          'aria-controls': `${scopeIdPrefix}-${kind}-panel`,
+          tabIndex: selected ? 0 : -1,
+          disabled: busy,
+          onClick: () => activateScope(kind),
+          onKeyDown: (event) => handleTabKeyDown(event, kind),
+        }, SCOPE_COPY[kind].title);
+      })),
+    scopeKinds.map((kind) => h('div', {
+      key: kind,
+      id: `${scopeIdPrefix}-${kind}-panel`,
+      className: 'dim-contextTabPanel',
+      role: 'tabpanel',
+      'data-context-kind': kind,
+      'aria-labelledby': `${scopeIdPrefix}-${kind}-tab`,
+      hidden: activeScope !== kind,
+    }, h(ContextEnhancementScopeEditor, {
+      kind,
+      scope: draft[kind],
+      example: kind === 'group' ? groupGuidanceExample : directGuidanceExample,
+      supported: kind === 'group' ? groupSupported : true,
+      busy,
+      idPrefix: scopeIdPrefix,
+      onChange: (key, value) => changeScope(kind, key, value),
+    }))),
+    error ? h('p', { className: 'dim-contextError', role: 'alert' }, error) : null,),
   h('footer', { className: 'dim-contextFooter' },
     h('button', { type: 'button', disabled: saving, onClick: cancel }, '取消'),
     h('button', {
@@ -381,8 +383,7 @@ export function ContextEnhancementEditor({ config, groupSupported = true, disabl
       onClick: () => setOpen(true),
     }, h(ContextIcon),
     h('span', { className: 'dim-contextLabel' }, '上下文增强'),
-    h('span', { id: statusId, className: 'dim-contextStatus', 'data-active': label !== '未开启', 'aria-live': 'polite' }, label),
-    h(ContextIcon, { kind: 'chevron' })),
+    h('span', { id: statusId, className: 'dim-contextStatus', 'data-active': label !== '未开启', 'aria-live': 'polite' }, label)),
     open ? h(ContextEnhancementDialog, {
       id: dialogId, config, groupSupported, disabled, onSave,
       onClose: () => setOpen(false), returnFocusRef: entryRef,
