@@ -65,7 +65,6 @@ function Heading({ totals, adding, busy, onAdd, onCredential, credentialOpen, ad
     h('div', { className: 'ddt-tools' },
       h('div', { className: 'dim-bindActions' },
         h(Button, {
-          kind: 'primary',
           className: 'dim-scanButton',
           onClick: onAdd,
           disabled: adding || busy,

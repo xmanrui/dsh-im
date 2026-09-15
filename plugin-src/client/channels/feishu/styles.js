@@ -2,10 +2,10 @@ export const FEISHU_STYLE_ID = "xmanrui-dsh-im-feishu-settings";
 
 const CSS = String.raw`
 .bxf-page {
-  --bxf-accent: var(--dsw-alias-state-business-primary, #4176e6);
+  --bxf-accent: var(--dim-blue);
   --bxf-success: var(--dsw-alias-state-success-primary, #20a162);
   --bxf-warning: var(--dsw-alias-state-warn-primary, #d97706);
-  --bxf-error: var(--dsw-alias-state-error-primary, #d54941);
+  --bxf-error: var(--dim-danger);
   box-sizing: border-box;
   width: 100%;
   max-width: 860px;
@@ -72,7 +72,7 @@ const CSS = String.raw`
   border-radius: var(--dim-radius-full);
   padding: 4px 10px;
   color: var(--dsw-alias-label-secondary, #646a73);
-  background: var(--dsw-alias-bg-module-platform, #f5f6f7);
+  background: var(--dim-module-fill);
   font-size: var(--dim-font-11);
   line-height: 16px;
   white-space: nowrap;
@@ -338,18 +338,13 @@ const CSS = String.raw`
 
 .bxf-qrFallback span { display: block; color: #646a73; font-size: var(--dim-font-12); line-height: var(--dim-line-12); margin-top: 8px; }
 
+/* Only border-radius survives here. Every other declaration - position, inset, display,
+   place-items, colour, background, blur, font-size, weight, text-align - is also declared by the
+   shared .dim-panel .dim-qrExpired at (0,2,0), and the element carries both classes
+   (feishu/index.js:283), so all of them were dead. The two other channels' expired rules
+   (.ddt-expired, .dxw-expired) declared nothing BUT dead properties and are deleted outright. */
 .bxf-expiredOverlay {
-  position: absolute;
-  inset: 10px;
-  display: grid;
-  place-items: center;
   border-radius: var(--dim-radius-8);
-  color: #1f2329;
-  background: rgba(255, 255, 255, .94);
-  backdrop-filter: blur(3px);
-  font-size: var(--dim-font-13);
-  font-weight: var(--dim-weight-600);
-  text-align: center;
 }
 
 .bxf-countdown {
@@ -362,7 +357,7 @@ const CSS = String.raw`
 }
 
 .bxf-countdownTop { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-10); }
-.bxf-progress { height: 3px; overflow: hidden; border-radius: var(--dim-radius-full); background: var(--dsw-alias-bg-module-platform, #f5f6f7); margin-top: 6px; }
+.bxf-progress { height: 3px; overflow: hidden; border-radius: var(--dim-radius-full); background: var(--dim-module-fill); margin-top: 6px; }
 .bxf-progress > span { display: block; width: var(--bxf-progress, 100%); height: 100%; border-radius: inherit; background: var(--bxf-accent); transition: width 1s linear; }
 
 /* The channel's qrCopy h3 used to be declared twice here (20/28/600, and 18/26 under
@@ -412,7 +407,7 @@ const CSS = String.raw`
 .bxf-avatar { flex: none; display: grid; place-items: center; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 3px rgb(31 35 41 / 7%); }
 .bxf-botName { min-width: 0; }
 .bxf-botName h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--dim-font-16); line-height: var(--dim-line-16); font-weight: var(--dim-weight-600); }
-.bxf-botName p { overflow: hidden; color: var(--dsw-alias-label-tertiary, #81858c); font-family: var(--dim-font-mono, monospace); font-size: var(--dim-font-12); line-height: var(--dim-line-12); text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.bxf-botName p { overflow: hidden; color: var(--dsw-alias-label-tertiary, #81858c); font-family: var(--dim-font-mono); font-size: var(--dim-font-12); line-height: var(--dim-line-12); text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 
 /* A coloured status indicator, so the host owner is ConnectionIndicator (12 / 500 / 18, semantic
    colour carried by the indicator) rather than the neutral Pill (12 / 400 / 18). Only the weight
@@ -422,7 +417,7 @@ const CSS = String.raw`
 .bxf-healthPill[data-health="offline"], .bxf-healthPill[data-health="error"] { color: var(--bxf-error); background: color-mix(in srgb, var(--bxf-error) 10%, transparent); }
 
 
-.bxf-responseMode { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; column-gap: var(--dim-gap-10); row-gap: var(--dim-gap-5); margin-top: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: var(--dim-radius-8); background: var(--dsw-alias-bg-module-platform, #f5f6f7); }
+.bxf-responseMode { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; column-gap: var(--dim-gap-10); row-gap: var(--dim-gap-5); margin-top: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: var(--dim-radius-8); background: var(--dim-module-fill); }
 .bxf-responseModeHeader { display: contents; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .bxf-responseModeHeader > span:first-child { grid-column: 1; grid-row: 1; white-space: nowrap; }
 .bxf-responseModeStatus { grid-column: 2; grid-row: 1; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); white-space: nowrap; }
@@ -465,7 +460,7 @@ const CSS = String.raw`
 .bxf-botProvision .bxf-actions { margin-top: 16px; }
 .bxf-botProvision .bxf-inlineError { min-height: 160px; padding: 22px; }
 
-.bxf-connectedFooter { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-15); margin-top: 20px; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); }
+.bxf-connectedFooter { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-15); margin-top: 20px; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .bxf-healthSummary { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .bxf-healthSummary[data-error="true"] { color: var(--bxf-error); }
 .bxf-botActions { position: relative; flex: none; width: 100%; flex-wrap: wrap; gap: var(--dim-gap-8); margin-top: 0; justify-content: flex-end; }
@@ -480,7 +475,7 @@ const CSS = String.raw`
 
 .bxf-confirm {
   border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%));
-  background: color-mix(in srgb, var(--bxf-error) 4%, var(--dsw-alias-bg-module-platform, #f5f6f7));
+  background: color-mix(in srgb, var(--bxf-error) 4%, var(--dim-module-fill));
   padding: 17px 24px 20px;
 }
 .bxf-confirm:focus { outline: none; }
@@ -492,7 +487,7 @@ const CSS = String.raw`
 .bxf-errorIcon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--dim-radius-12); color: var(--bxf-error); background: color-mix(in srgb, var(--bxf-error) 9%, transparent); }
 .bxf-error h3 { font-size: var(--dim-font-16); line-height: var(--dim-line-16); overflow-wrap: anywhere; }
 .bxf-error p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); margin-top: 5px; overflow-wrap: anywhere; }
-.bxf-errorCode { display: inline-block; color: var(--dsw-alias-label-tertiary, #81858c); font-family: var(--dim-font-mono, monospace); font-size: var(--dim-font-11); margin-top: 7px; overflow-wrap: anywhere; }
+.bxf-errorCode { display: inline-block; color: var(--dsw-alias-label-tertiary, #81858c); font-family: var(--dim-font-mono); font-size: var(--dim-font-11); margin-top: 7px; overflow-wrap: anywhere; }
 
 .bxf-statusNotice {
   display: flex;
@@ -510,12 +505,12 @@ const CSS = String.raw`
 .bxf-statusNotice > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 
 .bxf-skeleton { min-height: 260px; padding: 28px; }
-.bxf-skeletonLine { height: 12px; border-radius: var(--dim-radius-full); background: linear-gradient(90deg, var(--dsw-alias-bg-module-platform, #f5f6f7), color-mix(in srgb, var(--dsw-alias-label-tertiary, #81858c) 10%, transparent), var(--dsw-alias-bg-module-platform, #f5f6f7)); background-size: 220% 100%; animation: bxf-shimmer 1.5s linear infinite; }
+.bxf-skeletonLine { height: 12px; border-radius: var(--dim-radius-full); background: linear-gradient(90deg, var(--dim-module-fill), color-mix(in srgb, var(--dsw-alias-label-tertiary, #81858c) 10%, transparent), var(--dim-module-fill)); background-size: 220% 100%; animation: bxf-shimmer 1.5s linear infinite; }
 .bxf-skeletonLine:nth-child(1) { width: 92px; }
 .bxf-skeletonLine:nth-child(2) { width: 44%; height: 22px; margin-top: 23px; }
 .bxf-skeletonLine:nth-child(3) { width: 72%; margin-top: 14px; }
 .bxf-skeletonLine:nth-child(4) { width: 58%; margin-top: 9px; }
-.bxf-skeletonBox { width: 138px; height: 38px; border-radius: var(--dim-radius-8); background: var(--dsw-alias-bg-module-platform, #f5f6f7); margin-top: 28px; }
+.bxf-skeletonBox { width: 138px; height: 38px; border-radius: var(--dim-radius-8); background: var(--dim-module-fill); margin-top: 28px; }
 
 .bxf-visuallyHidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 

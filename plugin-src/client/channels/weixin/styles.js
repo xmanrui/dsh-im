@@ -6,7 +6,7 @@ const CSS = String.raw`
   --dxw-accent-dark: #05994c;
   --dxw-success: var(--dsw-alias-state-success-primary, #20a162);
   --dxw-warning: var(--dsw-alias-state-warn-primary, #d97706);
-  --dxw-error: var(--dsw-alias-state-error-primary, #d54941);
+  --dxw-error: var(--dim-danger);
   width: 100%;
   max-width: 880px;
   display: flex;
@@ -24,7 +24,7 @@ const CSS = String.raw`
 .dxw-heading p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); margin-top: 5px; white-space: nowrap; }
 .dxw-tools, .dxw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--dim-gap-10); }
 .dxw-tools { width: 100%; justify-content: space-between; flex-wrap: nowrap; }
-.dxw-badge { display: inline-flex; align-items: center; gap: var(--dim-gap-7); padding: 0 11px; border-radius: var(--dim-radius-full); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f5f6f7); font-size: var(--dim-font-12); white-space: nowrap; }
+.dxw-badge { display: inline-flex; align-items: center; gap: var(--dim-gap-7); padding: 0 11px; border-radius: var(--dim-radius-full); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dim-module-fill); font-size: var(--dim-font-12); white-space: nowrap; }
 .dxw-dot { width: 8px; height: 8px; border-radius: 50%; background: #aeb3bb; flex: none; }
 .dxw-dot[data-tone="success"] { background: var(--dxw-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dxw-success) 14%, transparent); }
 .dxw-dot[data-tone="warning"] { background: var(--dxw-warning); }
@@ -50,7 +50,6 @@ const CSS = String.raw`
 .dxw-qrFrame { position: relative; width: 270px; aspect-ratio: 1; display: grid; place-items: center; overflow: hidden; padding: 10px; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-16); background: white; }
 .dxw-qrFrame img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .dxw-qrFallback { padding: 24px; text-align: center; color: #646a73; }
-.dxw-expired { position: absolute; inset: 0; display: grid; place-items: center; padding: 30px; color: white; text-align: center; font-weight: var(--dim-weight-600); background: rgb(31 35 41 / 76%); backdrop-filter: blur(3px); }
 .dxw-countdown { width: 270px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); }
 .dxw-countdown div { display: flex; justify-content: space-between; margin-bottom: 6px; }
 .dxw-progress { height: 4px; overflow: hidden; border-radius: var(--dim-radius-full); background: #eef0f3; }
@@ -67,7 +66,7 @@ const CSS = String.raw`
 .dxw-statusNotice, .dxw-error { display: flex; align-items: center; gap: var(--dim-gap-10); padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--dxw-error) 28%, transparent); border-radius: var(--dim-radius-10); color: var(--dxw-error); background: color-mix(in srgb, var(--dxw-error) 7%, transparent); font-size: var(--dim-font-13); }
 .dxw-error { align-items: flex-start; flex-direction: column; padding: 22px; }
 .dxw-error h3 { font-size: var(--dim-font-16); overflow-wrap: anywhere; }
-.dxw-errorCode { font-family: var(--dim-font-mono, monospace); font-size: var(--dim-font-11); opacity: .8; overflow-wrap: anywhere; }
+.dxw-errorCode { font-family: var(--dim-font-mono); font-size: var(--dim-font-11); opacity: .8; overflow-wrap: anywhere; }
 .dxw-listHeading { display: flex; justify-content: space-between; align-items: center; margin: 2px 0 9px; }
 .dxw-listHeading h3 { margin: 0; font-size: var(--dim-font-14); }
 .dxw-list { display: grid; gap: var(--dim-gap-12); margin: 0; padding: 0; list-style: none; }
@@ -75,9 +74,9 @@ const CSS = String.raw`
 .dxw-accountIdentity { display: flex; align-items: center; gap: var(--dim-gap-12); min-width: 0; }
 .dxw-avatar { display: grid; place-items: center; flex: none; color: white; background: var(--dxw-accent); }
 .dxw-accountIdentity h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--dim-font-15); }
-.dxw-accountIdentity p { color: var(--dsw-alias-label-secondary, #646a73); font: 12px var(--dim-font-mono, monospace); margin-top: 4px; }
+.dxw-accountIdentity p { color: var(--dsw-alias-label-secondary, #646a73); font: 12px var(--dim-font-mono); margin-top: 4px; }
 .dxw-health { display: inline-flex; align-items: center; gap: var(--dim-gap-7); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); white-space: nowrap; }
-.dxw-accountFooter { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-15); padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); }
+.dxw-accountFooter { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-15); padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .dxw-accountFooter .dxw-actions { flex: none; flex-wrap: nowrap; gap: var(--dim-gap-8); margin-top: 0; }
 .dxw-accountFooter .dxw-button { flex: none; white-space: nowrap; }
 .dxw-summary { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); }

@@ -10,7 +10,7 @@ const CSS = String.raw`
 .dim-callbackRow { display: flex; gap: var(--dim-gap-8); align-items: center; }
 /* Every other input in the plugin carries the field language; this one declared
    none of it, so it fell back to the UA default beside a 28px capsule button. */
-.dim-callbackRow input { flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font-family: var(--dim-font-mono, monospace); font-size: var(--dim-font-12); }
+.dim-callbackRow input { flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font-family: var(--dim-font-mono); font-size: var(--dim-font-12); }
 .dim-appSwitchRow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--dim-gap-8); font-size: var(--dim-font-13); }
 /* Both were mounted with no rule at all (wecom-app/index.js:161,190), so the
    text fell back to the browser default. Native gives help text under a

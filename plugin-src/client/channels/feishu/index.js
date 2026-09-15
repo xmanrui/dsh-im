@@ -162,7 +162,6 @@ function Heading({ totals, onAdd, onCredential, credentialOpen, adding, busy, ad
     h("div", { className: "bxf-headingTools" },
       h("div", { className: "dim-bindActions" },
         h(Button, {
-          kind: "primary",
           size: "small",
           className: "bxf-bindButton dim-scanButton",
           onClick: onAdd,
