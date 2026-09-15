@@ -6,6 +6,7 @@ import {
   validateAccessPolicy,
 } from '../../src/channels/shared/access-policy.mjs';
 import { h, localizeText } from './i18n.js';
+import { RowSelect } from './row-selector.js';
 
 export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
 
@@ -170,33 +171,35 @@ function ScenePolicyEditor({
           h('label', { className: 'dim-accessField dim-modelRow' },
             h('span', { className: 'dim-rowText' },
               h('span', { className: 'dim-modelRowLabel' }, '访问模式')),
-            h('select', {
-              className: 'dim-rowControl',
+            h(RowSelect, {
               value: policy.mode,
               disabled,
-              'aria-label': [localizeText(title), localizeText('访问模式')].join(' '),
-              onChange: (event) => onChange({ ...policy, mode: event.target.value }),
-            },
-            h('option', { value: 'open' }, '允许所有用户'),
-            h('option', { value: 'allowlist' }, '仅白名单用户'))),
+              label: [localizeText(title), localizeText('访问模式')].join(' '),
+              onChange: (next) => onChange({ ...policy, mode: next }),
+              options: [
+                { value: 'open', label: '允许所有用户' },
+                { value: 'allowlist', label: '仅白名单用户' },
+              ],
+            })),
           allowlist ? null : h('label', { className: 'dim-accessField dim-modelRow' },
               h('span', { className: 'dim-rowText' },
                 h('span', { className: 'dim-modelRowLabel' }, '默认命令权限')),
-              h('select', {
-                className: 'dim-rowControl',
+              h(RowSelect, {
                 value: policy.open.defaultCanExecuteCommands ? 'allow' : 'deny',
                 disabled,
-                'aria-label': [localizeText(title), localizeText('默认命令权限')].join(' '),
-                onChange: (event) => onChange({
+                label: [localizeText(title), localizeText('默认命令权限')].join(' '),
+                onChange: (next) => onChange({
                   ...policy,
                   open: {
                     ...policy.open,
-                    defaultCanExecuteCommands: commandValue(event.target.value),
+                    defaultCanExecuteCommands: commandValue(next),
                   },
                 }),
-              },
-              h('option', { value: 'allow' }, '可以执行命令'),
-              h('option', { value: 'deny' }, '不可以执行命令')))),
+                options: [
+                  { value: 'allow', label: '可以执行命令' },
+                  { value: 'deny', label: '不可以执行命令' },
+                ],
+              }))),
         h('div', { className: 'dim-accessUsers' },
           h('div', { className: 'dim-accessUsersHeading' },
             h('div', { className: 'dim-accessUsersTitle' },

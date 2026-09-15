@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { QuestionGlyph } from './ui-glyphs.js';
-import { createPortal } from 'react-dom';
+import { DisclosureChevron } from './channels/shared/collapsible-account.js';
 
 import {
   CONTEXT_DIRECT_GUIDANCE_EXAMPLE,
@@ -201,7 +201,6 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
   const mountedRef = React.useRef(true);
   const groupTabRef = React.useRef(null);
   const directTabRef = React.useRef(null);
-  const titleId = React.useId();
   const descriptionId = React.useId();
   const scopeIdPrefix = React.useId();
   const groupGuidanceExample = localizeText(CONTEXT_GROUP_GUIDANCE_EXAMPLE);
@@ -212,14 +211,12 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
 
   React.useEffect(() => {
     mountedRef.current = true;
+    // Inline disclosure, not a modal: focus moves in on open and returns to the trigger
+    // on close, but it is NOT trapped. A trap exists because a dialog covers the page;
+    // this region does not, so pulling focus back would fight the user.
     dialogRef.current?.focus?.();
-    const keepFocus = (event) => {
-      if (dialogRef.current && !dialogRef.current.contains(event.target)) dialogRef.current.focus();
-    };
-    globalThis.document?.addEventListener?.('focusin', keepFocus);
     return () => {
       mountedRef.current = false;
-      globalThis.document?.removeEventListener?.('focusin', keepFocus);
       queueMicrotask(() => returnFocusRef.current?.focus?.());
     };
   }, [returnFocusRef]);
@@ -274,16 +271,14 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
     }
   };
 
-  const content = h('div', {
-    className: 'dim-contextBackdrop',
-    onMouseDown: (event) => { if (event.target === event.currentTarget) cancel(); },
-  }, h('section', {
+  // Inline region, rendered where the trigger sits - native expands in place
+  // (ModelListEditor.tsx:407) instead of covering the page. No portal, no backdrop, and
+  // no role=dialog: aria-modal would claim the page behind is inert, which is false.
+  const content = h('section', {
     id,
     ref: dialogRef,
-    className: 'dim-contextDialog',
-    role: 'dialog',
-    'aria-modal': 'true',
-    'aria-labelledby': titleId,
+    className: 'dim-contextPanel',
+    'aria-label': '上下文增强',
     'aria-describedby': descriptionId,
     'aria-busy': saving,
     tabIndex: -1,
@@ -293,36 +288,10 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
         event.stopPropagation();
         cancel();
       }
-      if (event.key !== 'Tab') return;
-      const controls = dialogRef.current?.querySelectorAll?.(
-        'button:not(:disabled), input:not(:disabled), textarea:not(:disabled)',
-      );
-      if (!controls?.length) {
-        event.preventDefault();
-        dialogRef.current?.focus?.();
-        return;
-      }
-      const first = controls[0];
-      const last = controls[controls.length - 1];
-      const active = globalThis.document?.activeElement;
-      if (event.shiftKey && (active === first || active === dialogRef.current)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (active === last || active === dialogRef.current)) {
-        event.preventDefault();
-        first.focus();
-      }
     },
   },
-  h('header', { className: 'dim-contextHeader' },
-    h('div', { className: 'dim-contextHeaderTitle' },
-      h('h3', { id: titleId }, '上下文增强'),
-      h('p', { id: descriptionId, className: 'dim-helpHint' }, '选择在哪些会话中启用、提供哪些来源字段，以及如何使用这些信息。仅使用已有消息元数据，不查询平台 API。')),
-    h('button', {
-      type: 'button', className: 'dim-contextClose', 'aria-label': '关闭弹窗',
-      disabled: saving, onClick: cancel,
-    }, h(ContextIcon, { kind: 'close' }))),
   h('div', { className: 'dim-contextBody' },
+    h('p', { id: descriptionId, className: 'dim-helpHint dim-contextIntro' }, '选择在哪些会话中启用、提供哪些来源字段，以及如何使用这些信息。仅使用已有消息元数据，不查询平台 API。'),
     h('div', { className: 'dim-contextTabs', role: 'tablist', 'aria-label': '上下文增强范围' },
       scopeKinds.map((kind) => {
         const selected = activeScope === kind;
@@ -365,9 +334,9 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
     h('button', {
       type: 'button', className: 'dim-contextSave', disabled: busy,
       onClick: () => { void save(); },
-    }, saving ? '保存中…' : '保存'))));
+    }, saving ? '保存中…' : '保存')));
 
-  return globalThis.document?.body ? createPortal(content, document.body) : content;
+  return content;
 }
 
 export function ContextEnhancementEditor({ config, groupSupported = true, disabled = false, onSave }) {
@@ -380,17 +349,23 @@ export function ContextEnhancementEditor({ config, groupSupported = true, disabl
     ...saved, group: { ...saved.group, enabled: false },
   });
 
-  return h(React.Fragment, null,
+  // The shared disclosure root: `is-open` drives the chevron rotation and the
+  // body's grid-template-rows, so this editor reacts to the same two
+  // declarations as every channel card.
+  return h('div', { className: `dim-collapsible${open ? ' is-open' : ''}`, 'data-open': open ? 'true' : 'false' },
     h('button', {
       type: 'button', ref: entryRef, className: 'dim-contextEntry', disabled,
       'aria-label': '上下文增强', 'aria-describedby': statusId,
-      'aria-haspopup': 'dialog', 'aria-expanded': open, 'aria-controls': open ? dialogId : undefined,
-      onClick: () => setOpen(true),
+      'aria-expanded': open, 'aria-controls': open ? dialogId : undefined,
+      onClick: () => setOpen((value) => !value),
     }, h(ContextIcon),
     h('span', { className: 'dim-contextLabel' }, '上下文增强'),
-    h('span', { id: statusId, className: 'dim-contextStatus', 'data-active': label !== '未开启', 'aria-live': 'polite' }, label)),
-    open ? h(ContextEnhancementDialog, {
-      id: dialogId, config, groupSupported, disabled, onSave,
-      onClose: () => setOpen(false), returnFocusRef: entryRef,
-    }) : null);
+    h('span', { id: statusId, className: 'dim-contextStatus', 'data-active': label !== '未开启', 'aria-live': 'polite' }, label),
+    h(DisclosureChevron)),
+    open ? h('div', { className: 'dim-collapsibleBody' },
+      h('div', { className: 'dim-collapsibleBodyInner' },
+        h(ContextEnhancementDialog, {
+          id: dialogId, config, groupSupported, disabled, onSave,
+          onClose: () => setOpen(false), returnFocusRef: entryRef,
+        }))) : null);
 }

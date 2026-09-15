@@ -19,7 +19,6 @@ const CSS = String.raw`
 .dxw-page *, .dxw-page *::before, .dxw-page *::after { box-sizing: border-box; }
 .dxw-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--dim-gap-20); }
 .dxw-heading h2, .dxw-heading p, .dxw-card h3, .dxw-card p { margin: 0; }
-.dxw-eyebrow { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); font-weight: var(--dim-weight-600); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 3px; }
 .dxw-heading h2 { font-size: var(--dim-font-20); line-height: var(--dim-line-20); font-weight: var(--dim-weight-600); }
 .dxw-heading p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); margin-top: 5px; white-space: nowrap; }
 .dxw-tools, .dxw-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--dim-gap-10); }
@@ -66,7 +65,6 @@ const CSS = String.raw`
 .dxw-statusNotice, .dxw-error { display: flex; align-items: center; gap: var(--dim-gap-10); padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--dxw-error) 28%, transparent); border-radius: var(--dim-radius-10); color: var(--dxw-error); background: color-mix(in srgb, var(--dxw-error) 7%, transparent); font-size: var(--dim-font-13); }
 .dxw-error { align-items: flex-start; flex-direction: column; padding: 22px; }
 .dxw-error h3 { font-size: var(--dim-font-16); overflow-wrap: anywhere; }
-.dxw-errorCode { font-family: var(--dim-font-mono); font-size: var(--dim-font-11); opacity: .8; overflow-wrap: anywhere; }
 .dxw-listHeading { display: flex; justify-content: space-between; align-items: center; margin: 2px 0 9px; }
 .dxw-listHeading h3 { margin: 0; font-size: var(--dim-font-14); }
 .dxw-list { display: grid; gap: var(--dim-gap-12); margin: 0; padding: 0; list-style: none; }

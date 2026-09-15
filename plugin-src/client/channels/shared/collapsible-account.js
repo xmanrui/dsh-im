@@ -28,6 +28,26 @@ import { ChevronRightGlyph } from '../../ui-glyphs.js';
  * does not toggle the section (e.g. the bot settings button).
  * `children` is the collapsed details region.
  */
+/**
+ * The expand affordance, shared by every disclosure in the plugin.
+ *
+ * Rendered inside the toggle so the rotation stays a pure CSS reaction to the
+ * root's `is-open` class; a second copy of this markup would be a second place
+ * to change the glyph size.
+ */
+export function DisclosureChevron() {
+  return h('span', { className: 'dim-collapsibleChevron', 'aria-hidden': 'true' },
+    h(ChevronRightGlyph, { size: 14 }));
+}
+
+/**
+ * Collapsible account card.
+ *
+ * `header` renders the always-visible header line; clicking it toggles.
+ * Any interactive control inside the header should stop the click event so it
+ * does not toggle the section (e.g. the bot settings button).
+ * `children` is the collapsed details region.
+ */
 export function CollapsibleAccountSection({
   header,
   defaultOpen = false,
@@ -35,6 +55,7 @@ export function CollapsibleAccountSection({
   onToggle,
   id,
   className = '',
+  toggleLabel,
   children,
 }) {
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
@@ -54,7 +75,7 @@ export function CollapsibleAccountSection({
   };
 
   return h('div', {
-    className: `dim-collapsibleAccount ${open ? 'is-open' : ''} ${className}`.trim(),
+    className: `dim-collapsible ${open ? 'is-open' : ''} ${className}`.trim(),
     'data-open': open ? 'true' : 'false',
   },
     h('div', {
@@ -65,11 +86,14 @@ export function CollapsibleAccountSection({
       onKeyDown,
       'aria-expanded': open ? 'true' : 'false',
       'aria-controls': contentId,
-      'aria-label': open ? '收起该账号的设置' : '展开该账号的设置',
+      // Callers pass null when the header already carries visible text, so the
+      // accessible name stays the text the user can see.
+      'aria-label': toggleLabel === undefined
+        ? (open ? '收起该账号的设置' : '展开该账号的设置')
+        : (toggleLabel || undefined),
     },
       h('div', { className: 'dim-collapsibleHeaderContent' }, header),
-      h('span', { className: 'dim-collapsibleChevron', 'aria-hidden': 'true' },
-        h(ChevronRightGlyph, { size: 14 })),
+      h(DisclosureChevron),
     ),
     h('div', {
       id: contentId,

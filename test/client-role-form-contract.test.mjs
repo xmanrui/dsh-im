@@ -123,19 +123,21 @@ test('a disabled selector keeps its surface and dims only what it says', () => {
   }
 });
 
-test('a modal scrolls its body, not its own chrome', () => {
-  // The card used to be the only scroll region, so in a short viewport the tab
-  // strip that names the scope and the primary action both left the screen.
-  // Measured after the fix at a 560px viewport: the body scrolls - 659px of content
-  // in 374px - while Save stays at y=532, inside the viewport.
-  const dialog = rulesFor('.dim-contextDialog');
-  assert.equal(dialog.length, 1, 'the dialog keeps its rule');
-  assert.equal(declared(dialog[0], 'display'), 'grid');
-  assert.match(declared(dialog[0], 'grid-template-rows') ?? '', /minmax\(0, 1fr\)/);
+test('the inline context panel has no scroll region of its own', () => {
+  // It used to be a modal: the body scrolled while the tab strip and Save stayed put,
+  // because in a short viewport the card was the only scroll region. Inline there is no
+  // card and no height cap - the panel is part of the page, and the page scrolls - so
+  // nothing can scroll off on its own and no nested scroll region may exist.
+  // Two rules name this selector: the box-sizing guard and the panel itself, so pick
+  // the one that actually lays it out.
+  const panel = rulesFor('.dim-contextPanel').filter(rule => declared(rule, 'display') === 'grid');
+  assert.equal(panel.length, 1, 'the inline panel keeps its layout rule');
+  assert.equal(declared(panel[0], 'overflow-y'), undefined, 'no nested scroll region');
+  assert.equal(declared(panel[0], 'max-height'), undefined, 'no height cap');
+  assert.match(declared(panel[0], 'border-top') ?? '', /^0\.5px solid var\(--dsw-alias-border-l2/);
   const body = rulesFor('.dim-contextBody');
-  assert.equal(body.length, 1, 'the dialog has exactly one scrolling body');
-  assert.equal(declared(body[0], 'overflow-y'), 'auto');
-  assert.equal(declared(body[0], 'min-height'), '0', 'the scroll row may shrink below its content');
+  assert.equal(body.length, 1);
+  assert.equal(declared(body[0], 'overflow-y'), undefined);
 });
 
 test('every placeholder uses the token native gives placeholders', () => {
@@ -292,10 +294,17 @@ test('the settings row has one anatomy, declared once and never per channel', ()
   // .dim-panel .dim-presetSelect { width: 100% } and a control stays full-width
   // with no visible error. That bug was real once already.
   const control = rulesFor('.dim-panel .dim-rowControl');
-  assert.equal(control.length, 1, 'the right slot is declared once, and scoped so it can win');
-  assert.equal(declared(control[0], 'flex'), 'none');
-  assert.equal(declared(control[0], 'width'), 'auto');
-  assert.equal(declared(control[0], 'max-width'), '60%');
+  const base = control.find((rule) => rule.selectors.includes('.dim-panel .dim-rowControl'));
+  assert.ok(base, 'the right slot is declared on one shared class, scoped so it can win');
+  assert.equal(declared(base, 'flex'), 'none');
+  assert.equal(declared(base, 'width'), 'auto');
+  assert.equal(declared(base, 'max-width'), '60%');
+  // Hover, focus and disabled are declared on that same class, so a button and a
+  // select in the slot cannot end up with different feedback.
+  for (const state of [':hover:not(:disabled)', ':focus-visible', ':disabled']) {
+    assert.equal(rulesFor('.dim-panel .dim-rowControl' + state).length, 1,
+      'the shared control declares ' + state);
+  }
 
   const divider = rulesFor('.dim-rowDivider')[0];
   assert.ok(divider, '.dim-rowDivider exists');

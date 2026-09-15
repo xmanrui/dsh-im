@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { CheckGlyph } from './ui-glyphs.js';
 
 import {
@@ -31,6 +32,10 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
   const restoreFocusRef = React.useRef(false);
   const savingRef = React.useRef(false);
   const [pane, setPane] = React.useState(null);
+  // The list is a portal now, so its place is measured rather than inherited. Native
+  // opens its own list with the two right edges aligned and a 4px gap: measured on the
+  // live General page, trigger right edge 1096 and menu right edge 1096, top +4.
+  const [menuPos, setMenuPos] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
   const current = normalizeModelSelection(model);
@@ -67,15 +72,33 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
   }, [pane, saving, disabled]);
 
   React.useEffect(() => {
-    if (!pane) return undefined;
+    if (!pane) { setMenuPos(null); return undefined; }
+    const place = () => {
+      const trigger = triggerRef.current?.getBoundingClientRect?.();
+      if (!trigger) return;
+      setMenuPos({ top: trigger.bottom + 4, right: Math.max(8, globalThis.innerWidth - trigger.right) });
+    };
+    place();
     const options = menuRef.current?.querySelectorAll('[role="menuitemradio"]');
     const selected = menuRef.current?.querySelector('[aria-checked="true"]');
     (selected ?? options?.[0])?.focus();
+    // The list is no longer inside rootRef, so without the second test every press on
+    // a menu item would read as an outside click and close the list.
     const outside = (event) => {
-      if (!rootRef.current?.contains(event.target)) setPane(null);
+      if (rootRef.current?.contains(event.target)) return;
+      if (menuRef.current?.contains(event.target)) return;
+      setPane(null);
     };
     globalThis.document?.addEventListener('mousedown', outside);
-    return () => globalThis.document?.removeEventListener('mousedown', outside);
+    // No window under the renderer tests, where the list stays in the tree anyway.
+    const view = globalThis.window;
+    view?.addEventListener?.('resize', place);
+    view?.addEventListener?.('scroll', place, true);
+    return () => {
+      globalThis.document?.removeEventListener('mousedown', outside);
+      view?.removeEventListener?.('resize', place);
+      view?.removeEventListener?.('scroll', place, true);
+    };
   }, [pane]);
 
   const save = async (next) => {
@@ -122,7 +145,7 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
   // Label left, value inside the native selector pill on the right — the exact
   // cell the General page uses for Language and Conversation display.
   h('button', {
-    type: 'button', className: 'dim-modelSelector', disabled: disabled || saving || blocked,
+    type: 'button', className: 'dim-modelSelector dim-rowControl', disabled: disabled || saving || blocked,
     'aria-label': label, 'aria-haspopup': 'menu', 'aria-expanded': pane === key,
     'aria-controls': pane === key ? `${id}-menu` : undefined,
     'aria-describedby': key === 'effort' && effortHint ? `${id}-hint` : undefined,
@@ -132,22 +155,29 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
     },
   }, h('span', { className: 'dim-modelValue', title: value }, value), chevron(pane === key)));
 
+  // Focus lives in the portaled list, so its keys never bubble through the row.
+  const onMenuKeyDown = (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); return; }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = [...(menuRef.current?.querySelectorAll('[role="menuitemradio"]:not(:disabled)') ?? [])];
+    if (!items.length) return;
+    event.preventDefault();
+    const at = items.indexOf(globalThis.document?.activeElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+      : (at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  };
+  // Without a body (the renderer tests) the list stays in the tree instead of portaling.
+  const portalTarget = globalThis.document?.body ?? null;
+  const layer = (node) => (portalTarget ? createPortal(node, portalTarget) : node);
+
   return h('div', {
     ref: rootRef, className: 'dim-preset dim-modelSetting',
     onBlur: (event) => {
-      if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) close();
-    },
-    onKeyDown: (event) => {
-      if (!pane) return;
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
-      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-      const items = [...(menuRef.current?.querySelectorAll('[role="menuitemradio"]:not(:disabled)') ?? [])];
-      if (!items.length) return;
-      event.preventDefault();
-      const at = items.indexOf(globalThis.document?.activeElement);
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
-        : (at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
-      items[next]?.focus();
+      if (!event.relatedTarget) return;
+      if (event.currentTarget.contains(event.relatedTarget)) return;
+      if (menuRef.current?.contains(event.relatedTarget)) return;
+      close();
     },
   },
   h('div', { className: 'dim-presetHeader' },
@@ -157,9 +187,10 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
   // float under the group with no row to attach it to.
   row('model', '模型', entry?.name ?? (current ? modelSelectionId(current) : localizeText('跟随默认模型')), false, NEW_SESSION_ONLY_NOTE),
   row('effort', '思考强度', effortLabel, effortDisabled, effortHint, true),
-  pane ? h('div', { ref: menuRef, id: `${id}-menu`, role: 'menu',
+  pane ? layer(h('div', { ref: menuRef, id: `${id}-menu`, role: 'menu',
     'aria-label': pane === 'model' ? '模型' : '思考强度', 'aria-busy': saving,
-    className: 'dim-modelMenu' },
+    onKeyDown: onMenuKeyDown, className: 'dim-modelMenu',
+    style: menuPos ? { top: menuPos.top, right: menuPos.right } : undefined },
   pane === 'model' ? [
     option('default', '跟随默认模型', null, !current, null),
     ...catalog.groups.map((group) => h('section', { key: group.id, role: 'group', 'aria-label': group.name },
@@ -174,7 +205,7 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
       current ? { provider: current.provider, model: current.model } : null),
     ...(reasoning?.efforts ?? []).map((level) => option(`effort:${level.id}`, level.name, level.description,
       effort === level.id, { ...current, reasoningEffort: level.id })),
-  ]) : null,
+  ])) : null,
   error || !currentAvailable ? h('p', { className: 'dim-presetError', role: error ? 'alert' : 'status' },
     error ?? '当前模型已不可用，请选择其他模型或跟随默认模型。') : null);
 }

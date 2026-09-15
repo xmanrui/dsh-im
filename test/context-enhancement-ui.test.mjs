@@ -161,12 +161,14 @@ test('context settings default to off with sender ID and empty guidance, and exp
   const renderer = await mount(t, ContextEnhancementEditor, { onSave: (value) => saved.push(value) });
   const entry = renderer.root.findByProps({ className: 'dim-contextEntry' });
   assert.equal(entry.props.disabled, false);
-  assert.equal(entry.props['aria-haspopup'], 'dialog');
+  // A disclosure, not a dialog trigger: it points at the region it expands.
+  assert.equal(entry.props['aria-expanded'], false);
+  assert.equal(entry.props['aria-haspopup'], undefined, 'an inline disclosure does not claim a dialog');
   await open(renderer.root);
   // The dialog's description is inline hint text now. The description
   // relationship has to survive the trigger's removal, so assert it through the
   // dialog rather than through the button that used to point at it.
-  const dialogDescriptionId = renderer.root.findByProps({ role: 'dialog' }).props['aria-describedby'];
+  const dialogDescriptionId = renderer.root.findByProps({ className: 'dim-contextPanel' }).props['aria-describedby'];
   assert.ok(dialogDescriptionId, 'the dialog keeps an accessible description');
   const dialogDescription = renderer.root.findByProps({ id: dialogDescriptionId });
   assert.match(textOf(dialogDescription), /选择在哪些会话中启用.*不查询平台 API/);
@@ -253,7 +255,11 @@ test('context settings default to off with sender ID and empty guidance, and exp
 test('switches, fields, and guidance are local drafts until Save; Cancel and close discard them', async (t) => {
   const saved = [];
   const renderer = await mount(t, ContextEnhancementEditor, { onSave: (value) => saved.push(value) });
-  for (const dismiss of ['取消', 'close', 'escape', 'backdrop']) {
+  // Two overlays-era dismissals have no referent now that this expands inline:
+  // there is no backdrop to click, and no close button, because an inline editor is
+  // collapsed from the control that opened it. The capability they provided
+  // (dismiss without saving) survives through 取消, the trigger itself, and Escape.
+  for (const dismiss of ['取消', 'toggle', 'escape']) {
     await open(renderer.root);
     await act(async () => { scopeSwitch(renderer.root, 'group').props.onChange({ target: { checked: true } }); });
     assert.deepEqual(switchStates(renderer.root), [true, false]);
@@ -269,17 +275,14 @@ test('switches, fields, and guidance are local drafts until Save; Cancel and clo
     assert.equal(guidance(renderer.root, 'group').props.value, '');
     assert.deepEqual(saved, []);
     await act(async () => {
-      if (dismiss === 'close') renderer.root.findByProps({ 'aria-label': '关闭弹窗' }).props.onClick();
-      else if (dismiss === 'escape') renderer.root.findByProps({ role: 'dialog' }).props.onKeyDown({
+      if (dismiss === 'toggle') renderer.root.findByProps({ className: 'dim-contextEntry' }).props.onClick();
+      else if (dismiss === 'escape') renderer.root.findByProps({ className: 'dim-contextPanel' }).props.onKeyDown({
         key: 'Escape', preventDefault() {}, stopPropagation() {},
       });
-      else if (dismiss === 'backdrop') {
-        const target = {};
-        renderer.root.findByProps({ className: 'dim-contextBackdrop' }).props.onMouseDown({ target, currentTarget: target });
-      } else button(renderer.root, dismiss).props.onClick();
+      else button(renderer.root, dismiss).props.onClick();
       await flush();
     });
-    assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
+    assert.equal(renderer.root.findAllByProps({ className: 'dim-contextPanel' }).length, 0);
     await open(renderer.root);
     assert.deepEqual(switchStates(renderer.root), [false, false]);
     for (const kind of ['group', 'direct']) {
@@ -317,7 +320,7 @@ test('Save submits one complete config, preserves explicit empty fields/guidance
     group: { enabled: true, fields: [], guidance: '' },
     direct: { enabled: false, fields: ['senderId'], guidance: '' },
   });
-  assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
+  assert.equal(renderer.root.findAllByProps({ className: 'dim-contextPanel' }).length, 0);
   assert.equal(badge(renderer.root), '仅群聊');
   await open(renderer.root);
   assert.ok(fields(renderer.root, 'group').every((node) => !node.props.checked));
@@ -353,15 +356,15 @@ test('failed atomic saves retain the draft, lock edits and duplicate submits, an
   const saveButton = button(renderer.root, '保存');
   await act(async () => { saveButton.props.onClick(); saveButton.props.onClick(); await flush(); });
   assert.equal(calls.length, 1);
-  assert.equal(renderer.root.findByProps({ role: 'dialog' }).props['aria-busy'], true);
+  assert.equal(renderer.root.findByProps({ className: 'dim-contextPanel' }).props['aria-busy'], true);
   assert.ok(renderer.root.findAllByType('input').every((node) => node.props.disabled));
   assert.ok(renderer.root.findAllByType('button').every((node) => node.props.disabled || node.props.className === 'dim-contextEntry'));
   await act(async () => {
     guidance(renderer.root, 'direct').props.onChange({ target: { value: 'do not commit' } });
-    renderer.root.findByProps({ role: 'dialog' }).props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    renderer.root.findByProps({ className: 'dim-contextPanel' }).props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
     button(renderer.root, '取消').props.onClick();
   });
-  assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 1);
+  assert.equal(renderer.root.findAllByProps({ className: 'dim-contextPanel' }).length, 1);
   assert.equal(guidance(renderer.root, 'direct').props.value, 'local draft');
   assert.equal(badge(renderer.root), '未开启');
   request.reject(new Error('Save rejected'));
@@ -373,7 +376,7 @@ test('failed atomic saves retain the draft, lock edits and duplicate submits, an
   await click(renderer.root, '保存');
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1], calls[0]);
-  assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
+  assert.equal(renderer.root.findAllByProps({ className: 'dim-contextPanel' }).length, 0);
 });
 
 test('Weixin displays and saves only its supported direct scope', async (t) => {
@@ -415,7 +418,7 @@ test('Weixin displays and saves only its supported direct scope', async (t) => {
   assert.equal(saved[0].direct.enabled, true);
 });
 
-test('dialog traps Tab and external focus, cancels with Escape, and restores entry focus', async (t) => {
+test('an inline panel cancels with Escape, keeps focus flowing, and restores entry focus', async (t) => {
   const previous = globalThis.document;
   const listeners = new Map();
   const document = { activeElement: null, addEventListener(type, fn) { listeners.set(type, fn); }, removeEventListener(type) { listeners.delete(type); } };
@@ -429,7 +432,7 @@ test('dialog traps Tab and external focus, cancels with Escape, and restores ent
   const renderer = await mount(t, ContextEnhancementEditor, {}, {
     createNodeMock(element) {
       if (element.props.className === 'dim-contextEntry') return entry;
-      if (element.props.role === 'dialog') return dialog;
+      if (element.props.className === 'dim-contextPanel') return dialog;
       return {};
     },
   });
@@ -437,23 +440,27 @@ test('dialog traps Tab and external focus, cancels with Escape, and restores ent
   assert.equal(document.activeElement, dialog);
   const keydown = (shiftKey) => {
     let prevented = false;
-    renderer.root.findByProps({ role: 'dialog' }).props.onKeyDown({ key: 'Tab', shiftKey, preventDefault() { prevented = true; } });
-    assert.equal(prevented, true);
+    renderer.root.findByProps({ className: 'dim-contextPanel' }).props.onKeyDown({ key: 'Tab', shiftKey, preventDefault() { prevented = true; } });
+    // NOT trapped. The trap only existed because the dialog covered the page; inline the
+    // panel is part of the page and Tab should flow through it like anywhere else.
+    assert.equal(prevented, false);
   };
+  // Tab is never intercepted. The panel is part of the page, so the browser moves focus
+  // on its own and the component must not move it. Three presses, no movement by us.
   keydown(false);
-  assert.equal(document.activeElement, first);
+  assert.equal(document.activeElement, dialog, 'Tab is not intercepted');
   keydown(true);
-  assert.equal(document.activeElement, last);
+  assert.equal(document.activeElement, dialog, 'Shift+Tab is not intercepted either');
   keydown(false);
-  assert.equal(document.activeElement, first);
-  listeners.get('focusin')({ target: {} });
   assert.equal(document.activeElement, dialog);
+  // And there is no focusin guard: an inline panel must not pull focus back when the
+  // user moves on. The listener that used to do it is not installed at all.
+  assert.equal(listeners.has('focusin'), false);
   await act(async () => {
-    renderer.root.findByProps({ role: 'dialog' }).props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    renderer.root.findByProps({ className: 'dim-contextPanel' }).props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
     await flush();
   });
-  assert.equal(document.activeElement, entry);
-  assert.equal(listeners.has('focusin'), false);
+  assert.equal(document.activeElement, entry, 'closing returns focus to the trigger');
 });
 
 test('all context dialog copy and validation errors localize without translating the saved body', async (t) => {
@@ -551,7 +558,7 @@ test('all nine cards save through their existing RPC path, isolate bots and pres
     } }]);
     assert.equal(badge(first()), '仅私聊');
     assert.equal(badge(second()), '未开启');
-    assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 0);
+    assert.equal(renderer.root.findAllByProps({ className: 'dim-contextPanel' }).length, 0);
     assert.equal(current.bots[0].workspace, '/workspace/0');
     const reloaded = await mount(t, channel.Settings, { rpcCall });
     await open(reloaded.root.findByProps({ 'data-bot-id': `${channel.name}_0` }));
@@ -645,7 +652,7 @@ test('all nine failed save RPCs keep runtime state and drafts intact through sta
     await click(first(), '保存');
     assert.equal(badge(first()), '未开启');
     assert.equal(scopeSwitch(first(), 'direct').props.checked, true);
-    const dialog = first().findByProps({ role: 'dialog' });
+    const dialog = first().findByProps({ className: 'dim-contextPanel' });
     assert.equal(guidance(first(), 'direct').props.value, '');
     assert.ok(textOf(dialog.findByProps({ role: 'alert' })));
     assert.equal(original.bots[0].contextEnhancement, undefined);
@@ -663,31 +670,43 @@ test('the approved neutral entry and theme-aware modal keep responsive labels an
   assert.match(styles, /\.dim-contextEntry \{[^}]*min-height: 40px;[^}]*minmax\(0, 1fr\)[^}]*padding: 14px 0;[^}]*border: 0;[^}]*background: none;[^}]*font-size: var\(--dim-font-14\);/);
   // Native Pill active tone.
   assert.match(styles, /\.dim-contextStatus\[data-active="true"\] \{[^}]*--dsw-alias-button-ghost-active-fill/);
-  // Native Modal surface: border 0, r24, layer-2, elevation-prominent.
-  assert.match(styles, /\.dim-contextDialog \{[^}]*width: min\(450px, 100%\);[^}]*overflow-y: auto;[^}]*border: 0;[^}]*border-radius: var\(--dim-radius-24\);[^}]*--dsw-alias-bg-layer-2/);
-  // Native tablist strip, not a bespoke segmented control.
-  assert.match(styles, /\.dim-contextTabs \{[^}]*display: flex;[^}]*border-bottom: 0\.5px solid var\(--dsw-alias-border-l2/);
-  assert.match(styles, /\.dim-contextTab\[aria-selected="true"\] \{[^}]*--dsw-alias-label-primary/);
-  assert.match(styles, /\.dim-contextTab\[aria-selected="true"\]::after \{[^}]*background: var\(--dsw-alias-label-primary/);
+  // Inline region, not a modal surface: no fixed size, no elevation, and the host's
+  // hairline separating the trigger from what it discloses.
+  assert.match(styles, /\.dim-contextPanel \{[^}]*width: 100%;[^}]*padding: 12px 0 0;[^}]*border-top: 0\.5px solid var\(--dsw-alias-border-l2/);
+  assert.doesNotMatch(styles, /dim-contextBackdrop|dim-contextDialog/, 'the overlay and its dialog are gone, not restyled');
+  // Native tablist strip, not a bespoke segmented control - and now literally the
+  // host's own tablist (settings-plugins bundle:377 .tabs/.tab), shared by all three of
+  // the plugin's strips - Context enhancement, the General page, and the bot card's
+  // More bot settings - so one edit moves every tab strip in the plugin.
+  assert.match(styles, /\.dim-contextTabs, \.dim-generalSettingsTabs, \.dim-botSettingsTabs \{[^}]*display: flex;[^}]*align-items: flex-end;[^}]*border-bottom: 0\.5px solid var\(--dsw-alias-border-l2/);
+  assert.match(styles, /\.dim-contextTab, \.dim-generalSettingsTab, \.dim-botSettingsTab \{[^}]*padding: 7px 1px 9px;[^}]*color: var\(--dsw-alias-label-tertiary,[^}]*font-size: var\(--dim-font-13\);/);
+  assert.match(styles, /\.dim-contextTab\[aria-selected="true"\], \.dim-generalSettingsTab\[aria-selected="true"\], \.dim-botSettingsTab\[aria-selected="true"\] \{[^}]*--dsw-alias-label-primary/);
+  assert.match(styles, /\.dim-contextTab\[aria-selected="true"\]::after, \.dim-generalSettingsTab\[aria-selected="true"\]::after, \.dim-botSettingsTab\[aria-selected="true"\]::after \{[^}]*background: var\(--dsw-alias-label-primary/);
+  // The host has no scale animation on its bar, so neither strip carries one.
+  assert.doesNotMatch(styles, /scaleX\(\.45\)/);
+  // Each part of the panel takes the host role for that part: a footer is a form action
+  // row, a textarea is a field input.
+  assert.match(styles, /\.dim-contextFooter button \{[^}]*height: 36px;[^}]*padding: 0 14px;[^}]*border-radius: var\(--dim-radius-18\);[^}]*font-size: var\(--dim-font-14\);/);
+  assert.match(styles, /\.dim-contextGuidance textarea \{[^}]*padding: 8px 10px;/);
+  assert.match(styles, /\.dim-diagnosticTextarea \{[^}]*padding: 8px 10px;/);
   assert.match(styles, /\.dim-contextTabPanel\[hidden\] \{[^}]*display: none;/);
-  assert.match(styles, /\.dim-contextFields \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /\.dim-contextFields \{[^}]*grid-template-columns: repeat\(auto-fit, minmax\(160px, 1fr\)\);[^}]*gap: var\(--dim-gap-8\);/);
   assert.match(styles, /\.dim-contextGuidance textarea \{[^}]*min-height: 88px;/);
   assert.match(styles, /\.dim-contextGuidance textarea::placeholder \{[^}]*--dsw-alias-label-caption[^}]*opacity: 1;/);
   // The code family now has one address; the literal stack it replaced is gone.
   assert.match(styles, /\.dim-contextFieldKey \{[^}]*var\(--dim-font-mono/);
   // The second track must not be sized by its content: the per-field caveat is a
   // full-width row, and a max-content track made the grid overflow the dialog.
-  assert.match(styles, /\.dim-contextFieldText \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\);[^}]*column-gap: var\(--dim-gap-5\);/);
+  // One track: the hint and the key both span 1 / -1, so a second track stayed empty.
+  assert.match(styles, /\.dim-contextFieldText \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(styles, /\.dim-contextFieldHint \{[^}]*grid-column: 1 \/ -1;/);
   assert.match(styles, /\.dim-contextField \{[^}]*position: relative;/);
-  assert.match(styles, /\.dim-contextFieldHelp \{[^}]*position: static;/);
-  assert.match(styles, /\.dim-contextTooltip\.dim-contextFieldTooltip \{[^}]*right: 0;[^}]*left: auto;/);
-  assert.match(styles, /\.dim-contextField:nth-child\(odd\) \.dim-contextFieldTooltip \{[^}]*right: auto;[^}]*left: 0;/);
   assert.match(styles, /@media \(pointer: coarse\) \{\s*\.dim-contextEntry[^}]*min-height: 44px;/);
   assert.match(styles, /\.dim-contextLabel \{[^}]*overflow-wrap: anywhere;/);
   assert.match(styles, /\.dim-contextTooltip \{[^}]*opacity: 0;[^}]*visibility: hidden;/);
   assert.match(styles, /\.dim-contextTooltip\.dim-contextGuidanceTooltip \{[^}]*bottom: calc\(100% \+ 7px\);[^}]*overflow-y: auto;/);
-  assert.match(styles, /\.dim-contextHeader \{[^}]*position: relative;/);
+  // One title per disclosure: the trigger names it, the opened region does not repeat it.
+  assert.doesNotMatch(styles, /dim-contextHeader|dim-contextClose/);
   assert.match(styles, /\.dim-contextLegend \{[^}]*position: relative;[^}]*display: grid/);
   assert.match(styles, /\.dim-contextHelp:hover \.dim-contextTooltip, \.dim-contextHelp:focus-within \.dim-contextTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
   const office = await readFile(new URL('../plugin-src/client/channels/office/index.js', import.meta.url), 'utf8');

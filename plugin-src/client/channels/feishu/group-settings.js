@@ -130,7 +130,7 @@ export function GroupResponseModeEditor({
           saving ? '保存中…' : '正在准备授权…')
       : null),
   h('select', {
-    className: 'dim-feishuGroupSelect',
+    className: 'dim-fieldSelect',
     value: current,
     disabled: disabled || saving,
     'aria-label': '群聊响应方式',
@@ -190,7 +190,7 @@ export function GroupTopicReplyEditor({ value = false, disabled = false, onSave 
       ? h('span', { className: 'dim-feishuGroupControlStatus', role: 'status' }, '保存中…')
       : null),
   h('select', {
-    className: 'dim-feishuGroupSelect',
+    className: 'dim-fieldSelect',
     value: current,
     disabled: disabled || saving,
     'aria-label': '群聊以话题方式回复',
