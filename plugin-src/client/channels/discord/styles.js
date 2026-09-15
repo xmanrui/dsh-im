@@ -1,8 +1,8 @@
 export const DISCORD_STYLE_ID = 'xmanrui-dsh-im-discord-settings';
 
 const CSS = String.raw`
-.ddc-page { --ddt-accent: #5865f2; --ddt-accent-deep: #4752c4; --ddt-accent-wash: #eef0ff; }
-.ddc-avatar { color: #fff; background: #5865f2; }
+.ddc-page.dim-channelPage { --ddt-accent: #5865f2; --ddt-accent-deep: #4752c4; --ddt-accent-wash: #eef0ff; }
+.ddc-avatar.dim-botAvatar { color: #fff; background: #5865f2; }
 .ddc-avatar svg { display: block; }
 `;
 

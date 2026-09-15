@@ -27,20 +27,20 @@ const CSS = String.raw`
 .ddt-heading p { margin-top: 5px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: 20px; white-space: nowrap; }
 .ddt-tools, .ddt-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--dim-gap-10); }
 .ddt-tools { width: 100%; justify-content: space-between; flex-wrap: nowrap; }
-.ddt-badge { min-height: 30px; display: inline-flex; align-items: center; gap: var(--dim-gap-7); padding: 0 11px; border-radius: var(--dim-radius-full); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f5f6f7); font-size: var(--dim-font-12); white-space: nowrap; }
+.ddt-badge { display: inline-flex; align-items: center; gap: var(--dim-gap-7); padding: 0 11px; border-radius: var(--dim-radius-full); color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f5f6f7); font-size: var(--dim-font-12); white-space: nowrap; }
 .ddt-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #aeb3bb; }
 .ddt-dot[data-tone="success"] { background: var(--ddt-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ddt-success) 14%, transparent); }
 .ddt-dot[data-tone="warning"] { background: var(--ddt-warning); }
 .ddt-dot[data-tone="error"] { background: var(--ddt-error); }
 .ddt-button { height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: var(--dim-gap-4); padding: 0 10px; border: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); font-weight: 400; text-decoration: none; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
-.ddt-button:hover:not(:disabled) { border-color: #aeb3bb; background: var(--dim-hover); }
+.ddt-button:hover:not(:disabled) { background: var(--dim-hover-solid); }
 .ddt-button:active:not(:disabled) { transform: translateY(1px); }
 .ddt-button:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
 .ddt-button:disabled { cursor: not-allowed; opacity: 0.4; }
-.ddt-button[data-kind="primary"] { color: #fff; border-color: var(--ddt-accent); background: var(--ddt-accent); }
-.ddt-button[data-kind="primary"]:hover:not(:disabled) { border-color: var(--ddt-accent-deep); background: var(--ddt-accent-deep); }
+.ddt-button[data-kind="primary"] { color: var(--dim-action-on-fill, #fff); border-color: var(--dim-action-fill); background: var(--dim-action-fill); }
+.ddt-button[data-kind="primary"]:hover:not(:disabled) { border-color: var(--dim-action-fill-hover); background: var(--dim-action-fill-hover); }
 .ddt-button[data-kind="danger"] { color: var(--ddt-error); }
-.ddt-button[data-kind="quiet"] { min-height: 30px; padding: 0 10px; border-color: transparent; background: transparent; }
+.ddt-button[data-kind="quiet"] { padding: 0 10px; border-color: transparent; background: transparent; }
 .ddt-card { overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-14); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 2px rgb(31 35 41 / 3%); }
 .ddt-cardBody { padding: 24px; }
 .ddt-empty { min-height: 230px; display: grid; grid-template-columns: minmax(0, 1fr) 180px; align-items: center; gap: var(--dim-gap-30); }
@@ -60,7 +60,7 @@ const CSS = String.raw`
 .ddt-countdownTop { display: flex; justify-content: space-between; margin-bottom: 6px; }
 .ddt-countdown strong { color: var(--dsw-alias-label-primary, #0f1115); font-variant-numeric: tabular-nums; }
 .ddt-progress { height: 4px; overflow: hidden; border-radius: var(--dim-radius-full); background: #eef0f3; }
-.ddt-progress span { display: block; width: var(--ddt-progress); height: 100%; background: var(--ddt-accent); transition: width .2s linear; }
+.ddt-progress span { display: block; width: var(--ddt-progress); height: 100%; background: var(--dim-action-fill); transition: width .2s linear; }
 .ddt-stateLabel { display: inline-flex; align-items: center; gap: var(--dim-gap-8); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); font-weight: 600; }
 .ddt-qrCopy { min-width: 0; overflow-wrap: anywhere; }
 .ddt-qrCopy h3 { margin: 9px 0 8px; font-size: var(--dim-font-18); }
@@ -71,7 +71,7 @@ const CSS = String.raw`
 .ddt-loading { padding: 38px; color: var(--dsw-alias-label-secondary, #646a73); text-align: center; }
 .ddt-loading h3 { margin: 0 0 7px; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-16); }
 .ddt-loading p { line-height: 1.6; }
-.ddt-spinner { width: 24px; height: 24px; margin: 0 auto 13px; border: 3px solid #e6e8eb; border-top-color: var(--ddt-accent); border-radius: 50%; animation: ddt-spin .8s linear infinite; }
+.ddt-spinner { width: 24px; height: 24px; margin: 0 auto 13px; border: 3px solid #e6e8eb; border-top-color: var(--dim-action-fill); border-radius: 50%; animation: ddt-spin .8s linear infinite; }
 .ddt-statusNotice, .ddt-inlineError { display: flex; align-items: flex-start; gap: var(--dim-gap-10); padding: 13px 15px; border: 1px solid color-mix(in srgb, var(--ddt-error) 28%, transparent); border-radius: var(--dim-radius-10); color: var(--ddt-error); background: color-mix(in srgb, var(--ddt-error) 7%, transparent); font-size: var(--dim-font-13); }
 .ddt-inlineError { flex-direction: column; padding: 22px; }
 .ddt-inlineError h3 { font-size: var(--dim-font-16); overflow-wrap: anywhere; }
@@ -101,8 +101,8 @@ const CSS = String.raw`
 @container (max-width: 680px) {
   .ddt-heading { flex-direction: column; align-items: stretch; }
   .ddt-tools { width: 100%; flex-wrap: nowrap; gap: var(--dim-gap-6); }
-  .ddt-tools .ddt-badge { min-height: 34px; padding-inline: 8px; }
-  .ddt-tools .ddt-button { flex: none; padding-inline: 10px; white-space: nowrap; }
+  .ddt-tools .ddt-badge { padding-inline: 8px; }
+  .ddt-tools .ddt-button { flex: none; white-space: nowrap; }
   .ddt-empty { grid-template-columns: minmax(0, 1fr); }
   .ddt-brandMark { display: none; }
   .ddt-qrLayout { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: var(--dim-gap-24); }

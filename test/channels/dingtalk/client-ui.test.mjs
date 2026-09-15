@@ -70,6 +70,14 @@ test('the narrow-panel toolbar keeps all three controls on one row', async () =>
     styles,
     /@container \(max-width: 680px\)[\s\S]*\.ddt-tools \{ width: 100%; flex-wrap: nowrap; gap: var\(--dim-gap-6\); \}/,
   );
-  assert.match(styles, /\.ddt-tools \.ddt-badge \{ min-height: 34px;/);
+  // The header chip's box is owned in one place (styles.js, height+min-height 24px).
+  // The channel sheet used to add min-height: 34px here, which is unopposed by the
+  // shared `height` - different longhands, used = max - so every channel reusing
+  // .ddt-tools rendered a 34px chip where feishu and weixin rendered 24px.
+  const badgeRules = [...styles.matchAll(/\.(?:ddt|dxw|bxf)-(?:total)?[Bb]adge[^{]*\{[^}]*\}/g)].map((m) => m[0]);
+  assert.ok(badgeRules.length, 'the channel keeps its badge rules');
+  for (const rule of badgeRules) {
+    assert.doesNotMatch(rule, /min-height/, 'the header chip box is owned by the shared rule: ' + rule);
+  }
   assert.match(styles, /\.ddt-tools \.ddt-button \{[^\n]*white-space: nowrap;/);
 });

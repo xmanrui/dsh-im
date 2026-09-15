@@ -36,8 +36,25 @@
  * were dead code, not divergence.
  *
  * The remaining class of false positive is a DECLARED VARIANT, which is not drift:
- * .bxf-button reads 32px against 28px until you notice the taller ones carry
- * [data-size="small"], and the base rule is byte-identical to the shared geometry.
+ * .bxf-button read 32px against 28px because the taller ones carried
+ * [data-size="small"] while the base rule was byte-identical to the shared
+ * geometry. (That one turned out to be a real defect after all - the variant was
+ * min-height 32px against a base height of 28px, and it was removed in 7a1977e.)
+ *
+ * AND ONE BLIND SPOT THIS TOOL CANNOT SEE AT ALL: different LONGHANDS on the same
+ * element do not compete, so no specificity reasoning applies. `height: 28px` from
+ * the shared sheet and `min-height: 30px` from a channel sheet produce 30px, and
+ * the channel wins at ANY specificity because the used value is max(). Two live
+ * divergences hid there - the header status chip rendered 34px on nine channels
+ * and 24px on two, and a Cancel button sat 30px beside a 28px sibling in its own
+ * row. Both are now fixed and both were invisible to every check in this file.
+ *
+ * So the checks before acting on a hit are three, not two: (a) does a
+ * higher-specificity shared rule target a class that co-occurs on the element,
+ * (b) are the differing rules gated by different attributes, and (c) is the
+ * shared layer setting a DIFFERENT longhand of the same box - height against
+ * min-height, padding against padding-inline - in which case there is no
+ * conflict to resolve and the channel value simply adds.
  *
  * So: before treating a hit as visual, (a) check whether a shared rule with higher
  * specificity targets a class that co-occurs on the same element, and (b) check

@@ -135,3 +135,26 @@ test('a modal scrolls its body, not its own chrome', () => {
   assert.equal(declared(body[0], 'overflow-y'), 'auto');
   assert.equal(declared(body[0], 'min-height'), '0', 'the scroll row may shrink below its content');
 });
+
+test('every placeholder uses the token native gives placeholders', () => {
+  // The host does not use one placeholder token. A census of all 12 placeholder
+  // declarations in packages/client found three tiers, and label-dimmed is the
+  // MINORITY (3 of 12, two of them dead code):
+  //   label-caption  #ADB2B8 / #81858C - 7 of 12, the dominant tier, and the one the
+  //                  session composer uses (ui-conversation InputBar.module.css:210)
+  //   label-tertiary #81858C / #ADB2B8 - 2 of 12, the search boxes
+  //   label-dimmed   #E1E5EE / #43454A - 3 of 12; measured on the live UI it is
+  //                  1.26:1 on white and 1.64:1 on bg-layer-1 dark, i.e. a
+  //                  disabled-text grey. Chasing it made the credential fields
+  //                  unreadable, which is the opposite of the reported bug.
+  // caption also restores the host's own relationship: placeholder one step lighter
+  // than the label-tertiary helper text that sits under the same field.
+  const placeholders = rules.filter(rule =>
+    rule.selectors.some(s => s.includes(String.fromCharCode(58,58) + "placeholder")));
+  assert.ok(placeholders.length >= 3, 'the placeholders keep their rules');
+  for (const rule of placeholders) {
+    const colour = declared(rule, String.fromCharCode(99,111,108,111,114)) ?? "";
+    assert.match(colour, /--dsw-alias-label-caption/,
+      'placeholder colour follows the native placeholder tier: ' + rule.selectors.join(', '));
+  }
+});
