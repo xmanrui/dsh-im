@@ -469,7 +469,7 @@ const CSS = String.raw`
 .bxf-botActions .bxf-repairButton:hover:not(:disabled) { background: color-mix(in srgb, var(--bxf-accent) 7%, transparent); }
 .bxf-repairAction { display: inline-flex; }.bxf-repairTooltip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; width: min(330px, 100%); display: grid; gap: var(--dim-gap-3); opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
 .bxf-repairTooltip strong { font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-600); }
-.bxf-repairTooltip > span { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; font-weight: var(--dim-weight-400); overflow-wrap: anywhere; }
+.bxf-repairTooltip > span { color: var(--dsw-static-neutral-bluish-00, #f9fafb); font-size: var(--dim-font-11); line-height: 17px; font-weight: var(--dim-weight-400); overflow-wrap: anywhere; }
 .bxf-repairAction:hover .bxf-repairTooltip,
 .bxf-repairAction:focus-within .bxf-repairTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 

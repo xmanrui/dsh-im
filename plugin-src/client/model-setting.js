@@ -105,7 +105,7 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
     description ? h('span', { className: 'dim-modelDescription' }, description) : null),
   h('span', { className: 'dim-modelCheck', 'aria-hidden': true }, selected ? h(CheckGlyph, { size: 16 }) : null));
 
-  const row = (key, label, value, blocked = false) => h('button', {
+  const row = (key, label, value, blocked = false, description = null) => h('button', {
     type: 'button', className: 'dim-modelRow', disabled: disabled || saving || blocked,
     'aria-label': label, 'aria-haspopup': 'menu', 'aria-expanded': pane === key,
     'aria-controls': pane === key ? `${id}-menu` : undefined,
@@ -114,7 +114,15 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
       triggerRef.current = event.currentTarget;
       setPane(pane === key ? null : key);
     },
-  }, h('span', { className: 'dim-modelRowLabel' }, label),
+  }, h('span', { className: 'dim-modelRowText' },
+    h('span', { className: 'dim-modelRowLabel' }, label),
+    // The description sits UNDER its own label, inside the row - native's
+    // .rowText is a 4px-gap column of title + desc. It used to be a separate
+    // paragraph below the whole block, which is what made the block 184px tall.
+    description ? h('span', {
+      className: 'dim-rowDesc', id: `${id}-hint`,
+      role: key === 'effort' && effortUnavailable ? 'status' : undefined,
+    }, description) : null),
   // Label left, value inside the native selector pill on the right — the exact
   // cell the General page uses for Language and Conversation display.
   h('span', { className: 'dim-modelSelector' },
@@ -142,7 +150,7 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
     h('span', { className: 'dim-presetTitle' }, '模型与思考强度'),
     saving ? h('span', { className: 'dim-presetStatus', role: 'status' }, '保存中…') : null),
   row('model', '模型', entry?.name ?? (current ? modelSelectionId(current) : localizeText('跟随默认模型'))),
-  row('effort', '思考强度', effortLabel, effortDisabled),
+  row('effort', '思考强度', effortLabel, effortDisabled, effortHint),
   h('p', { className: 'dim-helpHint' }, NEW_SESSION_ONLY_NOTE),
   pane ? h('div', { ref: menuRef, id: `${id}-menu`, role: 'menu',
     'aria-label': pane === 'model' ? '模型' : '思考强度', 'aria-busy': saving,
@@ -162,8 +170,6 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
     ...(reasoning?.efforts ?? []).map((level) => option(`effort:${level.id}`, level.name, level.description,
       effort === level.id, { ...current, reasoningEffort: level.id })),
   ]) : null,
-  effortHint ? h('p', { id: `${id}-hint`, className: 'dim-modelHint',
-    role: effortUnavailable ? 'status' : undefined }, effortHint) : null,
   error || !currentAvailable ? h('p', { className: 'dim-presetError', role: error ? 'alert' : 'status' },
     error ?? '当前模型已不可用，请选择其他模型或跟随默认模型。') : null);
 }
