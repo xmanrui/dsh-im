@@ -243,7 +243,7 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   assert.match(styles, /\.dim-brand \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*align-items: flex-start;[^}]*gap: var\(--dim-gap-1\);/);
   assert.match(styles, /\.dim-brandHeading \{[^}]*display: flex;[^}]*align-items: center;[^}]*gap: var\(--dim-gap-8\);[^}]*white-space: nowrap;/);
   // Native section title role: 18/600 with no letter-spacing, not a 20/800 wordmark.
-  assert.match(styles, /\.dim-brandName \{[^}]*font-size: var\(--dim-font-18\);[^}]*line-height: 25px;[^}]*font-weight: var\(--dim-weight-600\);[^}]*letter-spacing: 0;/);
+  assert.match(styles, /\.dim-brandName \{[^}]*font-size: var\(--dim-font-18\);[^}]*line-height: var\(--dim-line-18\);[^}]*font-weight: var\(--dim-weight-600\);[^}]*letter-spacing: 0;/);
   // The version renders as a native Tag: r999 capsule, 0.5px l4 outline, 11/17/500.
   assert.match(styles, /\.dim-brandVersion \{[^}]*padding: 1px 8px;[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-full\);[^}]*corner-shape: round;[^}]*font: 500 11px\/17px/);
   assert.doesNotMatch(styles, /dim-versionTooltip|\.dim-brand:focus-visible/);

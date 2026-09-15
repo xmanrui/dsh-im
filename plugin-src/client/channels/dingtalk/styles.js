@@ -32,7 +32,7 @@ const CSS = String.raw`
 .ddt-dot[data-tone="success"] { background: var(--ddt-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ddt-success) 14%, transparent); }
 .ddt-dot[data-tone="warning"] { background: var(--ddt-warning); }
 .ddt-dot[data-tone="error"] { background: var(--ddt-error); }
-.ddt-button { height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: var(--dim-gap-4); padding: 0 10px; border: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); font-weight: var(--dim-weight-400); text-decoration: none; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.ddt-button { height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: var(--dim-gap-4); padding: 0 10px; border: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-400); text-decoration: none; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
 .ddt-button:hover:not(:disabled) { background: var(--dim-hover-solid); }
 .ddt-button:active:not(:disabled) { transform: translateY(1px); }
 .ddt-button:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }

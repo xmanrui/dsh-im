@@ -5,7 +5,7 @@ const CSS = `
 .dof-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--dim-gap-16); align-items: center; margin-bottom: 12px; padding: 16px; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: var(--dim-radius-16); background: none; }
 .dof-hero::after { display: none; }
 .dof-heroCopy { min-width: 0; }
-.dof-heroCopy h3 { margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-15); line-height: 22px; font-weight: var(--dim-weight-600); }
+.dof-heroCopy h3 { margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-15); line-height: var(--dim-line-15); font-weight: var(--dim-weight-600); }
 .dof-heroCopy p { margin: 4px 0 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dof-status { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: var(--dim-gap-4); height: 24px; padding: 0 8px; border: none; border-radius: var(--dim-radius-12); background: var(--dsw-alias-bg-layer-2, #fff); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); white-space: nowrap; }
 /* The office dot is the same role as .dim-stateDot and now carries that class, so the

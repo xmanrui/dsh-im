@@ -33,7 +33,7 @@ const CSS = String.raw`
   color: var(--dsw-alias-label-tertiary, #81858c);
   font-size: var(--dim-font-12);
   font-weight: var(--dim-weight-600);
-  line-height: 18px;
+  line-height: var(--dim-line-12);
   letter-spacing: .08em;
   text-transform: uppercase;
   margin-bottom: 3px;
@@ -41,7 +41,7 @@ const CSS = String.raw`
 
 .bxf-heading h2 {
   font-size: var(--dim-font-20);
-  line-height: 28px;
+  line-height: var(--dim-line-20);
   font-weight: var(--dim-weight-600);
   letter-spacing: -.015em;
 }
@@ -50,7 +50,7 @@ const CSS = String.raw`
   max-width: 540px;
   color: var(--dsw-alias-label-secondary, #646a73);
   font-size: var(--dim-font-13);
-  line-height: 20px;
+  line-height: var(--dim-line-13);
   margin-top: 5px;
   white-space: nowrap;
 }
@@ -123,7 +123,7 @@ const CSS = String.raw`
   color: var(--dsw-alias-label-secondary, #646a73);
   font-size: var(--dim-font-12);
   font-weight: var(--dim-weight-600);
-  line-height: 18px;
+  line-height: var(--dim-line-12);
   margin-bottom: 13px;
 }
 
@@ -171,7 +171,7 @@ const CSS = String.raw`
   align-items: flex-start;
   color: var(--dsw-alias-label-tertiary, #81858c);
   font-size: var(--dim-font-12);
-  line-height: 18px;
+  line-height: var(--dim-line-12);
   margin-top: 16px;
 }
 
@@ -200,7 +200,7 @@ const CSS = String.raw`
   font: inherit;
   font-size: var(--dim-font-12);
   font-weight: var(--dim-weight-400);
-  line-height: 18px;
+  line-height: var(--dim-line-12);
   text-decoration: none;
   cursor: pointer;
   transition: background .15s var(--ds-ease-in-out, ease), border-color .15s var(--ds-ease-in-out, ease), transform .15s var(--ds-ease-in-out, ease);
@@ -365,7 +365,11 @@ const CSS = String.raw`
 .bxf-progress { height: 3px; overflow: hidden; border-radius: var(--dim-radius-full); background: var(--dsw-alias-bg-module-platform, #f5f6f7); margin-top: 6px; }
 .bxf-progress > span { display: block; width: var(--bxf-progress, 100%); height: 100%; border-radius: inherit; background: var(--bxf-accent); transition: width 1s linear; }
 
-.bxf-qrCopy h3 { font-size: var(--dim-font-20); line-height: var(--dim-line-20); font-weight: var(--dim-weight-600); }
+/* The channel's qrCopy h3 used to be declared twice here (20/28/600, and 18/26 under
+   .bxf-botProvision). Both were dead: the element carries bxf-qrCopy AND dim-qrCopy
+   (feishu/index.js:298), so the shared .dim-panel .dim-qrCopy h3 owns it at (0,2,1) - the first
+   rule loses on specificity, the second ties and loses because the shared sheet is injected
+   later. Measured on 3080: the h3 renders 18 / 24 / 600, never 20 or 26. */
 .bxf-qrCopy > p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); margin-top: 7px; }
 
 .bxf-steps { counter-reset: bxf-step; display: flex; flex-direction: column; gap: var(--dim-gap-11); margin: 20px 0 0; padding: 0; list-style: none; }
@@ -410,7 +414,10 @@ const CSS = String.raw`
 .bxf-botName h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--dim-font-16); line-height: var(--dim-line-16); font-weight: var(--dim-weight-600); }
 .bxf-botName p { overflow: hidden; color: var(--dsw-alias-label-tertiary, #81858c); font-family: var(--dim-font-mono, monospace); font-size: var(--dim-font-12); line-height: var(--dim-line-12); text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 
-.bxf-healthPill { flex: none; display: inline-flex; align-items: center; gap: var(--dim-gap-7); min-height: 28px; border-radius: var(--dim-radius-full); padding: 4px 10px; color: var(--bxf-success); background: color-mix(in srgb, var(--bxf-success) 10%, transparent); font-size: var(--dim-font-12); font-weight: var(--dim-weight-600); line-height: var(--dim-line-12); }
+/* A coloured status indicator, so the host owner is ConnectionIndicator (12 / 500 / 18, semantic
+   colour carried by the indicator) rather than the neutral Pill (12 / 400 / 18). Only the weight
+   moves here; the tinted-fill treatment is a separate question already on the open list. */
+.bxf-healthPill { flex: none; display: inline-flex; align-items: center; gap: var(--dim-gap-7); min-height: 28px; border-radius: var(--dim-radius-full); padding: 4px 10px; color: var(--bxf-success); background: color-mix(in srgb, var(--bxf-success) 10%, transparent); font-size: var(--dim-font-12); font-weight: var(--dim-weight-500); line-height: var(--dim-line-12); }
 .bxf-healthPill[data-health="degraded"], .bxf-healthPill[data-health="checking"], .bxf-healthPill[data-health="connecting"] { color: var(--bxf-warning); background: color-mix(in srgb, var(--bxf-warning) 10%, transparent); }
 .bxf-healthPill[data-health="offline"], .bxf-healthPill[data-health="error"] { color: var(--bxf-error); background: color-mix(in srgb, var(--bxf-error) 10%, transparent); }
 
@@ -454,7 +461,6 @@ const CSS = String.raw`
 }
 .bxf-botProvision .bxf-qrFrame { width: 176px; height: 176px; padding: 10px; border-radius: var(--dim-radius-12); }
 .bxf-botProvision .bxf-countdown { width: 176px; }
-.bxf-botProvision .bxf-qrCopy h3 { font-size: var(--dim-font-18); line-height: 26px; }
 .bxf-botProvision .bxf-steps { gap: var(--dim-gap-8); margin-top: 14px; }
 .bxf-botProvision .bxf-actions { margin-top: 16px; }
 .bxf-botProvision .bxf-inlineError { min-height: 160px; padding: 22px; }
@@ -466,7 +472,7 @@ const CSS = String.raw`
 .bxf-botActions .bxf-button { flex: none; white-space: nowrap; }
 .bxf-botActions .bxf-repairButton { color: var(--bxf-accent); border-color: color-mix(in srgb, var(--bxf-accent) 35%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); }
 .bxf-botActions .bxf-repairButton:hover:not(:disabled) { background: color-mix(in srgb, var(--bxf-accent) 7%, transparent); }
-.bxf-repairAction { display: inline-flex; }.bxf-repairTooltip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; width: min(330px, 100%); display: grid; gap: var(--dim-gap-3); opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; padding: 3px 7px; border: 0; border-radius: var(--dim-radius-8); color: var(--dsw-static-neutral-bluish-00, #f9fafb); background: var(--dsw-alias-tooltip-bg, #2c2c2e); box-shadow: none; font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-400); }
+.bxf-repairAction { display: inline-flex; }.bxf-repairTooltip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; width: min(330px, 100%); display: grid; gap: var(--dim-gap-3); opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
 .bxf-repairTooltip strong { font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-600); }
 .bxf-repairTooltip > span { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; font-weight: var(--dim-weight-400); overflow-wrap: anywhere; }
 .bxf-repairAction:hover .bxf-repairTooltip,
@@ -498,7 +504,7 @@ const CSS = String.raw`
   color: var(--dsw-alias-label-secondary, #646a73);
   background: color-mix(in srgb, var(--bxf-warning) 5%, var(--dsw-alias-bg-layer-1, #fff));
   font-size: var(--dim-font-12);
-  line-height: 18px;
+  line-height: var(--dim-line-12);
 }
 .bxf-statusNotice > svg { flex: none; color: var(--bxf-warning); }
 .bxf-statusNotice > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
