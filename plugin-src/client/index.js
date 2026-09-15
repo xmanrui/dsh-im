@@ -6,6 +6,7 @@ import {
   DingtalkLogoGlyph,
   DiscordLogoGlyph,
   FeishuLogoGlyph,
+  GithubMarkGlyph,
   OfficeLogoGlyph,
   QqLogoGlyph,
   SlackLogoGlyph,
@@ -296,8 +297,7 @@ export function IMSettingsTab({
           'aria-label': 'dsh-im GitHub',
           'aria-describedby': githubTooltipId,
         },
-        h('span', null, 'GitHub'),
-        h('span', { className: 'dim-githubArrow', 'aria-hidden': 'true' }, '↗')),
+        h(GithubMarkGlyph, { size: 16 })),
         h('span', {
           id: githubTooltipId,
           className: 'dim-githubTooltip',
@@ -343,7 +343,6 @@ export function IMSettingsTab({
           h('strong', null, channel.label),
           channel.note ? h('small', { className: 'dim-channelNote' }, channel.note) : null,
         )))),
-      h('div', { className: 'dim-divider', 'aria-hidden': 'true' }),
       h('main', {
         className: 'dim-panel',
         role: 'tabpanel',
