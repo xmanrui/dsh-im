@@ -219,21 +219,27 @@ test('context settings default to off with sender ID and empty guidance, and exp
   assert.equal(textOf(tooltip.findByProps({ className: 'dim-contextTooltipExample' })), CONTEXT_GROUP_GUIDANCE_EXAMPLE);
   assert.equal(guidance(renderer.root, 'group').props['aria-describedby'], tooltip.props.id);
   assert.equal(renderer.root.findAllByType('p').some((node) => /只需填写正文|发送者标识可能包含/.test(textOf(node))), false);
-  // Each field's caveat is inline hint text under its own label now, so it reads
-  // without a hover and the trigger no longer exists.
-  const senderNameHint = renderer.root
+  // Every field used to open its caveat with the same sentence and close it with
+  // the same sentence, differing only in the middle. That shared half is stated
+  // once, on the section legend above the fields, so each field carries only the
+  // clause that is actually about that field.
+  assert.match(
+    textOf(fieldsHints[0]),
+    /某字段在当前渠道或当前消息中不存在时，即使已勾选，<dsh_im_source> 中也会省略/,
+  );
+  const fieldHints = renderer.root
     .findAllByProps({ className: 'dim-helpHint dim-contextFieldHint' })
-    .map(textOf)
-    .find((text) => /省略 senderName/.test(text));
-  assert.ok(senderNameHint, 'the sender-name field keeps its caveat');
-  assert.match(senderNameHint, /不是每个渠道.*dsh_im_source.*省略 senderName/s);
-  const fieldHintCount = renderer.root.findAllByProps({ className: 'dim-helpHint dim-contextFieldHint' }).length;
-  assert.equal(fieldHintCount, 8, 'two scopes times the four fields that carry a caveat');
-  const conversationTitleHint = renderer.root
-    .findAllByProps({ className: 'dim-helpHint dim-contextFieldHint' })
-    .map(textOf)
-    .find((text) => /省略 conversationTitle/.test(text));
-  assert.ok(conversationTitleHint, 'the conversation-title field keeps its caveat');
+    .map(textOf);
+  assert.equal(fieldHints.length, 6, 'three fields carry a caveat, and there are two scopes');
+  assert.deepEqual([...new Set(fieldHints)].sort(), [
+    '钉钉群聊会带上群名。',
+    '用于区分不同的群组或私聊；飞书群聊会带上群 ID。',
+    '飞书话题群的消息会带上话题 ID，用于区分同一群组内的不同话题。',
+  ].sort());
+  assert.ok(
+    fieldHints.every((text) => !/不是每个渠道都能提供/.test(text)),
+    'the shared sentence is no longer repeated under every field',
+  );
   assert.deepEqual(saved, []);
 });
 
@@ -647,7 +653,7 @@ test('all nine failed save RPCs keep runtime state and drafts intact through sta
 test('the approved neutral entry and theme-aware modal keep responsive labels and touch targets', async () => {
   const styles = await readFile(new URL('../plugin-src/client/styles.js', import.meta.url), 'utf8');
   // The entry is a native row now: no border, no radius, no fill.
-  assert.match(styles, /\.dim-contextEntry \{[^}]*min-height: 40px;[^}]*minmax\(0, 1fr\)[^}]*padding: 14px 0;[^}]*border: 0;[^}]*background: none;[^}]*font-size: var\(--dim-font-13\);/);
+  assert.match(styles, /\.dim-contextEntry \{[^}]*min-height: 40px;[^}]*minmax\(0, 1fr\)[^}]*padding: 14px 0;[^}]*border: 0;[^}]*background: none;[^}]*font-size: var\(--dim-font-14\);/);
   // Native Pill active tone.
   assert.match(styles, /\.dim-contextStatus\[data-active="true"\] \{[^}]*--dsw-alias-button-ghost-active-fill/);
   // Native Modal surface: border 0, r24, layer-2, elevation-prominent.
@@ -674,7 +680,7 @@ test('the approved neutral entry and theme-aware modal keep responsive labels an
   assert.match(styles, /\.dim-contextTooltip \{[^}]*opacity: 0;[^}]*visibility: hidden;/);
   assert.match(styles, /\.dim-contextTooltip\.dim-contextGuidanceTooltip \{[^}]*bottom: calc\(100% \+ 7px\);[^}]*overflow-y: auto;/);
   assert.match(styles, /\.dim-contextHeader \{[^}]*position: relative;/);
-  assert.match(styles, /\.dim-contextLegend \{[^}]*position: relative;[^}]*inline-flex/);
+  assert.match(styles, /\.dim-contextLegend \{[^}]*position: relative;[^}]*display: grid/);
   assert.match(styles, /\.dim-contextHelp:hover \.dim-contextTooltip, \.dim-contextHelp:focus-within \.dim-contextTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
   const office = await readFile(new URL('../plugin-src/client/channels/office/index.js', import.meta.url), 'utf8');
   assert.doesNotMatch(office, /ContextEnhancement|context-enhancement/);

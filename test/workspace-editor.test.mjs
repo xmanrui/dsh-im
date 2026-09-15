@@ -863,13 +863,14 @@ test('AgentPresetEditor lists Host presets and moves its session guidance into a
   assert.deepEqual(optionValues(select), ['', 'coding', 'default']);
   assert.equal(textOf(select.children[0]), '跟随 Host 默认');
   assert.equal(textOf(select.children[1]), 'Coding（coding）');
-  // The guidance is inline hint text now. Native settings surfaces carry no help
-  // trigger at all, so the "?" button and its tooltip were removed rather than
-  // restyled; the sentence itself is unchanged and still announced.
-  const hint = renderer.root.findByProps({ className: 'dim-helpHint' });
+  // The new-session note is stated once, on the model block that sits directly
+  // above this one in every channel, so carrying a second copy here put the same
+  // sentence on screen twice. Native settings surfaces carry no help trigger at
+  // all, so this block keeps no hint of its own.
   assert.equal(
-    textOf(hint),
-    '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。',
+    renderer.root.findAllByProps({ className: 'dim-helpHint' }).length,
+    0,
+    'the Agent Preset block does not restate the note the block above it carries',
   );
   assert.equal(renderer.root.findAll(node => node.props?.['aria-label'] === '查看 Agent Preset 说明').length, 0);
   assert.equal(renderer.root.findAllByType('small').length, 0);
