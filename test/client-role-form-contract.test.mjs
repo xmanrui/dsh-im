@@ -72,7 +72,7 @@ test('a settings-row label uses the native row-title role, not the stacked-field
       }
       const weight = declared(rule, 'font-weight');
       if (weight !== undefined) {
-        assert.equal(weight, '400', selector + ' keeps the native row-title weight');
+        assert.equal(weight, 'var(--dim-weight-400)', selector + ' keeps the native row-title weight');
       }
     }
   }
@@ -85,7 +85,7 @@ test('the group caption keeps the native caption role', () => {
   const caption = rulesFor('.dim-modelSetting > .dim-presetHeader');
   assert.equal(caption.length, 1, 'the group caption keeps its rule');
   assert.equal(declared(caption[0], 'font-size'), 'var(--dim-font-12)');
-  assert.equal(declared(caption[0], 'font-weight'), '500');
+  assert.equal(declared(caption[0], 'font-weight'), 'var(--dim-weight-500)');
   assert.match(declared(caption[0], 'color') ?? '', /--dsw-alias-label-secondary/);
 });
 

@@ -107,7 +107,7 @@ export function OfficeSettingsTab({ rpcCall, initialStatus }) {
         h('h3', null, 'AI Office Connector'),
         h('p', null, '本机主动连接公网 Office；Harness 不开放端口。协议 Hook 固定为 ', OFFICE_PROTOCOL_VERSION, '。')),
       h('span', { className: 'dof-status', 'data-connected': String(model.connected) },
-        h('span', { className: 'dof-dot' }), stateLabel(model))),
+        h('span', { className: 'dof-dot dim-stateDot' }), stateLabel(model))),
     model.configured ? h('div', { className: 'dof-metrics' },
       h('div', { className: 'dof-metric' }, h('span', null, '最近心跳'), h('strong', null, health.lastHeartbeatAt ?? '尚无')),
       h('div', { className: 'dof-metric' }, h('span', null, '最近事件'), h('strong', null, health.lastEventType ?? '尚无')),
