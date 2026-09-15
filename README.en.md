@@ -254,7 +254,7 @@ node bin/dsh-im.mjs install --source .
 
 Before changing the settings page's presentation layer (`plugin-src/client/styles.js` and each channel's `styles.js`), read the [presentation-layer style contract](docs/adr/0002-presentation-layer-style-contract.md). It records the four cascade mechanisms behind "one role, several authors", the verification standard, the axes already converged, and the three contract-test guards. (Chinese only.)
 
-How to start the two local instances, get the URL token, check an installed build against the repository, and reinstall or re-pin the version: [local environment notes](docs/local-environment.md). (Chinese only.)
+How to start the two local instances, get the URL token, check an installed build against the repository, and understand the install form (both link to the repository, so a rebuild is all a change needs) and the version policy: [local environment notes](docs/local-environment.md). (Chinese only.)
 
 IM management uses Harness browser authentication and Host/Origin trust checks by default. Once Harness allows and authenticates access from your LAN address, you can view and configure IM bots without any extra dsh-im configuration.
 
