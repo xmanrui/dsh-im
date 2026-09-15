@@ -36,7 +36,11 @@ import {
 } from '../shared/preset-command.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
-import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  captureContextEnhancementSource,
+  enhanceContextContent,
+} from '../shared/context-enhancement.mjs';
 import {
   hasInboundImages,
   imagePromptDiagnostic,
@@ -707,6 +711,11 @@ export class WeixinHarnessBridge {
         || this.#approvals.hasPending(key),
       control: { owner: this, key },
       deferredDelivery: this.#deferred,
+      enhancement: captureContextEnhancementSource(
+        this.#contextEnhancement,
+        'direct',
+        () => ({ channel: 'weixin', senderId: sender, chatId: sender }),
+      ),
     });
     if (result?.stopped) {
       await Promise.allSettled([
@@ -826,6 +835,7 @@ export class WeixinHarnessBridge {
           text,
           content,
           titleText: batchSubmission?.title,
+          sourceGuidance: snapshot?.config?.guidance,
           contextEnhanced,
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },

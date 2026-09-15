@@ -4,6 +4,23 @@ export const CONTEXT_ENHANCEMENT_FIELDS = Object.freeze([
   'chatId', 'threadId', 'botId',
 ]);
 
+/**
+ * Tag grammar of the injected context prefix. The producer here and the
+ * Host-side splitter in `injected-context.mjs` share these literals, so the
+ * prefix a channel writes can never drift from the parser that pairs it.
+ */
+export const INJECTED_CONTEXT_TAGS = Object.freeze({
+  sourceOpen: '<dsh_im_source>',
+  sourceClose: '</dsh_im_source>',
+  guidanceOpen: '<dsh_im_source_guidance>',
+  guidanceClose: '</dsh_im_source_guidance>',
+  replyOpen: '<dsh_im_reply_to>',
+  replyClose: '</dsh_im_reply_to>',
+});
+
+/** Separator the producer joins prefix blocks with, and the splitter consumes. */
+export const INJECTED_CONTEXT_SEPARATOR = '\n\n';
+
 export const CONTEXT_ENHANCEMENT_GUIDANCE_MAX_LENGTH = 8_000;
 export const CONTEXT_GROUP_GUIDANCE_EXAMPLE = `仅依据当前消息的 <dsh_im_source> 中实际提供的字段理解来源；没有提供的字段不要猜测或补全。
 当前消息来自群聊，请使用严肃、克制、简洁的表达方式。`;
@@ -138,6 +155,26 @@ export function captureContextEnhancement(provider, conversationType) {
   }
 }
 
+/**
+ * Capture the enhancement one prompt replays, together with the source factory
+ * that fills its selected fields.
+ *
+ * Ordinary messages snapshot this when they are accepted, so a queued message
+ * keeps the settings it arrived under. A control command is never queued, so it
+ * captures at the moment it runs -- and it must, because the source fields of a
+ * steering instruction belong to whoever issued it, not to the message that
+ * opened the turn.
+ *
+ * @param provider - the bot's enhancement provider.
+ * @param conversationType - the inbound message's scope.
+ * @param source - factory for the currently selected source fields.
+ * @returns the enhancement to apply, or null when the scope is off.
+ */
+export function captureContextEnhancementSource(provider, conversationType, source) {
+  const snapshot = captureContextEnhancement(provider, conversationType);
+  return snapshot === null ? null : Object.freeze({ snapshot, source });
+}
+
 function sourceString(value, field) {
   if (field === 'senderId' && (typeof value === 'bigint' || Number.isFinite(value))) {
     value = String(value);
@@ -165,7 +202,7 @@ function sourceBlock(snapshot, sourceFactory) {
   const json = JSON.stringify(projected).replace(/[<>&]/g, (character) => ({
     '<': '\\u003c', '>': '\\u003e', '&': '\\u0026',
   })[character]);
-  return `<dsh_im_source>${json}</dsh_im_source>`;
+  return `${INJECTED_CONTEXT_TAGS.sourceOpen}${json}${INJECTED_CONTEXT_TAGS.sourceClose}`;
 }
 
 function guidanceBlock(guidance) {
@@ -173,7 +210,7 @@ function guidanceBlock(guidance) {
   const body = guidance.replace(/<\/?dsh_im_source_guidance\b[^>]*(?:>|$)/gi, (tag) => (
     tag.replace(/</g, '&lt;').replace(/>/g, '&gt;')
   ));
-  return `<dsh_im_source_guidance>\n${body}\n</dsh_im_source_guidance>`;
+  return `${INJECTED_CONTEXT_TAGS.guidanceOpen}\n${body}\n${INJECTED_CONTEXT_TAGS.guidanceClose}`;
 }
 
 /** Add one text prefix; never inspect sources, format or copy content when off. */
@@ -183,7 +220,7 @@ export function enhanceContextContent(content, snapshot, sourceFactory) {
     const blocks = [sourceBlock(snapshot, sourceFactory), guidanceBlock(snapshot.config.guidance)]
       .filter(Boolean);
     if (blocks.length === 0) return content;
-    const prefix = blocks.join('\n\n');
+    const prefix = blocks.join(INJECTED_CONTEXT_SEPARATOR);
     if (typeof content === 'string') return `${prefix}\n\n${content}`;
     if (Array.isArray(content)) return [{ type: 'text', text: prefix }, ...content];
     return content;

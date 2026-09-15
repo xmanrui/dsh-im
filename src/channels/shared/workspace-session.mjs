@@ -82,6 +82,11 @@ async function createSession(harness, options) {
  * user's own words -- a batch submission composes dsh-im's framing sentence and
  * message labels into one prompt, and only the collected text may name the
  * conversation.
+ *
+ * `sourceGuidance` is the guidance the channel's captured enhancement settings
+ * applied, carried to the Host out of band so it can materialize it as session
+ * prompt context. It is never re-derived from the prompt, which also carries
+ * whatever the user typed.
  */
 export async function askInWorkspaceSession({
   harness,
@@ -90,6 +95,7 @@ export async function askInWorkspaceSession({
   text,
   content,
   titleText,
+  sourceGuidance,
   contextEnhanced = false,
   createOptions,
   existsOptions,
@@ -151,6 +157,9 @@ export async function askInWorkspaceSession({
       const artifactOptions = typeof askOptions === 'number'
         ? { timeoutMs: askOptions }
         : { ...askOptions };
+      // The guidance the channel's captured settings applied, carried out of
+      // band so the Host never has to read configuration out of the prompt.
+      artifactOptions.sourceGuidance = sourceGuidance;
       artifactOptions.onArtifact = async (artifact) => {
         artifacts.push(artifact);
         await originalOnArtifact?.(artifact);

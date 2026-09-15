@@ -60,7 +60,11 @@ import {
 } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
-import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
+import {
+  captureContextEnhancement,
+  captureContextEnhancementSource,
+  enhanceContextContent,
+} from '../shared/context-enhancement.mjs';
 import { deliverOutboundArtifacts } from '../shared/semantic/artifact-delivery.mjs';
 import {
   createDeliveryReceipt,
@@ -1416,6 +1420,16 @@ export class FeishuHarnessBridge {
         hasFiles: hasInboundFiles(message),
         pendingInteraction: this.#hasPendingInteraction(key),
         control: { owner: this, key },
+        enhancement: captureContextEnhancementSource(
+          this.#contextEnhancement,
+          event.message.chat_type === 'p2p' ? 'direct' : 'group',
+          () => ({
+            channel: 'feishu',
+            senderId: senderOpenId(event),
+            chatId: event.message.chat_id,
+            threadId: event.message.thread_id,
+          }),
+        ),
       },
     );
     if (result?.stopped) {
@@ -2475,7 +2489,7 @@ export class FeishuHarnessBridge {
         await this.#sendCard(chatId, customSteerCard(), { key, updateMessageId: messageId, replyTo: messageId });
         return;
       }
-      await this.#sendSteer({ key, chatId, messageId }, raw);
+      await this.#sendSteer({ key, chatId, messageId, actor }, raw);
       return;
     }
     if (action === 'presets') {
@@ -3201,11 +3215,26 @@ export class FeishuHarnessBridge {
    */
   async #sendSteer(entry, text) {
     const { key, chatId } = entry;
+    // Card routes carry the conversation key, not the raw event, so the topic
+    // id is recovered from the key the channel itself minted.
+    const threadId = typeof key === 'string'
+      ? /(?:^|:)thread:(.+)$/u.exec(key)?.[1]
+      : undefined;
     const result = await runControlCommand(
       `/steer ${text}`, this.#harness, this.#state, key, {
         signal: this.#signal,
         pendingInteraction: this.#hasPendingInteraction(key),
         control: { owner: this, key },
+        enhancement: captureContextEnhancementSource(
+          this.#contextEnhancement,
+          typeof key === 'string' && key.startsWith('p2p:') ? 'direct' : 'group',
+          () => ({
+            channel: 'feishu',
+            senderId: entry.actor ?? entry.operatorOpenId,
+            chatId,
+            threadId,
+          }),
+        ),
       },
     );
     await this.#send(chatId, result?.message || t('已提交补充指令。'), { replyTo: entry.messageId ?? null });
@@ -4964,6 +4993,7 @@ export class FeishuHarnessBridge {
       text,
       content,
       titleText: event.batchSubmission?.title,
+      sourceGuidance: snapshot?.config?.guidance,
       contextEnhanced,
       createOptions: { signal: this.#signal },
       existsOptions: { signal: this.#signal },
@@ -5207,6 +5237,7 @@ export class FeishuHarnessBridge {
         text,
         content,
         titleText: event.batchSubmission?.title,
+        sourceGuidance: snapshot?.config?.guidance,
         contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
@@ -5287,6 +5318,7 @@ export class FeishuHarnessBridge {
             text,
             content,
             titleText: event.batchSubmission?.title,
+            sourceGuidance: snapshot?.config?.guidance,
             contextEnhanced,
             createOptions: { signal: this.#signal },
             existsOptions: { signal: this.#signal },
@@ -5358,6 +5390,7 @@ export class FeishuHarnessBridge {
         text,
         content,
         titleText: event.batchSubmission?.title,
+        sourceGuidance: snapshot?.config?.guidance,
         contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
