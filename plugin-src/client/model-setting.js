@@ -114,7 +114,10 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
       setPane(pane === key ? null : key);
     },
   }, h('span', { className: 'dim-modelRowLabel' }, label),
-  h('span', { className: 'dim-modelValue', title: value }, value), chevron(pane === key));
+  // Label left, value inside the native selector pill on the right — the exact
+  // cell the General page uses for Language and Conversation display.
+  h('span', { className: 'dim-modelSelector' },
+    h('span', { className: 'dim-modelValue', title: value }, value), chevron(pane === key)));
 
   return h('div', {
     ref: rootRef, className: 'dim-preset dim-modelSetting',

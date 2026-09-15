@@ -634,15 +634,20 @@ test('all nine failed save RPCs keep runtime state and drafts intact through sta
 
 test('the approved neutral entry and theme-aware modal keep responsive labels and touch targets', async () => {
   const styles = await readFile(new URL('../plugin-src/client/styles.js', import.meta.url), 'utf8');
-  assert.match(styles, /\.dim-contextEntry \{[^}]*min-height: 40px;[^}]*minmax\(0, 1fr\)[^}]*border-radius: 8px;[^}]*font-size: 13px;/);
-  assert.match(styles, /\.dim-contextStatus\[data-active="true"\] \{[^}]*--dsw-alias-state-business-primary/);
-  assert.match(styles, /\.dim-contextDialog \{[^}]*width: min\(450px, 100%\);[^}]*overflow-y: auto;[^}]*border-radius: 12px;[^}]*--dsw-alias-bg-layer-3/);
-  assert.match(styles, /\.dim-contextTabs \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*border-radius: 8px;/);
-  assert.match(styles, /\.dim-contextTab\[aria-selected="true"\] \{[^}]*--dsw-alias-state-business-primary[^}]*box-shadow:/);
+  // The entry is a native row now: no border, no radius, no fill.
+  assert.match(styles, /\.dim-contextEntry \{[^}]*min-height: 40px;[^}]*minmax\(0, 1fr\)[^}]*padding: 14px 0;[^}]*border: 0;[^}]*background: none;[^}]*font-size: 13px;/);
+  // Native Pill active tone.
+  assert.match(styles, /\.dim-contextStatus\[data-active="true"\] \{[^}]*--dsw-alias-button-ghost-active-fill/);
+  // Native Modal surface: border 0, r24, layer-2, elevation-prominent.
+  assert.match(styles, /\.dim-contextDialog \{[^}]*width: min\(450px, 100%\);[^}]*overflow-y: auto;[^}]*border: 0;[^}]*border-radius: 24px;[^}]*--dsw-alias-bg-layer-2/);
+  // Native tablist strip, not a bespoke segmented control.
+  assert.match(styles, /\.dim-contextTabs \{[^}]*display: flex;[^}]*border-bottom: 0\.5px solid var\(--dsw-alias-border-l2/);
+  assert.match(styles, /\.dim-contextTab\[aria-selected="true"\] \{[^}]*--dsw-alias-label-primary/);
+  assert.match(styles, /\.dim-contextTab\[aria-selected="true"\]::after \{[^}]*background: var\(--dsw-alias-label-primary/);
   assert.match(styles, /\.dim-contextTabPanel\[hidden\] \{[^}]*display: none;/);
   assert.match(styles, /\.dim-contextFields \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(styles, /\.dim-contextGuidance textarea \{[^}]*min-height: 88px;/);
-  assert.match(styles, /\.dim-contextGuidance textarea::placeholder \{[^}]*--dsw-alias-label-tertiary[^}]*opacity: 1;/);
+  assert.match(styles, /\.dim-contextGuidance textarea::placeholder \{[^}]*--dsw-alias-label-dimmed[^}]*opacity: 1;/);
   assert.match(styles, /\.dim-contextFieldKey \{[^}]*ui-monospace/);
   assert.match(styles, /\.dim-contextFieldText \{[^}]*grid-template-columns: max-content max-content;[^}]*column-gap: 5px;/);
   assert.match(styles, /\.dim-contextField \{[^}]*position: relative;/);

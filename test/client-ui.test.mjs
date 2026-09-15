@@ -238,18 +238,21 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   )?.[1] ?? '';
   assert.match(settingsButtonMarkup, /data-im-icon="global-settings"/);
   assert.doesNotMatch(settingsButtonMarkup, /通用设置/);
-  assert.match(styles, /\.dim-title \{[^}]*margin: 0 0 18px;/);
-  assert.match(styles, /\.dim-title p \{[^}]*color: var\(--dsw-alias-label-secondary, #646a73\);[^}]*font-size: 12px;[^}]*font-weight: 500;/);
+  assert.match(styles, /\.dim-title \{[^}]*margin: 0 0 12px;/);
+  assert.match(styles, /\.dim-title p \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-size: 13px;[^}]*line-height: 20px;[^}]*font-weight: 400;/);
   assert.match(styles, /\.dim-brand \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*align-items: flex-start;[^}]*gap: 1px;/);
-  assert.match(styles, /\.dim-brandHeading \{[^}]*display: flex;[^}]*align-items: baseline;[^}]*gap: 8px;[^}]*white-space: nowrap;/);
-  assert.match(styles, /\.dim-brandName \{[^}]*font-size: 20px;[^}]*font-weight: 800;[^}]*letter-spacing: \.04em;/);
-  assert.match(styles, /\.dim-brandVersion \{[^}]*color: var\(--dsw-alias-label-tertiary, #8f959e\);[^}]*font: 500 10px\/16px[^}]*letter-spacing: 0;/);
+  assert.match(styles, /\.dim-brandHeading \{[^}]*display: flex;[^}]*align-items: center;[^}]*gap: 8px;[^}]*white-space: nowrap;/);
+  // Native section title role: 18/600 with no letter-spacing, not a 20/800 wordmark.
+  assert.match(styles, /\.dim-brandName \{[^}]*font-size: 18px;[^}]*line-height: 25px;[^}]*font-weight: 600;[^}]*letter-spacing: 0;/);
+  // The version renders as a native Tag: r999 capsule, 0.5px l4 outline, 11/17/500.
+  assert.match(styles, /\.dim-brandVersion \{[^}]*padding: 1px 8px;[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: 999px;[^}]*corner-shape: round;[^}]*font: 500 11px\/17px/);
   assert.doesNotMatch(styles, /dim-versionTooltip|\.dim-brand:focus-visible/);
   assert.doesNotMatch(styles, /\.dim-brandLogo/);
-  assert.match(styles, /\.dim-githubLink \{[^}]*border: 1px solid var\(--dsw-alias-border-l2, #dfe1e5\);[^}]*text-decoration: none;/);
+  // Header actions are native icon buttons: 28px, no border, transparent at rest.
+  assert.match(styles, /\.dim-githubLink \{[^}]*width: 28px;[^}]*height: 28px;[^}]*border: none;[^}]*background: transparent;[^}]*text-decoration: none;/);
   assert.match(styles, /\.dim-githubTooltip \{[^}]*top: calc\(100% \+ 8px\);[^}]*transform: translateY\(-3px\);/);
   assert.match(styles, /\.dim-githubAction:hover \.dim-githubTooltip, \.dim-githubAction:focus-within \.dim-githubTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.match(styles, /\.dim-generalSettingsButton \{[^}]*width: 30px;[^}]*height: 30px;[^}]*display: grid;[^}]*border: 1px solid var\(--dsw-alias-border-l2, #dfe1e5\);/);
+  assert.match(styles, /\.dim-generalSettingsButton \{[^}]*width: 28px;[^}]*height: 28px;[^}]*display: grid;[^}]*border: none;[^}]*background: transparent;/);
   assert.match(styles, /\.dim-generalSettingsTooltip \{[^}]*top: calc\(100% \+ 8px\);[^}]*transform: translateY\(-3px\);/);
   assert.match(styles, /\.dim-generalSettingsAction:hover \.dim-generalSettingsTooltip, \.dim-generalSettingsButton:focus-visible \+ \.dim-generalSettingsTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
   assert.match(styles, /\.dim-generalSettingsButton\[aria-current="page"\] \+ \.dim-generalSettingsTooltip \{[^}]*opacity: 0;[^}]*visibility: hidden;/);
@@ -283,12 +286,40 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   assert.match(markup, /dim-logoWhatsapp/);
   assert.match(markup, /dim-logoIMessage/);
   assert.match(markup, /dim-logoOffice/);
-  assert.match(styles, /\.dim-logoFeishu svg \{ width: 28px; height: 28px; \}/);
+  assert.match(styles, /\.dim-logoFeishu svg \{ width: 17px; height: 17px; \}/);
   assert.equal((markup.match(/role="tab"/g) ?? []).length, 12);
   assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.doesNotMatch(markup, /role="switch"|type="checkbox"/);
   assert.doesNotMatch(markup, /dim-chevron|扫码绑定<\/small>|扫码接入<\/small>/);
   assert.doesNotMatch(markup, />INSTANT MESSAGING<|>Channel<|>微信设置</);
+});
+
+test('channel switching is a wrapped tab strip instead of a second navigation column', async () => {
+  const styles = await readFile(STYLES_URL, 'utf8');
+  const markup = renderToStaticMarkup(React.createElement(IMSettingsTab, {
+    weixinRpcCall: async () => ({ ok: true, value: {} }),
+  }));
+
+  assert.match(markup, /<nav class="dim-rail" role="tablist" aria-label="IM 设置导航">/);
+  assert.equal((markup.match(/role="tab"/g) ?? []).length, 12);
+  assert.match(markup, /aria-selected="true"/);
+  assert.doesNotMatch(markup, /dim-divider/);
+
+  // The settings shell already spends 188px of its 800px panel on navigation. A
+  // second column inside the remaining 564px left the text column at 341px, which
+  // is what forced every hint to wrap; the strip must stay one full-width row set.
+  assert.match(styles, /\.dim-layout \{ display: block; \}/);
+  assert.match(styles, /\.dim-rail \{ display: flex;[^}]*flex-wrap: wrap;/);
+  assert.doesNotMatch(styles, /\.dim-layout \{[^}]*grid-template-columns:/);
+  assert.doesNotMatch(styles, /\.dim-rail \{[^}]*display: grid;/);
+
+  // Tabs read as native selector pills: no border, no fill, no shadow at rest.
+  assert.match(styles, /\.dim-channel \{ max-width: 100%; min-height: 28px; display: inline-flex;[^}]*border: 0;[^}]*border-radius: 14px;[^}]*corner-shape: round;/);
+  assert.doesNotMatch(styles, /\.dim-channel \{[^}]*box-shadow:/);
+  assert.match(styles, /\.dim-channel:hover \{ color: var\(--dsw-alias-label-primary, #0f1115\); background: var\(--dsw-alias-interactive-bg-hover/);
+  assert.match(styles, /\.dim-channel:focus-visible \{ outline: 2px solid var\(--dsw-alias-brand-primary, #0f1115\); outline-offset: 2px; \}/);
+  assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: 13px;[^}]*font-weight: 500;/);
+  assert.match(styles, /\.dim-channelNote \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-weight: 400;/);
 });
 
 test('the general settings gear sits to the right of GitHub and outside the channel rail', () => {
@@ -519,7 +550,7 @@ test('all channel styles use the current Harness theme tokens', async () => {
   assert.match(styles, /--dim-blue: var\(--dsw-alias-state-business-primary, #3370ff\)/);
   assert.match(
     styles,
-    /\.dim-channel\[aria-selected="true"\][^}]*var\(--dsw-alias-bg-layer-3/,
+    /\.dim-channel\[aria-selected="true"\][^}]*var\(--dsw-alias-bg-module-platform/,
   );
   assert.match(
     styles,
@@ -750,7 +781,7 @@ test('credential binding is a distinct secondary action beside QR binding in fou
 
   const styles = await readFile(STYLES_URL, 'utf8');
   assert.match(styles, /\.dim-panel \.dim-bindActions \{[^}]*flex-wrap: nowrap;/);
-  assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*border: 1px solid #86909c;[^}]*background: var\(--dsw-alias-bg-layer-1, #fff\)/);
+  assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: 14px;[^}]*background: transparent;/);
   assert.match(styles, /\.dim-panel \.dim-actionIcon \{[^}]*flex: 0 0 15px;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-credentialPanel \{[^}]*border-left:/);
 });
@@ -814,8 +845,10 @@ test('scan actions align left while online totals align right in every channel',
   }
   assert.doesNotMatch(weixinHeading, /dxw-dot/);
   assert.doesNotMatch(dingtalkHeading, /ddt-dot/);
-  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-scanButton,[^}]*border: 1px solid #1677ff;[^}]*border-radius: 8px;[^}]*background: #1677ff;[^}]*box-shadow: none;/);
-  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-onlineBadge,[^}]*border-radius: 999px;[^}]*background: var\(--dsw-alias-bg-module-platform, #f2f3f5\);[^}]*font-size: 12px;/);
+  // The channel CTA is a theme-following capsule so its QR glyph rides currentColor.
+  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-scanButton,[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: 14px;[^}]*color: var\(--dsw-alias-label-primary, #0f1115\);[^}]*background: transparent;[^}]*box-shadow: none;/);
+  // Native Pill: h24 r12, bg-layer-2 fill, 12/18.
+  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-onlineBadge,[^}]*height: 24px;[^}]*border-radius: 12px;[^}]*background: var\(--dsw-alias-bg-layer-2, #fff\);[^}]*font-size: 12px;/);
 });
 
 test('channel headings omit the redundant local credential badge', () => {
@@ -891,13 +924,13 @@ test('all channel settings states use the DingTalk page treatment', async () => 
   }
 
   assert.match(styles, /\.dim-panel \.dim-channelPage \{[^}]*flex-direction: column;[^}]*gap: 12px;/);
-  assert.match(styles, /\.dim-panel \.dim-listHeading \{[^}]*margin: 0 0 6px;/);
-  assert.match(styles, /\.dim-panel \.dim-botList \{[^}]*gap: 8px;/);
-  assert.match(styles, /\.dim-panel \.dim-surfaceCard \{[^}]*border-radius: 14px;[^}]*box-shadow: 0 1px 2px/);
+  assert.match(styles, /\.dim-panel \.dim-listHeading \{[^}]*margin: 0 0 8px;/);
+  assert.match(styles, /\.dim-panel \.dim-botList \{[^}]*gap: 12px;/);
+  assert.match(styles, /\.dim-panel \.dim-surfaceCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: 16px;[^}]*background: none;/);
   assert.match(styles, /\.dim-panel \.dim-loadingView \{[^}]*padding: 38px;[^}]*text-align: center;/);
   assert.match(styles, /\.dim-panel \.dim-emptyView \{[^}]*grid-template-columns: minmax\(0, 1fr\) 180px;[^}]*gap: 30px;/);
   assert.match(styles, /\.dim-panel \.dim-qrLayout \{[^}]*grid-template-columns: 300px minmax\(0, 1fr\);[^}]*gap: 34px;[^}]*align-items: start;/);
-  assert.match(styles, /\.dim-panel \.dim-viewActions \.bxf-button,[^}]*min-height: 34px;[^}]*border-radius: 8px;[^}]*font-size: 13px;/);
+  assert.match(styles, /\.dim-panel \.dim-viewActions \.bxf-button,[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: 14px;[^}]*font-size: 12px;/);
   assert.match(styles, /\.dim-panel \.dim-inlineError \{[^}]*padding: 22px;[^}]*background:/);
   assert.match(styles, /\.dim-panel \.dim-confirm \{[^}]*padding: 18px 24px;[^}]*border-top: 1px solid/);
 });
@@ -1019,13 +1052,13 @@ test('all IM channel cards keep localized actions visible above full-width feedb
   assert.match(feishuStyles, /\.bxf-botActions \{[^}]*width: 100%;[^}]*flex-wrap: wrap;/);
   assert.match(weixinStyles, /\.dxw-accountFooter \.dxw-actions \{[^}]*flex-wrap: nowrap;/);
   assert.match(dingtalkStyles, /\.ddt-accountFooter \.ddt-actions \{[^}]*flex-wrap: nowrap;/);
-  assert.match(imStyles, /\.dim-panel \.dim-cardFooter \{[^}]*gap: 12px;[^}]*padding-top: 6px;[^}]*border-top: 1px solid/);
+  assert.match(imStyles, /\.dim-panel \.dim-cardFooter \{[^}]*gap: 12px;[^}]*padding: 12px 0 0;[^}]*border-top: 0\.5px solid/);
   assert.match(imStyles, /\.dim-panel \.dim-cardFooterLayout \{[^}]*width: 100%;[^}]*flex-direction: column;[^}]*align-items: stretch;/);
   assert.match(imStyles, /\.dim-panel \.dim-cardFooterLayout > \.dim-cardActions \{[^}]*align-self: stretch;/);
   assert.match(imStyles, /\.dim-panel \.dim-cardActions \{[^}]*width: 100%;[^}]*justify-content: flex-end;[^}]*flex-wrap: wrap;/);
   assert.match(imStyles, /\.dim-panel \.dim-cardFeedback \{[^}]*width: 100%;[^}]*overflow-wrap: anywhere;[^}]*white-space: normal;/);
-  assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction \{[^}]*min-height: 32px;[^}]*border-radius: 8px;[^}]*font-size: 13px;/);
-  assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction\[data-kind="danger"\] \{[^}]*#d54941/);
+  assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction \{[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: 14px;[^}]*font-size: 12px;/);
+  assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction\[data-kind="danger"\] \{[^}]*var\(--dim-danger\)/);
 
   const account = {
     botId: 'footer-layout-bot',
@@ -1073,14 +1106,20 @@ test('all IM channel cards keep localized actions visible above full-width feedb
 test('all channel bot cards use the DingTalk card treatment', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
 
-  assert.match(styles, /\.dim-panel \.dim-botCard \{[^}]*border-radius: 14px;[^}]*background: var\(--dsw-alias-bg-layer-1, #fff\);[^}]*box-shadow: 0 1px 2px/);
-  assert.match(styles, /\.dim-panel \.dim-botCardBody \{[^}]*padding: 12px 8px;/);
+  // One outline level per card: a 0.5px l4 hairline on the panel fill, exactly
+  // like the native plugin card. A fill or a shadow here would be a second
+  // chrome level and would break in light mode, where every layer token is white.
+  assert.match(styles, /\.dim-panel \.dim-botCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: 16px;[^}]*background: none;/);
+  assert.doesNotMatch(styles, /\.dim-panel \.dim-botCard \{[^}]*box-shadow:/);
+  assert.match(styles, /\.dim-panel \.dim-botCard:hover \{ border-color: var\(--dsw-alias-label-dimmed,/);
+  assert.match(styles, /\.dim-panel \.dim-botCardBody \{[^}]*padding: 0 16px;/);
+  assert.match(styles, /\.dim-collapsibleBodyInner > \* \+ \* \{ border-top: 0\.5px solid var\(--dsw-alias-border-l2,/);
   assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*align-items: flex-start;[^}]*gap: 6px;/);
-  assert.match(styles, /\.dim-panel \.dim-botAvatar \{[^}]*width: 38px;[^}]*height: 38px;[^}]*border-radius: 11px;/);
+  assert.match(styles, /\.dim-panel \.dim-botAvatar \{[^}]*width: 38px;[^}]*height: 38px;[^}]*border-radius: 12px;/);
   assert.match(styles, /\.dim-panel \.dim-botName h3 \{[^}]*font-size: 15px;/);
-  assert.match(styles, /\.dim-panel \.dim-botHealthGroup \{[^}]*display: grid;[^}]*justify-items: end;[^}]*gap: 5px;/);
+  assert.match(styles, /\.dim-panel \.dim-botHealthGroup \{[^}]*display: grid;[^}]*justify-items: end;[^}]*gap: 2px;/);
   assert.match(styles, /\.dim-panel \.dim-botCard \.dim-botHealth \{[^}]*background: transparent;[^}]*font-size: 12px;[^}]*font-weight: 400;/);
-  assert.match(styles, /\.dim-panel \.dim-lastChecked \{[^}]*display: inline-flex;[^}]*font-size: 11px;[^}]*white-space: nowrap;/);
+  assert.match(styles, /\.dim-panel \.dim-lastChecked \{[^}]*display: inline-flex;[^}]*font-size: 12px;[^}]*white-space: nowrap;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-botMetrics|\.dim-panel \.dim-botMetric/);
 });
 
@@ -1097,7 +1136,7 @@ test('bot card status stays in the top-right corner at every responsive breakpoi
 test('bot cards wrap full workspace paths without horizontal scrolling', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
 
-  assert.match(styles, /\.dim-panel \.dim-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\) max-content;[^}]*row-gap: 4px;[^}]*margin-top: 6px;[^}]*padding: 6px 10px;/);
+  assert.match(styles, /\.dim-panel \.dim-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\) max-content;[^}]*row-gap: 4px;[^}]*margin: 0;[^}]*padding: 16px 0;[^}]*border: 0;[^}]*background: none;/);
   assert.match(styles, /\.dim-panel \.dim-workspaceHeader \{[^}]*display: contents;/);
   assert.match(styles, /\.dim-panel \.dim-workspacePath \{[^}]*grid-column: 1 \/ -1;[^}]*grid-row: 2;[^}]*overflow: hidden;[^}]*overflow-wrap: anywhere;[^}]*white-space: normal;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-workspacePath \{[^}]*overflow-x: auto;/);
@@ -1107,14 +1146,15 @@ test('bot cards wrap full workspace paths without horizontal scrolling', async (
 test('bot cards keep Agent Preset guidance in a keyboard-accessible help tooltip', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
 
-  assert.match(styles, /\.dim-panel \.dim-preset \{[^}]*grid-template-columns: minmax\(0, 1fr\) max-content;[^}]*margin-top: 6px;[^}]*padding: 6px 10px;/);
-  assert.match(styles, /\.dim-panel \.dim-presetHeader \{[^}]*position: relative;[^}]*grid-column: 1 \/ -1;[^}]*display: flex;[^}]*justify-content: space-between;/);
-  assert.match(styles, /\.dim-panel \.dim-presetTitle \{[^}]*display: inline-flex;[^}]*gap: 5px;[^}]*white-space: nowrap;/);
+  // Native Setting-Cell: label left, selector pill right.
+  assert.match(styles, /\.dim-panel \.dim-preset \{[^}]*display: flex;[^}]*align-items: center;[^}]*gap: 8px;[^}]*padding: 16px 0;[^}]*border: 0;[^}]*background: none;/);
+  assert.match(styles, /\.dim-panel \.dim-presetHeader \{[^}]*position: relative;[^}]*flex: 1;[^}]*display: flex;[^}]*align-items: center;/);
+  assert.match(styles, /\.dim-panel \.dim-presetTitle \{[^}]*display: inline-flex;[^}]*gap: 8px;[^}]*white-space: nowrap;/);
   assert.match(styles, /\.dim-panel \.dim-presetHelpButton:focus-visible \{[^}]*box-shadow:/);
   assert.match(styles, /\.dim-panel \.dim-presetTooltip \{[^}]*position: absolute;[^}]*width: min\(320px, 100%\);[^}]*white-space: normal;[^}]*opacity: 0;[^}]*visibility: hidden;[^}]*pointer-events: none;/);
   assert.match(styles, /\.dim-panel \.dim-presetHelp:hover \.dim-presetTooltip, \.dim-panel \.dim-presetHelp:focus-within \.dim-presetTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.match(styles, /\.dim-panel \.dim-presetSelect \{[^}]*grid-column: 1 \/ -1;[^}]*grid-row: 2;/);
-  assert.match(styles, /\.dim-panel \.dim-presetError \{[^}]*grid-column: 1 \/ -1;[^}]*grid-row: 3;/);
+  assert.match(styles, /\.dim-panel \.dim-presetSelect \{[^}]*height: 36px;[^}]*border: none;[^}]*border-radius: 18px;[^}]*corner-shape: round;[^}]*background-color: var\(--dim-module-fill\);/);
+  assert.match(styles, /\.dim-panel \.dim-presetError \{[^}]*margin: 6px 0 0;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-presetHelp \{[^}]*grid-row: 3;/);
 });
 
