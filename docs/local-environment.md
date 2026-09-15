@@ -1,13 +1,16 @@
 # 本地运行环境 —— 重启、取 token、核对与重装
 
 > 用途：**换一台终端、重启机器、或者换一个不记得上下文的助手之后，照着它就能把这套环境恢复到可用状态。**
+> **占位符**：`%USERPROFILE%` 是 Windows 环境变量（可直接用）；`<repo>` 是本仓库的克隆路径；`<dsh>` 是宿主 DSH 源码路径（只读）。
+
+---
 > 全部路径、端口、哈希、界面取值均为 2026-09-15 在本机实测所得，命令可直接复制。
 > 相关：[ADR-0002 表现层样式契约](adr/0002-presentation-layer-style-contract.md)。
 
 ## 0. 先读这一句
 
 **不需要重装，而且以后也不需要。** 2026-09-15 起 3080 的安装形态已从「真实拷贝」改为**指向本仓库的符号链接**
-（`"@xmanrui/dsh-im": "link:D:/ProjectSomething/dsh-im"`），与 3081 一致：仓库改完 `npm run build`，两个实例都自动读到最新 `lib/`。
+（`"@xmanrui/dsh-im": "link:<repo>"`），与 3081 一致：仓库改完 `npm run build`，两个实例都自动读到最新 `lib/`。
 安装副本版本号随仓库走，现为 **`4.21.0`**。附录 B 的 `4.20.3-local.0` 版本改写**已停用**（理由见附录 B）。
 
 **重启的唯一作用是：让正在运行的进程重新加载当前宿主端产物。**
@@ -21,29 +24,29 @@
 
 | 项 | 值 |
 |---|---|
-| 仓库 | `D:\ProjectSomething\dsh-im` |
+| 仓库 | `<repo>` |
 | 分支 | `refine/ui-settings-hierarchy` |
 | 基点 | `0d36ae3`（实测等于 `origin/main`） |
 | 停机时 HEAD | **本文件所在的那个提交**（用 `git log -1 --format=%H -- docs/local-environment.md` 取，见 §4.3），基点之上 **83** 个提交 |
-| 证据目录（**不在版本控制内**） | `D:\ProjectSomething\dsh-im-ui-evidence` |
-| 宿主源码（**只读，禁止修改**） | `D:\ProjectSomething\deepseek-harness` |
-| dsh CLI | `C:\Users\speak\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh\lib\bin.js`，由 PATH 上的 `dsh` 调用 |
-| node | `E:\nodejs\node.exe` |
+| 证据目录（**不在版本控制内**） | `<repo>-ui-evidence` |
+| 宿主源码（**只读，禁止修改**） | `<dsh>` |
+| dsh CLI | `%USERPROFILE%\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh\lib\bin.js`，由 PATH 上的 `dsh` 调用 |
+| node | `node（PATH 上）` |
 
 ### 两个实例
 
 | | **3080（真实实例）** | **3081（隔离自检实例）** |
 |---|---|---|
-| DSH_HOME | `C:\Users\speak\.dsh`（默认，不设即为此值） | `C:\Users\speak\.dsh-imui` |
+| DSH_HOME | `%USERPROFILE%\.dsh`（默认，不设即为此值） | `%USERPROFILE%\.dsh-imui` |
 | profile | `web` | `imui` |
 | 端口 | 3080（默认） | 3081 |
 | 语言 | English | 中文 |
 | 真实机器人 | 只配了飞书 | 无 |
-| 插件安装形态 | **符号链接** → `D:\ProjectSomething\dsh-im`（2026-09-15 起） | **符号链接** → `D:\ProjectSomething\dsh-im` |
+| 插件安装形态 | **符号链接** → `<repo>`（2026-09-15 起） | **符号链接** → `<repo>` |
 | 改完仓库要不要重装 | **不要**（链接自动跟随仓库；只需 `npm run build`） | **不要**（链接自动跟随仓库） |
 
-- 3080 安装路径：`C:\Users\speak\.dsh\profiles\web\node_modules\@xmanrui\dsh-im`
-- 3081 安装路径：`C:\Users\speak\.dsh-imui\profiles\imui\node_modules\@xmanrui\dsh-im`
+- 3080 安装路径：`%USERPROFILE%\.dsh\profiles\web\node_modules\@xmanrui\dsh-im`
+- 3081 安装路径：`%USERPROFILE%\.dsh-imui\profiles\imui\node_modules\@xmanrui\dsh-im`
 
 因为 3081 是指向仓库的符号链接，**它读的就是仓库当前的 `lib/`**，版本号也永远等于仓库 `package.json` 的版本号。
 
@@ -68,7 +71,7 @@ dsh web
 ```
 
 预期：终端打印监听地址并**自动打开浏览器**；进程命令行形如
-`"E:\nodejs\node.exe" ...\@deepseek-ai\dsh\lib\bin.js web`。
+`"node（PATH 上）" ...\@deepseek-ai\dsh\lib\bin.js web`。
 
 ### 3081
 
@@ -77,21 +80,21 @@ dsh web
 ```powershell
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$env:DSH_HOME = "C:\Users\speak\.dsh-imui"
+$env:DSH_HOME = "%USERPROFILE%\.dsh-imui"
 $env:DSH_WEB_URL = ""
 Remove-Item Env:\DSH_SESSION_ID -ErrorAction SilentlyContinue
 dsh --profile imui --port 3081 --no-open 2>&1
 ```
 
 **这个作业会随本次重启一起结束，不需要在停机前主动去停它。**
-重启后按上面这段重新拉起即可（工作目录无关紧要，端口 **3081**，profile **imui**，DSH_HOME **`C:\Users\speak\.dsh-imui`**）。
+重启后按上面这段重新拉起即可（工作目录无关紧要，端口 **3081**，profile **imui**，DSH_HOME **`%USERPROFILE%\.dsh-imui`**）。
 最后一行可以简写成 `dsh --profile imui --port 3081`；**去掉 `--no-open` 就会自动开浏览器，token 直接从地址栏拿**。
 
 预期：终端打印监听地址、不自动开浏览器（若保留 `--no-open`）；进程命令行含 `--profile imui --port 3081 --no-open`。
 
 ## 3. 取当前有效的 token 并自测
 
-**token 由服务在启动时打印，不落盘**（在 `C:\Users\speak\.dsh` 下全目录搜索当前 token，唯一命中是会话缓存文件里的偶然出现，不可用作来源）。
+**token 由服务在启动时打印，不落盘**（在 `%USERPROFILE%\.dsh` 下全目录搜索当前 token，唯一命中是会话缓存文件里的偶然出现，不可用作来源）。
 每次重启都从**启动终端输出**或**浏览器地址栏**取。
 
 ### 自测
@@ -115,7 +118,7 @@ catch { [int]$_.Exception.Response.StatusCode }
 已安装副本（3080）必须读出 `4.20.3-local.0`：
 
 ```powershell
-(Get-Content "C:\Users\speak\.dsh\profiles\web\node_modules\@xmanrui\dsh-im\package.json" -Raw |
+(Get-Content "%USERPROFILE%\.dsh\profiles\web\node_modules\@xmanrui\dsh-im\package.json" -Raw |
   ConvertFrom-Json).version
 ```
 
@@ -128,8 +131,8 @@ catch { [int]$_.Exception.Response.StatusCode }
 ### 4.2 构建产物哈希：确认安装副本 == 仓库 HEAD
 
 ```powershell
-$repo = "D:\ProjectSomething\dsh-im\lib"
-$inst = "C:\Users\speak\.dsh\profiles\web\node_modules\@xmanrui\dsh-im\lib"
+$repo = "<repo>\lib"
+$inst = "%USERPROFILE%\.dsh\profiles\web\node_modules\@xmanrui\dsh-im\lib"
 foreach ($f in @("client.js","index.js")) {
   $a = (Get-FileHash "$repo\$f" -Algorithm SHA256).Hash
   $b = (Get-FileHash "$inst\$f" -Algorithm SHA256).Hash
@@ -150,7 +153,7 @@ foreach ($f in @("client.js","index.js")) {
 ### 4.3 仓库状态
 
 ```powershell
-cd D:\ProjectSomething\dsh-im
+cd <repo>
 git rev-parse HEAD                  # 期望 = 本文件所在的提交（见下方说明）
 git rev-list --count 0d36ae3..HEAD  # 期望 83
 git log -1 --format=%H -- docs/local-environment.md   # 停机时的 HEAD
@@ -193,7 +196,7 @@ getComputedStyle(document.documentElement).getPropertyValue("--dim-gap-3").trim(
 ## 5. 恢复后的测试口径
 
 ```powershell
-cd D:\ProjectSomething\dsh-im
+cd <repo>
 npm test
 ```
 
@@ -207,7 +210,7 @@ npm test
 改样式后另跑 UI 门禁（期望 **174 项全绿**）：
 
 ```powershell
-cd D:\ProjectSomething\dsh-im
+cd <repo>
 node --test test/client-native-border-contract.test.mjs test/client-role-form-contract.test.mjs `
   test/client-toolbar-role-contract.test.mjs test/client-ui.test.mjs `
   test/context-enhancement-ui.test.mjs test/client-delivery-settings.test.mjs `
@@ -218,7 +221,7 @@ node --test test/client-native-border-contract.test.mjs test/client-role-form-co
 
 **权威来源**（按优先级，不依赖任何助手的记忆）：
 
-1. `D:\ProjectSomething\dsh-im-ui-evidence\handoff\00-STYLE-MEMO.md` —— 恢复工作口径的第一入口；
+1. `<repo>-ui-evidence\handoff\00-STYLE-MEMO.md` —— 恢复工作口径的第一入口；
    数字与行号一律锚定提交号，旧结论参照系不同时会标注适用范围。
 2. `docs/adr/0002-presentation-layer-style-contract.md` —— 表现层的四条层叠机制、验收口径、已收敛轴与四项裁决。
 
@@ -241,18 +244,18 @@ node --test test/client-native-border-contract.test.mjs test/client-role-form-co
 > 于是报「找不到 dsh」。绕过办法是直接执行它内部那条同样的命令：
 >
 > ```powershell
-> & 'C:\Users\speak\AppData\Roaming\npm\dsh.cmd' plugin --profile web add --save-exact 'D:\ProjectSomething\dsh-im'
+> & '%USERPROFILE%\AppData\Roaming\npm\dsh.cmd' plugin --profile web add --save-exact '<repo>'
 > ```
 >
-> ⚠️ **它会改写 profile 的依赖写法**：从 registry 范围 `^4.20.2` 变成 `link:D:/ProjectSomething/dsh-im`，
+> ⚠️ **它会改写 profile 的依赖写法**：从 registry 范围 `^4.20.2` 变成 `link:<repo>`，
 > 并把安装形态从拷贝换成符号链接。这正是 2026-09-15 发生的事，此后不再需要重装。
-> 执行前先备份 `C:\Users\speak\.dsh\profiles\web\package.json`。
+> 执行前先备份 `%USERPROFILE%\.dsh\profiles\web\package.json`。
 
 3080 的已安装副本是**真实拷贝**而不是链接，所以仓库改了它不会自动跟随。
 只有当 §4.2 的哈希核对**不相等**、而且你确实想把磁盘上的安装刷成 HEAD 时才需要重装。
 
 ```powershell
-cd D:\ProjectSomething\dsh-im
+cd <repo>
 git rev-parse HEAD                       # 先记下要装的 sha
 npm run build                            # 必须先构建：install 拷的是工作树当前内容
 node bin\dsh-im.mjs install --source .
@@ -261,17 +264,17 @@ node bin\dsh-im.mjs install --source .
 **两个已知副作用**（读 `bin/dsh-im.mjs` 得到，不是推测）：
 
 1. 它执行的是 `dsh plugin --profile web add --save-exact <仓库绝对路径>`，会**改写**
-   `C:\Users\speak\.dsh\profiles\web\package.json` **里的依赖写法** —— 从现在的 registry 版本范围
+   `%USERPROFILE%\.dsh\profiles\web\package.json` **里的依赖写法** —— 从现在的 registry 版本范围
    `"@xmanrui/dsh-im": "^4.20.2"` 变成仓库绝对路径。
 2. 因为是拷贝，重装后安装副本的版本号会**回到仓库的 `4.20.2`**，附录 B 的改写要重做一遍。
 
 只想同步产物、不动 profile 与版本号，用这个更小的做法即可：
 
 ```powershell
-cd D:\ProjectSomething\dsh-im
+cd <repo>
 npm run build
-Copy-Item lib\client.js "C:\Users\speak\.dsh\profiles\web\node_modules\@xmanrui\dsh-im\lib\client.js" -Force
-Copy-Item lib\index.js  "C:\Users\speak\.dsh\profiles\web\node_modules\@xmanrui\dsh-im\lib\index.js"  -Force
+Copy-Item lib\client.js "%USERPROFILE%\.dsh\profiles\web\node_modules\@xmanrui\dsh-im\lib\client.js" -Force
+Copy-Item lib\index.js  "%USERPROFILE%\.dsh\profiles\web\node_modules\@xmanrui\dsh-im\lib\index.js"  -Force
 ```
 
 （3081 是符号链接，上面两种做法都不需要 —— 它永远读仓库。）
@@ -296,7 +299,7 @@ Copy-Item lib\index.js  "C:\Users\speak\.dsh\profiles\web\node_modules\@xmanrui\
 **将来若要重做**（例如附录 A 的重装之后）：
 
 ```powershell
-$pj = "C:\Users\speak\.dsh\profiles\web\node_modules\@xmanrui\dsh-im\package.json"
+$pj = "%USERPROFILE%\.dsh\profiles\web\node_modules\@xmanrui\dsh-im\package.json"
 $lines = Get-Content $pj
 $lines = $lines -replace '^(\s*)"version":.*$', '$1"version": "4.20.3-local.0",'
 Set-Content -Path $pj -Value $lines -Encoding UTF8
@@ -304,3 +307,5 @@ Select-String -Path $pj -Pattern '"version"'      # 核对
 ```
 
 改完刷新浏览器再看更新面板即可。
+
+
