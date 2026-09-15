@@ -25,11 +25,11 @@ const CSS = `
 .dof-field[data-wide="true"] { grid-column: 1 / -1; }
 .dof-field input, .dof-field textarea { box-sizing: border-box; width: 100%; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: var(--dim-radius-8); background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, #0f1115); font: inherit; font-size: var(--dim-font-14); font-weight: var(--dim-weight-400); line-height: var(--dim-line-14); outline: none; }
 .dof-field input { height: 32px; padding: 0 10px; }
-.dof-field textarea { min-height: 86px; resize: vertical; padding: 8px 12px; font-family: var(--dim-font-mono, monospace); }
+.dof-field textarea { min-height: 86px; resize: vertical; padding: 8px 12px; font-family: var(--dim-font-mono); }
 .dof-field input:focus, .dof-field textarea:focus { outline: none; border-color: var(--dsw-alias-brand-primary, #0f1115); box-shadow: none; }
 .dof-field small { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); font-weight: var(--dim-weight-400); line-height: var(--dim-line-12); }
 .dof-hooks { display: grid; gap: var(--dim-gap-7); }
-.dof-hook { min-width: 0; display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: var(--dim-gap-10); align-items: center; padding: 8px 10px; border-radius: var(--dim-radius-12); background: var(--dsw-alias-bg-module-platform, #f5f6f7); }
+.dof-hook { min-width: 0; display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: var(--dim-gap-10); align-items: center; padding: 8px 10px; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
 .dof-hook strong { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); font-weight: var(--dim-weight-500); }
 .dof-hook code { overflow: hidden; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-11); text-overflow: ellipsis; white-space: nowrap; }
 /* The hook preview's empty state had no rule at all - the class was mounted and
@@ -45,7 +45,7 @@ const CSS = `
 .dof-error { color: var(--dim-danger); background: color-mix(in srgb, var(--dim-danger) 8%, var(--dsw-alias-bg-layer-1, #fff)); }
 .dof-notice { color: var(--dsw-alias-label-secondary, #646a73); background: var(--dim-hover); }
 .dof-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--dim-gap-8); margin-top: 12px; }
-.dof-metric { min-width: 0; padding: 9px 10px; border-radius: var(--dim-radius-12); background: var(--dsw-alias-bg-module-platform, #f5f6f7); }
+.dof-metric { min-width: 0; padding: 9px 10px; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
 .dof-metric span { display: block; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); }
 .dof-metric strong { display: block; overflow: hidden; margin-top: 4px; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-12); text-overflow: ellipsis; white-space: nowrap; }
 @container (max-width: 680px) { .dof-grid { grid-template-columns: minmax(0, 1fr); } .dof-field[data-wide="true"] { grid-column: auto; } .dof-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
