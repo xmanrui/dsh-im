@@ -29,7 +29,7 @@ const CSS = String.raw`
 .dxw-dot[data-tone="success"] { background: var(--dxw-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dxw-success) 14%, transparent); }
 .dxw-dot[data-tone="warning"] { background: var(--dxw-warning); }
 .dxw-dot[data-tone="error"] { background: var(--dxw-error); }
-.dxw-button { height: 28px; border: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-14); padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: var(--dim-gap-4); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); font-weight: var(--dim-weight-400); cursor: pointer; text-decoration: none; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.dxw-button { height: 28px; border: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-14); padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: var(--dim-gap-4); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-400); cursor: pointer; text-decoration: none; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
 .dxw-button:hover:not(:disabled) { background: var(--dim-hover-solid); }
 .dxw-button:active:not(:disabled) { transform: translateY(1px); }
 .dxw-button:focus-visible, .dxw-input:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }

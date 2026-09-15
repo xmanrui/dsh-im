@@ -116,6 +116,11 @@ function ContextEnhancementScopeEditor({
   h('label', { className: 'dim-contextSwitchRow' },
     h('span', { className: 'dim-contextSwitchLabel' },
       h('span', null, copy.enable),
+      /* P2: name the scope on the row itself. The tab strip above already shows which panel is
+         open, but the switch is what actually writes the value, so it states its own scope
+         rather than relying on the reader to connect the two. copy.title is the same localised
+         scope name the tab uses, so no new strings are introduced. */
+      h('span', { className: 'dim-contextSwitchScope' }, copy.title),
       !supported ? h('span', {
         id: unavailableId, className: 'dim-contextUnavailable',
       }, '（当前渠道不支持群聊）') : null),

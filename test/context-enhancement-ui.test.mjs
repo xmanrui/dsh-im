@@ -184,7 +184,14 @@ test('context settings default to off with sender ID and empty guidance, and exp
   assert.deepEqual(panels(renderer.root).map((node) => node.props.hidden), [true, false]);
   await act(async () => { tabs(renderer.root)[1].props.onKeyDown({ key: 'Home', preventDefault() {} }); });
   assert.deepEqual(tabs(renderer.root).map((node) => node.props['aria-selected']), [true, false]);
-  assert.deepEqual(renderer.root.findAllByProps({ className: 'dim-contextSwitchRow' }).map(textOf), ['启用', '启用']);
+  // Each switch names its own scope, so the row states what it writes rather than relying on
+  // the reader to connect it to the highlighted tab above.
+  assert.deepEqual(renderer.root.findAllByProps({ className: 'dim-contextSwitchRow' }).map(textOf), ['启用私聊', '启用群聊']);
+  assert.deepEqual(
+    renderer.root.findAllByProps({ className: 'dim-contextSwitchScope' }).map(textOf),
+    ['私聊', '群聊'],
+    'the scope tag carries the same localised name as the tab',
+  );
   assert.deepEqual(renderer.root.findAllByType('label').filter((node) => (
     typeof node.props.htmlFor === 'string' && node.props.htmlFor.endsWith('-guidance')
   )).map(textOf), ['增强提示词', '增强提示词']);
