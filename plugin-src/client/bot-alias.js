@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { CloseGlyph } from './ui-glyphs.js';
 import { createPortal } from 'react-dom';
 import { MAX_BOT_ALIAS_LENGTH, validateBotAlias } from '../../src/channels/shared/bot-alias.mjs';
 import { h } from './i18n.js';
@@ -46,7 +47,7 @@ function AliasDialog({ bot, onSave, onClose }) {
   h('div', { className: 'dim-aliasHeader' },
     h('h3', { id: `${id}-title` }, '修改别名'),
     h('button', { type: 'button', className: 'dim-aliasClose', disabled: saving,
-      'aria-label': '关闭修改别名', onClick: close }, '×')),
+      'aria-label': '关闭修改别名', onClick: close }, h(CloseGlyph, { size: 14 }))),
   h('div', { className: 'dim-aliasOriginal' }, h('span', null, '原名称'),
     h('span', null, bot.originalName ?? bot.name)),
   h('label', { htmlFor: `${id}-input` }, '别名'),

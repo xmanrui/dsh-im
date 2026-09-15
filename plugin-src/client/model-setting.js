@@ -9,7 +9,7 @@ import {
   normalizeModelSelection,
   sameModelSelection,
 } from '../../src/channels/shared/model-setting.mjs';
-import { h, localizeText } from './i18n.js';
+import { h, localizeText, NEW_SESSION_ONLY_NOTE } from './i18n.js';
 
 export const SET_MODEL_ENDPOINT = 'bot.model.set';
 export { EMPTY_MODEL_CATALOG, normalizeModelCatalog, normalizeModelSelection };
@@ -139,16 +139,11 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
     },
   },
   h('div', { className: 'dim-presetHeader' },
-    h('span', { className: 'dim-presetTitle' }, '模型与思考强度',
-      h('span', { className: 'dim-presetHelp' },
-        h('button', { type: 'button', className: 'dim-presetHelpButton',
-          'aria-label': '查看模型设置说明', 'aria-describedby': `${id}-help` },
-        h('span', { 'aria-hidden': true }, '?')),
-        h('span', { id: `${id}-help`, className: 'dim-presetTooltip', role: 'tooltip' },
-          '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。'))),
+    h('span', { className: 'dim-presetTitle' }, '模型与思考强度'),
     saving ? h('span', { className: 'dim-presetStatus', role: 'status' }, '保存中…') : null),
   row('model', '模型', entry?.name ?? (current ? modelSelectionId(current) : localizeText('跟随默认模型'))),
   row('effort', '思考强度', effortLabel, effortDisabled),
+  h('p', { className: 'dim-helpHint' }, NEW_SESSION_ONLY_NOTE),
   pane ? h('div', { ref: menuRef, id: `${id}-menu`, role: 'menu',
     'aria-label': pane === 'model' ? '模型' : '思考强度', 'aria-busy': saving,
     className: 'dim-modelMenu' },

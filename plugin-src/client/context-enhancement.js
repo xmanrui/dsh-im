@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { QuestionGlyph } from './ui-glyphs.js';
 import { createPortal } from 'react-dom';
 
 import {
@@ -131,7 +132,7 @@ function ContextEnhancementScopeEditor({
         h('button', {
           type: 'button', className: 'dim-contextHelpButton', disabled,
           'aria-label': copy.fieldsHelpLabel, 'aria-describedby': fieldsHelpId,
-        }, h('span', { 'aria-hidden': 'true' }, '?')),
+        }, h(QuestionGlyph, { size: 14 })),
         h('span', { id: fieldsHelpId, className: 'dim-contextTooltip dim-contextLegendTooltip', role: 'tooltip' },
           '增强提示词中请使用字段名（如 senderId、conversationType）引用这些信息。只发送当前会话中勾选且可用的字段，不会额外查询或补全。'))),
     h('div', { className: 'dim-contextFields' }, CONTEXT_ENHANCEMENT_FIELDS.map((field) => {
@@ -150,7 +151,7 @@ function ContextEnhancementScopeEditor({
               type: 'button', className: 'dim-contextHelpButton dim-contextFieldHelpButton', disabled,
               'aria-label': copy[FIELD_HELP[field].labelKey],
               'aria-describedby': `${idPrefix}-${kind}-${field}-help`,
-            }, h('span', { 'aria-hidden': 'true' }, '?')),
+            }, h(QuestionGlyph, { size: 14 })),
             h('span', {
               id: `${idPrefix}-${kind}-${field}-help`,
               className: 'dim-contextTooltip dim-contextFieldTooltip',
@@ -166,7 +167,7 @@ function ContextEnhancementScopeEditor({
           h('button', {
             type: 'button', className: 'dim-contextHelpButton', disabled,
             'aria-label': copy.guidanceHelpLabel, 'aria-describedby': guidanceHelpId,
-          }, h('span', { 'aria-hidden': 'true' }, '?')),
+          }, h(QuestionGlyph, { size: 14 })),
           h('span', { id: guidanceHelpId, className: 'dim-contextTooltip dim-contextGuidanceTooltip', role: 'tooltip' },
             h('strong', null, '使用说明'),
             h('span', null, copy.guidanceUsage),
@@ -327,7 +328,7 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
         h('button', {
           type: 'button', className: 'dim-contextHelpButton', disabled: busy,
           'aria-label': '查看上下文增强说明', 'aria-describedby': descriptionId,
-        }, h('span', { 'aria-hidden': 'true' }, '?')),
+        }, h(QuestionGlyph, { size: 14 })),
         h('span', { id: descriptionId, className: 'dim-contextTooltip dim-contextHeaderTooltip', role: 'tooltip' },
           '选择在哪些会话中启用、提供哪些来源字段，以及如何使用这些信息。仅使用已有消息元数据，不查询平台 API。'))),
     h('button', {

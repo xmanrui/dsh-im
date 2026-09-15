@@ -933,7 +933,7 @@ test('all channel settings states use the DingTalk page treatment', async () => 
   assert.match(styles, /\.dim-panel \.dim-qrLayout \{[^}]*grid-template-columns: 300px minmax\(0, 1fr\);[^}]*gap: 34px;[^}]*align-items: start;/);
   assert.match(styles, /\.dim-panel \.dim-viewActions \.bxf-button,[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: 14px;[^}]*font-size: 12px;/);
   assert.match(styles, /\.dim-panel \.dim-inlineError \{[^}]*padding: 22px;[^}]*background:/);
-  assert.match(styles, /\.dim-panel \.dim-confirm \{[^}]*padding: 18px 24px;[^}]*border-top: 1px solid/);
+  assert.match(styles, /\.dim-panel \.dim-confirm \{[^}]*padding: 18px 24px;[^}]*border-top: 0\.5px solid/);
 });
 
 test('bot cards reuse the same channel brand logos as the channel rail', () => {

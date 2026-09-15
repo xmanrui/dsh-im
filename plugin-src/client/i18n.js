@@ -1008,6 +1008,14 @@ export const zh = Object.freeze(Object.fromEntries(
 
 let translate = (key) => key;
 
+/**
+ * The model and preset choices only take effect on sessions created after
+ * they are saved. Both surfaces used to repeat this sentence verbatim from
+ * two separate tooltips; it now has one source.
+ */
+export const NEW_SESSION_ONLY_NOTE =
+  '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。';
+
 export function setImTranslator(next) {
   translate = typeof next === 'function' ? next : (key) => key;
 }

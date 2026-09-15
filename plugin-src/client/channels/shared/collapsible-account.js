@@ -18,6 +18,7 @@
  */
 import * as React from 'react';
 import { h } from '../../i18n.js';
+import { ChevronRightGlyph } from '../../ui-glyphs.js';
 
 /**
  * Collapsible account card.
@@ -67,7 +68,8 @@ export function CollapsibleAccountSection({
       'aria-label': open ? '收起该账号的设置' : '展开该账号的设置',
     },
       h('div', { className: 'dim-collapsibleHeaderContent' }, header),
-      h('span', { className: 'dim-collapsibleChevron', 'aria-hidden': 'true' }),
+      h('span', { className: 'dim-collapsibleChevron', 'aria-hidden': 'true' },
+        h(ChevronRightGlyph, { size: 14 })),
     ),
     h('div', {
       id: contentId,

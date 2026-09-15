@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { h } from './i18n.js';
+import { h, NEW_SESSION_ONLY_NOTE } from './i18n.js';
 
 export const SET_AGENT_PRESET_ENDPOINT = 'bot.preset.set';
 
@@ -80,19 +80,7 @@ export function AgentPresetEditor({ agentPreset = '', disabled = false, onSave }
   return h('div', { className: 'dim-preset' },
     h('div', { className: 'dim-presetHeader' },
       h('span', { className: 'dim-presetTitle' },
-        h('span', null, 'Agent Preset'),
-        h('span', { className: 'dim-presetHelp' },
-          h('button', {
-            type: 'button',
-            className: 'dim-presetHelpButton',
-            'aria-label': '查看 Agent Preset 说明',
-            'aria-describedby': helpId,
-          }, h('span', { 'aria-hidden': 'true' }, '?')),
-          h('span', {
-            id: helpId,
-            className: 'dim-presetTooltip',
-            role: 'tooltip',
-          }, '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。'))),
+        h('span', null, 'Agent Preset')),
       saving ? h('span', { className: 'dim-presetStatus' }, '保存中…') : null),
     React.createElement('select', {
       className: 'dim-presetSelect',
@@ -110,6 +98,7 @@ export function AgentPresetEditor({ agentPreset = '', disabled = false, onSave }
           : item.label && item.label !== item.id ? `${item.label}（${item.id}）` : item.id,
       )),
     ),
+    h('p', { className: 'dim-helpHint' }, NEW_SESSION_ONLY_NOTE),
     error || currentUnavailable ? h(
       'p',
       { className: 'dim-presetError', role: error ? 'alert' : 'status' },

@@ -116,7 +116,8 @@ test('ModelEditor lists provider groups, explains new-session semantics and clea
     }),
   });
   assert.match(textOf(renderer.root), /removed\/old-model/u);
-  assert.match(textOf(renderer.root.findByProps({ role: 'tooltip' })), /先发送 \/new/u);
+  // The new-session sentence is an inline hint now, not a hover tooltip.
+  assert.match(textOf(renderer.root.findByProps({ className: 'dim-helpHint' })), /先发送 \/new/u);
   assert.match(textOf(renderer.root.findByProps({ role: 'status' })), /当前模型已不可用/u);
   await openMenu(renderer.root, '模型');
   assert.equal(renderer.root.findByProps({ role: 'group' }).props['aria-label'], 'OpenAI');

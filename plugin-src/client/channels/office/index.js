@@ -96,9 +96,12 @@ export function OfficeSettingsTab({ rpcCall, initialStatus }) {
   const hooksUnavailable = Object.keys(hooks).length === 0;
   const health = model.health ?? {};
 
-  if (phase === 'loading') return h('div', { className: 'ddt-card ddt-loading', 'aria-busy': 'true' }, '正在读取 AI Office Connector…');
+  if (phase === 'loading') return h('div', { className: 'ddt-card ddt-loading dim-surfaceCard dim-loadingView', 'aria-busy': 'true' }, '正在读取 AI Office Connector…');
 
-  return h('section', { className: 'dof-page', 'aria-label': 'AI Office 设置' },
+  // The convergence layer reaches a channel through these two classes; without
+  // them the whole page kept its local skin (h34/r8/13px buttons) instead of the
+  // native ladder every other channel is snapped to.
+  return h('section', { className: 'dof-page dim-channelPage', 'aria-label': 'AI Office 设置' },
     h('div', { className: 'dof-hero' },
       h('div', { className: 'dof-heroCopy' },
         h('h3', null, 'AI Office Connector'),
@@ -134,7 +137,7 @@ export function OfficeSettingsTab({ rpcCall, initialStatus }) {
       error ? h('p', { className: 'dof-error', role: 'alert' }, error) : null,
       notice ? h('p', { className: 'dof-notice', role: 'status' }, notice) : null,
       health.error?.message ? h('p', { className: 'dof-error' }, health.error.message) : null,
-      h('div', { className: 'dof-actions' },
+      h('div', { className: 'dof-actions dim-viewActions' },
         h(Button, { kind: 'primary', disabled: Boolean(busy), onClick: () => void run('save', () => invoke(OFFICE_RPC_ENDPOINTS.configure, {
           baseUrl: form.baseUrl,
           deviceId: form.deviceId,
