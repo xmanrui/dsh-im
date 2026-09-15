@@ -5,8 +5,10 @@ import {
   normalizeAccessPolicy,
   validateAccessPolicy,
 } from '../../src/channels/shared/access-policy.mjs';
+import { HelpTip } from './help-tip.js';
 import { h, localizeText } from './i18n.js';
 import { RowSelect } from './row-selector.js';
+import { PlusGlyph } from './ui-glyphs.js';
 
 export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
 
@@ -159,16 +161,24 @@ function ScenePolicyEditor({
     'data-scene': scene,
   },
   h('div', { id: legendId, className: 'dim-accessLegend' },
-    h('span', { className: 'dim-accessLegendContent' },
-      h('span', null, title)),
-    h('p', { className: 'dim-helpHint' }, '原所有者或扫码接入者始终可以访问并执行命令；以下设置仅约束其他用户。')),
+    h('div', { className: 'dim-helpRow' },
+      h('span', { className: 'dim-accessLegendContent' },
+        h('span', null, title)),
+      h(HelpTip, {
+        id: ownerHelpId,
+        label: [localizeText(title), localizeText('查看访问权限说明')].join(' '),
+        disabled,
+      }, '原所有者或扫码接入者始终可以访问并执行命令；以下设置仅约束其他用户。'))),
   unsupported
     ? h('div', { className: 'dim-accessUnsupported', role: 'note' },
         h('strong', null, '当前渠道不支持群聊'),
         h('p', null, '此区域无需配置，保存私聊设置时会保留现有群聊策略。'))
     : h(React.Fragment, null,
         h('div', { className: 'dim-accessControls', 'data-mode': policy.mode },
-          h('label', { className: 'dim-accessField dim-modelRow' },
+          /* Both policy rows are divs, not labels: a label wrapping the row makes a click
+             on the row's own name open the menu, which is not how any other row behaves.
+             The selector names itself through its own aria-label. */
+          h('div', { className: 'dim-accessField dim-modelRow' },
             h('span', { className: 'dim-rowText' },
               h('span', { className: 'dim-modelRowLabel' }, '访问模式')),
             h(RowSelect, {
@@ -181,7 +191,7 @@ function ScenePolicyEditor({
                 { value: 'allowlist', label: '仅白名单用户' },
               ],
             })),
-          allowlist ? null : h('label', { className: 'dim-accessField dim-modelRow' },
+          allowlist ? null : h('div', { className: 'dim-accessField dim-modelRow' },
               h('span', { className: 'dim-rowText' },
                 h('span', { className: 'dim-modelRowLabel' }, '默认命令权限')),
               h(RowSelect, {
@@ -205,7 +215,7 @@ function ScenePolicyEditor({
             h('div', { className: 'dim-accessUsersTitle' },
               h('strong', null, allowlist ? '白名单用户' : '命令权限例外'),
               emptyAllowlist
-                ? h('p', { className: 'dim-helpHint' }, '当前没有白名单用户，保存后普通用户将无法使用机器人。')
+                ? h('p', { className: 'dim-accessEmptyWarning' }, '当前没有白名单用户，保存后普通用户将无法使用机器人。')
                 : null),
             h('button', {
               type: 'button',
@@ -219,7 +229,7 @@ function ScenePolicyEditor({
                   ? false
                   : !policy.open.defaultCanExecuteCommands,
               }]),
-            }, h('span', { 'aria-hidden': true }, '+'))),
+            }, h(PlusGlyph, { size: 16 }))),
           users.length === 0
             ? h('div', { className: 'dim-accessUsersEmpty' }, '尚未添加用户')
             : h('ul', { className: 'dim-accessUserList' }, users.map((user, index) =>

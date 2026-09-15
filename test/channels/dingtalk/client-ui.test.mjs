@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const CLIENT_URL = new URL('../../../plugin-src/client/channels/dingtalk/index.js', import.meta.url);
 const STYLES_URL = new URL('../../../plugin-src/client/channels/dingtalk/styles.js', import.meta.url);
+const SHARED_STYLES_URL = new URL('../../../plugin-src/client/styles.js', import.meta.url);
 
 test('channel client exports a reusable settings component without a standalone settings registration', async () => {
   const source = await readFile(CLIENT_URL, 'utf8');
@@ -46,17 +47,31 @@ test('the client uses an isolated compact and accessible DingTalk style namespac
 });
 
 test('the QR card responds to its plugin panel width instead of the browser viewport', async () => {
-  const styles = await readFile(STYLES_URL, 'utf8');
+  const [styles, shared] = await Promise.all([
+    readFile(STYLES_URL, 'utf8'),
+    readFile(SHARED_STYLES_URL, 'utf8'),
+  ]);
   assert.match(styles, /container-type: inline-size/);
   assert.match(
     styles,
-    /@container \(max-width: 680px\)[\s\S]*\.ddt-qrLayout \{ grid-template-columns: minmax\(0, 1fr\); justify-items: center;/,
+    /@container \(max-width: 680px\)[\s\S]*\.ddt-tools \{ width: 100%; flex-wrap: nowrap; gap: var\(--dim-gap-6\); \}/,
   );
-  assert.match(styles, /\.ddt-qrFrame \{[^\n]*width: min\(270px, 100%\)/);
-  assert.match(styles, /\.ddt-countdown \{ width: min\(270px, 100%\)/);
-  assert.match(styles, /\.ddt-qrLayout \{[^\n]*align-items: start;/);
-  assert.match(styles, /\.ddt-qrColumn \{ width: 100%; min-width: 0; \}/);
-  assert.match(styles, /\.ddt-qrCopy \{ min-width: 0; overflow-wrap: anywhere; \}/);
+  // The QR card's own geometry is no longer stated here. Each of these rules was outranked
+  // at EVERY render point by the shared sheet's .dim-panel .dim-* rule for the same element
+  // (the element carries dim-qrLayout / dim-qrColumn / dim-qrFrame / dim-countdown /
+  // dim-qrCopy wherever it renders - dead-rule-audit, first bucket), so the two forms this
+  // sheet described - the 300px column and the under-680px collapse - never rendered.
+  // The shared sheet states the form once, for every channel.
+  assert.doesNotMatch(styles, /\.ddt-qrLayout/);
+  assert.doesNotMatch(styles, /\.ddt-qrColumn/);
+  assert.doesNotMatch(styles, /\.ddt-qrFrame \{/);
+  assert.doesNotMatch(styles, /\.ddt-countdown \{/);
+  assert.doesNotMatch(styles, /\.ddt-qrCopy \{/);
+  assert.match(shared, /\.dim-panel \.dim-qrFrame \{ position: relative; width: min\(270px, 100%\)/);
+  assert.match(shared, /\.dim-panel \.dim-countdown \{ width: min\(270px, 100%\)/);
+  assert.match(shared, /\.dim-panel \.dim-qrLayout \{ grid-template-columns: minmax\(0, 1fr\); justify-items: center; gap: var\(--dim-gap-24\); \}/);
+  assert.match(shared, /\.dim-panel \.dim-qrColumn \{ width: 100%; min-width: 0;/);
+  assert.match(shared, /\.dim-panel \.dim-qrCopy \{ width: 100%; min-width: 0; overflow-wrap: anywhere; \}/);
 });
 
 test('bot cards do not reserve a row for repeated channel metrics', async () => {

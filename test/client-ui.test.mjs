@@ -275,7 +275,9 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   assert.match(markup, />Discord</);
   assert.match(markup, />WhatsApp</);
   assert.match(markup, />iMessage</);
-  assert.match(markup, />AI Office<\/strong><small class="dim-channelNote">（实验功能）<\/small>/);
+  // The marker is an icon with a name, not a word in the label row.
+  assert.match(markup, />AI Office<\/strong><span class="dim-channelBadge" role="img" aria-label="实验功能"/);
+  assert.match(markup, /data-im-icon="flask"/);
   assert.match(markup, /dim-logoWeixin/);
   assert.match(markup, /dim-logoFeishu/);
   assert.match(markup, /dim-logoDingtalk/);
@@ -323,7 +325,7 @@ test('channel switching is a wrapped tab strip instead of a second navigation co
   assert.match(styles, /\.dim-channel:focus-visible \{ outline: 2px solid var\(--dsw-alias-brand-primary, #0f1115\); outline-offset: 2px; \}/);
   // The label takes the host's .navCell type: 14/22 at the inherited weight.
   assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: var\(--dim-font-14\);[^}]*line-height: var\(--dim-line-14\);[^}]*font-weight: var\(--dim-weight-400\);/);
-  assert.match(styles, /\.dim-channelNote \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-weight: var\(--dim-weight-400\);/);
+  assert.match(styles, /\.dim-channelBadge \{[^}]*align-self: center;[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);/);
 });
 
 test('the general settings gear sits to the right of GitHub and outside the channel rail', () => {
@@ -360,12 +362,18 @@ test('the general settings page uses an Attachments tab with contextual help and
   // No label wrapper: the input takes its accessible name from the heading.
   assert.doesNotMatch(markup, /<label/);
   assert.match(markup, /<input[^>]*aria-labelledby="dim-globalTtlTitle"/);
-  // The retention legend is inline hint text, so its trigger is gone.
-  assert.doesNotMatch(markup, /查看附件保留时长说明/);
-  // The value legend is a hint under the input now, not a hover layer.
-  assert.match(markup, /class="dim-globalTtlHints"/);
-  assert.doesNotMatch(markup, /dim-globalTtlTooltip/);
+  // The retention legend is help now: the heading carries the one "?" trigger and the
+  // value table lives inside the shared panel.
+  assert.match(markup, /aria-label="查看附件保留时长说明"/);
+  assert.match(markup, /class="dim-helpList"/);
+  assert.doesNotMatch(markup, /dim-globalTtlTooltip|dim-globalTtlHints/);
   assert.match(markup, /<code>1~8760<\/code>/);
+  // The field is described by the panel itself, so the reference is not dangling.
+  const ttlDescribedBy = markup.match(/<input[^>]*aria-describedby="([^"]+)"/)?.[1];
+  assert.ok(ttlDescribedBy, 'the TTL field points at its value legend');
+  const ttlPanelAt = markup.indexOf(`id="${ttlDescribedBy}"`);
+  assert.notEqual(ttlPanelAt, -1, 'the described-by id resolves to a rendered element');
+  assert.match(markup.slice(ttlPanelAt, ttlPanelAt + 80), /^id="[^"]+" role="tooltip" class="dim-helpPanel"/);
   assert.match(markup, /正在读取通用设置…/);
   // Field actions share one row; the heading stays dedicated to its label and help.
   const ttlFormMarkup = markup.match(/<form class="dim-globalTtlRow"[^]*?<\/form>/)?.[0] ?? '';
@@ -635,7 +643,10 @@ test('Feishu bot cards place the application identifier under the bot name', asy
 });
 
 test('Feishu keeps its heading controls on one row without a plus icon', async () => {
-  const styles = await readFile(FEISHU_STYLES_URL, 'utf8');
+  const [styles, shared] = await Promise.all([
+    readFile(FEISHU_STYLES_URL, 'utf8'),
+    readFile(STYLES_URL, 'utf8'),
+  ]);
   const markup = renderToStaticMarkup(React.createElement(FeishuSettingsTab, {
     rpcCall: async () => ({ ok: true, value: {} }),
   }));
@@ -644,7 +655,11 @@ test('Feishu keeps its heading controls on one row without a plus icon', async (
   assert.match(markup, /class="dim-actionIcon"[^]*<span>扫码接入机器人<\/span>/);
   assert.doesNotMatch(markup, />添加机器人</);
   assert.match(styles, /\.bxf-headingTools \{[^}]*justify-content: space-between;[^}]*flex-wrap: nowrap;/);
-  assert.match(styles, /@container \(max-width: 620px\)[^]*\.bxf-headingTools \{ gap: var\(--dim-gap-6\); \}/);
+  // The narrow-container gap is not this sheet's to state: .dim-panel .bxf-headingTools owns
+  // it at (0,2,0) against this sheet's (0,1,0), and it states it unconditionally, so the 6px
+  // copy never rendered (dead-rule-audit, first bucket). The row keeps one gap at every width.
+  assert.doesNotMatch(styles, /\.bxf-headingTools \{ gap: var\(--dim-gap-6\); \}/);
+  assert.match(shared, /\.dim-panel \.bxf-headingTools, \.dim-panel \.dxw-tools, \.dim-panel \.ddt-tools \{ gap: var\(--dim-gap-8\); \}/);
   assert.doesNotMatch(styles, /\.bxf-headingTools \.bxf-button \{ margin-left: auto; \}/);
 });
 
@@ -1208,15 +1223,19 @@ test('bot cards keep Agent Preset guidance in a keyboard-accessible help tooltip
   assert.match(styles, /\.dim-panel \.dim-presetHeader \{[^}]*position: relative;[^}]*display: flex;[^}]*align-items: center;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-presetHeader \{[^}]*flex: 1;/);
   assert.match(styles, /\.dim-panel \.dim-presetTitle \{[^}]*display: inline-flex;[^}]*gap: var\(--dim-gap-8\);[^}]*white-space: nowrap;/);
-  assert.match(styles, /\.dim-panel \.dim-presetHelpButton:focus-visible \{[^}]*box-shadow:/);
-  assert.match(styles, /\.dim-panel \.dim-presetTooltip \{[^}]*position: absolute;[^}]*width: min\(320px, 100%\);[^}]*white-space: normal;[^}]*opacity: 0;[^}]*visibility: hidden;[^}]*pointer-events: none;/);
-  assert.match(styles, /\.dim-panel \.dim-presetHelp:hover \.dim-presetTooltip, \.dim-panel \.dim-presetHelp:focus-within \.dim-presetTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
+  // The preset header's "?" is the one shared help role, so its skin is asserted where
+  // that role is declared rather than per site.
+  assert.match(styles, /\.dim-helpButton:focus-visible \{[^}]*box-shadow:/);
+  // Portaled to document.body and fixed, so the card it was rendered in can neither clip
+  // it nor paint over it. The open state is the component's, not a hover rule's.
+  assert.match(styles, /\.dim-helpPanel \{[^}]*position: fixed;[^}]*z-index: var\(--dim-z-menu\);[^}]*width: min\(330px,[^}]*white-space: normal;[^}]*opacity: 0;[^}]*visibility: hidden;[^}]*pointer-events: none;/);
+  assert.match(styles, /\.dim-helpPanel\[data-open="true"\] \{[^}]*opacity: 1;[^}]*visibility: visible;/);
   // The preset selector owns a whole row, so it is the module pill (36px, radius 18,
   // module fill) and declares no rule of its own - it is a .dim-rowControl button now.
   assert.ok(!styles.includes('.dim-panel .dim-presetSelect'), 'the row trigger declares nothing of its own');
   assert.match(styles, /\.dim-panel \.dim-rowControl \{[^}]*height: 36px;[^}]*border-radius: var\(--dim-radius-18\);[^}]*background-color: var\(--dim-module-fill\);/);
   assert.match(styles, /\.dim-panel \.dim-presetError \{[^}]*margin: 6px 0 0;/);
-  assert.doesNotMatch(styles, /\.dim-panel \.dim-presetHelp \{[^}]*grid-row: 3;/);
+  assert.doesNotMatch(styles, /\.dim-help \{[^}]*grid-row: 3;/);
 });
 
 test('the bundled DingTalk channel has no local sender approval workflow', async () => {
@@ -1398,7 +1417,7 @@ test('client registers one top-level bilingual IM settings section with a direct
     assert.match(markup, /General settings/);
     assert.match(markup, />WeChat<|>Feishu<|>DingTalk<|>WeCom</);
     assert.match(markup, />QQ<[^]*>Slack<[^]*>Telegram<[^]*>Discord<[^]*>WhatsApp</);
-    assert.match(markup, />AI Office<\/strong><small class="dim-channelNote">\(Experimental\)<\/small>/);
+    assert.match(markup, />AI Office<\/strong><span class="dim-channelBadge" role="img" aria-label="Experimental"/);
     assert.doesNotMatch(markup, /[\p{Script=Han}]/u);
   } finally {
     setImTranslator(null);

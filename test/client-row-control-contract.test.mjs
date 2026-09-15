@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 
 const sheet = await readFile(new URL('../plugin-src/client/styles.js', import.meta.url), 'utf8');
@@ -41,13 +41,16 @@ test('the row label and hint take the shared row roles', () => {
   assert.ok(label.includes('line-height: var(--dim-line-14)'), '22px');
   assert.ok(label.includes('font-weight: var(--dim-weight-400)'), 'regular, not a heading weight');
 
-  // A field-skin select inside a row was the drift: the control now takes its
-  // shape from the one row-control declaration.
-  // The row trigger owns no rule at all now: it is a .dim-rowControl button, so its
-  // whole shape comes from the one declaration above. The field selects that used to
-  // share this class name have their own.
+  // A field-skin select inside a row was the drift: the control takes its shape from
+  // the one row-control declaration above, and the last two holdouts - the Feishu
+  // Group tab's settings - migrated with it. Nothing declares the row trigger, and no
+  // field-skin select is left outside a real form field.
   assert.ok(!sheet.includes('.dim-feishuGroupSelect'), 'the row trigger declares nothing of its own');
-  assert.ok(sheet.includes('.dim-panel .dim-fieldSelect {'), 'the field selects have one shared skin');
+  // Read as a selector, not as text: the sheet's own comments name the class they
+  // retired, and a prose mention must not read as a live rule.
+  assert.ok(!/\.dim-fieldSelect\s*[,{]/.test(sheet), 'the row-level field skin is gone, not merely unused');
+  const fieldSkin = sheet.match(/\.dim-panel \.dim-targetField select,[^}]*\}/);
+  assert.ok(fieldSkin?.[0].includes('max-width: 240px'), 'real form fields keep the one official .input skin');
   const control = sheet.match(/\.dim-panel \.dim-rowControl \{[^}]*\}/);
   assert.ok(control, 'the shared row control is declared');
   for (const required of ['height: 36px', 'border-radius: var(--dim-radius-18)', 'background-color: var(--dim-module-fill)']) {
@@ -59,8 +62,8 @@ test('an inline editor repeats neither the title nor a close button', async () =
   const panel = await source('../plugin-src/client/context-enhancement.js');
   assert.ok(!/dim-contextClose/.test(panel), 'the trigger is the only way out');
   assert.ok(!/className: 'dim-contextHeader'/.test(panel), 'no second heading for the same section');
-  // The copy the dialog carried is not deleted, only demoted to the hint role.
-  assert.match(panel, /dim-helpHint dim-contextIntro/);
+  // The copy the dialog carried is not deleted, only moved into the shared help panel.
+  assert.match(panel, /h\(HelpTip,/);
   assert.ok(panel.includes('选择在哪些会话中启用、提供哪些来源字段'),
     'the description survives the header removal');
   // Collapsing must discard the draft exactly as the close button did, so the
@@ -131,16 +134,44 @@ test('the 11px tier is two host roles, not one', () => {
   // metadata roles - and its hint role is 12/18 (.advancedHint, .hint). Treating the
   // tier as one thing is why it had been kept whole; ADR-0002's note was right in
   // direction and too broad in scope.
-  for (const hint of ['.dim-contextFieldHint', '.dim-contextUnavailable', '.dim-globalInline',
-    '.dim-directoryPickerNotice', '.dim-targetFeedback', '.dim-globalTtlHints span']) {
+  for (const hint of ['.dim-accessEmptyWarning', '.dim-contextUnavailable', '.dim-globalInline',
+    '.dim-directoryPickerNotice', '.dim-targetFeedback']) {
     const rule = ruleFor(sheet, hint);
     assert.ok(rule.includes('font-size: var(--dim-font-12)'), hint + ' takes the hint role');
     assert.ok(!rule.includes('var(--dim-font-11)'), hint + ' left the 11px tier');
   }
-  for (const label of ['.dim-channelNote', '.dim-contextSwitchScope', '.dim-targetTitle span',
-    '.dim-feishuGroupCountdown', '.dim-targetSessionSyncCopy small', '.dim-contextSwitchScope']) {
+  // .dim-channelNote is gone: the experimental marker is a glyph now, so the 11px label
+  // tier is asserted on the four roles that still carry it.
+  for (const label of ['.dim-contextSwitchScope', '.dim-targetTitle span',
+    '.dim-feishuGroupCountdown', '.dim-targetSessionSyncCopy small']) {
     assert.ok(ruleFor(sheet, label).includes('font-size: var(--dim-font-11)'),
       label + ' keeps the label tier the host also has');
   }
+});
+
+test('a row names itself without making its own text a hit target', async () => {
+  // A <label> wrapping the row forwards a click ANYWHERE inside it - the setting's own
+  // name included - to the control, so the menu opened from the text. The host's rows
+  // are containers: only the control is clickable. Three rows were labels; they are the
+  // whole family, so this reads every source rather than a list of the three.
+  const dir = new URL('../plugin-src/client/', import.meta.url);
+  const walk = async (at) => {
+    const found = [];
+    for (const entry of await readdir(at, { withFileTypes: true })) {
+      const child = new URL(entry.name + (entry.isDirectory() ? '/' : ''), at);
+      if (entry.isDirectory()) found.push(...await walk(child));
+      else if (entry.name.endsWith('.js')) found.push({ name: entry.name, text: await readFile(child, 'utf8') });
+    }
+    return found;
+  };
+  for (const file of await walk(dir)) {
+    assert.doesNotMatch(file.text, /h\('label', \{ className: '[^']*dim-modelRow/,
+      file.name + ' does not wrap a row in a label');
+  }
+  // ...and the row still has an accessible name, now on the control itself.
+  const preset = await source('../plugin-src/client/agent-preset.js');
+  assert.match(preset, /className: 'dim-presetSelect dim-rowControl',[\s\S]{0,240}?label: 'Agent 预设'/);
+  const access = await source('../plugin-src/client/access-policy-settings.js');
+  assert.match(access, /label: \[localizeText\(title\), localizeText\('访问模式'\)\]\.join\(' '\)/);
 });
 

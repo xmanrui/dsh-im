@@ -8,9 +8,7 @@ const CSS = String.raw`
 .dim-githubTooltip,
 .dim-generalSettingsTooltip,
 .dim-generalSettingsButton[aria-current="page"] + .dim-generalSettingsTooltip,
-.dim-panel .dim-presetTooltip,
-.dim-contextTooltip,
-.dim-contextTooltip.dim-contextGuidanceTooltip,
+.dim-helpPanel,
 .dim-botSettingsTooltip,
 .dim-githubTooltip,
 .bxf-repairTooltip {
@@ -45,9 +43,10 @@ const CSS = String.raw`
 .dim-aliasDialog .dim-aliasClose:hover:not(:disabled) { background: var(--dim-hover); }
 .dim-aliasOriginal { display: flex; flex-wrap: wrap; gap: var(--dim-gap-6) 14px; padding: 10px 12px; margin-bottom: 18px; border-radius: var(--dim-radius-8); background: var(--dsw-alias-bg-layer-2, #f5f6f7); overflow-wrap: anywhere; }
 .dim-aliasOriginal > span:first-child { flex: none; color: var(--dsw-alias-label-secondary, #646a73); }
+.dim-aliasDialog .dim-helpRow { margin-bottom: 7px; }
+.dim-aliasDialog .dim-helpRow label { margin-bottom: 0; }
 .dim-aliasDialog label { display: block; margin-bottom: 7px; }
 .dim-aliasDialog input { width: 100%; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
-.dim-aliasHelp { margin: 8px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); }
 .dim-aliasError { color: var(--dim-danger); overflow-wrap: anywhere; }
 .dim-aliasFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--dim-gap-14); margin-top: 24px; }
 .dim-aliasRestore { padding: 4px 0; border: 0; color: var(--dim-blue); background: transparent; }
@@ -240,7 +239,11 @@ body {
 .dim-updateDialog { width: min(480px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; border: 0; border-radius: var(--dim-radius-32); background: var(--dsw-alias-bg-layer-2, #fff); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); text-align: left; }
 .dim-updateDialog:focus { outline: none; }
 .dim-updateDialog h3 { margin: 22px 24px 8px; font-size: var(--dim-font-16); line-height: var(--dim-line-16); font-weight: var(--dim-weight-500); }
-.dim-updateDescription { margin: 0 24px; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-13); line-height: var(--dim-line-13); }
+/* The title and its help button are one row now, so the row takes the block margin the
+   heading used to carry and the heading gives it up - otherwise the button sits 24px
+   away from the title it explains and 7px below its centre. */
+.dim-updateDialog .dim-helpRow { margin: 22px 24px 8px; }
+.dim-updateDialog .dim-helpRow h3 { margin: 0; }
 .dim-updateBody { padding: 18px 24px 20px; }
 .dim-updateVersions { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--dim-gap-8) 18px; margin: 0 0 18px; font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-updateVersions dt { color: var(--dsw-alias-label-secondary, #646a73); }
@@ -305,9 +308,12 @@ body {
 .dim-logoSlack { background: linear-gradient(145deg, #fff, #f8fafb); border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .dim-logoWhatsapp { color: white; background: #25d366; }
 .dim-logoIMessage { color: white; background: linear-gradient(180deg, #5bf675 0%, #28d944 50%, #0fbd2c 100%); }
-.dim-channelCopy { min-width: 0; display: inline-flex; align-items: baseline; gap: var(--dim-gap-4); }
+.dim-channelCopy { min-width: 0; display: inline-flex; align-items: baseline; gap: var(--dim-gap-5); }
 .dim-channelCopy strong { overflow: hidden; color: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-400); text-overflow: ellipsis; white-space: nowrap; }
-.dim-channelNote { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-11); line-height: var(--dim-line-11); font-weight: var(--dim-weight-400); white-space: nowrap; }
+/* Sits in the same slot the note text did, one line high. align-self keeps the glyph on
+   the label's centre line: the copy row is baseline-aligned for text, and an svg on a
+   baseline hangs below it. */
+.dim-channelBadge { flex: none; align-self: center; display: inline-flex; align-items: center; color: var(--dsw-alias-label-tertiary, #81858c); }-space: nowrap; }
 .dim-panel { min-width: 0; container-type: inline-size; }
 .dim-loopbackRecovery { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-16); margin: 0 0 14px; padding: 14px 16px; border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 30%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-primary, #0f1115); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 8%, var(--dsw-alias-bg-layer-1, #fff)); }
 .dim-loopbackRecoveryCopy { min-width: 0; }
@@ -361,11 +367,14 @@ body {
    border-l4 .5px, radius 8, bg-layer-1, 32px, padding 0 10px, 14/22; select.input
    adds cursor:pointer and max-width:240px; .selectInput adds the 12px chevron at
    right 12px). Only the right padding is ours: a background arrow needs the room,
-   and the host's own padding-left of 10px would run text under it. */
+   and the host's own padding-left of 10px would run text under it.
+   The standalone .dim-fieldSelect class is gone: its last two users were the Feishu
+   Group tab's settings, which are rows (title left, control right), not fields in a
+   grid - they now take .dim-rowControl like the Delivery tab's row already did. This
+   rule is left for real form fields only. */
 .dim-panel .dim-targetField select,
 .dim-panel .dim-targetSuggestionField select,
-.dim-panel .dim-accessField select,
-.dim-panel .dim-fieldSelect {
+.dim-panel .dim-accessField select {
   box-sizing: border-box; width: 100%; min-width: 0; max-width: 240px; height: 32px;
   padding: 0 28px 0 10px; appearance: none;
   border: var(--dim-field-border); border-radius: var(--dim-field-radius);
@@ -376,12 +385,10 @@ body {
 }
 .dim-panel .dim-targetField select:focus,
 .dim-panel .dim-targetSuggestionField select:focus,
-.dim-panel .dim-accessField select:focus,
-.dim-panel .dim-fieldSelect:focus { outline: none; border-color: var(--dim-focus); }
+.dim-panel .dim-accessField select:focus { outline: none; border-color: var(--dim-focus); }
 .dim-panel .dim-targetField select:disabled,
 .dim-panel .dim-targetSuggestionField select:disabled,
-.dim-panel .dim-accessField select:disabled,
-.dim-panel .dim-fieldSelect:disabled { opacity: 0.6; cursor: default; }
+.dim-panel .dim-accessField select:disabled { opacity: 0.6; cursor: default; }
 .dim-panel .dim-surfaceCard { position: relative; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: var(--dim-radius-16); background: none; }
 .dim-panel .dim-surfaceCard::before { display: none; }
 .dim-panel .dim-surfaceBody { padding: 24px; }
@@ -493,7 +500,6 @@ body {
    select was capped at max-width: 60%, which truncated the longer preset labels - the
    one thing a preset picker has to keep readable. */
 .dim-panel .dim-preset { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--dim-gap-6); margin: 0; padding: 16px 0; border: 0; background: none; }
-.dim-panel .dim-preset > .dim-helpHint { flex: 1 1 100%; }
 /* The host has two 12/18 caption roles and they are not interchangeable: label-tertiary
    is the hint/route role (.advancedHint, .editorRoute, .modelFieldLabel), while
    label-secondary is the caption that heads a sub-block (.fieldLabel,
@@ -502,12 +508,6 @@ body {
    heads a page section rather than a sub-block, and was reverted. */
 .dim-panel .dim-presetHeader { position: relative; min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-8); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-500); }
 .dim-panel .dim-presetTitle { min-width: 0; display: inline-flex; align-items: center; gap: var(--dim-gap-8); white-space: nowrap; }
-.dim-panel .dim-presetHelp { display: inline-flex; align-items: center; flex: none; }
-.dim-panel .dim-presetHelpButton { width: 16px; height: 16px; display: grid; place-items: center; padding: 0; border: none; border-radius: 50%; corner-shape: round; color: var(--dsw-alias-label-tertiary, #81858c); background: transparent; font: inherit; font-size: var(--dim-font-11); line-height: 1; font-weight: var(--dim-weight-500); cursor: help; transition: color .15s ease, background .15s ease; }
-.dim-panel .dim-presetHelpButton:hover { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover); }
-.dim-panel .dim-presetHelpButton:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
-.dim-panel .dim-presetTooltip { position: absolute; top: calc(100% + 7px); left: 0; z-index: var(--dim-z-tooltip); width: min(320px, 100%); overflow-wrap: anywhere; white-space: normal; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
-.dim-panel .dim-presetHelp:hover .dim-presetTooltip, .dim-panel .dim-presetHelp:focus-within .dim-presetTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .dim-panel .dim-presetStatus { flex: none; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); white-space: nowrap; }
 /* The row owns its vertical padding now (native: padding 16px 0 per row), so the
    block must not add a second copy - otherwise the hairline between two rows gets
@@ -594,7 +594,10 @@ body {
 .dim-modelOptionName { font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-500); overflow-wrap: anywhere; }
 .dim-modelDescription { color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); overflow-wrap: anywhere; }
 .dim-modelCheck { flex: 0 0 18px; text-align: center; }
-.dim-helpHint { margin: 6px 0 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
+/* Not help: this one appears only while the allowlist is empty, and it describes a state
+   rather than a label. It was sharing .dim-helpHint with five pieces of real help, which is
+   exactly the "one name, two roles" split this round is undoing. */
+.dim-accessEmptyWarning { margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-panel .dim-presetError { margin: 6px 0 0; color: var(--dim-danger); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-contextEntry { width: 100%; min-height: 40px; display: grid; grid-template-columns: 16px minmax(0, 1fr) max-content max-content; align-items: center; gap: var(--dim-gap-6); margin: 0; padding: 14px 0; border: 0; border-radius: 0; color: var(--dsw-alias-label-primary, #0f1115); background: none; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; cursor: pointer; }
 .dim-contextEntry:hover:not(:disabled) { background: none; color: var(--dim-blue); }
@@ -611,17 +614,24 @@ body {
    scrolling behind it. Native does the same in ModelListEditor.tsx:407 - a plain
    sibling region, no portal, no backdrop, no elevation. The hairline above is the
    host separator between a trigger and what it discloses. */
-.dim-contextPanel { display: grid; grid-template-rows: auto auto; width: 100%; min-width: 0; margin-top: 12px; padding: 12px 0 0; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); background: transparent; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; }
+/* The expansion is separated by spacing and by the tab strip's own underline, not by a
+   rule of its own: two hairlines 30px apart, one under the entry and one under the tabs,
+   read as clutter rather than as structure. */
+.dim-contextPanel { display: grid; grid-template-rows: auto auto; width: 100%; min-width: 0; margin-top: 12px; padding: 0; background: transparent; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); text-align: left; }
 .dim-contextPanel:focus { outline: none; }
 .dim-contextEditorHeader { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--dim-gap-8); }
 /* The trigger already names the section, so the opened region carries no second
    title and no close button: it is an inline editor, not a dialog. */
-.dim-contextIntro { margin: 0 0 var(--dim-gap-12); }
 /* Host tablist, adopted verbatim (settings-plugins bundle:377 .tabs/.tab). One strip
    anatomy now serves both of the plugin's tab strips, so a change here moves Context
    enhancement and the General page together. The host's inactive tab is
    label-tertiary at the inherited weight, its bar exists only while active, and it
    declares no min-height. */
+/* The strip and the panel's help button share a row (context-enhancement.js). Only the
+   strip inside that row flexes; the other two strips keep the shared sizing. The button
+   deliberately does NOT go inside the tablist, whose only permitted children are tabs. */
+.dim-contextTabsRow { min-width: 0; display: flex; align-items: center; gap: var(--dim-gap-6); }
+.dim-contextTabsRow > .dim-contextTabs { flex: 1 1 auto; }
 .dim-contextTabs, .dim-generalSettingsTabs, .dim-botSettingsTabs { min-width: 0; display: flex; align-items: flex-end; gap: var(--dim-gap-22); margin-top: 2px; border-bottom: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .dim-contextTab, .dim-generalSettingsTab, .dim-botSettingsTab { position: relative; min-width: 0; flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 7px 1px 9px; border: 0; border-radius: 0; color: var(--dsw-alias-label-tertiary, #81858c); background: none; font: inherit; font-size: var(--dim-font-13); line-height: var(--dim-line-13); white-space: nowrap; cursor: pointer; }
 .dim-contextTab:hover:not(:disabled):not([aria-selected="true"]), .dim-generalSettingsTab:hover:not([aria-selected="true"]), .dim-botSettingsTab:hover:not([aria-selected="true"]) { color: var(--dsw-alias-label-primary, #0f1115); }
@@ -636,7 +646,10 @@ body {
 .dim-contextBody { min-height: 0; scrollbar-width: thin; }
 .dim-contextTabPanel[hidden] { display: none; }
 .dim-contextSection { min-width: 0; margin: 0; padding: 0; border: 0; }
-.dim-contextScope { margin-top: 12px; padding: 12px 14px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
+/* Flat. It used to be a filled, rounded slab inside the expansion - a card within a
+   card, on top of the two rules above it. The tab strip already says which scope is
+   open, so the fill was repeating it in a heavier voice. */
+.dim-contextScope { margin-top: 12px; padding: 0; border: 0; background: none; }
 .dim-contextScopeBlock { margin-top: 12px; }
 /* Same section role as the guidance title below it, so the same weight. Two 14px
    titles at 400 and 500 inside one panel is what made it read as two systems. */
@@ -663,18 +676,44 @@ body {
    second track never held anything. */
 .dim-contextFieldText { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; overflow-wrap: anywhere; }
 .dim-contextFieldName { min-width: 0; line-height: var(--dim-line-14); }
-.dim-contextFieldHint { grid-column: 1 / -1; margin: 2px 0 0; font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-contextFieldKey { min-width: 0; grid-column: 1 / -1; color: var(--dsw-alias-label-tertiary, #81858c); font: 11px/16px var(--dim-font-mono); overflow-wrap: anywhere; }
 .dim-contextEditorTitle { min-width: 0; display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
 .dim-contextEditorTitle > label { font-weight: var(--dim-weight-500); }
-.dim-contextHelp { display: inline-flex; align-items: center; flex: none; }
-.dim-contextHelpButton { width: 16px; height: 16px; display: grid; place-items: center; padding: 0; border: none; border-radius: 50%; corner-shape: round; color: var(--dsw-alias-label-tertiary, #81858c); background: transparent; font: inherit; font-size: var(--dim-font-11); line-height: 1; font-weight: var(--dim-weight-500); cursor: help; transition: color .15s ease, background .15s ease; }
-.dim-contextHelpButton:hover:not(:disabled) { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover); }
-.dim-contextTooltip { position: absolute; top: calc(100% + 7px); left: 0; z-index: var(--dim-z-tooltip); width: min(330px, calc(100vw - 72px)); display: grid; gap: var(--dim-gap-5); overflow-wrap: anywhere; white-space: normal; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
-.dim-contextTooltip strong { font-weight: var(--dim-weight-600); }
-.dim-contextTooltipExample { padding: 7px 8px; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-module-fill); font-family: var(--dim-font-mono); white-space: pre-wrap; }
-.dim-contextTooltip.dim-contextGuidanceTooltip { top: auto; bottom: calc(100% + 7px); width: min(380px, calc(100vw - 72px)); max-height: calc(100dvh - 48px); overflow-y: auto; }
-.dim-contextHelp:hover .dim-contextTooltip, .dim-contextHelp:focus-within .dim-contextTooltip { opacity: 1; visibility: visible; transform: translateY(0); pointer-events: auto; }
+/* The one help "?" and the panel it opens. This role had two class-name sets
+   (dim-contextHelp* and dim-presetHelp*) and they had already drifted: 320px vs 330px
+   panel, a grid gap on one and not the other, :hover vs :hover:not(:disabled). One name
+   now, declared once, so a fourth variant cannot appear.
+   Deliberately NOT scoped to .dim-panel: this role is used both inside the settings
+   panel and inside dialogs that portal to document.body (the alias dialog, the update
+   dialog), where a panel-scoped rule would not match at all and the button would render
+   unstyled. No channel sheet declares these names, so there is no equal-specificity
+   author left to lose to - which is the only reason the other shared roles are scoped.
+   The panel is portaled to document.body and positioned in viewport coordinates
+   against its own button, so it is never clipped by the card it was rendered in and no
+   caller has to supply a positioned ancestor. */
+.dim-help { display: inline-flex; align-items: center; flex: none; }
+.dim-helpButton { width: 16px; height: 16px; display: grid; place-items: center; padding: 0; border: none; border-radius: 50%; corner-shape: round; color: var(--dsw-alias-label-tertiary, #81858c); background: transparent; font: inherit; font-size: var(--dim-font-11); line-height: 1; font-weight: var(--dim-weight-500); cursor: help; transition: color .15s ease, background .15s ease; }
+.dim-helpButton:hover:not(:disabled) { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover); }
+.dim-helpButton:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
+.dim-helpPanel { position: fixed; z-index: var(--dim-z-menu); width: min(330px, calc(100vw - 72px)); display: grid; gap: var(--dim-gap-5); overflow-wrap: anywhere; white-space: normal; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
+.dim-helpPanel strong { font-weight: var(--dim-weight-600); }
+.dim-helpExample { padding: 7px 8px; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-module-fill); font-family: var(--dim-font-mono); white-space: pre-wrap; }
+.dim-helpPanelTop { width: min(380px, calc(100vw - 72px)); max-height: calc(100dvh - 48px); overflow-y: auto; }
+/* Portaled out of the card, so no hover rule can reach it any more: the component owns
+   the open state and says so here. */
+.dim-helpPanel[data-open="true"] { opacity: 1; visibility: visible; transform: translateY(0); pointer-events: auto; }
+/* A value legend that moved into a panel. It must obey the pairing invariant the panel
+   itself obeys - the base is always the dark tooltip base, so nothing inside may take a
+   foreground or a fill that flips with the theme. That is why the code chip lost its
+   module-fill background: a light fill on a permanently dark base is the same mistake
+   the invariant exists to prevent, one level down. */
+/* A row that puts a block title or a field label and its help button on one line. It needs
+   no positioning of its own: the panel is fixed and measured against the button. */
+.dim-helpRow { min-width: 0; display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
+.dim-helpList { display: grid; gap: var(--dim-gap-4); margin: 0; padding: 0; list-style: none; }
+.dim-helpList li { min-width: 0; display: flex; align-items: baseline; gap: var(--dim-gap-8); }
+.dim-helpList code { flex: none; min-width: 44px; color: var(--dsw-static-neutral-bluish-00, #f9fafb); font: 11px/16px var(--dim-font-mono); text-align: center; }
+.dim-helpList span { min-width: 0; }
 .dim-contextTextActions { display: flex; gap: var(--dim-gap-10); margin-left: auto; }
 .dim-contextTextActions button { min-height: 30px; padding: 4px 0; border: 0; border-radius: var(--dim-radius-8); color: var(--dim-blue); background: transparent; font: inherit; font-size: var(--dim-font-12); cursor: pointer; }
 .dim-contextTextActions button:hover:not(:disabled) { text-decoration: underline; }
@@ -691,18 +730,13 @@ body {
    only hint-named rules still on secondary, and its own .dim-helpHint/.dim-modelDescription
    were already tertiary. */
 .dim-contextError { margin: 12px 0 0; color: var(--dim-danger); font-size: var(--dim-font-12); line-height: var(--dim-line-12); overflow-wrap: anywhere; }
-.dim-contextFooter { display: flex; justify-content: flex-end; gap: var(--dim-gap-8); margin-top: 0; padding-top: 12px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
-/* A panel footer is the host's .editorActions role, not a row's inline action, so it
-   takes the form action size: 36px, radius 18, padding 0 14, 14/22 (settings-models
-   bundle: the primaryButton/secondaryButton family). The 28px variant belongs to
-   .rowActions. */
-.dim-contextFooter button { height: 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0 14px; border: var(--dim-control-border); border-radius: var(--dim-radius-18); color: var(--dsw-alias-label-primary, #0f1115); background: transparent; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); white-space: nowrap; cursor: pointer; }
-.dim-contextFooter button:hover:not(:disabled) { background: var(--dim-hover); }
-.dim-contextFooter .dim-contextSave, .dim-contextFooter .dim-contextSave:hover:not(:disabled) { border-color: var(--dim-blue); color: var(--dim-action-on-fill, #fff); background: var(--dim-blue); }
+/* No buttons and no rule above them: the region saves itself, so what is left is a
+   status line on the left, where a form that has no Save button says that it saved. */
+.dim-contextFooter { min-height: 18px; margin-top: 12px; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-contextEntry:focus-visible, .dim-contextPanel button:focus-visible, .dim-contextPanel input:focus-visible, .dim-contextPanel textarea:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
 .dim-contextEntry:disabled, .dim-contextPanel button:disabled, .dim-contextPanel input:disabled, .dim-contextPanel textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 @media (pointer: coarse) {
-  .dim-contextEntry, .dim-contextTab, .dim-contextFooter button, .dim-contextTextActions button, .dim-contextField, .dim-contextSwitchRow { min-height: 44px; }
+  .dim-contextEntry, .dim-contextTab, .dim-contextTextActions button, .dim-contextField, .dim-contextSwitchRow { min-height: 44px; }
   .dim-contextTextActions button { min-width: 44px; }
   .dim-contextGuidance textarea { font-size: var(--dim-font-16); }
 }
@@ -979,12 +1013,19 @@ body {
 .dim-accessField input { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); }
 .dim-accessField input:focus { outline: none; border-color: var(--dim-focus); }
 .dim-accessUsers { min-width: 0; margin-top: 14px; padding-top: 14px; border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
-.dim-accessUsersHeading { position: relative; min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--dim-gap-12); }
+/* Centred, like every other heading in the sheet: the action on the right belongs to the
+   title, not to the top of whatever the text block happens to measure. */
+.dim-accessUsersHeading { position: relative; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-12); }
 .dim-accessUsersHeading > div { min-width: 0; }
-.dim-accessUsersTitle { display: inline-flex; align-items: center; gap: var(--dim-gap-6); }
+/* The title and its warning are a stacked text slot, the same shape as .dim-rowText:
+   they used to share an inline-flex row, so the warning sat beside the title instead of
+   under it and the pair read as one long line. */
+.dim-accessUsersTitle { min-width: 0; display: grid; justify-items: start; gap: var(--dim-gap-4); }
 .dim-accessUsersHeading strong { color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-600); }
-.dim-accessUsersHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
-.dim-accessAddUser { width: 32px; height: 32px; min-height: 32px; flex: 0 0 32px; padding: 0; font-size: var(--dim-font-20); line-height: var(--dim-line-20); }
+.dim-accessUsersHeading p { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
+/* An icon button, so it centres its glyph instead of typesetting a plus sign: the text
+   glyph sat on the baseline of a 20px line box and never looked centred in the square. */
+.dim-accessAddUser { width: 32px; height: 32px; min-height: 32px; flex: 0 0 32px; display: grid; place-items: center; padding: 0; }
 .dim-accessUsersEmpty { margin-top: 10px; padding: 15px 12px; border: 1px dashed var(--dsw-alias-border-l3, #dfe1e5); border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); text-align: center; }
 .dim-accessUserList { display: grid; gap: var(--dim-gap-9); margin: 10px 0 0; padding: 0; list-style: none; }
 .dim-accessUserRow { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(145px, 180px) max-content; align-items: end; gap: var(--dim-gap-14); padding: 14px 16px; border: 0; border-radius: var(--dim-radius-12); background: var(--dim-module-fill); }
@@ -1009,11 +1050,6 @@ body {
 .dim-globalHead { min-width: 0; display: flex; align-items: center; }
 .dim-globalHeadTitle { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--dim-gap-6); }
 .dim-globalHead h3 { min-width: 0; overflow: hidden; margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-15); line-height: var(--dim-line-15); font-weight: var(--dim-weight-600); text-overflow: ellipsis; white-space: nowrap; }
-.dim-globalTtlHints { display: grid; gap: var(--dim-gap-4); margin: 0; padding: 0; list-style: none; }
-.dim-globalTtlHints li { min-width: 0; display: flex; align-items: baseline; gap: var(--dim-gap-8); }
-.dim-globalTtlHints code { flex: none; min-width: 44px; padding: 0 6px; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-module-fill); font: 11px/16px var(--dim-font-mono); text-align: center; }
-/* Explanation text, so the host's hint role: label-tertiary at 12/18. */
-.dim-globalTtlHints span { min-width: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
 .dim-globalTtlRow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--dim-gap-4) 10px; margin-top: 12px; }
 .dim-globalTtlInput { width: min(160px, 100%); min-width: 110px; max-width: 160px; flex: 1 1 130px; height: 32px; padding: 0 10px; border: var(--dim-field-border); border-radius: var(--dim-field-radius); color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font: 13px/1.5 var(--dim-font-mono); transition: border-color .16s ease; }
 
@@ -1089,7 +1125,7 @@ body {
   .dim-updateBackdrop { padding: 12px; }
   .dim-updateDialog { max-height: calc(100vh - 24px); }
   .dim-updateDialog h3 { margin: 18px 18px 8px; }
-  .dim-updateDescription { margin: 0 18px; }
+  .dim-updateDialog .dim-helpRow { margin: 18px 18px 8px; }
   .dim-updateBody { padding: 16px 18px; }
   .dim-updateFooter { padding: 12px 18px; }
 /* Anchored to the action's right edge so the tooltip grows leftward. Opened to

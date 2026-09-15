@@ -76,7 +76,9 @@ select.input{cursor:pointer;max-width:240px}
 
 | 族 | 改了什么 | 判据依据 |
 | --- | --- | --- |
-| 行级 vs 字段级选择器 | 4 个行级 `<select>` → `button` + portal 菜单（新建 `row-selector.js`）；5 个字段级保留，套官方 `.input`/`.selectInput` | §2.2 |
+| 行级 vs 字段级选择器 | 4 个行级 `<select>` → `button` + portal 菜单（新建 `row-selector.js`）；其余字段级保留，套官方 `.input`/`.selectInput` | §2.2 |
+| Group 页两个字段级 `<select>`（群聊响应方式、群聊以话题方式回复） | 并入行级：`section.dim-feishuGroupControl.dim-modelRow` + `div.dim-rowText` + `RowSelect`；`.dim-fieldSelect` 至此无使用者，连同它的 3 条规则一并删除 | 它们是「标题 + 说明 + 一个取值」，与同页 Delivery 的 `dim-feishuGroupControl dim-modelRow`（`index.js:512`）同族；同一对话框的 Delivery / Access 两个标签页每个控件都已是行控件，Group 是最后一个例外 |
+| 堆叠描述反模式 | 8 个渲染点的可见灰段落 → 共享「?」+ 浮窗（新建 `help-tip.js`）；两个帮助类名族（`dim-contextHelp*` / `dim-presetHelp*`）合并为一处声明的 `.dim-help*`；面板 portal 到 `document.body` 并 `position: fixed`（z 1100），不再被所在卡片裁切或压住；新增两个布局行 `.dim-helpRow` / `.dim-contextTabsRow`，其中后者同时修掉「按钮放进 `role=tablist`」的 ARIA 缺陷 | 这些文字解释的是有标签的控件或块标题，角色是「帮助说明」；宿主的行内说明槽（`.dim-rowDesc` 一族）角色不同，不在其列 |
 | 三条标签栏 | Context enhancement / General / 更多机器人设置 合并到同一份宿主 `.tabs`/`.tab` 值 | §2.3 |
 | 行文字 | `cursor: text` 落在**文字叶子**（不是整行），`user-select: text`；卡片头解除 `user-select: none` | 宿主行文本是纯文本，只声明在文字上 |
 | Context 面板内部 | 页脚按钮改宿主表单动作尺寸 `36/r18/0 14`；两个 textarea 统一 chrome；删恒空的 grid 轨 | models `.editorActions` 按钮族 |
@@ -106,11 +108,13 @@ select.input{cursor:pointer;max-width:240px}
 
 ### 4.1 门禁与 CI
 
-每次改动后跑 14 个测试文件（**199 例**），并重建 `lib/` 产物、复制到运行副本后核对哈希一致。最终 **199/199 通过**。
+每次改动后跑 14 个测试文件（**199 例**）；后续把 `test/channels/feishu/connection-test-client.test.mjs`（8 例）与本轮的 `test/client-help-idiom-contract.test.mjs`（5 例）一并纳入，共 **16 文件、212 例**，最终 **212/212 通过**，并重建 `lib/` 产物后核对运行副本哈希一致。
 
 其中 **5 个契约测试共 32 例**：`client-row-control-contract`（9）、`client-role-form-contract`（10）、`client-disclosure-contract`（6）、`client-native-border-contract`（5）、`client-toolbar-role-contract`（2）。
 
-CI 跑的是全量 `npm run check`（构建 + `test/*.test.mjs` + `test/channels/*/*.test.mjs` + `scripts/verify-package.mjs`）。**本机 Windows 下全量有 87 条既有失败，全部落在服务端/Host 测试文件**（`update-service` 11、`host-harness-connection` 10、`inbound-file` 4、`stores` 3、`workspace` 3 等），形态是 Windows 特有（`C:\...` 路径正则、`mode 0600` 权限位、ENOENT 拒绝），**CI 上一条都不出现**。改样式前先确认**失败集合**没有变化，不要只看数字。
+CI 跑的是全量 `npm run check`（构建 + `test/*.test.mjs` + `test/channels/*/*.test.mjs` + `scripts/verify-package.mjs`）。**本机 Windows 下全量 2812 例里有 42 条既有失败，全部落在服务端/Host 测试文件**（`host-harness-connection` 10、`update-service` 10、`inbound-file` 4、`weixin/stores` 3、`workspace` 3 等），形态是 Windows 特有（`C:\...` 路径正则、`mode 0600` 权限位、ENOENT 拒绝），**CI 上一条都不出现**。改样式前先确认**失败集合**没有变化，不要只看数字。
+
+末轮的核对方式是：先存下当前失败**名字**集合，再 `git stash` 回到 HEAD 重跑同样的 16 个文件取基线集合，最后 `Compare-Object` 两个集合——结果 **42 ⊆ 43，无新增失败**（多出的那条是 `update-service` 的偶发失败，在全量运行里它通过了）。
 
 ### 4.2 变异测试（每例先用哈希确认文件真被改动，跑完再还原并复核哈希）
 
@@ -124,6 +128,8 @@ CI 跑的是全量 `npm run check`（构建 + `test/*.test.mjs` + `test/channels
 | 给箭头加内联 `transform` | `F1F2B6A7 → E7849E36` | 4 pass / **1 fail** |
 | 行容器自声明几何 | `A0EC7348 → 925C922A` | 4 pass / **1 fail** |
 | 诊断键角色去掉颜色 | `7B26989D → 0BE44710` | 5 pass / **1 fail** |
+| 字段级 select 上限 `240px` → `200px` | `241CBE4D → 3A66DBA9` | 8 pass / **1 fail** |
+| 浮窗前景 `static-neutral-bluish-00` → `alias-label-primary` | `08616E84 → 39BBC5B2` | 4 pass / **1 fail** |
 
 **教训（已写入 ADR）**：变异的**还原**必须用与施加同等唯一的锚点。一次还原因子串在表里匹配到 7 处按钮规则而
 静默失败，表停在被变异的状态，直到按哈希核对才发现。
@@ -139,7 +145,12 @@ CI 跑的是全量 `npm run check`（构建 + `test/*.test.mjs` + `test/channels
 | 卡内标题 | `14px/22px 500` `rgb(15,17,21)` | `14px/22px 500` `rgb(249,250,251)` |
 | 卡片工具条 | 上 6px / 下 6px（居中） | 同 |
 | portal 菜单 | `fixed` / `z 1100` / `gap 4` / `rightDelta 0` / 白底 | 同几何，底色 `rgb(53,54,56)` |
+| 帮助浮窗 | `13px/20px w400`，底 `rgb(44,44,46)`，前景 `rgb(255,255,255)`，**13.94:1**；`parent=BODY` / `fixed` / `z 1100`，面板自身所在点即该点的命中元素 | 逐字相同：底恒深、前景静态浅，**13.94:1** |
 | 诊断 textarea（剪贴板降级路径） | `704×144`，白底深字 | `704×144`，`rgb(35,35,36)` 底浅字 |
+
+### 4.4 清单类工具（从代码生成，可重跑）
+
+本轮新增 `scripts/help-idiom-audit.mjs`：把「解释性文字」分进五个桶（`helpPanel` / `stacked` / `rowSlot` / `status` / `reference`），并按类名在基线提交 `0d36ae3` 里是否存在标注**分支引入**或**上游遗留**。归因按类名而非行号：行号每次编辑都会移动，类名不会。改完后 `stacked` 桶为 **0**——这是「零残留」的机器证据，不是人工清点。
 
 ## 5. 自行裁决与放弃项
 
@@ -156,6 +167,7 @@ CI 跑的是全量 `npm run check`（构建 + `test/*.test.mjs` + `test/channels
 | 分割线语义别名 | **评估后不做** | 表里只有三种拼法且分布干净（l2 22 处 / l4 7 处 / 虚线 4 处），别名买的是文档价值；代价是约 15 条跨文件断言改写。角色错位已修正，剩下的是命名 |
 | 段落 `max-width: 760px` | 未采纳 | 宿主 `.section` 的上限；我们的面板本身已窄（实测内容宽 486–514px） |
 | 菜单「卡片 + 内层滚动区」拆分 | 未采纳 | 结构改动；padding 随内容滚动的差异在本机实测中不可见 |
+| Group 行控件在英文界面下把「(recommended)」尾部截断 | **保留**，记为已知边界 | 行控件继承胶囊上限 `max-width: 60%`（实测宽 338px）；英文全称需 307px，而 `.dim-modelValue` 实际可用 284px，差 23px。完整文案在 `title` 悬浮与展开菜单里都可见。修它要么改用户可见文案、要么动所有行共用的胶囊上限，代价都大于收益 |
 
 ## 6. 未决项
 

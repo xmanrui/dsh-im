@@ -123,7 +123,7 @@ node --test test/client-native-border-contract.test.mjs test/client-role-form-co
 ### 4.2 清单类工具（从代码生成，可重跑）
 
 收敛的每一步都需要一份**从代码算出来、且能再算一次**的清单。手抄的清单不行：本仓库曾经出现过一份约 118 个表面的手抄清单，只存在于一次对话里，
-等再次需要时它已经不存在了。因此把四类问题各做成一个可重跑的脚本：
+等再次需要时它已经不存在了。因此把每一类问题各做成一个可重跑的脚本：
 
 | 脚本 | 回答什么问题 | 用法 |
 | --- | --- | --- |
@@ -132,6 +132,7 @@ node --test test/client-native-border-contract.test.mjs test/client-role-form-co
 | `scripts/surface-audit.mjs` | 设置页能渲染出哪些表面（portal / select / menu / 条件挂载 / 数据门控），静态可枚举的那部分 | `node scripts/surface-audit.mjs [--json]` |
 | `scripts/surface-probe.js` | 上一条的**第二阶段**：在真实页面里确认候选表面确实渲染、并读出计算值 | 在页面控制台 `await __surfaceProbe()` |
 | `scripts/dead-rule-audit.mjs` | 哪条渠道规则永远赢不了层叠，或**根本没有渲染点**（附「被谁压掉」或「零引用」的证据） | `node scripts/dead-rule-audit.mjs [--json]` |
+| `scripts/help-idiom-audit.mjs` | 每段可见说明属于哪个角色（共享浮窗 / 堆叠描述 / 行内说明槽 / 状态 / 参考资料），它**是分支引入还是上游遗留**（按类名在基线提交里是否存在判定，不看会移动的行号） | `node scripts/help-idiom-audit.mjs [--json]` |
 
 关于 `dead-rule-audit.mjs` 的一条**已知盲区**：它的第四个桶用 `selectors.every(...)` 判定，
 **选择器里只要有一个活类，整条规则就逃出该桶**。更严的做法是逐令牌验证（抽出全部类令牌、全仓 grep 非样式表引用）
@@ -233,6 +234,44 @@ DEAD / PARTIAL / uncertain **三个桶全是 0**，脚本里根本没有 "truly 
 style 属性里的东西无法与表里其余决策一起重构——这正是它一路漂移的原因。现在键/值网格取宿主最近的两个角色
 （键=字段标签，值=字段正文），兜底提示、剪贴板提示、只读 textarea 分别取 notice / hint / 字段输入框。
 字段清单、剪贴板降级路径、`role=status`、`readOnly`/`aria-label`/`rows` 一字未动。
+
+### 收口：堆叠描述归一到共享帮助浮窗
+
+**同一个角色曾经有两个类名族**：`dim-contextHelp*`（上下文增强）与 `dim-presetHelp*`（飞书预设），两者都是「16px 盒子 + 11/500 字形 + 悬停/聚焦展开的面板」。它们已经漂开了——面板 320px vs 330px、一个有 grid gap 一个没有、一个 `:hover` 一个 `:hover:not(:disabled)`。现在只有一个名字、一处声明：`.dim-help` / `.dim-helpButton` / `.dim-helpPanel`（+ 向上的 `.dim-helpPanelTop`、示例块 `.dim-helpExample`）。
+
+**这些规则故意不加 `.dim-panel` 前缀**，与其它共享角色相反：帮助浮窗既用在设置面板内，也用在 portal 到 `document.body` 的对话框里（别名对话框、更新对话框），加前缀在那里根本不匹配，按钮会变成裸样式。渠道表不声明这些名字，所以不存在同权重的对手——而「存在同权重对手」正是其它共享角色要加前缀的唯一理由。
+
+**堆叠描述反模式一次改完（族批）**：凡是「解释一个有标签的控件或块标题」的可见灰段落，都改成挂在被描述文字右侧的「?」。共 8 个渲染点：上下文增强的块引路、逐字段注解（3 个字段）、面板引路、guidance 既有浮窗；访问策略的场景图例；机器人别名字段；附件保留时长值图例；更新面板说明；企业微信流式开关与回调框；飞书预设。
+
+**排除项及其理由**（`scripts/help-idiom-audit.mjs` 逐条列成四个桶，可重跑）：`rowSlot` 是宿主自己的行内说明槽（`.dim-rowDesc`/`.dim-modelDescription`/`.dim-feishuGroupHelp`）；`status` 是随数据出现、消失的报错/进度/待复制命令（`.dim-updateHint`/`.dim-updateManualHint`/`.dim-diagnosticHint`）；`reference` 是读者操作时需要的资料（`.dim-channelNote`）。这三类保持可见。
+
+**一处「一个名字两个角色」的拆分**：`.dim-helpHint` 同时被五段真帮助和一条状态告警使用（空名单告警只在名单为空时出现）。帮助那五处进了浮窗，告警改成 `.dim-accessEmptyWarning`——名字说出了它是什么。
+
+**配对不变量在面板内部同样成立**：值图例进了浮窗后，它的 `code` 去掉了 module-fill 底——面板的底恒为深色 tooltip 底，任何随主题翻转的前景或填充都是同一个错误下沉一层。
+
+**面板必须在最顶层**：它现在是 `position: fixed` 且 portal 到 `document.body`。原先它是卡片里的绝对定位子元素，于是被卡片的滚动裁切、又被卡片的层叠压住——解释某个字段的浮窗要么被切掉，要么被旁边的块盖住。卡片内部没有任何位置能承诺「在最上面」，只有卡片之外的层可以。修好之后实测：`parent=BODY`、`position=fixed`、`z-index=1100`，且面板自身所在点是 `elementFromPoint` 的命中元素。
+
+同一个改动顺带**删掉两个只为当锚点才存在的 `position: relative`**（`.dim-helpRow` 与 `.dim-contextTabsRow`）；后者作为一行布局保留，并修掉一个 ARIA 缺陷：按钮**不能**放进 `role=tablist`，tablist 唯一允许的子元素是 tab。
+
+面板不再位于 `.dim-help` 的子树里，所以原来靠 `:hover`/`:focus-within` 的显示规则不可能再命中：开启状态改由组件持有，并带 140ms 关闭延迟以跨过按钮与面板之间 7px 的空隙。
+
+实测（本机 3082，两主题）：面板 `13px/20px w400`、`padding 3px 7px`、圆角 8、宽 330；底恒为 `rgb(44,44,46)`，前景 `rgb(255,255,255)`，**对比度 13.94:1**（浅色与深色逐字相同，ADR 记过的 1.x~2.x:1 那类缺陷不再出现）。按钮 `16×16`、`11px/11px w500`、`cursor: help`。
+
+守卫：`test/client-help-idiom-contract.test.mjs`（5 例）——只允许一个帮助按钮皮肤（数得出来）、面板必须同时是深底与**静态浅前景**（别名色会随主题翻转）、默认隐藏且 `:hover`/`:focus-within` 才显示、九个退休类名在源码里零渲染点且在表里零声明、七处调用点都经共享组件渲染。**它读的是选择器与 className，不是散文**：表和源码的注释都写着它们退休的名字，`includes` 会把注释读成活规则（这是 `.dim-fieldSelect` 那轮踩过的同一个坑）。
+
+变异证据：把面板前景从 `--dsw-static-neutral-bluish-00` 换成 `--dsw-alias-label-primary`，`08616E84 → 39BBC5B2`，4 pass / **1 fail**，哈希已还原。
+### 收口：最后一个字段级行选择器
+
+**Task progress display 换完并没有换完。** 同一对话框的 Delivery / Access 两个标签页每个控件都已是 `.dim-rowControl`，
+而 Group 标签页的两个设置（群聊响应方式、群聊以话题方式回复）仍是**裸 `<select class="dim-fieldSelect">`**：
+它们是「标题 + 说明 + 一个取值」的行，不是字段网格里的枚举。现在两处都改为
+`section.dim-feishuGroupControl.dim-modelRow` + `div.dim-rowText` + `RowSelect`，与 `index.js:512` 的同胞逐字同形。
+
+`.dim-fieldSelect` 至此**零使用者**，按「诚实清理」连同它参与的三条规则（基础 / `:focus` / `:disabled`）一并删除，
+只留下真正是表单字段的三个选择器头（`.dim-targetField` / `.dim-targetSuggestionField` / `.dim-accessField`）。
+守卫相应改写：断言这类名**以选择器身份消失**（用 `\.dim-fieldSelect\s*[,{]` 判定而不是 `includes`——
+表里的注释本来就写着它退休的名字，散文提及不得被读成活规则），并改为取出字段皮肤规则、断言它仍带 `max-width: 240px`。
+行为一字未动：`onSave` 调用、`disabled`、保存中状态、错误行、授权按钮与选项文案全部原样。
 
 ### 收口：本轮踩到并修掉的两个自伤
 

@@ -875,7 +875,7 @@ test('AgentPresetEditor lists Host presets and moves its session guidance into a
     0,
     'the Agent Preset block does not restate the note the block above it carries',
   );
-  assert.equal(renderer.root.findAll(node => node.props?.['aria-label'] === '查看 Agent Preset 说明').length, 0);
+  assert.equal(renderer.root.findAll(node => node.props?.['aria-label'] === '查看 Agent 预设说明').length, 0);
   assert.equal(renderer.root.findAllByType('small').length, 0);
   renderer.unmount();
 });
@@ -896,7 +896,7 @@ test('AgentPresetEditor marks a removed current preset and still allows clearing
   assert.equal(picker.props.options[3].label, 'removed-preset（已不可用）');
   assert.equal(
     textOf(renderer.root.findByProps({ role: 'status' })),
-    '当前 Agent Preset 已不可用，请选择其他 Preset 或跟随 Host 默认。',
+    '当前 Agent 预设已不可用，请选择其他预设或跟随 Host 默认。',
   );
 
   await act(async () => {

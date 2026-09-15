@@ -3,6 +3,7 @@ import { CloseGlyph } from './ui-glyphs.js';
 import { createPortal } from 'react-dom';
 import { MAX_BOT_ALIAS_LENGTH, validateBotAlias } from '../../src/channels/shared/bot-alias.mjs';
 import { h } from './i18n.js';
+import { HelpTip } from './help-tip.js';
 
 function AliasDialog({ bot, onSave, onClose }) {
   const id = React.useId();
@@ -50,7 +51,13 @@ function AliasDialog({ bot, onSave, onClose }) {
       'aria-label': '关闭修改别名', onClick: close }, h(CloseGlyph, { size: 14 }))),
   h('div', { className: 'dim-aliasOriginal' }, h('span', null, '原名称'),
     h('span', null, bot.originalName ?? bot.name)),
-  h('label', { htmlFor: `${id}-input` }, '别名'),
+  h('div', { className: 'dim-helpRow' },
+    h('label', { htmlFor: `${id}-input` }, '别名'),
+    h(HelpTip, {
+      id: `${id}-help`,
+      label: '查看别名说明',
+      disabled: saving,
+    }, '仅更改显示名称，留空则显示原名称。')),
   h('input', { id: `${id}-input`, ref: inputRef, value: draft, disabled: saving,
     maxLength: MAX_BOT_ALIAS_LENGTH, placeholder: '例如：客服助手',
     'aria-describedby': `${id}-help`,
@@ -61,7 +68,6 @@ function AliasDialog({ bot, onSave, onClose }) {
       }
     },
   }),
-  h('p', { id: `${id}-help`, className: 'dim-aliasHelp' }, '仅更改显示名称，留空则显示原名称。'),
   error ? h('p', { className: 'dim-aliasError', role: 'alert' }, error) : null,
   h('div', { className: 'dim-aliasFooter' },
     h('button', { type: 'button', className: 'dim-aliasRestore',

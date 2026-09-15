@@ -63,6 +63,26 @@ export function PlusGlyph({ size } = {}) {
   h('path', { fill: 'currentColor', d: 'M8.64453 1.5V7.34961H14.5V8.65039H8.64453V14.5H7.34473V8.65039H1.5V7.34961H7.34473V1.5H8.64453Z' }));
 }
 
+/**
+ * The one glyph here that is NOT vendored: the native set has no flask, and "(Experimental)"
+ * written out as text cost a second line's worth of width on every card that carries it.
+ * Drawn to the same rules as the rest - 16 grid, currentColor, native stroke weight.
+ */
+export function FlaskGlyph({ size } = {}) {
+  return h('svg', {
+    ...dimensions(size),
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    focusable: 'false',
+    'aria-hidden': 'true',
+    'data-im-icon': 'flask',
+  },
+  h('path', {
+    d: 'M6.4 1.7v3.95l-3.72 6.4a1.3 1.3 0 0 0 1.13 1.95h8.38a1.3 1.3 0 0 0 1.13-1.95L9.6 5.65V1.7M5.45 1.7h5.1',
+    stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round',
+  }));
+}
+
 export function ExternalLinkGlyph({ size } = {}) {
   return h('svg', {
     ...dimensions(size),

@@ -6,6 +6,7 @@ import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from "../.
 import { CollapsibleAccountSection } from "../shared/collapsible-account.js";
 import { RowSelect } from "../../row-selector.js";
 import { h } from "../../i18n.js";
+import { HelpTip } from '../../help-tip.js';
 import {
   FEISHU_ENDPOINTS,
   FEISHU_REGISTRATION_OPERATIONS,
@@ -516,18 +517,8 @@ function StepPushEditor({ value = false, mode = "post", disabled = false, onSave
   h("div", { className: "dim-rowText" },
     h("div", { className: "dim-feishuGroupControlHeader" },
       h("h3", { id: titleId }, "任务过程展示"),
-      h("span", { className: "dim-presetHelp" },
-        h("button", {
-          type: "button",
-          className: "dim-presetHelpButton",
-          "aria-label": "查看分步直推说明",
-          "aria-describedby": helpId,
-        }, h("span", { "aria-hidden": "true" }, "?")),
-        h("span", {
-          id: helpId,
-          className: "dim-presetTooltip",
-          role: "tooltip",
-        }, "设置任务执行过程的呈现方式：不显示、实时卡片或逐步消息"))),
+      h(HelpTip, { id: helpId, label: "查看分步直推说明" },
+        "设置任务执行过程的呈现方式：不显示、实时卡片或逐步消息")),
     saving
       ? h("span", { className: "dim-feishuGroupControlStatus", role: "status" }, "保存中…")
       : null,

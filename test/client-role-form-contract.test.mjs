@@ -134,7 +134,9 @@ test('the inline context panel has no scroll region of its own', () => {
   assert.equal(panel.length, 1, 'the inline panel keeps its layout rule');
   assert.equal(declared(panel[0], 'overflow-y'), undefined, 'no nested scroll region');
   assert.equal(declared(panel[0], 'max-height'), undefined, 'no height cap');
-  assert.match(declared(panel[0], 'border-top') ?? '', /^0\.5px solid var\(--dsw-alias-border-l2/);
+  // The panel draws no rule of its own: the tab strip's underline is the one separator
+  // between the entry and the content, and a second hairline 30px above it read as clutter.
+  assert.equal(declared(panel[0], 'border-top'), undefined, 'the panel adds no separator of its own');
   const body = rulesFor('.dim-contextBody');
   assert.equal(body.length, 1);
   assert.equal(declared(body[0], 'overflow-y'), undefined);

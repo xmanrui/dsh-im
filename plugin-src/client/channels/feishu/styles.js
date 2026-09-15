@@ -14,7 +14,7 @@ const CSS = String.raw`
   flex-direction: column;
   container-type: inline-size;
   gap: var(--dim-gap-18);
-  padding: 2px 0 24px;
+  padding: 0 0 24px; /* page padding owner: shared styles.js:323 .dim-panel .bxf-page */
 }
 
 .bxf-page *, .bxf-page *::before, .bxf-page *::after { box-sizing: border-box; }
@@ -81,7 +81,7 @@ const CSS = String.raw`
 .bxf-card {
   position: relative;
   overflow: hidden;
-  border-radius: var(--dim-radius-14);
+  border-radius: var(--dim-radius-16); /* radius owner: shared styles.js:389 .dim-surfaceCard (the element carries it) and the host's own row card (models .rowCard: border-radius:16px) */
   background: var(--dsw-alias-bg-layer-3, #fff);
   /* The hairline belongs to the convergence layer, which paints every card in
      this plugin through .dim-panel .dim-surfaceCard / .dim-botCard. Drawing a
@@ -104,30 +104,22 @@ const CSS = String.raw`
 
 .bxf-cardBody { position: relative; padding: 24px; }
 
-.bxf-intro {
-  min-height: 250px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 172px;
-  gap: var(--dim-gap-32);
-  align-items: center;
-}
-
 .bxf-introCopy { max-width: 500px; }
 
 .bxf-stateLabel {
   display: inline-flex;
   align-items: center;
-  gap: var(--dim-gap-7);
+  gap: var(--dim-gap-8);
   color: var(--dsw-alias-label-secondary, #646a73);
   font-size: var(--dim-font-12);
   font-weight: var(--dim-weight-600);
   line-height: var(--dim-line-12);
-  margin-bottom: 13px;
+  margin-bottom: 13px; /* gap owner: shared styles.js:431 .dim-stateLabel, which the element carries (index.js:211,300) */
 }
 
 .bxf-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px; /* owner: shared styles.js:432 .dim-stateDot (the element carries it, index.js:212,301); host status dots are 8px too (dsh-client-ui-approval .dot, dsh-client-ui-schedule .statusDot) */
+  height: 8px;
   border-radius: 50%;
   background: var(--dsw-alias-label-tertiary, #81858c);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--dsw-alias-label-tertiary, #81858c) 12%, transparent);
@@ -241,10 +233,6 @@ const CSS = String.raw`
 .bxf-button[data-size="small"] { min-height: 28px; padding: 0 10px; font-size: var(--dim-font-12); }
 .bxf-bindButton { flex: none; white-space: nowrap; }
 
-.bxf-provisionCard {
-  border-color: color-mix(in srgb, var(--bxf-accent) 32%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)));
-}
-
 .bxf-markStage {
   position: relative;
   width: 156px;
@@ -285,24 +273,16 @@ const CSS = String.raw`
   box-shadow: 0 12px 28px color-mix(in srgb, var(--bxf-accent) 28%, transparent);
 }
 
-.bxf-qrLayout {
-  display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
-  align-items: center;
-  gap: var(--dim-gap-32);
-}
-
-.bxf-qrColumn { min-width: 0; }
-
 .bxf-qrFrame {
   position: relative;
-  width: 222px;
-  height: 222px;
+  width: min(270px, 100%);
+  height: auto;
+  aspect-ratio: 1;
   display: grid;
   place-items: center;
   border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%));
-  border-radius: var(--dim-radius-14);
-  padding: 13px;
+  border-radius: var(--dim-radius-16);
+  padding: 10px; /* same box as the shared owner styles.js:450 .dim-qrFrame and as the other sheets; the provision variant below re-boxes it to 176px */
   background: #fff;
   box-shadow: 0 8px 24px rgba(31, 35, 41, .07);
 }
@@ -318,7 +298,6 @@ const CSS = String.raw`
 
 .bxf-qrFrame::before { inset: -3px auto auto -3px; border-width: 2px 0 0 2px; border-radius: var(--dim-radius-8) 0 0; }
 .bxf-qrFrame::after { inset: auto -3px -3px auto; border-width: 0 2px 2px 0; border-radius: 0 0 8px; }
-.bxf-qrFrame img { width: 100%; height: 100%; display: block; object-fit: contain; }
 
 .bxf-qrFallback {
   width: 100%;
@@ -329,7 +308,9 @@ const CSS = String.raw`
   color: var(--bxf-accent);
   background: #f7f9ff;
   text-align: center;
-  padding: 20px;
+  padding: 24px; /* padding owner: none in the shared layer; the other seven sheets that render
+     .dim-qrFallback (dingtalk family + weixin) all use 24px. The rest of this block's
+     skin (tinted fill, r8, 100% box) stays feishu-only. */
 }
 
 .bxf-qrFallback span { display: block; color: #646a73; font-size: var(--dim-font-12); line-height: var(--dim-line-12); margin-top: 8px; }
@@ -344,56 +325,41 @@ const CSS = String.raw`
 }
 
 .bxf-countdown {
-  width: 222px;
+  width: min(270px, 100%);
   color: var(--dsw-alias-label-tertiary, #81858c);
   font-variant-numeric: tabular-nums;
-  font-size: var(--dim-font-11);
-  line-height: 17px;
+  font-size: var(--dim-font-12);
+  line-height: var(--dim-line-12); /* width + 12/18 owner: shared styles.js:456 .dim-countdown, which the element carries (index.js:289); 11/17 was a label rung, and this role is not a label */
   margin-top: 11px;
 }
-
-.bxf-countdownTop { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-10); }
-.bxf-progress { height: 3px; overflow: hidden; border-radius: var(--dim-radius-full); background: var(--dim-module-fill); margin-top: 6px; }
-.bxf-progress > span { display: block; width: var(--bxf-progress, 100%); height: 100%; border-radius: inherit; background: var(--bxf-accent); transition: width 1s linear; }
 
 /* The channel's qrCopy h3 used to be declared twice here (20/28/600, and 18/26 under
    .bxf-botProvision). Both were dead: the element carries bxf-qrCopy AND dim-qrCopy
    (feishu/index.js:298), so the shared .dim-panel .dim-qrCopy h3 owns it at (0,2,1) - the first
    rule loses on specificity, the second ties and loses because the shared sheet is injected
    later. Measured on 3080: the h3 renders 18 / 24 / 600, never 20 or 26. */
-.bxf-qrCopy > p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); margin-top: 7px; }
+.bxf-qrCopy > p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); margin-top: 7px; /* line-height owner: shared styles.js:463 .dim-qrCopy > p, which the element carries (index.js:298), and it is 1.65 there - dingtalk and weixin declare the same 1.65, so the 13px rung on this sheet was a third value that never rendered */ }
 
 .bxf-steps { counter-reset: bxf-step; display: flex; flex-direction: column; gap: var(--dim-gap-11); margin: 20px 0 0; padding: 0; list-style: none; }
-.bxf-steps li { counter-increment: bxf-step; display: grid; grid-template-columns: 23px minmax(0, 1fr); align-items: start; gap: var(--dim-gap-9); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }
+.bxf-steps li { counter-increment: bxf-step; display: grid; grid-template-columns: 23px minmax(0, 1fr); align-items: start; gap: var(--dim-gap-9); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); /* 13/20: five of the six sheets that render a step list use it (dingtalk family + weixin); this sheet was the only 12/18 */ }
 .bxf-steps li::before { content: counter(bxf-step); width: 21px; height: 21px; display: grid; place-items: center; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: 50%; color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font-size: var(--dim-font-11); font-weight: var(--dim-weight-600); }
 
 
 .bxf-inlineError {
   min-height: 190px;
-  display: grid;
+  display: flex;
   grid-template-columns: 44px minmax(0, 1fr);
   align-content: center;
-  gap: var(--dim-gap-15);
-  padding: 28px;
+  gap: var(--dim-gap-10);
+  padding: 22px; /* display/gap/padding owner: shared styles.js:469 .dim-inlineError, which the element carries (index.js:395) */
 }
-
-.bxf-inlineError h3 { font-size: var(--dim-font-16); line-height: var(--dim-line-16); margin: 0; overflow-wrap: anywhere; }
 .bxf-inlineError p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); margin-top: 5px; overflow-wrap: anywhere; }
-
-.bxf-listSection { display: flex; flex-direction: column; gap: var(--dim-gap-10); }
 .bxf-listHeading { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-16); padding: 0 2px; }
 .bxf-listHeading h3 { font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-600); margin: 0; }
-.bxf-botList { display: flex; flex-direction: column; gap: var(--dim-gap-12); margin: 0; padding: 0; list-style: none; }
 .bxf-botList > li { min-width: 0; }
 .bxf-botCard:focus { outline: none; }
 .bxf-botCard:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
-
-.bxf-connectedTop { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-20); }
-.bxf-botIdentity { min-width: 0; display: flex; align-items: center; gap: 13px; }
 .bxf-avatar { flex: none; display: grid; place-items: center; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 3px rgb(31 35 41 / 7%); }
-.bxf-botName { min-width: 0; }
-.bxf-botName h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--dim-font-16); line-height: var(--dim-line-16); font-weight: var(--dim-weight-600); }
-.bxf-botName p { overflow: hidden; color: var(--dsw-alias-label-tertiary, #81858c); font-family: var(--dim-font-mono); font-size: var(--dim-font-12); line-height: var(--dim-line-12); text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 
 /* A coloured status indicator, so the host owner is ConnectionIndicator (12 / 500 / 18, semantic
    colour carried by the indicator) rather than the neutral Pill (12 / 400 / 18). Only the weight
@@ -423,13 +389,6 @@ const CSS = String.raw`
   background: color-mix(in srgb, var(--bxf-accent) 2.5%, var(--dsw-alias-bg-layer-3, #fff));
 }
 .bxf-botProvision .bxf-cardBody { padding: 18px; }
-.bxf-botProvision .bxf-qrLayout {
-  grid-template-columns: 184px minmax(0, 1fr);
-  align-items: start;
-  gap: var(--dim-gap-24);
-}
-.bxf-botProvision .bxf-qrFrame { width: 176px; height: 176px; padding: 10px; border-radius: var(--dim-radius-12); }
-.bxf-botProvision .bxf-countdown { width: 176px; }
 .bxf-botProvision .bxf-steps { gap: var(--dim-gap-8); margin-top: 14px; }
 .bxf-botProvision .bxf-actions { margin-top: 16px; }
 .bxf-botProvision .bxf-inlineError { min-height: 160px; padding: 22px; }
@@ -439,41 +398,24 @@ const CSS = String.raw`
 .bxf-healthSummary[data-error="true"] { color: var(--bxf-error); }
 .bxf-botActions { position: relative; flex: none; width: 100%; flex-wrap: wrap; gap: var(--dim-gap-8); margin-top: 0; justify-content: flex-end; }
 .bxf-botActions .bxf-button { flex: none; white-space: nowrap; }
-.bxf-botActions .bxf-repairButton { color: var(--bxf-accent); border-color: color-mix(in srgb, var(--bxf-accent) 35%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); }
-.bxf-botActions .bxf-repairButton:hover:not(:disabled) { background: color-mix(in srgb, var(--bxf-accent) 7%, transparent); }
 .bxf-repairAction { display: inline-flex; }.bxf-repairTooltip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; width: min(330px, 100%); display: grid; gap: var(--dim-gap-3); opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
 .bxf-repairTooltip strong { font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-600); }
 .bxf-repairTooltip > span { color: var(--dsw-static-neutral-bluish-00, #f9fafb); font-size: var(--dim-font-11); line-height: 17px; font-weight: var(--dim-weight-400); overflow-wrap: anywhere; }
 .bxf-repairAction:hover .bxf-repairTooltip,
 .bxf-repairAction:focus-within .bxf-repairTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
-
-.bxf-confirm {
-  border-top: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%));
-  background: color-mix(in srgb, var(--bxf-error) 4%, var(--dim-module-fill));
-  padding: 17px 24px 20px;
-}
 .bxf-confirm:focus { outline: none; }
-.bxf-confirm h4 { font-size: var(--dim-font-13); line-height: var(--dim-line-13); margin: 0; }
 .bxf-confirm p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); margin: 4px 0 0; }
 .bxf-confirm .bxf-actions { margin-top: 12px; }
 
-.bxf-error { min-height: 252px; display: grid; grid-template-columns: 44px minmax(0, 1fr); align-content: center; gap: var(--dim-gap-15); padding: 30px; }
-.bxf-error h3 { font-size: var(--dim-font-16); line-height: var(--dim-line-16); overflow-wrap: anywhere; }
+/* No min-height: measured in both themes, this block is the LAST child of .bxf-page and
+   nothing follows it, so the 252px reserve moved nothing when it appeared (0px either way)
+   and only added 87px of dead space under a one-line error. The sibling rule for
+   .bxf-inlineError keeps its reserve on purpose - that block sits directly above the bot
+   list, and there the reserve is what keeps a one-line and a two-line message from
+   pushing the list by 25px. */
+.bxf-error { display: flex; grid-template-columns: 44px minmax(0, 1fr); align-content: center; gap: var(--dim-gap-10); padding: 22px; /* this element is an .dim-inlineError (index.js:762), so it takes that role's anatomy (styles.js:469) */ }
 .bxf-error p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); margin-top: 5px; overflow-wrap: anywhere; }
 .bxf-errorCode { display: inline-block; color: var(--dsw-alias-label-tertiary, #81858c); font-family: var(--dim-font-mono); font-size: var(--dim-font-11); margin-top: 7px; overflow-wrap: anywhere; }
-
-.bxf-statusNotice {
-  display: flex;
-  align-items: center;
-  gap: var(--dim-gap-9);
-  border: 0.5px solid color-mix(in srgb, var(--bxf-warning) 28%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)));
-  border-radius: var(--dim-radius-10);
-  padding: 9px 11px;
-  color: var(--dsw-alias-label-secondary, #646a73);
-  background: color-mix(in srgb, var(--bxf-warning) 5%, var(--dsw-alias-bg-layer-1, #fff));
-  font-size: var(--dim-font-12);
-  line-height: var(--dim-line-12);
-}
 .bxf-statusNotice > svg { flex: none; color: var(--bxf-warning); }
 .bxf-statusNotice > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 
@@ -484,17 +426,10 @@ const CSS = String.raw`
 @keyframes bxf-revealProvision { from { opacity: 0; transform: translateY(-5px); } }
 
 @container (max-width: 620px) {
-  .bxf-headingTools { gap: var(--dim-gap-6); }
   .bxf-headingTools .bxf-totalBadge { padding-inline: 8px; }
   }
 
 @media (max-width: 680px) {
-  .bxf-intro { grid-template-columns: minmax(0, 1fr); }
-  .bxf-markStage { display: none; }
-  .bxf-qrLayout { grid-template-columns: minmax(0, 1fr); justify-items: center; }
-  .bxf-botProvision .bxf-qrLayout { grid-template-columns: minmax(0, 1fr); }
-  .bxf-qrCopy { width: 100%; }
-  .bxf-connectedTop { align-items: flex-start; flex-direction: column; }
   .bxf-inlineError { grid-template-columns: minmax(0, 1fr); padding: 20px; }
   .bxf-statusNotice { align-items: flex-start; flex-wrap: wrap; }
   .bxf-cardBody { padding: 20px; }

@@ -71,7 +71,7 @@ export function AgentPresetEditor({ agentPreset = '', disabled = false, onSave }
     try {
       await onSave?.(next || null);
     } catch (cause) {
-      setError(cause?.message ?? 'Agent Preset 修改失败，请重试。');
+      setError(cause?.message ?? 'Agent 预设修改失败，请重试。');
     } finally {
       setSaving(false);
     }
@@ -83,14 +83,18 @@ export function AgentPresetEditor({ agentPreset = '', disabled = false, onSave }
     // save status, so the title is not stated twice.
     saving ? h('div', { className: 'dim-presetHeader' },
       h('span', { className: 'dim-presetStatus' }, '保存中…')) : null,
-    h('label', { className: 'dim-modelRow' },
+    /* A div, not a label. A label wrapping a row makes a click anywhere in the row - the
+       setting's own name included - activate the control it labels, so the menu opened
+       from the text. The host's rows are not labels either: only the control is
+       clickable. The selector carries its own accessible name (label: 'Agent 预设'). */
+    h('div', { className: 'dim-modelRow' },
       h('span', { className: 'dim-rowText' },
-        h('span', { className: 'dim-modelRowLabel' }, 'Agent Preset')),
+        h('span', { className: 'dim-modelRowLabel' }, 'Agent 预设')),
       h(RowSelect, {
         className: 'dim-presetSelect dim-rowControl',
         value: current,
         disabled: disabled || saving,
-        label: 'Agent Preset',
+        label: 'Agent 预设',
         onChange: (next) => { void change(next); },
         options: [
           { value: '', label: inheritLabel },
@@ -105,7 +109,7 @@ export function AgentPresetEditor({ agentPreset = '', disabled = false, onSave }
     error || currentUnavailable ? h(
       'p',
       { className: 'dim-presetError', role: error ? 'alert' : 'status' },
-      error ?? '当前 Agent Preset 已不可用，请选择其他 Preset 或跟随 Host 默认。',
+      error ?? '当前 Agent 预设已不可用，请选择其他预设或跟随 Host 默认。',
     ) : null,
   );
 }
