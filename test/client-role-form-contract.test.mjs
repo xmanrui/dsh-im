@@ -158,3 +158,138 @@ test('every placeholder uses the token native gives placeholders', () => {
       'placeholder colour follows the native placeholder tier: ' + rule.selectors.join(', '));
   }
 });
+
+/**
+ * Specificity as [ids, classes-and-attributes, elements], the way the cascade counts
+ * it. `:not()` contributes its argument - the detail that made the capsule defect
+ * invisible to a naive reading of the two rules, which look like rest versus hover
+ * and are in fact a tie.
+ */
+function specificity(selector) {
+  const withoutNot = selector.replace(/:not\(([^)]*)\)/g, ' $1 ');
+  let a = 0; let b = 0; let c = 0;
+  const stripped = withoutNot.replace(/::?[a-z-]+(\([^)]*\))?/gi, (hit) => {
+    if (hit.startsWith('::')) { c += 1; return ' '; }
+    b += 1;
+    return ' ';
+  });
+  for (const _ of stripped.matchAll(/#[\w-]+/g)) a += 1;
+  for (const _ of stripped.matchAll(/\.[\w-]+/g)) b += 1;
+  for (const _ of stripped.matchAll(/\[[^\]]+\]/g)) b += 1;
+  for (const _ of stripped.matchAll(/(^|[\s>+~,(])([a-zA-Z][\w-]*)/g)) c += 1;
+  return [a, b, c];
+}
+
+function outranks(left, right) {
+  const [la, lb, lc] = specificity(left);
+  const [ra, rb, rc] = specificity(right);
+  if (la !== ra) return la > ra;
+  if (lb !== rb) return lb > rb;
+  return lc > rc;
+}
+
+test('the capsule hover has one deciding author, and it is the shared rule', () => {
+  // Measured on 3081: the channel rule and this shared rule were BOTH (0,4,0), so the
+  // winner was decided by <style> injection order - weixin sheet 110, shared 120,
+  // dingtalk 121. WeChat lost the tie, so its Generate button had no hover feedback at
+  // all, while DingTalk won it and turned rgb(67,69,74). Same rule, two appearances.
+  // The shared rule now sits one step higher, so the tie cannot happen again.
+  const anchors = [
+    '.dim-panel .dim-viewActions .bxf-button:hover:not(:disabled)',
+    '.dim-panel .dim-viewActions .dxw-button:hover:not(:disabled)',
+    '.dim-panel .dim-viewActions .ddt-button:hover:not(:disabled)',
+  ];
+  const owner = rules.filter(rule => anchors.every(a => rule.selectors.includes(a)));
+  assert.equal(owner.length, 1, 'exactly one shared rule declares the capsule hover');
+  assert.equal(declared(owner[0], 'background'), 'var(--dim-hover-solid)');
+  assert.match(declared(owner[0], 'border-color'), /^var\(--dsw-alias-border-l3/);
+
+  // The channel sheets keep their own hover rules on purpose: those also style filled
+  // buttons that are NOT capsules, so banning them outright would break those. What is
+  // forbidden is a channel declaration that can tie or win. Every one of them must lose.
+  const channelHover = [
+    '.bxf-button[data-kind="primary"]:hover:not(:disabled)',
+    '.dxw-button[data-kind="primary"]:hover:not(:disabled)',
+    '.ddt-button[data-kind="primary"]:hover:not(:disabled)',
+  ];
+  for (const selector of channelHover) {
+    for (const anchorSelector of anchors) {
+      assert.ok(
+        outranks(anchorSelector, selector),
+        anchorSelector + ' must strictly outrank ' + selector + ' so the tie cannot return',
+      );
+    }
+  }
+});
+
+const CHANNEL_STYLES = new URL('../plugin-src/client/channels/feishu/styles.js', import.meta.url);
+const channelRules = parseRules(await readFile(CHANNEL_STYLES, 'utf8'));
+const allRules = rules.concat(channelRules);
+
+test('a tooltip foreground and background are decided as a pair', () => {
+  // The pairing rule, and the reason it is not simply 'never flip'. The tooltip base is
+  // DARK IN BOTH THEMES: design-platform.css:235 gives --dsw-alias-tooltip-bg =
+  // neutral-bluish-850 (44,44,46) in light, and :328 gives neutral-bluish-750
+  // (67,69,74) in dark. So a foreground that flips with the theme lands near-black on a
+  // dark base in the light theme. Measured on 3080 before the fix:
+  //   .dim-panel .dim-channelTooltip strong  1.36:1
+  //   .bxf-repairTooltip > span              2.40:1   <- black text and white text in
+  //                                                      one tooltip: the plain text
+  //                                                      inherited the skin, the span
+  //                                                      did not. Both read fine in
+  //                                                      dark, which is why it survived.
+  // But a block that repaints its own surface with a THEME token must flip - its
+  // background flips, so its foreground has to flip with it. Flipping is therefore legal
+  // exactly when the same rule also repaints the base.
+  const tooltipRules = allRules.filter(r => r.selectors.some(s => /tooltip/i.test(s)));
+  assert.ok(tooltipRules.length >= 10, 'the tooltip rules are found');
+  for (const rule of tooltipRules) {
+    const colour = declared(rule, 'color');
+    if (!colour) continue;
+    if (!/var\(--dsw-alias-/.test(colour)) continue; // static: safe on the dark base
+    const background = declared(rule, 'background') ?? declared(rule, 'background-color');
+    assert.ok(
+      background && !/--dsw-alias-tooltip-bg/.test(background),
+      rule.selectors[0] + ' paints tooltip text with a theme-flipping alias (' + colour
+        + ') without pairing a themed surface of its own',
+    );
+  }
+  // The converse: repainting the base obliges the rule to state its own foreground,
+  // otherwise the text inherits the tooltip's constant white onto a light surface.
+  // Measured on 3080 in light before the fix: white on rgb(245,246,247).
+  for (const rule of tooltipRules) {
+    const background = declared(rule, 'background') ?? declared(rule, 'background-color');
+    if (!background) continue;
+    if (/--dsw-alias-tooltip-bg/.test(background)) continue;
+    assert.ok(
+      declared(rule, 'color'),
+      rule.selectors[0] + ' repaints the tooltip background (' + background + ') so it must pair a foreground',
+    );
+  }
+});
+
+test('the settings-row family keeps one form: title over description, 4px apart', () => {
+  // Native's row text slot is a 4px-gap column, the title at 14/22 over a 12/18
+  // tertiary description - measured on 3080 at the host's oY77xG_rowText. The plugin
+  // used to put the description in a separate paragraph below the whole block, which
+  // is what made .dim-modelSetting 184px tall. Every row in the family shares this one
+  // slot, so the values live here once instead of per row.
+  const slot = rulesFor('.dim-modelRowText')[0];
+  assert.ok(slot, '.dim-modelRowText exists');
+  assert.equal(declared(slot, 'display'), 'grid');
+  assert.equal(declared(slot, 'gap'), 'var(--dim-gap-4)', 'title and description sit 4px apart, as native does');
+  assert.equal(declared(slot, 'text-align'), 'left');
+
+  const desc = rulesFor('.dim-rowDesc')[0];
+  assert.ok(desc, '.dim-rowDesc exists');
+  assert.equal(declared(desc, 'font-size'), 'var(--dim-font-12)');
+  assert.equal(declared(desc, 'line-height'), 'var(--dim-line-12)');
+  assert.match(declared(desc, 'color'), /--dsw-alias-label-tertiary/);
+
+  // The old form: the label itself stretched and the description was a sibling
+  // paragraph. Guard against either coming back.
+  const label = rulesFor('.dim-modelRowLabel')[0];
+  assert.ok(label, '.dim-modelRowLabel exists');
+  assert.notEqual(declared(label, 'flex'), '1', 'the label no longer stretches on its own; the text slot does');
+  assert.equal(rulesFor('.dim-modelHint').length, 0, 'the standalone hint rule is gone with its last use');
+});

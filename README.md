@@ -256,6 +256,8 @@ node bin/dsh-im.mjs install --source .
 
 改动设置页的表现层（`plugin-src/client/styles.js` 与各渠道的 `styles.js`）前，先读[表现层样式契约](docs/adr/0002-presentation-layer-style-contract.md)：它记录了「同一角色多个作者」的四种层叠机制、验收口径、已收敛的轴，以及三个契约测试护栏。
 
+本机两个运行实例（`dsh web` 与隔离 profile `imui`）的启动方式、URL token 的取法、构建产物与仓库的核对方法，以及重装与版本号改写的步骤，见[本地运行环境说明](docs/local-environment.md)。
+
 IM 管理接口默认沿用 Harness 的浏览器认证和 Host／Origin 信任检查。只要 Harness 已允许并认证当前局域网访问，便可直接查看和配置 IM 机器人，无需额外修改 dsh-im 配置。
 
 如需将 IM 管理额外限制为仅本机访问，可在当前 Web profile 的 `cordis.patch.yml` 中设置：
