@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { QuestionGlyph } from './ui-glyphs.js';
 
 import {
   DEFAULT_ACCESS_POLICY,
@@ -160,19 +159,8 @@ function ScenePolicyEditor({
   },
   h('div', { id: legendId, className: 'dim-accessLegend' },
     h('span', { className: 'dim-accessLegendContent' },
-      h('span', null, title),
-      h('span', { className: 'dim-channelHelp dim-accessLegendHelp' },
-        h('button', {
-          type: 'button',
-          className: 'dim-channelHelpButton',
-          'aria-label': [localizeText(title), localizeText('查看访问权限说明')].join(' '),
-          'aria-describedby': ownerHelpId,
-        }, h(QuestionGlyph, { size: 14 })),
-        h('span', {
-          id: ownerHelpId,
-          className: 'dim-channelTooltip dim-accessHelpTooltip',
-          role: 'tooltip',
-        }, '原所有者或扫码接入者始终可以访问并执行命令；以下设置仅约束其他用户。')))),
+      h('span', null, title)),
+    h('p', { className: 'dim-helpHint' }, '原所有者或扫码接入者始终可以访问并执行命令；以下设置仅约束其他用户。')),
   unsupported
     ? h('div', { className: 'dim-accessUnsupported', role: 'note' },
         h('strong', null, '当前渠道不支持群聊'),
@@ -210,18 +198,7 @@ function ScenePolicyEditor({
             h('div', { className: 'dim-accessUsersTitle' },
               h('strong', null, allowlist ? '白名单用户' : '命令权限例外'),
               emptyAllowlist
-                ? h('span', { className: 'dim-channelHelp dim-accessUsersHelp' },
-                    h('button', {
-                      type: 'button',
-                      className: 'dim-channelHelpButton',
-                      'aria-label': [localizeText(title), localizeText('查看白名单说明')].join(' '),
-                      'aria-describedby': emptyAllowlistHelpId,
-                    }, h(QuestionGlyph, { size: 14 })),
-                    h('span', {
-                      id: emptyAllowlistHelpId,
-                      className: 'dim-channelTooltip dim-accessEmptyAllowlistTooltip',
-                      role: 'tooltip',
-                    }, '当前没有白名单用户，保存后普通用户将无法使用机器人。'))
+                ? h('p', { className: 'dim-helpHint' }, '当前没有白名单用户，保存后普通用户将无法使用机器人。')
                 : null),
             h('button', {
               type: 'button',

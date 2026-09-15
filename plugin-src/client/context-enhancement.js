@@ -128,13 +128,8 @@ function ContextEnhancementScopeEditor({
   h('div', { className: 'dim-contextScopeBlock' },
     h('div', { className: 'dim-contextLegend' },
       h('span', null, '来源字段'),
-      h('span', { className: 'dim-contextHelp dim-contextLegendHelp' },
-        h('button', {
-          type: 'button', className: 'dim-contextHelpButton', disabled,
-          'aria-label': copy.fieldsHelpLabel, 'aria-describedby': fieldsHelpId,
-        }, h(QuestionGlyph, { size: 14 })),
-        h('span', { id: fieldsHelpId, className: 'dim-contextTooltip dim-contextLegendTooltip', role: 'tooltip' },
-          '增强提示词中请使用字段名（如 senderId、conversationType）引用这些信息。只发送当前会话中勾选且可用的字段，不会额外查询或补全。'))),
+      h('span', { className: 'dim-helpHint dim-contextLegendHint' },
+        '增强提示词中请使用字段名（如 senderId、conversationType）引用这些信息。只发送当前会话中勾选且可用的字段，不会额外查询或补全。')),
     h('div', { className: 'dim-contextFields' }, CONTEXT_ENHANCEMENT_FIELDS.map((field) => {
       const fieldId = `${idPrefix}-${kind}-field-${field}`;
       return h('div', { key: field, className: 'dim-contextField' },
@@ -146,17 +141,9 @@ function ContextEnhancementScopeEditor({
         }),
         h('span', { className: 'dim-contextFieldText' },
           h('label', { className: 'dim-contextFieldName', htmlFor: fieldId }, FIELD_LABELS[field]),
-          FIELD_HELP[field] ? h('span', { className: 'dim-contextHelp dim-contextFieldHelp' },
-            h('button', {
-              type: 'button', className: 'dim-contextHelpButton dim-contextFieldHelpButton', disabled,
-              'aria-label': copy[FIELD_HELP[field].labelKey],
-              'aria-describedby': `${idPrefix}-${kind}-${field}-help`,
-            }, h(QuestionGlyph, { size: 14 })),
-            h('span', {
-              id: `${idPrefix}-${kind}-${field}-help`,
-              className: 'dim-contextTooltip dim-contextFieldTooltip',
-              role: 'tooltip',
-            }, FIELD_HELP[field].text)) : null,
+          FIELD_HELP[field]
+            ? h('span', { className: 'dim-helpHint dim-contextFieldHint' }, FIELD_HELP[field].text)
+            : null,
           h('label', { className: 'dim-contextFieldKey', htmlFor: fieldId }, field)));
     }))),
   h('div', { className: 'dim-contextGuidance dim-contextScopeBlock' },
@@ -324,13 +311,7 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
   h('header', { className: 'dim-contextHeader' },
     h('div', { className: 'dim-contextHeaderTitle' },
       h('h3', { id: titleId }, '上下文增强'),
-      h('span', { className: 'dim-contextHelp dim-contextHeaderHelp' },
-        h('button', {
-          type: 'button', className: 'dim-contextHelpButton', disabled: busy,
-          'aria-label': '查看上下文增强说明', 'aria-describedby': descriptionId,
-        }, h(QuestionGlyph, { size: 14 })),
-        h('span', { id: descriptionId, className: 'dim-contextTooltip dim-contextHeaderTooltip', role: 'tooltip' },
-          '选择在哪些会话中启用、提供哪些来源字段，以及如何使用这些信息。仅使用已有消息元数据，不查询平台 API。'))),
+      h('p', { id: descriptionId, className: 'dim-helpHint' }, '选择在哪些会话中启用、提供哪些来源字段，以及如何使用这些信息。仅使用已有消息元数据，不查询平台 API。')),
     h('button', {
       type: 'button', className: 'dim-contextClose', 'aria-label': '关闭弹窗',
       disabled: saving, onClick: cancel,

@@ -188,20 +188,20 @@ const CSS = String.raw`
 
 .bxf-button {
   appearance: none;
-  min-height: 36px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  border: 0.5px solid var(--dsw-alias-border-l2, #dee0e3);
-  border-radius: 8px;
-  padding: 7px 13px;
+  gap: 4px;
+  border: 0.5px solid var(--dsw-alias-border-l3, #dee0e3);
+  border-radius: 14px;
+  padding: 0 10px;
   color: var(--dsw-alias-label-primary, #1f2329);
-  background: var(--dsw-alias-bg-layer-1, #fff);
+  background: transparent;
   font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 20px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
   text-decoration: none;
   cursor: pointer;
   transition: background .15s var(--ds-ease-in-out, ease), border-color .15s var(--ds-ease-in-out, ease), transform .15s var(--ds-ease-in-out, ease);
@@ -215,11 +215,11 @@ const CSS = String.raw`
 .bxf-button:active:not(:disabled) { transform: translateY(1px); }
 
 .bxf-button:focus-visible, .bxf-link:focus-visible {
-  outline: 2px solid var(--bxf-accent);
+  outline: none; box-shadow: var(--dim-focus-shadow);
   outline-offset: 2px;
 }
 
-.bxf-button:disabled { cursor: not-allowed; opacity: .55; }
+.bxf-button:disabled { cursor: not-allowed; opacity: 0.4; }
 
 .bxf-button[data-kind="primary"] {
   border-color: var(--bxf-accent);
@@ -393,7 +393,7 @@ const CSS = String.raw`
 .bxf-botList { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .bxf-botList > li { min-width: 0; }
 .bxf-botCard:focus { outline: none; }
-.bxf-botCard:focus-visible { outline: 2px solid var(--bxf-accent); outline-offset: 2px; }
+.bxf-botCard:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
 
 .bxf-connectedTop { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .bxf-botIdentity { min-width: 0; display: flex; align-items: center; gap: 13px; }
@@ -414,7 +414,7 @@ const CSS = String.raw`
 .bxf-responseModeSelect { min-width: 0; width: 100%; grid-column: 1 / -1; grid-row: 2; height: 32px; padding: 0 10px; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: 8px; color: var(--dsw-alias-label-primary, #1f2329); background-color: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 12px; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease; }
 
 .bxf-responseModeSelect:focus-visible { outline: none; border-color: var(--dsw-alias-brand-primary, #0f1115); }
-.bxf-responseModeSelect:disabled { cursor: not-allowed; opacity: .55; }
+.bxf-responseModeSelect:disabled { cursor: not-allowed; opacity: 0.4; }
 .bxf-responseModeHelp { grid-column: 1 / -1; grid-row: 3; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 11px; line-height: 1.45; }
 .bxf-responseModePermissionAction { grid-column: 1 / -1; grid-row: 4; display: flex; justify-content: flex-start; margin-top: 2px; }
 .bxf-responseModePermissionButton { min-height: 28px; padding: 3px 9px; color: var(--bxf-accent); border-color: color-mix(in srgb, var(--bxf-accent) 30%, var(--dsw-alias-border-l2, #dfe1e5)); background: var(--dsw-alias-bg-layer-1, #fff); }
@@ -429,7 +429,7 @@ const CSS = String.raw`
 }
 .bxf-botProvision:focus { outline: none; }
 .bxf-botProvision:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--bxf-accent) 75%, transparent);
+  outline: none; box-shadow: var(--dim-focus-shadow);
   outline-offset: 3px;
   border-radius: 12px;
 }
@@ -458,7 +458,7 @@ const CSS = String.raw`
 .bxf-botActions .bxf-button { flex: none; white-space: nowrap; }
 .bxf-botActions .bxf-repairButton { color: var(--bxf-accent); border-color: color-mix(in srgb, var(--bxf-accent) 35%, var(--dsw-alias-border-l2, #dee0e3)); }
 .bxf-botActions .bxf-repairButton:hover:not(:disabled) { background: color-mix(in srgb, var(--bxf-accent) 7%, transparent); }
-.bxf-repairAction { display: inline-flex; }.bxf-repairTooltip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; width: min(330px, 100%); display: grid; gap: 3px; opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; padding: 3px 7px; border: 0; border-radius: 8px; color: var(--dim-tooltip-fg, #f9fafb); background: var(--dsw-alias-tooltip-bg, #2c2c2e); box-shadow: none; font-size: 13px; line-height: 20px; font-weight: 400; }
+.bxf-repairAction { display: inline-flex; }.bxf-repairTooltip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; width: min(330px, 100%); display: grid; gap: 3px; opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; padding: 3px 7px; border: 0; border-radius: 8px; color: var(--dsw-static-neutral-bluish-00, #f9fafb); background: var(--dsw-alias-tooltip-bg, #2c2c2e); box-shadow: none; font-size: 13px; line-height: 20px; font-weight: 400; }
 .bxf-repairTooltip strong { font-size: 12px; line-height: 17px; font-weight: 600; }
 .bxf-repairTooltip > span { color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 17px; font-weight: 400; overflow-wrap: anywhere; }
 .bxf-repairAction:hover .bxf-repairTooltip,
