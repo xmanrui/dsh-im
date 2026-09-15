@@ -13,7 +13,7 @@ const CSS = String.raw`
   display: flex;
   flex-direction: column;
   container-type: inline-size;
-  gap: 18px;
+  gap: var(--dim-gap-18);
   padding: 2px 0 24px;
 }
 
@@ -23,7 +23,7 @@ const CSS = String.raw`
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
+  gap: var(--dim-gap-20);
 }
 
 .bxf-headingCopy { min-width: 0; }
@@ -62,14 +62,14 @@ const CSS = String.raw`
   align-items: center;
   justify-content: space-between;
   flex-wrap: nowrap;
-  gap: 8px;
+  gap: var(--dim-gap-8);
 }
 
 .bxf-totalBadge {
   min-height: 28px;
   display: inline-flex;
   align-items: baseline;
-  gap: 3px;
+  gap: var(--dim-gap-3);
   border-radius: var(--dim-radius-full);
   padding: 4px 10px;
   color: var(--dsw-alias-label-secondary, #646a73);
@@ -111,7 +111,7 @@ const CSS = String.raw`
   min-height: 250px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 172px;
-  gap: 32px;
+  gap: var(--dim-gap-32);
   align-items: center;
 }
 
@@ -120,7 +120,7 @@ const CSS = String.raw`
 .bxf-stateLabel {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--dim-gap-7);
   color: var(--dsw-alias-label-secondary, #646a73);
   font-size: var(--dim-font-12);
   font-weight: 600;
@@ -168,7 +168,7 @@ const CSS = String.raw`
 
 .bxf-note {
   display: flex;
-  gap: 8px;
+  gap: var(--dim-gap-8);
   align-items: flex-start;
   color: var(--dsw-alias-label-tertiary, #81858c);
   font-size: var(--dim-font-12);
@@ -182,7 +182,7 @@ const CSS = String.raw`
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--dim-gap-10);
   margin-top: 22px;
 }
 
@@ -192,7 +192,7 @@ const CSS = String.raw`
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: var(--dim-gap-4);
   border: 0.5px solid var(--dsw-alias-border-l3, #dee0e3);
   border-radius: var(--dim-radius-14);
   padding: 0 10px;
@@ -208,7 +208,7 @@ const CSS = String.raw`
 }
 
 .bxf-button:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover, rgb(38 49 72 / 6%));
+  background: var(--dim-hover);
   border-color: var(--dsw-alias-border-l1, #c9cdd4);
 }
 
@@ -285,7 +285,7 @@ const CSS = String.raw`
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
   align-items: center;
-  gap: 32px;
+  gap: var(--dim-gap-32);
 }
 
 .bxf-qrColumn { min-width: 0; }
@@ -353,15 +353,15 @@ const CSS = String.raw`
   margin-top: 11px;
 }
 
-.bxf-countdownTop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.bxf-countdownTop { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-10); }
 .bxf-progress { height: 3px; overflow: hidden; border-radius: var(--dim-radius-full); background: var(--dsw-alias-bg-module-platform, #f5f6f7); margin-top: 6px; }
 .bxf-progress > span { display: block; width: var(--bxf-progress, 100%); height: 100%; border-radius: inherit; background: var(--bxf-accent); transition: width 1s linear; }
 
 .bxf-qrCopy h3 { font-size: var(--dim-font-20); line-height: 29px; font-weight: 600; }
 .bxf-qrCopy > p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: 21px; margin-top: 7px; }
 
-.bxf-steps { counter-reset: bxf-step; display: flex; flex-direction: column; gap: 11px; margin: 20px 0 0; padding: 0; list-style: none; }
-.bxf-steps li { counter-increment: bxf-step; display: grid; grid-template-columns: 23px minmax(0, 1fr); align-items: start; gap: 9px; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: 19px; }
+.bxf-steps { counter-reset: bxf-step; display: flex; flex-direction: column; gap: var(--dim-gap-11); margin: 20px 0 0; padding: 0; list-style: none; }
+.bxf-steps li { counter-increment: bxf-step; display: grid; grid-template-columns: 23px minmax(0, 1fr); align-items: start; gap: var(--dim-gap-9); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: 19px; }
 .bxf-steps li::before { content: counter(bxf-step); width: 21px; height: 21px; display: grid; place-items: center; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: 50%; color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-alias-bg-layer-1, #fff); font-size: var(--dim-font-11); font-weight: 600; }
 
 .bxf-connecting { min-height: 292px; display: grid; place-items: center; text-align: center; padding: 36px 24px; }
@@ -380,34 +380,34 @@ const CSS = String.raw`
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
   align-content: center;
-  gap: 15px;
+  gap: var(--dim-gap-15);
   padding: 28px;
 }
 
-.bxf-inlineError h3 { font-size: var(--dim-font-16); line-height: 25px; margin: 0; }
+.bxf-inlineError h3 { font-size: var(--dim-font-16); line-height: 25px; margin: 0; overflow-wrap: anywhere; }
 .bxf-inlineError p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: 21px; margin-top: 5px; overflow-wrap: anywhere; }
 
-.bxf-listSection { display: flex; flex-direction: column; gap: 10px; }
-.bxf-listHeading { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 2px; }
+.bxf-listSection { display: flex; flex-direction: column; gap: var(--dim-gap-10); }
+.bxf-listHeading { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-16); padding: 0 2px; }
 .bxf-listHeading h3 { font-size: var(--dim-font-14); line-height: 22px; font-weight: 600; margin: 0; }
-.bxf-botList { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.bxf-botList { display: flex; flex-direction: column; gap: var(--dim-gap-12); margin: 0; padding: 0; list-style: none; }
 .bxf-botList > li { min-width: 0; }
 .bxf-botCard:focus { outline: none; }
 .bxf-botCard:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
 
-.bxf-connectedTop { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.bxf-connectedTop { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-20); }
 .bxf-botIdentity { min-width: 0; display: flex; align-items: center; gap: 13px; }
 .bxf-avatar { flex: none; width: 48px; height: 48px; display: grid; place-items: center; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); border-radius: var(--dim-radius-14); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 1px 3px rgb(31 35 41 / 7%); }
 .bxf-botName { min-width: 0; }
 .bxf-botName h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--dim-font-16); line-height: 24px; font-weight: 600; }
 .bxf-botName p { overflow: hidden; color: var(--dsw-alias-label-tertiary, #81858c); font-family: var(--ds-font-family-code, monospace); font-size: var(--dim-font-12); line-height: 18px; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 
-.bxf-healthPill { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 28px; border-radius: var(--dim-radius-full); padding: 4px 10px; color: var(--bxf-success); background: color-mix(in srgb, var(--bxf-success) 10%, transparent); font-size: var(--dim-font-12); font-weight: 600; line-height: 18px; }
+.bxf-healthPill { flex: none; display: inline-flex; align-items: center; gap: var(--dim-gap-7); min-height: 28px; border-radius: var(--dim-radius-full); padding: 4px 10px; color: var(--bxf-success); background: color-mix(in srgb, var(--bxf-success) 10%, transparent); font-size: var(--dim-font-12); font-weight: 600; line-height: 18px; }
 .bxf-healthPill[data-health="degraded"], .bxf-healthPill[data-health="checking"], .bxf-healthPill[data-health="connecting"] { color: var(--bxf-warning); background: color-mix(in srgb, var(--bxf-warning) 10%, transparent); }
 .bxf-healthPill[data-health="offline"], .bxf-healthPill[data-health="error"] { color: var(--bxf-error); background: color-mix(in srgb, var(--bxf-error) 10%, transparent); }
 
 
-.bxf-responseMode { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; column-gap: 10px; row-gap: 5px; margin-top: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: var(--dim-radius-8); background: var(--dsw-alias-bg-module-platform, #f5f6f7); }
+.bxf-responseMode { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; column-gap: var(--dim-gap-10); row-gap: var(--dim-gap-5); margin-top: 6px; padding: 8px 10px; border: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: var(--dim-radius-8); background: var(--dsw-alias-bg-module-platform, #f5f6f7); }
 .bxf-responseModeHeader { display: contents; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: normal; }
 .bxf-responseModeHeader > span:first-child { grid-column: 1; grid-row: 1; white-space: nowrap; }
 .bxf-responseModeStatus { grid-column: 2; grid-row: 1; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); white-space: nowrap; }
@@ -442,23 +442,23 @@ const CSS = String.raw`
 .bxf-botProvision .bxf-qrLayout {
   grid-template-columns: 184px minmax(0, 1fr);
   align-items: start;
-  gap: 24px;
+  gap: var(--dim-gap-24);
 }
 .bxf-botProvision .bxf-qrFrame { width: 176px; height: 176px; padding: 10px; border-radius: var(--dim-radius-12); }
 .bxf-botProvision .bxf-countdown { width: 176px; }
 .bxf-botProvision .bxf-qrCopy h3 { font-size: var(--dim-font-18); line-height: 26px; }
-.bxf-botProvision .bxf-steps { gap: 8px; margin-top: 14px; }
+.bxf-botProvision .bxf-steps { gap: var(--dim-gap-8); margin-top: 14px; }
 .bxf-botProvision .bxf-actions { margin-top: 16px; }
 .bxf-botProvision .bxf-inlineError { min-height: 160px; padding: 22px; }
 
-.bxf-connectedFooter { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 20px; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); }
+.bxf-connectedFooter { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-15); margin-top: 20px; padding-top: 16px; border-top: 0.5px solid var(--dsw-alias-border-l1, #eef0f3); }
 .bxf-healthSummary { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: 18px; }
 .bxf-healthSummary[data-error="true"] { color: var(--bxf-error); }
-.bxf-botActions { position: relative; flex: none; width: 100%; flex-wrap: wrap; gap: 8px; margin-top: 0; justify-content: flex-end; }
+.bxf-botActions { position: relative; flex: none; width: 100%; flex-wrap: wrap; gap: var(--dim-gap-8); margin-top: 0; justify-content: flex-end; }
 .bxf-botActions .bxf-button { flex: none; white-space: nowrap; }
 .bxf-botActions .bxf-repairButton { color: var(--bxf-accent); border-color: color-mix(in srgb, var(--bxf-accent) 35%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%))); }
 .bxf-botActions .bxf-repairButton:hover:not(:disabled) { background: color-mix(in srgb, var(--bxf-accent) 7%, transparent); }
-.bxf-repairAction { display: inline-flex; }.bxf-repairTooltip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; width: min(330px, 100%); display: grid; gap: 3px; opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; padding: 3px 7px; border: 0; border-radius: var(--dim-radius-8); color: var(--dsw-static-neutral-bluish-00, #f9fafb); background: var(--dsw-alias-tooltip-bg, #2c2c2e); box-shadow: none; font-size: var(--dim-font-13); line-height: 20px; font-weight: 400; }
+.bxf-repairAction { display: inline-flex; }.bxf-repairTooltip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; width: min(330px, 100%); display: grid; gap: var(--dim-gap-3); opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; padding: 3px 7px; border: 0; border-radius: var(--dim-radius-8); color: var(--dsw-static-neutral-bluish-00, #f9fafb); background: var(--dsw-alias-tooltip-bg, #2c2c2e); box-shadow: none; font-size: var(--dim-font-13); line-height: 20px; font-weight: 400; }
 .bxf-repairTooltip strong { font-size: var(--dim-font-12); line-height: 17px; font-weight: 600; }
 .bxf-repairTooltip > span { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-11); line-height: 17px; font-weight: 400; overflow-wrap: anywhere; }
 .bxf-repairAction:hover .bxf-repairTooltip,
@@ -474,16 +474,16 @@ const CSS = String.raw`
 .bxf-confirm p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: 19px; margin: 4px 0 0; }
 .bxf-confirm .bxf-actions { margin-top: 12px; }
 
-.bxf-error { min-height: 252px; display: grid; grid-template-columns: 44px minmax(0, 1fr); align-content: center; gap: 15px; padding: 30px; }
+.bxf-error { min-height: 252px; display: grid; grid-template-columns: 44px minmax(0, 1fr); align-content: center; gap: var(--dim-gap-15); padding: 30px; }
 .bxf-errorIcon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--dim-radius-12); color: var(--bxf-error); background: color-mix(in srgb, var(--bxf-error) 9%, transparent); }
-.bxf-error h3 { font-size: var(--dim-font-16); line-height: 25px; }
+.bxf-error h3 { font-size: var(--dim-font-16); line-height: 25px; overflow-wrap: anywhere; }
 .bxf-error p { color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: 21px; margin-top: 5px; overflow-wrap: anywhere; }
-.bxf-errorCode { display: inline-block; color: var(--dsw-alias-label-tertiary, #81858c); font-family: var(--ds-font-family-code, monospace); font-size: var(--dim-font-11); margin-top: 7px; }
+.bxf-errorCode { display: inline-block; color: var(--dsw-alias-label-tertiary, #81858c); font-family: var(--ds-font-family-code, monospace); font-size: var(--dim-font-11); margin-top: 7px; overflow-wrap: anywhere; }
 
 .bxf-statusNotice {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--dim-gap-9);
   border: 0.5px solid color-mix(in srgb, var(--bxf-warning) 28%, var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)));
   border-radius: var(--dim-radius-10);
   padding: 9px 11px;
@@ -511,7 +511,7 @@ const CSS = String.raw`
 @keyframes bxf-revealProvision { from { opacity: 0; transform: translateY(-5px); } }
 
 @container (max-width: 620px) {
-  .bxf-headingTools { gap: 6px; }
+  .bxf-headingTools { gap: var(--dim-gap-6); }
   .bxf-headingTools .bxf-totalBadge { padding-inline: 8px; }
   .bxf-headingTools .bxf-bindButton { padding-inline: 10px; }
 }

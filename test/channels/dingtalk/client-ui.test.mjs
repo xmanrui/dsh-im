@@ -68,7 +68,7 @@ test('the narrow-panel toolbar keeps all three controls on one row', async () =>
   const styles = await readFile(STYLES_URL, 'utf8');
   assert.match(
     styles,
-    /@container \(max-width: 680px\)[\s\S]*\.ddt-tools \{ width: 100%; flex-wrap: nowrap; gap: 6px; \}/,
+    /@container \(max-width: 680px\)[\s\S]*\.ddt-tools \{ width: 100%; flex-wrap: nowrap; gap: var\(--dim-gap-6\); \}/,
   );
   assert.match(styles, /\.ddt-tools \.ddt-badge \{ min-height: 34px;/);
   assert.match(styles, /\.ddt-tools \.ddt-button \{[^\n]*white-space: nowrap;/);

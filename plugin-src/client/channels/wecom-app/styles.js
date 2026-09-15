@@ -4,12 +4,12 @@ const CSS = String.raw`
 .dwecomapp-page { --ddt-accent: #07c160; --ddt-accent-deep: #059a4c; --ddt-accent-wash: #eefaf3; }
 .dwecomapp-avatar, .dwecomapp-brand { color: #07c160; background: #fff; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
 .dwecomapp-avatar svg, .dwecomapp-brand svg { display: block; }
-.dim-appFieldGrid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-.dim-callbackBox { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px dashed var(--dsw-alias-border-l3, #e5e6eb); border-radius: var(--dim-radius-8); }
+.dim-appFieldGrid { display: grid; gap: var(--dim-gap-10); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.dim-callbackBox { display: flex; flex-direction: column; gap: var(--dim-gap-6); padding: 10px 12px; border: 1px dashed var(--dsw-alias-border-l3, #e5e6eb); border-radius: var(--dim-radius-8); }
 .dim-callbackBox strong { font-size: var(--dim-font-12); color: var(--dsw-alias-label-secondary, #646a73); }
-.dim-callbackRow { display: flex; gap: 8px; align-items: center; }
+.dim-callbackRow { display: flex; gap: var(--dim-gap-8); align-items: center; }
 .dim-callbackRow input { flex: 1 1 auto; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--dim-font-12); }
-.dim-appSwitchRow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: var(--dim-font-13); }
+.dim-appSwitchRow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--dim-gap-8); font-size: var(--dim-font-13); }
 /* Both were mounted with no rule at all (wecom-app/index.js:161,190), so the
    text fell back to the browser default. Native gives help text under a
    control this shape (ui-settings-plugins .hint). */

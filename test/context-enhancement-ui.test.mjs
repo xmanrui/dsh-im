@@ -663,7 +663,7 @@ test('the approved neutral entry and theme-aware modal keep responsive labels an
   assert.match(styles, /\.dim-contextFieldKey \{[^}]*ui-monospace/);
   // The second track must not be sized by its content: the per-field caveat is a
   // full-width row, and a max-content track made the grid overflow the dialog.
-  assert.match(styles, /\.dim-contextFieldText \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\);[^}]*column-gap: 5px;/);
+  assert.match(styles, /\.dim-contextFieldText \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\);[^}]*column-gap: var\(--dim-gap-5\);/);
   assert.match(styles, /\.dim-contextFieldHint \{[^}]*grid-column: 1 \/ -1;/);
   assert.match(styles, /\.dim-contextField \{[^}]*position: relative;/);
   assert.match(styles, /\.dim-contextFieldHelp \{[^}]*position: static;/);
