@@ -252,6 +252,8 @@ node bin/dsh-im.mjs install --source .
 
 `npm run check` runs unit tests, builds the Host and Client artifacts, and verifies that the published package contains neither credentials nor standalone channel settings-page registrations.
 
+Before changing the settings page's presentation layer (`plugin-src/client/styles.js` and each channel's `styles.js`), read the [presentation-layer style contract](docs/adr/0002-presentation-layer-style-contract.md). It records the four cascade mechanisms behind "one role, several authors", the verification standard, the axes already converged, and the three contract-test guards. (Chinese only.)
+
 IM management uses Harness browser authentication and Host/Origin trust checks by default. Once Harness allows and authenticates access from your LAN address, you can view and configure IM bots without any extra dsh-im configuration.
 
 To additionally restrict IM management to local access, set the following in the active Web profile's `cordis.patch.yml`:
