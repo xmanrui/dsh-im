@@ -356,8 +356,11 @@ test('the general settings page uses an Attachments tab with contextual help and
   // No label wrapper: the input takes its accessible name from the heading.
   assert.doesNotMatch(markup, /<label/);
   assert.match(markup, /<input[^>]*aria-labelledby="dim-globalTtlTitle"/);
-  assert.match(markup, /aria-label="查看附件保留时长说明"/);
-  assert.match(markup, /class="dim-globalTtlTooltip" role="tooltip"/);
+  // The retention legend is inline hint text, so its trigger is gone.
+  assert.doesNotMatch(markup, /查看附件保留时长说明/);
+  // The value legend is a hint under the input now, not a hover layer.
+  assert.match(markup, /class="dim-globalTtlHints"/);
+  assert.doesNotMatch(markup, /dim-globalTtlTooltip/);
   assert.match(markup, /<code>1~8760<\/code>/);
   assert.match(markup, /正在读取通用设置…/);
   // Field actions share one row; the heading stays dedicated to its label and help.
@@ -782,7 +785,9 @@ test('credential binding is a distinct secondary action beside QR binding in fou
   }
 
   const styles = await readFile(STYLES_URL, 'utf8');
-  assert.match(styles, /\.dim-panel \.dim-bindActions \{[^}]*flex-wrap: nowrap;/);
+  // The action row wraps now: at narrow widths the secondary button slid under
+  // the online badge (measured 9.2px overlap at vw 560).
+  assert.match(styles, /\.dim-panel \.dim-bindActions \{[^}]*flex-wrap: wrap;/);
   assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: 14px;[^}]*background: transparent;/);
   assert.match(styles, /\.dim-panel \.dim-actionIcon \{[^}]*flex: 0 0 15px;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-credentialPanel \{[^}]*border-left:/);

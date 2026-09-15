@@ -377,7 +377,9 @@ test('access settings preserve independent mode drafts and save direct and group
   assert.equal(renderer.root.findAllByProps({ role: 'tab' }).length, 3);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessScene' }).length, 2);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessOwnerNotice' }).length, 0);
-  assert.equal(accessHelpButtons(renderer.root).length, 2);
+  // The owner rule is inline hint text now, so neither scene carries a "?"
+  // trigger; the sentence itself is asserted below.
+  assert.equal(accessHelpButtons(renderer.root).length, 0);
   for (const [scene, title] of [['direct', '私聊'], ['group', '群聊']]) {
     const sceneEditor = renderer.root.findByProps({ 'data-scene': scene });
     // Grouping is carried by role=group + aria-labelledby, which replaces the
@@ -387,15 +389,9 @@ test('access settings preserve independent mode drafts and save direct and group
     const sceneLegend = sceneEditor.findByProps({ className: 'dim-accessLegend' });
     assert.equal(sceneLegend.props.id, sceneEditor.props['aria-labelledby']);
     assert.match(textOf(sceneLegend), new RegExp(title));
-    const accessHelpButton = sceneEditor.findByProps({
-      'aria-label': `${title} 查看访问权限说明`,
-    });
-    const accessHelpTooltip = sceneEditor.findByProps({
-      className: 'dim-channelTooltip dim-accessHelpTooltip',
-    });
-    assert.equal(accessHelpTooltip.props.role, 'tooltip');
-    assert.equal(accessHelpButton.props['aria-describedby'], accessHelpTooltip.props.id);
-    assert.match(textOf(accessHelpTooltip), /原所有者或扫码接入者始终可以访问并执行命令/);
+    // The owner rule reads in place now: no "?" trigger, no hover layer.
+    const ownerHint = sceneEditor.findByProps({ className: 'dim-helpHint' });
+    assert.match(textOf(ownerHint), /原所有者或扫码接入者始终可以访问并执行命令/);
   }
   assert.equal(accessHelpButtons(renderer.root.findByProps({ className: 'dim-accessActions' })).length, 0);
   assert.equal(accessHelpButtons(renderer.root.findByProps({ role: 'tablist' })).length, 0);
@@ -428,18 +424,13 @@ test('access settings preserve independent mode drafts and save direct and group
     });
     await flush();
   });
-  const directAllowlistHelp = renderer.root.findByProps({
-    'aria-label': '私聊 查看白名单说明',
-  });
-  const directAllowlistTooltip = renderer.root.findByProps({
-    className: 'dim-channelTooltip dim-accessEmptyAllowlistTooltip',
-  });
-  assert.equal(directAllowlistTooltip.props.role, 'tooltip');
-  assert.equal(directAllowlistHelp.props['aria-describedby'], directAllowlistTooltip.props.id);
-  assert.equal(
-    textOf(directAllowlistTooltip),
-    '当前没有白名单用户，保存后普通用户将无法使用机器人。',
-  );
+  // An empty allowlist is a state message about the list, not help: it reads in
+  // place now instead of hiding behind a "?" trigger.
+  const emptyAllowlistHint = renderer.root
+    .findAllByProps({ className: 'dim-helpHint' })
+    .map(textOf)
+    .find((text) => text === '当前没有白名单用户，保存后普通用户将无法使用机器人。');
+  assert.ok(emptyAllowlistHint, 'the empty-allowlist warning is stated inline');
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessWarning' }).length, 0);
   assert.match(
     textOf(renderer.root.findByProps({ 'data-scene': 'direct' })),
@@ -465,7 +456,12 @@ test('access settings preserve independent mode drafts and save direct and group
     });
     await flush();
   });
-  assert.ok(renderer.root.findByProps({ 'aria-label': '群聊 查看白名单说明' }));
+  assert.ok(
+    renderer.root.findAllByProps({ className: 'dim-helpHint' })
+      .map(textOf)
+      .some((text) => text === '当前没有白名单用户，保存后普通用户将无法使用机器人。'),
+    'the group scene states the empty-allowlist consequence inline',
+  );
   await act(async () => {
     renderer.root.findByProps({ 'aria-label': '群聊 访问模式' }).props.onChange({
       target: { value: 'open' },

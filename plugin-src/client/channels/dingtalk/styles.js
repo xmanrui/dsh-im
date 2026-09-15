@@ -32,11 +32,11 @@ const CSS = String.raw`
 .ddt-dot[data-tone="success"] { background: var(--ddt-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ddt-success) 14%, transparent); }
 .ddt-dot[data-tone="warning"] { background: var(--ddt-warning); }
 .ddt-dot[data-tone="error"] { background: var(--ddt-error); }
-.ddt-button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 13px; border: 0.5px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.ddt-button { height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 10px; border: 0.5px solid var(--dsw-alias-border-l3, #dfe1e5); border-radius: 14px; color: var(--dsw-alias-label-primary, #1f2329); background: transparent; font: inherit; font-size: 12px; font-weight: 400; text-decoration: none; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
 .ddt-button:hover:not(:disabled) { border-color: #aeb3bb; background: var(--dsw-alias-interactive-bg-hover, #f7f8fa); }
 .ddt-button:active:not(:disabled) { transform: translateY(1px); }
-.ddt-button:focus-visible { outline: 2px solid color-mix(in srgb, var(--ddt-accent) 70%, white); outline-offset: 2px; }
-.ddt-button:disabled { cursor: not-allowed; opacity: .55; }
+.ddt-button:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
+.ddt-button:disabled { cursor: not-allowed; opacity: 0.4; }
 .ddt-button[data-kind="primary"] { color: #fff; border-color: var(--ddt-accent); background: var(--ddt-accent); }
 .ddt-button[data-kind="primary"]:hover:not(:disabled) { border-color: var(--ddt-accent-deep); background: var(--ddt-accent-deep); }
 .ddt-button[data-kind="danger"] { color: var(--ddt-error); }
@@ -47,7 +47,7 @@ const CSS = String.raw`
 .ddt-empty h3 { margin: 8px 0; font-size: 18px; }
 .ddt-empty p { max-width: 560px; color: var(--dsw-alias-label-secondary, #646a73); line-height: 1.65; }
 .ddt-empty .ddt-actions { margin-top: 20px; }
-.ddt-brandMark { width: 110px; height: 110px; display: grid; place-items: center; justify-self: center; border-radius: 28px; color: #fff; background: linear-gradient(145deg, #2997ff, var(--ddt-accent)); box-shadow: 0 18px 45px rgb(22 119 255 / 23%); }
+.ddt-brandMark { width: 110px; height: 110px; display: grid; place-items: center; justify-self: center; border-radius: 24px; color: #fff; background: linear-gradient(145deg, #2997ff, var(--ddt-accent)); box-shadow: 0 18px 45px rgb(22 119 255 / 23%); }
 .ddt-brandMark svg { filter: drop-shadow(0 3px 8px rgb(0 35 96 / 16%)); }
 .ddt-qrLayout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 34px; align-items: start; }
 .ddt-qrColumn { display: flex; flex-direction: column; align-items: center; gap: 12px; }

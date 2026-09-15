@@ -163,11 +163,13 @@ test('context settings default to off with sender ID and empty guidance, and exp
   assert.equal(entry.props.disabled, false);
   assert.equal(entry.props['aria-haspopup'], 'dialog');
   await open(renderer.root);
-  const contextHelp = renderer.root.findByProps({ 'aria-label': '查看上下文增强说明' });
-  const contextTooltip = renderer.root.findByProps({ id: contextHelp.props['aria-describedby'] });
-  assert.equal(renderer.root.findByProps({ role: 'dialog' }).props['aria-describedby'], contextTooltip.props.id);
-  assert.match(textOf(contextTooltip), /选择在哪些会话中启用.*不查询平台 API/);
-  assert.equal(renderer.root.findAllByType('p').some((node) => textOf(node).startsWith('选择在哪些会话中启用')), false);
+  // The dialog's description is inline hint text now. The description
+  // relationship has to survive the trigger's removal, so assert it through the
+  // dialog rather than through the button that used to point at it.
+  const dialogDescriptionId = renderer.root.findByProps({ role: 'dialog' }).props['aria-describedby'];
+  assert.ok(dialogDescriptionId, 'the dialog keeps an accessible description');
+  const dialogDescription = renderer.root.findByProps({ id: dialogDescriptionId });
+  assert.match(textOf(dialogDescription), /选择在哪些会话中启用.*不查询平台 API/);
   assert.deepEqual(tabs(renderer.root).map(textOf), ['私聊', '群聊']);
   assert.deepEqual(tabs(renderer.root).map((node) => node.props['aria-selected']), [true, false]);
   assert.deepEqual(tabs(renderer.root).map((node) => node.props.tabIndex), [0, -1]);
@@ -195,10 +197,16 @@ test('context settings default to off with sender ID and empty guidance, and exp
   assert.deepEqual(renderer.root.findAllByProps({ className: 'dim-contextFieldKey' }).map(textOf), [
     ...CONTEXT_ENHANCEMENT_FIELDS, ...CONTEXT_ENHANCEMENT_FIELDS,
   ]);
-  const fieldsHelp = renderer.root.findByProps({ 'aria-label': '查看群聊来源字段说明' });
-  const fieldsTooltip = renderer.root.findByProps({ id: fieldsHelp.props['aria-describedby'] });
-  assert.match(textOf(fieldsTooltip), /增强提示词中请使用字段名（如 senderId、conversationType）.*不会额外查询或补全/);
-  assert.equal(renderer.root.findAllByType('p').some((node) => textOf(node).startsWith('增强提示词中请使用字段名')), false);
+  // The fields convention is inline hint text now, so it is readable without a
+  // hover; the "?" trigger and its tooltip were removed with it.
+  // One legend per scope panel, so there are two.
+  const fieldsHints = renderer.root.findAllByProps({ className: 'dim-helpHint dim-contextLegendHint' });
+  assert.equal(fieldsHints.length, 2);
+  assert.match(textOf(fieldsHints[0]), /增强提示词中请使用字段名（如 senderId、conversationType）.*不会额外查询或补全/);
+  assert.equal(
+    renderer.root.findAll((node) => node.props?.['aria-label'] === '查看群聊来源字段说明').length,
+    0,
+  );
   assert.equal(guidance(renderer.root, 'group').props.value, '');
   assert.equal(guidance(renderer.root, 'direct').props.value, '');
   assert.equal(guidance(renderer.root, 'group').props.placeholder, CONTEXT_GROUP_GUIDANCE_EXAMPLE);
@@ -211,17 +219,21 @@ test('context settings default to off with sender ID and empty guidance, and exp
   assert.equal(textOf(tooltip.findByProps({ className: 'dim-contextTooltipExample' })), CONTEXT_GROUP_GUIDANCE_EXAMPLE);
   assert.equal(guidance(renderer.root, 'group').props['aria-describedby'], tooltip.props.id);
   assert.equal(renderer.root.findAllByType('p').some((node) => /只需填写正文|发送者标识可能包含/.test(textOf(node))), false);
-  const senderNameHelp = renderer.root.findByProps({ 'aria-label': '查看群聊发送者昵称字段说明' });
-  const senderNameTooltip = renderer.root.findByProps({ id: senderNameHelp.props['aria-describedby'] });
-  assert.equal(senderNameHelp.props.type, 'button');
-  assert.equal(senderNameHelp.parent.props.className, 'dim-contextHelp dim-contextFieldHelp');
-  assert.equal(senderNameHelp.parent.parent.props.className, 'dim-contextFieldText');
-  assert.match(textOf(senderNameTooltip), /不是每个渠道.*dsh_im_source.*省略 senderName/s);
-  const conversationTitleHelp = renderer.root.findByProps({ 'aria-label': '查看群聊会话标题字段说明' });
-  const conversationTitleTooltip = renderer.root.findByProps({ id: conversationTitleHelp.props['aria-describedby'] });
-  assert.equal(conversationTitleHelp.props.type, 'button');
-  assert.equal(conversationTitleHelp.parent.props.className, 'dim-contextHelp dim-contextFieldHelp');
-  assert.match(textOf(conversationTitleTooltip), /不是每个渠道.*dsh_im_source.*省略 conversationTitle/s);
+  // Each field's caveat is inline hint text under its own label now, so it reads
+  // without a hover and the trigger no longer exists.
+  const senderNameHint = renderer.root
+    .findAllByProps({ className: 'dim-helpHint dim-contextFieldHint' })
+    .map(textOf)
+    .find((text) => /省略 senderName/.test(text));
+  assert.ok(senderNameHint, 'the sender-name field keeps its caveat');
+  assert.match(senderNameHint, /不是每个渠道.*dsh_im_source.*省略 senderName/s);
+  const fieldHintCount = renderer.root.findAllByProps({ className: 'dim-helpHint dim-contextFieldHint' }).length;
+  assert.equal(fieldHintCount, 8, 'two scopes times the four fields that carry a caveat');
+  const conversationTitleHint = renderer.root
+    .findAllByProps({ className: 'dim-helpHint dim-contextFieldHint' })
+    .map(textOf)
+    .find((text) => /省略 conversationTitle/.test(text));
+  assert.ok(conversationTitleHint, 'the conversation-title field keeps its caveat');
   assert.deepEqual(saved, []);
 });
 
@@ -649,7 +661,10 @@ test('the approved neutral entry and theme-aware modal keep responsive labels an
   assert.match(styles, /\.dim-contextGuidance textarea \{[^}]*min-height: 88px;/);
   assert.match(styles, /\.dim-contextGuidance textarea::placeholder \{[^}]*--dsw-alias-label-dimmed[^}]*opacity: 1;/);
   assert.match(styles, /\.dim-contextFieldKey \{[^}]*ui-monospace/);
-  assert.match(styles, /\.dim-contextFieldText \{[^}]*grid-template-columns: max-content max-content;[^}]*column-gap: 5px;/);
+  // The second track must not be sized by its content: the per-field caveat is a
+  // full-width row, and a max-content track made the grid overflow the dialog.
+  assert.match(styles, /\.dim-contextFieldText \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\);[^}]*column-gap: 5px;/);
+  assert.match(styles, /\.dim-contextFieldHint \{[^}]*grid-column: 1 \/ -1;/);
   assert.match(styles, /\.dim-contextField \{[^}]*position: relative;/);
   assert.match(styles, /\.dim-contextFieldHelp \{[^}]*position: static;/);
   assert.match(styles, /\.dim-contextTooltip\.dim-contextFieldTooltip \{[^}]*right: 0;[^}]*left: auto;/);

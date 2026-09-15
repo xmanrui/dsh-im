@@ -235,19 +235,7 @@ export function GlobalSettingsPanel({ rpcCall }) {
     h('div', { className: 'dim-globalHead' },
       h('div', { className: 'dim-globalHeadTitle' },
         h('h3', { id: 'dim-globalTtlTitle' }, '附件保留时长 (小时)'),
-        h('div', { className: 'dim-globalTtlHelp' },
-          h('button', {
-            type: 'button',
-            className: 'dim-channelHelpButton dim-globalTtlHelpButton',
-            'aria-label': '查看附件保留时长说明',
-            'aria-describedby': ttlHintsId,
-          }, h(QuestionGlyph, { size: 14 })),
-          h('div', {
-            id: ttlHintsId,
-            className: 'dim-globalTtlTooltip',
-            role: 'tooltip',
-          },
-          h('ul', { className: 'dim-globalTtlHints' },
+        h('ul', { id: ttlHintsId, className: 'dim-globalTtlHints' },
             h('li', null,
               h('code', null, '-1'),
               h('span', null, '永久保留，不会自动清理')),
@@ -256,7 +244,7 @@ export function GlobalSettingsPanel({ rpcCall }) {
               h('span', null, '每 Turn 结束后立即清理')),
             h('li', null,
               h('code', null, `1~${INBOUND_TTL_MAX_HOURS}`),
-              h('span', null, '小时后自动清理'))))))),
+              h('span', null, '小时后自动清理'))))),
     h('form', {
       className: 'dim-globalTtlRow',
       onSubmit: (event) => {
