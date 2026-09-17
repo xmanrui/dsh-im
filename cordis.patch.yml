@@ -1,3 +1,7 @@
+- id: connection
+  inject:
+    - webRuntime
+    - webServer
 - insert:
     - id: xmanrui-dsh-im
       name: '@xmanrui/dsh-im'
