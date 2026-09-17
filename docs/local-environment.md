@@ -167,7 +167,7 @@ git rev-parse origin/main           # 期望 0d36ae3
 ### 4.4 界面标志物：确认跑的是当前构建
 
 三个标志物都取自本分支最近几笔改动，**停机前在 3080 上逐个实测过**。
-打开 设置 → IM bots，在浏览器控制台粘这一段：
+打开 **Plugins → Installed → `@xmanrui/dsh-im`**，在浏览器控制台粘这一段：
 
 ```js
 document.querySelector(".dim-scanButton").getAttribute("data-kind")        // 期望 "secondary"
@@ -188,7 +188,7 @@ getComputedStyle(document.documentElement).getPropertyValue("--dim-gap-3").trim(
 
 **肉眼等价物**（不想开控制台就看这三处）：
 
-1. 进「设置 → IM bots」，**左侧渠道是一排可换行的 tab 条**，页面里没有第二列渠道导航。
+1. 进 **Plugins → Installed → `@xmanrui/dsh-im`**，**左侧渠道是一排可换行的 tab 条**，页面里没有第二列渠道导航。
 2. 渠道标题旁边**没有「?」小圆按钮**，说明文字直接写在标题下面。
 3. 扫码接入按钮是一个**中性描边的胶囊**；鼠标悬停时**只有底色变化、描边不变**（原生 `.outline` 按钮的行为）。
    旧构建在深色主题下会给它描一圈近白色的边。

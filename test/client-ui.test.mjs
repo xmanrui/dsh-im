@@ -11,6 +11,7 @@ import TestRenderer from 'react-test-renderer';
 import {
   apply as applyClient,
   IM_PLUGIN_VERSION,
+  IMPluginConfigSection,
   IMSettingsTab,
   inject as clientInject,
 } from '../plugin-src/client/index.js';
@@ -213,11 +214,14 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   }));
 
   assert.match(markup, /IM机器人/);
-  assert.match(markup, /让 DeepSeek Harness 触手可及/);
+  // The Plugins page draws the bundle's title and one-liner itself; the section
+  // keeps only the version the Host reports it is running.
+  assert.doesNotMatch(markup, /让 DeepSeek Harness 触手可及/);
+  assert.doesNotMatch(markup, /dim-brandName/);
   assert.match(markup, /class="dim-brand"/);
   assert.equal(IM_PLUGIN_VERSION, packageVersion);
   assert.match(markup, new RegExp(
-    `<div class="dim-brandHeading"><strong class="dim-brandName">DSH-IM<\\/strong><span class="dim-brandVersion">v${packageVersion.replaceAll('.', '\\.')}<\\/span><\\/div>`,
+    `<div class="dim-brand"><span class="dim-brandVersion">v${packageVersion.replaceAll('.', '\\.')}<\\/span><\\/div>`,
   ));
   assert.doesNotMatch(markup, /dim-versionTooltip|当前版本/);
   assert.doesNotMatch(markup, /dim-brandLogo|<img/);
@@ -240,11 +244,9 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   assert.match(settingsButtonMarkup, /data-im-icon="global-settings"/);
   assert.doesNotMatch(settingsButtonMarkup, /通用设置/);
   assert.match(styles, /\.dim-title \{[^}]*margin: 0 0 12px;/);
-  assert.match(styles, /\.dim-title p \{[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);[^}]*font-size: var\(--dim-font-13\);[^}]*line-height: var\(--dim-line-13\);[^}]*font-weight: var\(--dim-weight-400\);/);
   assert.match(styles, /\.dim-brand \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*align-items: flex-start;[^}]*gap: var\(--dim-gap-1\);/);
-  assert.match(styles, /\.dim-brandHeading \{[^}]*display: flex;[^}]*align-items: center;[^}]*gap: var\(--dim-gap-8\);[^}]*white-space: nowrap;/);
-  // Native section title role: 18/600 with no letter-spacing, not a 20/800 wordmark.
-  assert.match(styles, /\.dim-brandName \{[^}]*font-size: var\(--dim-font-18\);[^}]*line-height: var\(--dim-line-18\);[^}]*font-weight: var\(--dim-weight-600\);[^}]*letter-spacing: 0;/);
+  // The section owns no title role: the Plugins page draws the bundle title.
+  assert.doesNotMatch(styles, /\.dim-brandHeading|\.dim-brandName|\.dim-title p \{/);
   // The version renders as a native Tag: r999 capsule, 0.5px l4 outline, 11/17/500.
   assert.match(styles, /\.dim-brandVersion \{[^}]*padding: 1px 8px;[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-full\);[^}]*corner-shape: round;[^}]*font: 500 11px\/17px/);
   assert.doesNotMatch(styles, /dim-versionTooltip|\.dim-brand:focus-visible/);
@@ -1296,7 +1298,8 @@ test('client source contains no legacy Plugins-tab settings registrations', asyn
   assert.deepEqual(legacy, []);
 });
 
-test('client registers one top-level bilingual IM settings section with a directory picker', async () => {
+test('client registers one bilingual IM bundle configuration for the Plugins page with a directory picker', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   const effects = [];
   const registrations = [];
   const dictionaries = [];
@@ -1342,7 +1345,7 @@ test('client registers one top-level bilingual IM settings section with a direct
     },
     slots: {
       inject(name, install) {
-        assert.equal(name, 'settings.section');
+        assert.equal(name, 'plugins.bundle.config');
         install();
       },
       register(options, component) {
@@ -1362,12 +1365,13 @@ test('client registers one top-level bilingual IM settings section with a direct
     assert.equal(dictionaries[0].namespace, IM_LOCALE_NAMESPACE);
     assert.deepEqual(Object.keys(dictionaries[0].value.en).sort(), Object.keys(dictionaries[0].value.zh).sort());
     assert.equal(registrations.length, 1);
-    assert.equal(registrations[0].options.name, 'settings.section');
-    assert.equal(registrations[0].options.id, 'xmanrui-dsh-im');
-    assert.equal(registrations[0].options.order, 21);
+    assert.equal(registrations[0].options.name, 'plugins.bundle.config');
+    // The page renders this entry only on the detail page of the bundle whose
+    // package name is the key, so the key must be the manifest name verbatim.
+    assert.equal(registrations[0].options.key, '@xmanrui/dsh-im');
+    assert.equal(registrations[0].options.key, manifest.name);
     assert.equal(registrations[0].options.locale, IM_LOCALE_NAMESPACE);
-    assert.equal(registrations[0].options.label(), 'IM bots');
-    assert.equal(registrations[0].component, IMSettingsTab);
+    assert.equal(registrations[0].component, IMPluginConfigSection);
 
     const injected = registrations[0].options.inject();
     const signal = new AbortController().signal;
@@ -1391,8 +1395,14 @@ test('client registers one top-level bilingual IM settings section with a direct
 
     const markup = renderToStaticMarkup(React.createElement(
       registrations[0].component,
-      injected,
+      { ...injected, view: 'page' },
     ));
+    // The page asks a bundle's configuration for its page view only; the
+    // summary view renders nothing rather than failing.
+    assert.equal(renderToStaticMarkup(React.createElement(
+      registrations[0].component,
+      { ...injected, view: 'summary' },
+    )), '');
     // A browser-derived interface locale reaches the Host only through this
     // mirror, so the settings section must report it while it is mounted.
     const mirrorEffect = effects.find((entry) =>
@@ -1409,7 +1419,6 @@ test('client registers one top-level bilingual IM settings section with a direct
     disposeMirror();
     assert.equal(localeListeners.size, 0);
 
-    assert.match(markup, /Connecting DeepSeek Harness/);
     assert.match(markup, new RegExp(
       `class="dim-brandVersion">v${IM_PLUGIN_VERSION.replaceAll('.', '\\.')}<\\/span>`,
     ));
@@ -1422,6 +1431,11 @@ test('client registers one top-level bilingual IM settings section with a direct
   } finally {
     setImTranslator(null);
   }
+});
+
+test('the IM bundle configuration renders only the page view', () => {
+  assert.equal(renderToStaticMarkup(React.createElement(IMPluginConfigSection, {})), '');
+  assert.equal(renderToStaticMarkup(React.createElement(IMPluginConfigSection, { view: 'summary' })), '');
 });
 
 test('client directory picker uses the current DSH uiWorkspace service', async () => {
@@ -1447,7 +1461,7 @@ test('client directory picker uses the current DSH uiWorkspace service', async (
     },
     slots: {
       inject(name, install) {
-        assert.equal(name, 'settings.section');
+        assert.equal(name, 'plugins.bundle.config');
         install();
       },
       register(options, component) {

@@ -224,10 +224,7 @@ body {
 .dim-page *, .dim-page *::before, .dim-page *::after { box-sizing: border-box; }
 .dim-title { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-16); margin: 0 0 12px; }
 .dim-brand { min-width: 0; width: max-content; max-width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: var(--dim-gap-1); margin: -2px -6px; padding: 2px 6px; border-radius: var(--dim-radius-8); }
-.dim-brandHeading { display: flex; align-items: center; gap: var(--dim-gap-8); white-space: nowrap; }
-.dim-brandName { color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-18); line-height: var(--dim-line-18); font-weight: var(--dim-weight-600); letter-spacing: 0; }
 .dim-brandVersion { display: inline-flex; align-items: center; padding: 1px 8px; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: var(--dim-radius-full); corner-shape: round; color: var(--dsw-alias-label-tertiary, #81858c); font: 500 11px/17px var(--dim-font-mono); }
-.dim-title p { margin: 0; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-13); line-height: var(--dim-line-13); font-weight: var(--dim-weight-400); white-space: nowrap; }
 .dim-titleActions { display: flex; align-items: center; justify-content: flex-end; gap: var(--dim-gap-8); flex-wrap: wrap; }
 .dim-updateButton { height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: var(--dim-gap-4); padding: 0 10px; border: var(--dim-control-border); border-radius: var(--dim-radius-14); color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: var(--dim-line-12); cursor: pointer; }
 .dim-updateButton:hover:not(:disabled) { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover-solid); }
@@ -1120,7 +1117,6 @@ body {
 }
 @media (max-width: 560px) {
   .dim-title { flex-direction: column; gap: var(--dim-gap-10); }
-  .dim-title p { white-space: normal; }
   .dim-titleActions { justify-content: flex-start; }
   .dim-updateBackdrop { padding: 12px; }
   .dim-updateDialog { max-height: calc(100vh - 24px); }

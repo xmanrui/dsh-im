@@ -111,7 +111,7 @@ Install the published stable release from npm (recommended):
 dsh plugin --profile web add -w @xmanrui/dsh-im
 ```
 
-Restart `dsh web`, refresh the browser, then open **Settings → IM Bot**. The top-level IM Bot entry uses `order: 21` to follow **Agent Presets**, and the Plugins page no longer retains the old entry. Upgrading preserves existing bots, credentials, workspaces, Agent Presets, and Session bindings.
+Restart `dsh web`, refresh the browser, then open **Plugins → Installed → `@xmanrui/dsh-im`**: its configuration renders on that bundle's detail page between the description and its rows, and the old top-level settings entry is gone. Upgrading preserves existing bots, credentials, workspaces, Agent Presets, and Session bindings.
 
 Local `dsh web` and DSH Desktop reuse the current Host's internal services by default: legacy Harness releases use `apiProxy`, while current releases automatically use the Typert Gateway plus the Session and Workspace controllers. No Harness address or loopback HTTP connection is required. Desktop's compatibility, extended-window, and advanced modes do not require browser access or LAN access to be enabled. An explicit channel `harnessBaseUrl` is retained only for legacy remote HTTP/WebSocket Harness endpoints; failed internal calls never silently switch to another Host.
 
@@ -233,7 +233,7 @@ Startup configuration validation failures also include `file`, `field`, and `iss
 
 ## Design
 
-- Registers one top-level **IM Bot** settings page containing the built-in IM channels and one AI Office Connector.
+- Registers one `@xmanrui/dsh-im` bundle configuration (**Plugins** → **Installed** → the bundle's detail page) containing the built-in IM channels and one AI Office Connector.
 - Maintains the Host, client, and runtime sources for the built-in channels and the Office Connector in this repository without external standalone plugins.
 - Follows the DeepSeek Harness language preference and switches the settings UI live between Chinese and English. Bot chat messages, command help, and the Telegram command menu follow the same interface language and switch live, with Chinese always as the fallback so untranslated text is sent verbatim.
 - Uses logos for WeChat, Feishu, DingTalk, WeCom, WeCom app, QQ, Slack, Telegram, Discord, WhatsApp, iMessage, and AI Office navigation without enable/disable switches.
@@ -242,7 +242,7 @@ Startup configuration validation failures also include `file`, `field`, and `iss
 
 ## Local development
 
-The Web profile is verified with unmodified DSH `0.1.2-alpha.4`, `0.1.2-alpha.5`, `0.1.2-rc.1`, `0.1.3-alpha.1`, and `0.1.5-alpha.1`. All use the same dsh-im management RPC adapter through the public Connection `/api` Fetch registry; no DSH patch or rebuild is required. After upgrading the plugin, restart the Host and refresh the settings page so both sides use the same plugin build.
+The Web profile is verified with unmodified DSH `0.1.2-alpha.4`, `0.1.2-alpha.5`, `0.1.2-rc.1`, `0.1.3-alpha.1`, and `0.1.5-alpha.1`. All use the same dsh-im management RPC adapter through the public Connection `/api` Fetch registry; no DSH patch or rebuild is required. The configuration area registers into the host's `plugins.bundle.config` slot, which arrives with `0.1.6-alpha.2`: older hosts keep working but no longer offer a configuration UI. After upgrading the plugin, restart the Host and refresh the settings page so both sides use the same plugin build.
 
 ```sh
 npm install

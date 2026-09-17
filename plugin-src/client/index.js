@@ -295,11 +295,12 @@ export function IMSettingsTab({
   return h(WorkspaceDirectoryPickerContext.Provider, { value: workspaceDirectoryPicker },
     h('section', { className: 'dim-page', 'aria-label': 'IM机器人设置' },
     h('header', { className: 'dim-title' },
+      // The Plugins page draws this bundle's title, version tag, package name and
+      // one-liner directly above the section, so the header keeps only what the
+      // page cannot draw: the version the Host reports it is running, and the
+      // plugin's own tools.
       h('div', { className: 'dim-brand' },
-        h('div', { className: 'dim-brandHeading' },
-          h('strong', { className: 'dim-brandName' }, 'DSH-IM'),
-          h('span', { className: 'dim-brandVersion' }, `v${runningVersion}`)),
-        h('p', null, '让 DeepSeek Harness 触手可及')),
+        h('span', { className: 'dim-brandVersion' }, `v${runningVersion}`)),
       h('div', { className: 'dim-titleActions' },
         h(UpdatePanel, {
           rpcCall: rpcCalls.updateRpcCall,
@@ -428,6 +429,16 @@ export function IMSettingsTab({
   ));
 }
 
+/**
+ * The bundle's configuration as the Plugins page asks for it. The page draws
+ * the title, the icon, the crumb and the one-liner itself and only asks for the
+ * page view, so the summary view renders nothing here.
+ */
+export function IMPluginConfigSection({ view, ...seat }) {
+  if (view !== 'page') return null;
+  return h(IMSettingsTab, seat);
+}
+
 export function apply(ctx) {
   ctx.effect(
     () => ctx.locale.register(IM_LOCALE_NAMESPACE, { zh, en }),
@@ -505,11 +516,11 @@ export function apply(ctx) {
     pickDirectory: () => callWorkspaceDirectoryApi(ctx, 'pickDirectory'),
   });
 
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'xmanrui-dsh-im',
-    order: 21,
-    label: () => t('IM机器人'),
+  // The Plugins page renders this on the detail page of the bundle whose
+  // package name is the key, and asks it for its page view only.
+  ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+    name: 'plugins.bundle.config',
+    key: '@xmanrui/dsh-im',
     locale: IM_LOCALE_NAMESPACE,
     inject: () => ({
       dingtalkRpcCall,
@@ -529,5 +540,5 @@ export function apply(ctx) {
       globalSettingsRpcCall,
       workspaceDirectoryPicker,
     }),
-  }, IMSettingsTab));
+  }, IMPluginConfigSection));
 }

@@ -121,22 +121,29 @@ if (forbiddenDshLockPaths.length > 0) {
 if (!/\bid\s*:\s*["']@xmanrui\/dsh-im["']/u.test(client)) {
   throw new Error('client bundle does not register the dsh-im loader id');
 }
-const sourceSectionMarkers = [
-  /ctx\.slots\.inject\(\s*["']settings\.section["']/u,
-  /name\s*:\s*["']settings\.section["']/u,
-  /id\s*:\s*["']xmanrui-dsh-im["']/u,
-  /order\s*:\s*21\b/u,
-  /label\s*:\s*\(\)\s*=>\s*t\(\s*["']IM机器人["']\s*\)/u,
+const configSlotMarkers = [
+  /ctx\.slots\.inject\(\s*["']plugins\.bundle\.config["']/u,
+  /name\s*:\s*["']plugins\.bundle\.config["']/u,
   /locale\s*:\s*IM_LOCALE_NAMESPACE\b/u,
 ];
-const bundleSectionPattern = /name\s*:\s*["']settings\.section["']\s*,\s*id\s*:\s*["']xmanrui-dsh-im["']\s*,\s*order\s*:\s*21\s*,\s*label\s*:\s*\(\)\s*=>\s*[$A-Z_a-z][$\w]*\(\s*["']IM(?:机器人|\\u673A\\u5668\\u4EBA)["']\s*\)\s*,\s*locale\s*:\s*(?:[$A-Z_a-z][$\w]*|["']dsh-im["'])/u;
-if (sourceSectionMarkers.some((pattern) => !pattern.test(clientEntrySource))
+// The key must be the bundle's package name, so the page renders this entry on
+// this bundle's own detail page; a mismatch renders nothing and reports nothing.
+const configKey = `["']${manifest.name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}["']`;
+const bundleConfigPattern = new RegExp(
+  `name\\s*:\\s*["']plugins\\.bundle\\.config["']\\s*,\\s*key\\s*:\\s*${configKey}`,
+  'u',
+);
+if (configSlotMarkers.some((pattern) => !pattern.test(clientEntrySource))
   || !/IM_LOCALE_NAMESPACE\s*=\s*["']dsh-im["']/u.test(clientSources)
-  || !bundleSectionPattern.test(client)) {
-  throw new Error('client bundle does not register the localized top-level IM settings section');
+  || !bundleConfigPattern.test(client)
+  || !bundleConfigPattern.test(clientEntrySource)) {
+  throw new Error('client bundle does not register the IM bundle configuration under its package name');
 }
-if ((client.match(/\.slots\.inject\(\s*["']settings\.section["']/gu) ?? []).length !== 1) {
-  throw new Error('client bundle must register exactly one top-level settings section');
+if ((client.match(/\.slots\.inject\(\s*["']plugins\.bundle\.config["']/gu) ?? []).length !== 1) {
+  throw new Error('client bundle must register exactly one bundle configuration slot');
+}
+if (clientEntrySource.includes('settings.section') || client.includes('settings.section')) {
+  throw new Error('client source or bundle still registers the removed settings.section slot');
 }
 if (client.includes('settings.plugins.tab') || clientSources.includes('settings.plugins.tab')) {
   throw new Error('client source or bundle still contains the legacy Plugins-tab settings entry');

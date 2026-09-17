@@ -113,7 +113,7 @@ Connect IM bots to DeepSeek Harness by scanning a QR code, using an App Manifest
 dsh plugin --profile web add -w @xmanrui/dsh-im
 ```
 
-重启 `dsh web`、刷新浏览器，然后打开「设置 → IM机器人」。IM机器人使用 `order: 21`，尽量排在一级设置菜单的「Agent 预设」之后；插件页面不再保留旧入口。从旧版升级不会改变已有机器人、凭据、工作区、Agent Preset 或会话绑定。
+重启 `dsh web`、刷新浏览器，然后在侧边栏 **Plugins** 页的 **Installed** 组打开 `@xmanrui/dsh-im`：配置区在该 bundle 详情页的描述与行列表之间，设置菜单里的「IM机器人」入口已移除。从旧版升级不会改变已有机器人、凭据、工作区、Agent Preset 或会话绑定。
 
 本机 `dsh web` 和 DSH Desktop 默认直接复用当前 Host 的内部服务：旧版 Harness 使用 `apiProxy`，新版 Harness 自动使用 Typert Gateway、Session Controller 和 Workspace Controller，不需要配置 Harness 地址，也不绕行本机 HTTP 端口。Desktop 的兼容模式、扩展窗口和增强模式均无需开启“允许在浏览器中打开”或局域网访问。渠道配置中显式设置的 `harnessBaseUrl` 仅保留给旧版远程 HTTP/WebSocket Harness；内部调用失败不会自动改连其他 Host。
 
@@ -235,7 +235,7 @@ Logo 由 dsh-im 的浏览器适配显示，无需修改 DSH。适配保留原始
 
 ## 设计
 
-- Harness 一级设置菜单中只注册一个「IM机器人」设置页，其中包含内置 IM 渠道和一个 AI Office Connector；
+- 只注册一个 `@xmanrui/dsh-im` bundle 配置区（侧边栏 **Plugins** → **Installed** → 该 bundle 详情页），其中包含内置 IM 渠道和一个 AI Office Connector；
 - 内置渠道及 Office Connector 的 Host、客户端与运行时源码都在本仓库维护，不依赖外部独立插件；
 - 设置页跟随 DeepSeek Harness 的语言选择，在中文和 English 之间即时切换；机器人发出的聊天消息、命令帮助和 Telegram 命令菜单同样跟随该界面语言并即时切换，中文始终为兜底，未收录的文案原样输出；
 - 左侧使用 Logo 切换微信、飞书、钉钉、企业微信、企业微信应用、QQ、Slack、Telegram、Discord、WhatsApp、iMessage 和 AI Office，不使用启用/停用开关；
@@ -244,7 +244,7 @@ Logo 由 dsh-im 的浏览器适配显示，无需修改 DSH。适配保留原始
 
 ## 本地开发
 
-Web profile 已验证兼容原版 DSH `0.1.2-alpha.4`、`0.1.2-alpha.5`、`0.1.2-rc.1`、`0.1.3-alpha.1` 和 `0.1.5-alpha.1`。这些版本共用 dsh-im 的管理 RPC 适配，通过 Connection 的公开 `/api` Fetch 注册接口工作，无需修改或重新编译 DSH。升级插件后重启 Host 并刷新设置页，使 Host 和客户端使用同一版插件。
+Web profile 已验证兼容原版 DSH `0.1.2-alpha.4`、`0.1.2-alpha.5`、`0.1.2-rc.1`、`0.1.3-alpha.1` 和 `0.1.5-alpha.1`。这些版本共用 dsh-im 的管理 RPC 适配，通过 Connection 的公开 `/api` Fetch 注册接口工作，无需修改或重新编译 DSH。配置区注册在宿主的 `plugins.bundle.config` 槽上，该槽由 `0.1.6-alpha.2` 引入：更早的宿主上机器人功能照常工作，但插件不再提供配置界面。升级插件后重启 Host 并刷新设置页，使 Host 和客户端使用同一版插件。
 
 ```sh
 npm install
