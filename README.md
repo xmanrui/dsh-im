@@ -113,7 +113,7 @@ Connect IM bots to DeepSeek Harness by scanning a QR code, using an App Manifest
 dsh plugin --profile web add -w @xmanrui/dsh-im
 ```
 
-重启 `dsh web`、刷新浏览器，然后在侧边栏 **Plugins** 页的 **Installed** 组打开 `@xmanrui/dsh-im`：配置区在该 bundle 详情页的描述与行列表之间，设置菜单里的「IM机器人」入口已移除。从旧版升级不会改变已有机器人、凭据、工作区、Agent Preset 或会话绑定。
+重启 `dsh web`、刷新浏览器，然后在侧边栏 **Plugins** 页的 **Installed** 组打开 `@xmanrui/dsh-im`：配置区在该 bundle 详情页的描述与行列表之间，设置菜单里的「IM机器人」入口已移除。该配置槽由宿主 DSH 0.1.6 引入 —— 更早的宿主上机器人照常工作，但**插件页里不会出现配置区**（静默，不报错）；需要配置界面请把宿主升到 `0.1.6-alpha.2` 或更高。从旧版升级不会改变已有机器人、凭据、工作区、Agent Preset 或会话绑定。
 
 本机 `dsh web` 和 DSH Desktop 默认直接复用当前 Host 的内部服务：旧版 Harness 使用 `apiProxy`，新版 Harness 自动使用 Typert Gateway、Session Controller 和 Workspace Controller，不需要配置 Harness 地址，也不绕行本机 HTTP 端口。Desktop 的兼容模式、扩展窗口和增强模式均无需开启“允许在浏览器中打开”或局域网访问。渠道配置中显式设置的 `harnessBaseUrl` 仅保留给旧版远程 HTTP/WebSocket Harness；内部调用失败不会自动改连其他 Host。
 

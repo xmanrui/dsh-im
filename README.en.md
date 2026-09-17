@@ -111,7 +111,7 @@ Install the published stable release from npm (recommended):
 dsh plugin --profile web add -w @xmanrui/dsh-im
 ```
 
-Restart `dsh web`, refresh the browser, then open **Plugins → Installed → `@xmanrui/dsh-im`**: its configuration renders on that bundle's detail page between the description and its rows, and the old top-level settings entry is gone. Upgrading preserves existing bots, credentials, workspaces, Agent Presets, and Session bindings.
+Restart `dsh web`, refresh the browser, then open **Plugins → Installed → `@xmanrui/dsh-im`**: its configuration renders on that bundle's detail page between the description and its rows, and the old top-level settings entry is gone. That slot arrives with DSH 0.1.6 — on an earlier Host bots keep working, but no configuration area appears on the Plugins page (silently, with no error); for the configuration UI, run the Host at `0.1.6-alpha.2` or newer. Upgrading preserves existing bots, credentials, workspaces, Agent Presets, and Session bindings.
 
 Local `dsh web` and DSH Desktop reuse the current Host's internal services by default: legacy Harness releases use `apiProxy`, while current releases automatically use the Typert Gateway plus the Session and Workspace controllers. No Harness address or loopback HTTP connection is required. Desktop's compatibility, extended-window, and advanced modes do not require browser access or LAN access to be enabled. An explicit channel `harnessBaseUrl` is retained only for legacy remote HTTP/WebSocket Harness endpoints; failed internal calls never silently switch to another Host.
 
