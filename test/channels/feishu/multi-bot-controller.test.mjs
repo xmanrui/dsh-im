@@ -835,6 +835,25 @@ test('manual Feishu credentials are verified, stored host-side, and use app visi
   await fx.controller.close();
 });
 
+test('manual Lark binding verifies, persists, and starts the runtime with the Lark domain', async (t) => {
+  const verified = [];
+  const fx = fixture({
+    createBotIds: ['bot_lark'],
+    verifyApp: async (options) => {
+      verified.push(options);
+      return { name: 'Lark bot', openId: 'ou_lark_bot', activated: 1 };
+    },
+  });
+  t.after(() => fx.controller.close());
+  const credentials = { appId: 'cli_lark', appSecret: 'lark-private-secret', domain: 'lark' };
+  const result = await fx.controller.bindCredentials(credentials);
+  assert.deepEqual(verified, [credentials]);
+  assert.equal(fx.configStore.getBot('bot_lark').domain, 'lark');
+  assert.equal(fx.runtimes.get('bot_lark')[0].config.domain, 'lark');
+  assert.equal(result.bots[0].bot.domain, 'lark');
+  assert.doesNotMatch(JSON.stringify(result), /lark-private-secret|appSecret/);
+});
+
 test('initialization isolates failures and starts every bot with available credentials', async () => {
   const missing = bot('bot_missing', 'missing');
   const healthy = bot('bot_healthy', 'healthy');

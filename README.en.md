@@ -258,6 +258,16 @@ How to start the two local instances, get the URL token, check an installed buil
 
 IM management uses Harness browser authentication and Host/Origin trust checks by default. Once Harness allows and authenticates access from your LAN address, you can view and configure IM bots without any extra dsh-im configuration.
 
+When accessing DSH through a custom domain, if IM settings report `transport failure for /api/dsh-im/...: HTTP 403`, add the browser-facing domain to your existing DSH launch command and restart DSH:
+
+```sh
+dsh web --trusted-host dsh.example.com
+```
+
+Replace `dsh.example.com` with the actual domain, without `http://`, `https://`, or a path. A domain without a port allows any port on that domain; use `--trusted-host dsh.example.com:8443` to restrict it to a particular access port. Repeat `--trusted-host` for multiple domains. This is a DSH option; dsh-im's `rpcAuthority: trusted-host` does not add domains to DSH's trust list. Local access through `localhost` or `127.0.0.1` normally needs no extra entry.
+
+With a reverse proxy, preserve the browser-facing domain and port in the `Host` sent to DSH. The host parsed from an attached `Origin`, including any non-default port, must match that `Host`; adding two different hosts to the trust list still produces 403. `--trusted-host` configures the access check; the browser must still authenticate using a valid launch link.
+
 To additionally restrict IM management to local access, set the following in the active Web profile's `cordis.patch.yml`:
 
 ```yaml

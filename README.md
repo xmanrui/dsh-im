@@ -260,6 +260,16 @@ node bin/dsh-im.mjs install --source .
 
 IM 管理接口默认沿用 Harness 的浏览器认证和 Host／Origin 信任检查。只要 Harness 已允许并认证当前局域网访问，便可直接查看和配置 IM 机器人，无需额外修改 dsh-im 配置。
 
+通过自定义域名访问时，如果 IM 设置页出现 `transport failure for /api/dsh-im/...: HTTP 403`，请在原 DSH 启动命令中添加浏览器访问的域名，并重启 DSH：
+
+```sh
+dsh web --trusted-host dsh.example.com
+```
+
+将 `dsh.example.com` 替换为实际访问域名，不带 `http://`、`https://` 或路径。只写域名允许该域名的任意端口；如需限制到指定访问端口，使用 `--trusted-host dsh.example.com:8443`。多个域名可重复传入 `--trusted-host`。这个参数属于 DSH；dsh-im 的 `rpcAuthority: trusted-host` 本身不会把域名加入 DSH 信任列表。本机通过 `localhost` 或 `127.0.0.1` 访问通常不需要额外配置。
+
+使用反向代理时，代理传给 DSH 的 `Host` 应保留浏览器访问的域名及端口；浏览器携带的 `Origin` 解析出的 host（含非默认端口）必须与该 `Host` 一致，仅将两者分别加入信任列表仍会返回 403。`--trusted-host` 只配置访问校验，浏览器仍需通过有效启动链接完成认证。
+
 如需将 IM 管理额外限制为仅本机访问，可在当前 Web profile 的 `cordis.patch.yml` 中设置：
 
 ```yaml

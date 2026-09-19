@@ -401,9 +401,10 @@ function validPayload(endpoint, payload) {
       : 'Group message permission update requires a single valid botId.';
   }
   if (endpoint === FEISHU_ENDPOINTS.bindCredentials) {
-    return hasOnlyKeys(payload, new Set(['appId', 'appSecret']))
+    return hasOnlyKeys(payload, new Set(['appId', 'appSecret', 'domain']))
       && validCredential(payload.appId, 256)
       && validCredential(payload.appSecret, 1024)
+      && (payload.domain === undefined || payload.domain === 'feishu' || payload.domain === 'lark')
       ? null
       : 'Credential binding requires App ID and App Secret.';
   }

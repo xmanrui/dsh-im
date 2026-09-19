@@ -357,6 +357,36 @@ test('Host validates and updates the Feishu step push flag', async () => {
   await fx.dispose();
 });
 
+test('manual credentials accept only supported optional domains and forward them unchanged', async (t) => {
+  const calls = [];
+  const fx = await rpcFixture({
+    status: async () => status(),
+    startRegistration: async () => status(),
+    cancelRegistration: async () => status(),
+    disconnect: async () => status(),
+    bindCredentials: async (payload) => {
+      calls.push(payload);
+      return status();
+    },
+  });
+  t.after(() => fx.dispose());
+  const credentials = { appId: 'cli_manual', appSecret: 'manual-private-secret' };
+  for (const payload of [credentials, { ...credentials, domain: 'feishu' }, { ...credentials, domain: 'lark' }]) {
+    const result = await fx.registration.handler(FEISHU_ENDPOINTS.bindCredentials, payload, signal());
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls.at(-1), payload);
+    assert.doesNotMatch(JSON.stringify(result), /manual-private-secret|appSecret/);
+  }
+  for (const domain of ['', 'Lark', 'https://open.larksuite.com', 'unknown', null, false, 1, {}]) {
+    const result = await fx.registration.handler(
+      FEISHU_ENDPOINTS.bindCredentials, { ...credentials, domain }, signal(),
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'bad-request');
+  }
+  assert.equal(calls.length, 3);
+});
+
 test('RPC dispatch matches every endpoint in client/api.js', async () => {
   const calls = [];
   let current = status({

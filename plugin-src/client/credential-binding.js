@@ -47,6 +47,7 @@ export function CredentialBindingPanel({
   error = null,
   onSubmit,
   onCancel,
+  children,
 }) {
   const [identity, setIdentity] = React.useState('');
   const [secret, setSecret] = React.useState('');
@@ -66,6 +67,7 @@ export function CredentialBindingPanel({
     'aria-labelledby': headingId,
   },
   h('h3', { id: headingId, className: 'dim-credentialTitle' }, `手动接入${channel}机器人`),
+  children,
   h('form', {
     className: `dim-credentialForm${hasIdentity ? '' : ' dim-credentialFormSingle'}`,
     onSubmit: submit,

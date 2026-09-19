@@ -850,6 +850,73 @@ test('credential binding is a distinct secondary action beside QR binding in fou
   assert.doesNotMatch(styles, /\.dim-panel \.dim-credentialPanel \{[^}]*border-left:/);
 });
 
+test('Feishu manual binding selects Lark, clears credentials on platform changes and locks in-flight requests', async (t) => {
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    setInterval: () => 1, clearInterval() {},
+    setTimeout: () => 1, clearTimeout() {},
+    requestAnimationFrame(callback) { queueMicrotask(callback); return 1; },
+    cancelAnimationFrame() {},
+  };
+  let renderer;
+  t.after(async () => {
+    if (renderer) await act(async () => renderer.unmount());
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  });
+  const snapshot = { schemaVersion: 2, revision: 1, state: 'idle', bots: [] };
+  const bindings = [];
+  let finishBinding;
+  const rpcCall = async (endpoint, payload) => {
+    if (endpoint === FEISHU_ENDPOINTS.status) return { ok: true, value: snapshot };
+    assert.equal(endpoint, FEISHU_ENDPOINTS.bindCredentials);
+    bindings.push(payload);
+    if (payload.domain === 'feishu') throw new Error('Test binding rejected');
+    return new Promise((resolve) => { finishBinding = resolve; });
+  };
+  await act(async () => {
+    renderer = create(React.createElement(FeishuSettingsTab, { rpcCall }));
+    await flushTasks();
+  });
+  await act(async () => findButton(renderer, '手动接入').props.onClick());
+  const platform = () => renderer.root.findByProps({ 'aria-label': '应用平台' });
+  const inputs = () => renderer.root.findAllByType('input');
+  const fill = async () => act(async () => {
+    inputs()[0].props.onChange({ target: { value: ' cli_test ' } });
+    inputs()[1].props.onChange({ target: { value: ' test-secret ' } });
+  });
+  const submit = async () => act(async () => {
+    renderer.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    await flushTasks();
+  });
+  assert.equal(platform().props.value, 'feishu');
+  assert.deepEqual(platform().findAllByType('option').map((node) => node.props.value), ['feishu', 'lark']);
+  await fill();
+  await submit();
+  assert.deepEqual(bindings[0], { appId: 'cli_test', appSecret: 'test-secret', domain: 'feishu' });
+  assert.equal(renderer.root.findAllByProps({ role: 'alert' }).length, 1);
+  await act(async () => platform().props.onChange({ target: { value: 'lark' } }));
+  assert.equal(renderer.root.findAllByProps({ role: 'alert' }).length, 0);
+  assert.ok(inputs().every((node) => node.props.value === ''), 'never reuse secrets across platforms');
+  assert.match(inputs()[0].props.placeholder, /Lark/);
+  assert.equal(inputs()[1].props.type, 'password');
+  await fill();
+  await submit();
+  assert.deepEqual(bindings[1], { appId: 'cli_test', appSecret: 'test-secret', domain: 'lark' });
+  assert.equal(platform().props.disabled, true);
+  assert.ok(inputs().every((node) => node.props.disabled));
+  assert.equal(findButton(renderer, '取消').props.disabled, true);
+  await submit();
+  assert.equal(bindings.length, 2, 'busy form cannot submit twice');
+  await act(async () => {
+    finishBinding({ ok: true, value: snapshot });
+    await flushTasks();
+  });
+  assert.equal(renderer.root.findAllByType('form').length, 0);
+  assert.match(nodeText(renderer.root), /Lark 机器人凭据已绑定/);
+  assert.equal(en['应用平台'], 'App platform');
+});
+
 test('credential form stays compact while using a protected password input', () => {
   const markup = renderToStaticMarkup(React.createElement(CredentialBindingPanel, {
     channel: '企业微信',

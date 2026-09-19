@@ -214,6 +214,31 @@ test('FeishuRuntime becomes chat-ready only after Harness and Feishu are connect
   assert.deepEqual(runtime.status, stoppedStatus);
 });
 
+test('FeishuRuntime uses the selected domain for both HTTP and WebSocket clients', async () => {
+  for (const domain of [undefined, 'feishu', 'lark']) {
+    const runtime = new FeishuRuntime({
+      lark: fakeLark(),
+      appId: 'cli_domain',
+      appSecret: 'secret',
+      domain,
+      ownerOpenIds: ['ou_owner'],
+      harness: { async ensureRunning() {} },
+      state: { hasSeen: () => false },
+    });
+    try {
+      const starting = runtime.start();
+      await waitFor(() => FakeWSClient.instances.length === 1);
+      FakeWSClient.instances[0].becomeReady();
+      await starting;
+      const expected = domain === 'lark' ? 'lark-domain' : 'feishu-domain';
+      assert.equal(FakeClient.instances[0].options.domain, expected);
+      assert.equal(FakeWSClient.instances[0].options.domain, expected);
+    } finally {
+      await runtime.stop();
+    }
+  }
+});
+
 test('FeishuRuntime keeps Slash registration non-blocking and aborts it on stop', async () => {
   const lark = fakeLark();
   const requests = [];

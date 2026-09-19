@@ -11,6 +11,50 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 配置面随宿主迁到侧边栏插件页：宿主把插件配置改到 `plugins.bundle.config` 槽，本插件的配置区因此渲染在 **Plugins → Installed → `@xmanrui/dsh-im`** 的详情页内（描述与行列表之间），一级设置菜单里的「IM机器人」入口随之移除。该槽由 DSH `0.1.6-alpha.2` 引入，`dsh.compatibility` 增加这一版本；更早的宿主上机器人功能照常工作，但不再有配置界面（[#216](https://github.com/xmanrui/dsh-im/pull/216)）。
   The configuration surface moved with the host onto the Plugins page: the host now takes plugin configuration through the `plugins.bundle.config` slot, so the page renders inside **Plugins → Installed → `@xmanrui/dsh-im`** between the bundle's description and its rows, and the top-level settings entry is gone. That slot arrives with DSH `0.1.6-alpha.2`, which `dsh.compatibility` now lists; older hosts keep working but no longer offer a configuration UI ([#216](https://github.com/xmanrui/dsh-im/pull/216)).
 
+## [4.21.2] - 2026-09-17
+
+### Fixed / 修复
+
+- 修复 Lark（飞书国际版）应用无法通过手动凭据入口接入的问题（[#212](https://github.com/xmanrui/dsh-im/issues/212)）。飞书设置页的「手动接入」可选择飞书或 Lark，绑定请求将所选平台传给 Host，并沿用该平台进行凭据验证、配置保存及 HTTP／WebSocket 连接；未指定平台的旧请求仍默认使用飞书。感谢 [@alpacachen](https://github.com/alpacachen) 的代码与测试贡献（[#219](https://github.com/xmanrui/dsh-im/pull/219)）。
+  Fixed Lark (international Feishu) applications being unable to connect through manual credential binding ([#212](https://github.com/xmanrui/dsh-im/issues/212)). The Feishu settings page now offers a Feishu/Lark platform selector for manual setup. The selected platform is passed to the Host and used for credential verification, persisted configuration, and HTTP/WebSocket connections; existing requests without a platform still default to Feishu. Thanks to [@alpacachen](https://github.com/alpacachen) for code and tests in [#219](https://github.com/xmanrui/dsh-im/pull/219).
+- 切换应用平台时清空已填写的 App ID、App Secret 和旧错误，避免跨平台复用凭据；提交期间锁定表单及平台选择，防止重复提交。补齐 Lark 绑定表单和成功提示的中英文文案，Host 仅接受 `feishu`、`lark` 或省略的平台值。
+  Changing platforms clears the entered App ID, App Secret, and previous error to avoid reusing credentials across platforms. The form and platform selector are locked during submission to prevent duplicate requests. Added bilingual Lark form and success messages; the Host accepts only `feishu`, `lark`, or an omitted platform value.
+
+### Documentation / 文档
+
+- 补充自定义域名访问 IM 管理接口时的 HTTP 403 排查说明：通过 DSH 的 `--trusted-host` 配置域名及可选端口，反向代理需保留匹配的 Host／Origin，浏览器认证仍然必需；该文档更新不放宽访问控制。
+  Documented HTTP 403 troubleshooting for IM management through custom domains: configure the domain and optional port with DSH's `--trusted-host`, preserve matching Host/Origin values through reverse proxies, and retain browser authentication. This documentation update does not relax access controls.
+- 扩展局域网管理验证脚本，覆盖回环地址、局域网地址、自定义域名、未认证访问及 Host／Origin 不匹配，并等待渠道初始化完成后检查业务状态；新增 Lark 界面、RPC、配置持久化和运行时域名选择的回归测试。
+  Expanded the LAN management verification script to cover loopback, LAN addresses, custom domains, unauthenticated access, and Host/Origin mismatches, waiting for channel initialization before checking business status. Added Lark regression tests for the UI, RPC validation, persisted configuration, and runtime domain selection.
+
+## [4.21.1] - 2026-09-16
+
+### Fixed / 修复
+
+- 修复钉钉群聊和私聊中引用图片、文件、富文本图片及音视频附件时，模型只收到引用说明而无法读取实际内容的问题（[#211](https://github.com/xmanrui/dsh-im/issues/211)）。仅解析直接引用的一层附件，保留当前消息附件并按下载引用去重；命令、权限校验与交互路由完成后才下载。缺少下载信息或下载失败时明确提示，不再把仅有元数据的请求送入模型。
+  Fixed quoted images, files, rich-text images, and audio/video attachments in DingTalk group and direct chats reaching the model as descriptions without their actual content ([#211](https://github.com/xmanrui/dsh-im/issues/211)). Only the immediate quote is resolved, current attachments are preserved, and matching download references are deduplicated. Downloads happen after command, access, and interaction routing; missing references or failed downloads report an error instead of submitting metadata alone.
+- 微信文件上传改为分块流式加密，由网络背压控制读取，减少整份密文复制。将固定 60 秒上传截止时间改为 60 秒无进展超时，持续传输的大文件不再因总耗时超过一分钟被中断；重试重新创建加密流，用户取消立即停止，失败不发送文件消息，并提供明确的上传超时提示。
+  Weixin file uploads now encrypt in chunks with network backpressure, reducing whole-file ciphertext copies. A 60-second idle timeout replaces the fixed upload deadline, allowing transfers that continue making progress to exceed one minute. Retries recreate the encrypted stream, caller cancellation stops immediately, and failed uploads never send a file message and report an explicit timeout when stalled.
+- IM 来源块与引用块按实际消息身份配对，在支持的 Host 中拆成独立、可折叠的 `dsh-im` 上下文行；用户消息保留自己的正文，引用材料排在提问之前，并发或在途消息不会串用来源。只选择 `botId`、`chatId` 或 `threadId` 时仍正确拆分，无法生成摘要时使用「来源」标题；不支持拆分或连接外部 Harness 时保留内联回退。
+  IM source and quoted-reply blocks are paired by message identity and split into separate, collapsible `dsh-im` context rows on supported Hosts. User messages retain their own text, quotations precede the question, and concurrent or in-flight prompts cannot exchange sources. ID-only field selections still split correctly and use a Source label when no readable summary exists; unsupported Hosts and external Harness connections retain the inline fallback.
+- `/补充指令`（`/steer`）按执行时的增强配置记录实际下达指令者的来源，卡片使用操作者身份，菜单和消息使用发送者身份，不再借用开启该回合的消息来源。感谢 [@Librazy](https://github.com/Librazy) 的实现、测试与文档贡献（[#204](https://github.com/xmanrui/dsh-im/pull/204)）。
+  `/steer` captures enhancement settings when the correction is issued and records its actual author: the card operator or the menu/message sender, rather than the author of the turn's opening message. Thanks to [@Librazy](https://github.com/Librazy) for implementation, tests, and documentation in [#204](https://github.com/xmanrui/dsh-im/pull/204).
+
+### Changed / 变更
+
+- 上下文增强提示词登记为会话级动态提示词上下文，不再逐条消息重复，配置变化时重新渲染。提示词中的 `{{变量}}` 按部署注册的变量解析，未知或格式错误的变量会使当前步骤失败；是否保留动态上下文由 Host 部署策略决定。
+  Context-enhancement guidance is registered as Session-level dynamic prompt context instead of repeating in each message, and re-rendered when its configuration changes. `{{variable}}` references use the deployment's registered template variables; unknown or malformed references fail the current step. Host deployment policy controls whether dynamic context is retained.
+
+### Security / 安全
+
+- 会话增强提示词仅来自渠道捕获的配置，不从用户消息中的仿造标签回读；关闭增强时清除登记。来源块采用受限字段识别，避免将形状不符的用户 JSON 误当成插件上下文。
+  Session guidance comes only from configuration captured by the channel, never from lookalike tags in user text, and is cleared when enhancement is disabled. Source blocks use restricted-field recognition so unrelated user JSON is not mistaken for plugin context.
+
+### Documentation / 文档
+
+- 更新上下文增强说明和钉钉引用附件修复记录，补充消息配对、纠偏来源、实际附件内容、微信流式上传、超时重试及取消的回归测试。
+  Updated context-enhancement guidance and DingTalk quoted-attachment repair notes, with regression tests for message pairing, correction provenance, actual attachment content, Weixin streaming uploads, timeout retries, and cancellation.
+
 ## [4.21.0] - 2026-09-16
 
 ### Added / 新增
@@ -75,6 +119,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 - 减少动态正则与动态日志格式字符串，强化标识校验和配置目录错误处理；更新锁文件中的 `qs`、`sharp`／libvips 间接依赖，并将 CI Actions 固定到提交 SHA。感谢 [@johnslee1207-commits](https://github.com/johnslee1207-commits) 的代码、测试与基础设施贡献（[#214](https://github.com/xmanrui/dsh-im/pull/214)）。
   Reduced dynamic regular expressions and log format strings, strengthened identity validation and configuration-directory error handling, updated locked `qs` and `sharp`/libvips transitive dependencies, and pinned CI Actions to commit SHAs. Thanks to [@johnslee1207-commits](https://github.com/johnslee1207-commits) for code, tests, and infrastructure in [#214](https://github.com/xmanrui/dsh-im/pull/214).
+
+### Documentation / 文档
+
+- 同步中英文交互与批量命令说明、贡献者名单、渠道徽章和截图，并完善跨平台测试及 Windows 包校验兼容性。
+  Updated bilingual interaction and batch-command guidance, contributor lists, channel badges, and screenshots, and improved cross-platform tests and Windows package verification.
 
 ## [4.20.2] - 2026-09-13
 
@@ -1084,7 +1133,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.21.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.21.2...HEAD
+[4.21.2]: https://github.com/xmanrui/dsh-im/compare/v4.21.1...v4.21.2
+[4.21.1]: https://github.com/xmanrui/dsh-im/compare/v4.21.0...v4.21.1
 [4.21.0]: https://github.com/xmanrui/dsh-im/compare/v4.20.2...v4.21.0
 [4.20.2]: https://github.com/xmanrui/dsh-im/compare/v4.20.1...v4.20.2
 [4.20.1]: https://github.com/xmanrui/dsh-im/compare/v4.20.0...v4.20.1
