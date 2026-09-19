@@ -299,7 +299,7 @@ test('IM settings renders eleven IM channels plus the AI Office connector', asyn
   assert.doesNotMatch(markup, />INSTANT MESSAGING<|>Channel<|>微信设置</);
 });
 
-test('channel switching is a wrapped tab strip instead of a second navigation column', async () => {
+test('channel switching is a fixed-width rail beside the panel, not a wrapped strip', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
   const markup = renderToStaticMarkup(React.createElement(IMSettingsTab, {
     weixinRpcCall: async () => ({ ok: true, value: {} }),
@@ -310,17 +310,33 @@ test('channel switching is a wrapped tab strip instead of a second navigation co
   assert.match(markup, /aria-selected="true"/);
   assert.doesNotMatch(markup, /dim-divider/);
 
-  // The settings shell already spends 188px of its 800px panel on navigation. A
-  // second column inside the remaining 564px left the text column at 341px, which
-  // is what forced every hint to wrap; the strip must stay one full-width row set.
-  assert.match(styles, /\.dim-layout \{ display: block; \}/);
-  assert.match(styles, /\.dim-rail \{ display: flex;[^}]*flex-wrap: wrap;/);
-  assert.doesNotMatch(styles, /\.dim-layout \{[^}]*grid-template-columns:/);
-  assert.doesNotMatch(styles, /\.dim-rail \{[^}]*display: grid;/);
+  // The rail is a fixed-width column beside the panel. It was a wrapped strip while
+  // the page lived in the settings shell's 564px column, where a second column left
+  // the text at 341px and forced every hint to wrap. The host has since moved plugin
+  // configuration onto the Plugins page, so the same page has room for both columns —
+  // and wrapping had turned the channel list into ragged rows whose current entry was
+  // hard to pick out. The width is fixed and never derived from the height.
+  assert.match(styles, /\.dim-layout \{ display: grid; grid-template-columns: var\(--dim-rail-width\) minmax\(0, 1fr\);/);
+  assert.match(styles, /\.dim-rail \{[^}]*flex-direction: column;[^}]*flex-wrap: nowrap;/);
+  assert.match(styles, /\.dim-rail \{[^}]*width: var\(--dim-rail-width\);[^}]*overflow-y: auto;/);
+  // The base rule must not wrap; the only wrap left is the narrow-screen fallback,
+  // which the media-query assertions below pin.
+  const baseRail = /\.dim-rail \{([^}]*)\}/.exec(styles)[1];
+  assert.match(baseRail, /flex-wrap: nowrap/);
+  assert.doesNotMatch(baseRail, /flex-wrap: wrap/);
+  assert.doesNotMatch(baseRail, /width: [^;]*vh/);
+  // Below the breakpoint the rail folds back into the wrapped strip, so a narrow
+  // window keeps every channel reachable without a second scroll container.
+  assert.match(styles, /@media \(max-width: 840px\) \{[\s\S]*?\.dim-layout \{ display: block; \}/);
+  assert.match(styles, /@media \(max-width: 840px\) \{[\s\S]*?\.dim-rail \{[^}]*flex-wrap: wrap;/);
 
-  // Tabs read as native selector pills: no border, no fill, no shadow at rest.
-  // The channel cell is the host's .navCell: 40px, radius 12, that padding, that gap.
-  assert.match(styles, /\.dim-channel \{[^}]*height: 40px;[^}]*gap: var\(--dim-gap-8\);[^}]*padding: 9px 16px 9px 12px;[^}]*border-radius: var\(--dim-radius-12\);/);
+  // Tabs read as native selector pills: no fill and no shadow at rest, and the cell
+  // fills the rail's track. The host's .navCell measures: 40px tall, radius 12, that gap.
+  assert.match(styles, /\.dim-channel \{[^}]*width: 100%;[^}]*height: 40px;[^}]*gap: var\(--dim-gap-8\);[^}]*padding: 0 12px;[^}]*border-radius: var\(--dim-radius-12\);/);
+  // The label clips rather than pushing the cell wider, and the button keeps the whole
+  // name in its title so nothing becomes unreachable when it is clipped.
+  assert.match(styles, /\.dim-channelCopy \{[^}]*min-width: 0;[^}]*overflow: hidden;/);
+  assert.match(markup, /title="AI Office"/);
   assert.doesNotMatch(styles, /\.dim-channel \{[^}]*box-shadow:/);
   // The hover fill is the host's own nav-cell token, not the generic hover.
   assert.match(styles, /\.dim-channel:hover \{ color: var\(--dsw-alias-label-primary, #0f1115\); background: var\(--dsw-specific-sidebar-nav-item-hover, var\(--dim-hover\)\); \}/);
@@ -328,6 +344,13 @@ test('channel switching is a wrapped tab strip instead of a second navigation co
   // The label takes the host's .navCell type: 14/22 at the inherited weight.
   assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: var\(--dim-font-14\);[^}]*line-height: var\(--dim-line-14\);[^}]*font-weight: var\(--dim-weight-400\);/);
   assert.match(styles, /\.dim-channelBadge \{[^}]*align-self: center;[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);/);
+  // Rest / hover / current read apart. Hover and current share the host's nav-cell
+  // fill family, so the accent bar is what identifies the current channel while a
+  // pointer is also on the rail; the rest state keeps a transparent boundary instead
+  // of an invisible one.
+  assert.match(styles, /\.dim-channel \{[^}]*border: 1px solid transparent;/);
+  assert.match(styles, /\.dim-channel\[aria-selected="true"\]::before \{[^}]*background: var\(--dsw-alias-brand-primary, #0f1115\);/);
+  assert.match(styles, /\.dim-channel\[aria-selected="true"\] \.dim-channelCopy strong \{ font-weight: var\(--dim-weight-600\); \}/);
 });
 
 test('the general settings gear sits to the right of GitHub and outside the channel rail', () => {

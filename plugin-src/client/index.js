@@ -356,6 +356,9 @@ export function IMSettingsTab({
           role: 'tab',
           id: `dim-tab-${channel.id}`,
           className: 'dim-channel',
+          // The rail is a fixed-width column, so a long name is clipped with an
+          // ellipsis; the title keeps the whole name reachable on hover.
+          title: channel.label,
           'aria-selected': !globalSettingsSelected && channel.id === active.id,
           // Roving tabindex: one Tab stop for the whole strip; the arrow keys
           // move within it. With nothing selected (the general settings page is
