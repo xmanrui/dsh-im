@@ -144,6 +144,90 @@ function streamPreview(text) {
   return streamTextPrefix(text, MAX_STREAM_CHARS - notice.length) + notice;
 }
 
+/**
+ * Feishu renders a markdown table inside a card as a `table` element, and a
+ * single card accepts only one of them. A normal agent reply often carries
+ * several tables (status reports, comparison grids), so `cardElement.content`
+ * rejects the whole update with:
+ *
+ *   ErrCode 11310  card table number over limit   (ErrorValue: table)
+ *
+ * The card then never updates, the bridge logs the failure per tick, and the
+ * reply never reaches the user.
+ *
+ * Pipes that are not a GFM table (shell pipelines, `a || b`, inline code) must
+ * survive untouched, so a table is only detected as a *header row* followed by
+ * a *delimiter row* of `---` cells with the same column count.
+ */
+function gfmTableDelimiter(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|')) return null;
+  const cells = trimmed.replace(/^\|/, '').replace(/\|$/, '').split('|');
+  if (cells.length === 0) return null;
+  for (const cell of cells) {
+    if (!/^\s*:?-{1,}:?\s*$/.test(cell)) return null;
+  }
+  return cells.length;
+}
+
+function gfmTableCells(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|')) return null;
+  return trimmed.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+}
+
+/**
+ * Rewrite each GFM table into a plain definition list:
+ *
+ *   | A | B |        - **A**: 1
+ *   |---|---|   ->   - **B**: 2
+ *   | 1 | 2 |
+ *
+ * The header becomes the field label, so no information is lost and the card
+ * carries zero `table` elements. Non-table content is returned unchanged.
+ */
+export function sanitizeMarkdownTables(text) {
+  const source = String(text ?? '');
+  if (!source.includes('|')) return source;
+
+  const lines = source.split('\n');
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const delimiterCols = i + 1 < lines.length ? gfmTableDelimiter(lines[i + 1]) : null;
+    const header = delimiterCols !== null ? gfmTableCells(lines[i]) : null;
+    if (header && header.length === delimiterCols) {
+      const rows = [];
+      let j = i + 2;
+      while (j < lines.length) {
+        const cells = gfmTableCells(lines[j]);
+        if (!cells || !lines[j].trim().startsWith('|')) break;
+        rows.push(cells);
+        j += 1;
+      }
+      if (rows.length === 0) {
+        // Header without body: render the header alone rather than dropping it.
+        out.push(header.filter(Boolean).join(' · '));
+      } else if (header.length === 1) {
+        for (const row of rows) out.push(`- ${row[0] ?? ''}`.trimEnd());
+      } else {
+        for (const row of rows) {
+          if (rows.length === 1) {
+            out.push(header.map((h, k) => `**${h}**: ${row[k] ?? ''}`).join(' · '));
+          } else {
+            out.push(`- ${header.map((h, k) => `**${h}**: ${row[k] ?? ''}`).join(' · ')}`);
+          }
+        }
+      }
+      i = j;
+      continue;
+    }
+    out.push(lines[i]);
+    i += 1;
+  }
+  return out.join('\n');
+}
+
 function splitStreamContent(text) {
   const chunks = [];
   let remaining = text;
@@ -511,7 +595,10 @@ export class VerifiedFeishuChannel {
   }
 
   async #updateStreamCard(card, content) {
-    if (content === card.content) return;
+    // Feishu rejects a card carrying more than one markdown table
+    // (ErrCode 11310). Rewrite tables into plain text before the card write.
+    const safeContent = sanitizeMarkdownTables(content);
+    if (safeContent === card.content) return;
     const response = await this.#client.cardkit.v1.cardElement.content({
       path: { card_id: card.cardId, element_id: STREAM_ELEMENT_ID },
       data: {
