@@ -144,6 +144,91 @@ function streamPreview(text) {
   return streamTextPrefix(text, MAX_STREAM_CHARS - notice.length) + notice;
 }
 
+/**
+ * Feishu renders a markdown table inside a card as a `table` element and a
+ * single card accepts only one of them. A normal agent reply often carries
+ * several (status reports, comparison grids, per-module results), so the card
+ * update is rejected in full:
+ *
+ *   ErrCode 11310  card table number over limit   (ErrorValue: table)
+ *
+ * The failure is invisible to the user -- the card simply never updates, so
+ * the answer never arrives -- and it is self-sustaining on a busy machine: a
+ * restart wakes the agent, the agent replies with tables again, the update
+ * fails again.
+ *
+ * Detection is deliberately strict so that ordinary pipes survive untouched:
+ * a line counts as a table only when it starts with `|` *and* the next line is
+ * a `|---|` delimiter row with the same column count.
+ */
+function gfmTableDelimiter(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|')) return null;
+  const cells = trimmed.replace(/^\|/, '').replace(/\|$/, '').split('|');
+  if (cells.length === 0) return null;
+  for (const cell of cells) {
+    if (!/^\s*:?-{1,}:?\s*$/.test(cell)) return null;
+  }
+  return cells.length;
+}
+
+function gfmTableCells(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('|')) return null;
+  return trimmed.replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+}
+
+/**
+ * Rewrite every GFM table into plain labelled bullets:
+ *
+ *   | A | B |        - **A**: 1
+ *   |---|---|   ->   - **B**: 2
+ *   | 1 | 2 |
+ *
+ * The header row becomes the field labels, so no information is lost and the
+ * card carries zero `table` elements. Anything that is not a table is returned
+ * unchanged.
+ */
+export function sanitizeMarkdownTables(text) {
+  const source = String(text ?? '');
+  if (!source.includes('|')) return source;
+
+  const lines = source.split('\n');
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const delimiterColumns = i + 1 < lines.length ? gfmTableDelimiter(lines[i + 1]) : null;
+    const header = delimiterColumns === null ? null : gfmTableCells(lines[i]);
+    if (header && header.length === delimiterColumns) {
+      const rows = [];
+      let j = i + 2;
+      while (j < lines.length) {
+        if (!lines[j].trim().startsWith('|')) break;
+        const cells = gfmTableCells(lines[j]);
+        if (!cells) break;
+        rows.push(cells);
+        j += 1;
+      }
+      if (rows.length === 0) {
+        out.push(header.filter(Boolean).join(' · '));
+      } else if (header.length === 1) {
+        for (const row of rows) out.push(`- ${row[0] ?? ''}`.trimEnd());
+      } else if (rows.length === 1) {
+        out.push(header.map((h, k) => `**${h}**: ${rows[0][k] ?? ''}`).join(' · '));
+      } else {
+        for (const row of rows) {
+          out.push(`- ${header.map((h, k) => `**${h}**: ${row[k] ?? ''}`).join(' · ')}`);
+        }
+      }
+      i = j;
+      continue;
+    }
+    out.push(lines[i]);
+    i += 1;
+  }
+  return out.join('\n');
+}
+
 function splitStreamContent(text) {
   const chunks = [];
   let remaining = text;
@@ -511,17 +596,21 @@ export class VerifiedFeishuChannel {
   }
 
   async #updateStreamCard(card, content) {
-    if (content === card.content) return;
+    // Feishu rejects a card carrying more than one markdown table
+    // (ErrCode 11310), which silently drops the whole answer. Rewrite tables
+    // into plain text before the card write.
+    const safeContent = sanitizeMarkdownTables(content);
+    if (safeContent === card.content) return;
     const response = await this.#client.cardkit.v1.cardElement.content({
       path: { card_id: card.cardId, element_id: STREAM_ELEMENT_ID },
       data: {
-        content,
+        content: safeContent,
         sequence: ++card.sequence,
         uuid: `content_${card.cardId}_${card.sequence}`,
       },
     });
     assertApiSuccess('Feishu cardElement.content', response);
-    card.content = content;
+    card.content = safeContent;
   }
 
   async #finishStreamCard(card) {
