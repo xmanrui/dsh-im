@@ -42,6 +42,14 @@ Either way it only affects Sessions created **afterwards**: existing Sessions ke
 | `per-conversation` (default) | `<base>/<prefix><key>-<digest>` | One stable directory per conversation; repeated `/new` reuses it and never nests |
 | `per-session` | as above plus a timestamp | Every new Session gets a fresh directory; old directories are kept — the plugin never deletes them |
 
+## When prefix and strategy changes apply
+
+Changing the **prefix** or **strategy** in the settings page needs **no bot removal and re-add**. A live Session's working directory is fixed when the Session is created and cannot move underneath it, so the change applies to a conversation's **next new Session**: when `/new` is sent (or the Session has lapsed and the next message creates one), the plugin sees the persisted directory record no longer matches the settings in force, derives a new directory below the **same base Workspace**, switches to it atomically, and **leaves the old directory and its files untouched**.
+
+- Because a name is derived from the conversation key alone, restoring the previous prefix makes the next new Session **re-adopt the original directory**: the files are still there.
+- Note that `/workspacelist` hides conversation directories matching the **current** prefix, so a directory minted under an older prefix reappears in the list after you rename it (`/workspacelist all` always shows everything).
+- Hand-editing `workspaces.json` still requires a restart (the plugin reads that file at startup only); this section covers live changes made in the settings page or over the management RPC.
+
 ## Naming
 
 The name is derived from the conversation key alone, so a restart or another machine recomputes the same directory:

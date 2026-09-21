@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -217,6 +217,91 @@ test('a recorded base is reused so /new never nests a directory in its predecess
   const again = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc', fresh: true });
   assert.equal(again.directory, first.directory);
   assert.ok(!again.directory.startsWith(`${first.directory}/`));
+});
+
+test('a prefix change re-mints the directory below the recorded base', async (t) => {
+  const { workspace } = await fixture(t);
+  const { harness, state } = scopeStub({ workspace, settings: { ...DEFAULT_CONVERSATION_DIRECTORY_SETTINGS, enabled: true } });
+  const first = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  // The operator renames the prefix in the settings page; the next new Session
+  // of the same conversation must follow, without removing the bot first.
+  state.settings = { ...state.settings, prefix: 'ws-' };
+  const second = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  assert.equal(second.created, true);
+  assert.notEqual(second.directory, first.directory);
+  assert.equal(second.base, workspace, 'the new directory stays below the same base');
+  assert.ok(basename(second.directory).startsWith('ws-'));
+  assert.equal(state.overrides.get('p2p:ou_abc'), second.directory);
+  // The stale record is replaced, not kept alongside.
+  assert.equal(state.records.get('p2p:ou_abc').directory, second.directory);
+  // The old directory is left on disk: nothing is ever deleted here.
+  assert.equal(await realpath(first.directory).then(() => true, () => false), true);
+  // A third message reuses the re-minted directory.
+  const third = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  assert.equal(third.reused, true);
+  assert.equal(third.directory, second.directory);
+});
+
+test('restoring the previous prefix re-adopts the original directory', async (t) => {
+  const { workspace } = await fixture(t);
+  const { harness, state } = scopeStub({ workspace, settings: { ...DEFAULT_CONVERSATION_DIRECTORY_SETTINGS, enabled: true } });
+  const original = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  state.settings = { ...state.settings, prefix: 'ws-' };
+  const renamed = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  assert.notEqual(renamed.directory, original.directory);
+  state.settings = { ...state.settings, prefix: CONVERSATION_DIRECTORY_PREFIX };
+  const restored = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  // Names are deterministic, so the conversation returns to the files it had.
+  // The stale (renamed) record cannot be reused, so this is a fresh mint that
+  // happens to resolve to the original path — the original directory, not a copy.
+  assert.equal(restored.directory, original.directory);
+  assert.equal(restored.prepared, true);
+  assert.equal(restored.base, workspace);
+});
+
+test('a strategy change re-mints the directory once and then stays stable', async (t) => {
+  const { workspace } = await fixture(t);
+  const { harness, state } = scopeStub({ workspace, settings: { ...DEFAULT_CONVERSATION_DIRECTORY_SETTINGS, enabled: true } });
+  const first = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  state.settings = { ...state.settings, strategy: 'per-session' };
+  const switched = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  assert.equal(switched.created, true);
+  assert.notEqual(switched.directory, first.directory);
+  assert.equal(switched.base, workspace);
+  // A plain message under the new strategy reuses the minted directory...
+  const reused = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  assert.equal(reused.reused, true);
+  assert.equal(reused.directory, switched.directory);
+  // ...and switching back to `per-conversation` re-mints once more.
+  state.settings = { ...state.settings, strategy: 'per-conversation' };
+  const back = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  assert.equal(back.created, true);
+  assert.equal(basename(back.directory), conversationDirectoryName('p2p:ou_abc', { prefix: CONVERSATION_DIRECTORY_PREFIX }));
+});
+
+test('an unchanged prefix still reuses the recorded directory', async (t) => {
+  const { workspace } = await fixture(t);
+  const { harness, state } = scopeStub({ workspace, settings: { ...DEFAULT_CONVERSATION_DIRECTORY_SETTINGS, enabled: true } });
+  const first = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  for (let round = 0; round < 3; round += 1) {
+    const again = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+    assert.equal(again.reused, true);
+    assert.equal(again.directory, first.directory);
+  }
+  assert.equal(state.switches.length, 1, 'settings that never changed must not re-switch');
+});
+
+test('a prefix that shadows another still re-derives exactly', async (t) => {
+  const { workspace } = await fixture(t);
+  // `conv-` directories start with `c`, so a bare prefix test would wrongly
+  // accept the old record when the prefix shrinks to `c-`.
+  const { harness, state } = scopeStub({ workspace, settings: { ...DEFAULT_CONVERSATION_DIRECTORY_SETTINGS, enabled: true } });
+  const first = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  state.settings = { ...state.settings, prefix: 'c-' };
+  const second = await ensureConversationDirectory({ harness, key: 'p2p:ou_abc' });
+  assert.equal(second.created, true);
+  assert.equal(basename(second.directory), conversationDirectoryName('p2p:ou_abc', { prefix: 'c-' }));
+  assert.notEqual(second.directory, first.directory);
 });
 
 test('preparation degrades instead of throwing when the directory cannot be created', async (t) => {

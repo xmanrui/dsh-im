@@ -89,8 +89,8 @@ export function ConversationDirectoryEditor({
   const showFields = enabled || (scope === 'bot' && hasOverride);
   const helpId = React.useId();
   const helpText = scope === 'channel'
-    ? '影响本渠道全部无覆盖的机器人。开启后 /workspace、/conv 与手动改工作区不可用。'
-    : '开启后工作目录按对话自动派生；/workspace、/conv 与手动改工作区不可用；/session 仅可绑定本目录内会话。';
+    ? '影响本渠道全部无覆盖的机器人。开启后 /workspace、/conv 与手动改工作区不可用。前缀或策略改动在下一个新会话生效（发送 /new 即切换），旧目录保留不删除。'
+    : '开启后工作目录按对话自动派生；/workspace、/conv 与手动改工作区不可用；/session 仅可绑定本目录内会话。前缀或策略改动在下一个新会话生效（发送 /new 即切换），旧目录保留不删除。';
 
   return h('div', {
     className: 'dim-conversationDirectory',

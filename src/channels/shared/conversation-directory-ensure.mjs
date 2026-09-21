@@ -3,11 +3,12 @@
 // bundle. The naming and settings rules live in ./conversation-directory.mjs.
 
 import { mkdir, stat } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import {
   conversationDirectoryName,
   DEFAULT_CONVERSATION_DIRECTORY_SETTINGS,
+  isConversationDirectoryPath,
 } from './conversation-directory.mjs';
 
 /**
@@ -88,6 +89,40 @@ async function freeSessionDirectory(base, name) {
 }
 
 /**
+ * Whether a persisted record still matches the settings in force today.
+ *
+ * A record is what made a prefix change look inert: the first isolated message
+ * stores the directory it minted, and every later message reuses that record
+ * verbatim, so renaming the prefix appeared to do nothing until the bot was
+ * removed — removal was the only path that cleared the records. Checking the
+ * derived name (or, for `per-session`, the prefix) turns a settings change into
+ * a stale record, which the caller then re-mints below the same base.
+ *
+ * `per-conversation` names are deterministic, so compare the exact segment: a
+ * prefix test alone would let `ws-…` satisfy a `w-` prefix. `per-session` names
+ * carry a timestamp that cannot be recomputed, so only the prefix is checkable.
+ *
+ * @param {object | null} record Persisted session directory record.
+ * @param {string} key Conversation key the record belongs to.
+ * @param {{ strategy: string, prefix: string }} settings Settings in force.
+ * @returns {boolean} True when the record may be reused as-is.
+ */
+function recordMatchesSettings(record, key, settings) {
+  if (!record) return false;
+  if ((record.strategy ?? settings.strategy) !== settings.strategy) return false;
+  if (settings.strategy === 'per-session') {
+    return isConversationDirectoryPath(record.directory, { prefix: settings.prefix });
+  }
+  try {
+    return basename(record.directory) === conversationDirectoryName(key, settings);
+  } catch {
+    // A prefix that leaves no room for a name invalidates the record rather
+    // than crashing preparation; minting fails later with a readable reason.
+    return false;
+  }
+}
+
+/**
  * Ensure the conversation's own directory exists and is in force, then let the
  * caller create a Session in it.
  *
@@ -118,8 +153,12 @@ export async function ensureConversationDirectory({ harness, key, fresh = false,
   const record = readRecord(harness, key);
   // `per-session` mints a directory per Session; every other combination keeps
   // the recorded one, which is what makes `/new` idempotent for the default
-  // `per-conversation` strategy.
+  // `per-conversation` strategy. A record whose name no longer matches the
+  // prefix or strategy in force is stale: fall through and re-mint below the
+  // same base so a settings change takes effect on the next message without
+  // removing the bot. The old directory is left on disk untouched.
   const reuseRecord = record
+    && recordMatchesSettings(record, key, settings)
     && !(fresh && settings.strategy === 'per-session');
 
   if (reuseRecord) {
