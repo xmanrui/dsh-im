@@ -450,8 +450,8 @@ export class TelegramApi {
     let body;
     try {
       body = await response.json();
-    } catch {
-      const error = new Error(`Telegram ${method} returned invalid JSON`);
+    } catch (cause) {
+      const error = new Error(`Telegram ${method} returned invalid JSON`, { cause });
       error.status = response?.status;
       error.code = 'telegram-response-invalid';
       error.deliveryOutcome = 'unknown';

@@ -1,3 +1,5 @@
+import imageInput from './i18n-en/image-input.mjs';
+import diagnostics from './i18n-en/diagnostics.mjs';
 // English translations for host-side user-facing text.
 // Keys are the exact Chinese literals passed to t() in src/channels/**.
 // Chinese output is the identity default and needs no entries here.
@@ -16,10 +18,14 @@ import slack from './i18n-en/slack.mjs';
 import telegram from './i18n-en/telegram.mjs';
 import discord from './i18n-en/discord.mjs';
 import whatsapp from './i18n-en/whatsapp.mjs';
+import matrix from './i18n-en/matrix.mjs';
 import office from './i18n-en/office.mjs';
+import email from './i18n-en/email.mjs';
 
 export const EN = Object.freeze(Object.assign(
   {},
+  diagnostics,
+  imageInput,
   sharedA,
   sharedB,
   sharedC,
@@ -33,5 +39,7 @@ export const EN = Object.freeze(Object.assign(
   telegram,
   discord,
   whatsapp,
+  matrix,
   office,
+  email,
 ));

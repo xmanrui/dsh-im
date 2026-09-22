@@ -1,3 +1,5 @@
+import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-details.mjs';
+import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { normalizeBotAlias } from '../../../../src/channels/shared/bot-alias.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
@@ -137,7 +139,7 @@ function publicError(error) {
   const code = typeof error.code === 'string' && Object.hasOwn(PUBLIC_ERROR_MESSAGES, error.code)
     ? error.code
     : 'registration_failed';
-  return { code, message: PUBLIC_ERROR_MESSAGES[code] };
+  return { code, message: PUBLIC_ERROR_MESSAGES[code], ...diagnosticFields(error) };
 }
 
 function publicRegistration(registration) {
@@ -560,6 +562,7 @@ function assertController(controller) {
 
 /** DSH rc.6 handler: (endpoint, payload, signal) => Promise<RpcResult>. */
 export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } = {}) {
+  const diagnostics = controller.diagnostics ?? createConnectionDiagnostics({ channel: 'feishu' });
   assertController(controller);
   const qrCache = new Map();
   const attemptQr = new Map();
@@ -721,7 +724,7 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
               testError = error;
             }
           }
-          value = { ...value, testMessage: publicConnectionTestResult(testError) };
+          value = { ...value, testMessage: publicConnectionTestResult(testError, { diagnostics, botId: payload.botId }) };
         }
       } else if (endpoint === FEISHU_MULTI_ENDPOINTS.disconnectBot) {
         if (typeof controller.disconnectBot !== 'function') throw new Error('Multi-bot disconnect is unavailable');
@@ -802,9 +805,9 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
       return { ok: true, value };
     } catch (error) {
       const workspaceError = publicWorkspaceError(error);
-      return signal?.aborted ? cancelled() : workspaceError
+      return diagnosticRpcResult(diagnostics, error, signal?.aborted ? cancelled() : workspaceError
         ? { ok: false, error: { ...workspaceError, details: {} } }
-        : internalFailure();
+        : internalFailure(), { operation: endpoint, botId: payload?.botId });
     }
   };
 }

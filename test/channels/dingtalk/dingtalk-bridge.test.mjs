@@ -1,3 +1,4 @@
+import { loadDeferredImages } from '../../helpers/deferred-images.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -293,6 +294,7 @@ for (const conversationType of ['1', '2']) {
         harness: {
           sessionExists: async () => true,
           ask: async (sessionId, content, options) => {
+        content = await loadDeferredImages(content, options);
             const staged = await stageInboundFiles({ files: options.files }, { workspace });
             const files = await Promise.all((staged?.files ?? []).map(async (file) => ({
               name: file.name, bytes: await readFile(join(workspace, file.path)),
@@ -408,6 +410,7 @@ test('DingTalk refuses incomplete or failed quoted attachments instead of sendin
         harness: {
           sessionExists: async () => true,
           ask: async (_sessionId, _prompt, options) => {
+        _prompt = await loadDeferredImages(_prompt, options);
             await stageInboundFiles({ files: options.files }, { workspace });
             modelRequests += 1;
             return 'unexpected';
@@ -441,6 +444,7 @@ test('DingTalk preserves current attachments and deduplicates only exact quoted 
     harness: {
       sessionExists: async () => true,
       ask: async (_sessionId, prompt, options) => {
+        prompt = await loadDeferredImages(prompt, options);
         for (const file of options.files) await file.load({});
         prompts.push({ prompt, files: options.files.length });
         return 'done';
@@ -956,7 +960,8 @@ test('DingTalk resolves picture downloadCode lazily and sends image-only content
     clientSecret: 'host-secret',
     harness: {
       sessionExists: async () => true,
-      ask: async (sessionId, content) => {
+      ask: async (sessionId, content, options) => {
+        content = await loadDeferredImages(content, options);
         prompts.push({ sessionId, content });
         return '钉钉图片已识别';
       },
@@ -976,7 +981,7 @@ test('DingTalk resolves picture downloadCode lazily and sends image-only content
   assert.equal(downloads[0].clientSecret, 'host-secret');
   assert.equal(downloads[0].robotCode, 'robot-from-callback');
   assert.equal(downloads[0].downloadCode, 'opaque-picture-code');
-  assert.equal(downloads[0].maxBytes, 5 * 1024 * 1024);
+  assert.equal(downloads[0].maxBytes, 30 * 1024 * 1024);
   assert.equal(prompts[0].sessionId, 'session-image');
   assert.deepEqual(prompts[0].content.map(({ type }) => type), ['text', 'image']);
   assert.equal(prompts[0].content[0].text, '请分析这张图片。');
@@ -1002,7 +1007,8 @@ test('DingTalk richText preserves its caption and all picture download codes', a
     clientSecret: 'host-secret',
     harness: {
       sessionExists: async () => true,
-      ask: async (_sessionId, content) => { prompt = content; return '完成'; },
+      ask: async (_sessionId, content, options) => {
+        content = await loadDeferredImages(content, options); prompt = content; return '完成'; },
     },
     state: fixture.state,
   });
@@ -1136,7 +1142,7 @@ test('DingTalk returns a specific retry message when picture download fails', as
     clientSecret: 'host-secret',
     harness: {
       sessionExists: async () => true,
-      ask: async () => assert.fail('a failed image must not reach Harness'),
+      ask: async (_sessionId, content, options) => { await loadDeferredImages(content, options); assert.fail('invalid images must not reach the model'); },
     },
     state: fixture.state,
     logger: { error() {} },
@@ -1214,7 +1220,7 @@ test('DingTalk distinguishes download-address failures from temporary-file failu
       },
       clientId: 'ding-client',
       clientSecret: 'host-secret',
-      harness: { ask: async () => assert.fail('a failed image must not reach Harness') },
+      harness: { createSession: async () => 'image-session', ask: async (_sessionId, content, options) => { await loadDeferredImages(content, options); assert.fail('invalid images must not reach the model'); } },
       state: fixture.state,
       logger: { error() {} },
     });

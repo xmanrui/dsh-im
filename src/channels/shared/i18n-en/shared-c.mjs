@@ -8,7 +8,7 @@ export default {
   '{channel}配置格式错误。请检查其数据目录中的 config.json 和 workspaces.json，修复后重启 DSH。详细原因请查看启动日志。': 'The {channel} configuration is invalid. Check config.json and workspaces.json in its data directory, then restart DSH. See the startup log for details.',
   '{channel}配置格式错误。请检查其数据目录中的 config.json，修复后重启 DSH。详细原因请查看启动日志。': 'The {channel} configuration is invalid. Check config.json in its data directory, then restart DSH. See the startup log for details.',
   '无法读取或写入{channel}配置。请检查其数据目录的访问权限，修复后重启 DSH。详细原因请查看启动日志。': 'The {channel} configuration could not be read or written. Check access to its data directory, then restart DSH. See the startup log for details.',
-  '{channel}初始化失败。请查看 DSH 启动日志中 failed to activate {id} 后的错误，修复后重启 DSH。': '{channel} initialization failed. Check the error after "failed to activate {id}" in the DSH startup log, fix it, then restart DSH.',
+  '{channel}初始化失败。请展开诊断详情，并通过参考号查找 DSH 启动日志，修复后重启 DSH。': '{channel} initialization failed. Expand the diagnostic details and find the reference in the DSH startup log, fix the issue, then restart DSH.',
   // history-command.mjs / command help
   '/history [数量]  查看最近历史消息（默认 3 条，最多 5 条）':
     '/history [count]  Preview recent messages (default 3, maximum 5)',

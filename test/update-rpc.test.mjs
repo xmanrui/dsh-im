@@ -54,7 +54,7 @@ test('aborting a submitted browser request does not cancel the Host installation
 
 test('Host update initialization failure leaves all channel activations available', async () => {
   const calls = [];
-  const channels = ['Feishu', 'Weixin', 'Dingtalk', 'Wecom', 'WecomApp', 'Qq', 'Slack', 'Telegram', 'Discord', 'Whatsapp', 'IMessage', 'Office'];
+  const channels = ['Feishu', 'Weixin', 'Dingtalk', 'Wecom', 'WecomApp', 'Qq', 'Slack', 'Telegram', 'Discord', 'Whatsapp', 'IMessage', 'Email', 'Matrix', 'Office'];
   const internals = Object.fromEntries(channels.map((channel) => [`apply${channel}`, async () => calls.push(channel)]));
   internals.installUpdateRpc = () => { throw new Error('updater unavailable'); };
   internals.installDeliveryRpc = () => {};

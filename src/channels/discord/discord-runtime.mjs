@@ -1,3 +1,4 @@
+import { extractConnectionEvidence, createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
 import { createEditableMessageStream, splitMessageText } from '../shared/editable-message-stream.mjs';
 import { fetchFileStream } from '../shared/file-download.mjs';
 import { fetchImageBuffer } from '../shared/image-prompt.mjs';
@@ -534,6 +535,7 @@ export class DiscordRuntime {
   #contextEnhancement;
   #accessPolicy;
   #logger;
+  #diagnostics;
   #replyTimeoutMs;
   #connectTimeoutMs;
   #createApi;
@@ -582,7 +584,7 @@ export class DiscordRuntime {
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
-    this.#logger = logger;
+    this.#logger = logger; this.#diagnostics = createConnectionDiagnostics({ channel: 'discord', logger });
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#connectTimeoutMs = connectTimeoutMs;
     this.#createApi = createApi;
@@ -639,8 +641,8 @@ export class DiscordRuntime {
     this.#routing.clear();
     this.#status.startedAt = new Date().toISOString();
     this.#status.connectionState = 'connecting';
-    this.#status.lastError = null;
-    await this.#harness.ensureRunning();
+    this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
+    await atConnectionStage('harness.check', () => this.#harness.ensureRunning());
     this.#status.harnessReachable = true;
     const controller = new AbortController();
     this.#abortController = controller;
@@ -672,7 +674,7 @@ export class DiscordRuntime {
         await Promise.race([
           this.#openSocket(false),
           new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error('Discord Gateway did not become ready in time')), this.#connectTimeoutMs);
+            timer = setTimeout(() => reject(Object.assign(new Error('Discord Gateway did not become ready in time'), { code: 'ETIMEDOUT', timeoutMs: this.#connectTimeoutMs })), this.#connectTimeoutMs);
           }),
         ]);
       } finally {
@@ -682,7 +684,8 @@ export class DiscordRuntime {
     } catch (error) {
       this.#status.ready = false;
       this.#status.connectionState = 'failed';
-      this.#status.lastError = error?.message ?? String(error);
+      this.#status.error = this.#diagnostics.report(error, { operation: 'connection.restore', reuse: true, botId: this.#config?.botId, automatic: true }).publicError;
+      this.#status.lastError = this.#status.error.message;
       await this.stop();
       throw error;
     }
@@ -705,7 +708,7 @@ export class DiscordRuntime {
         this.#status.connectionState = 'connected';
         this.#status.lastCheckedAt = now;
         this.#status.lastConnectedAt = now;
-        this.#status.lastError = null;
+        this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
         resolve();
       };
       addSocketListener(socket, 'message', (event) => {
@@ -790,7 +793,7 @@ export class DiscordRuntime {
               if (generation !== this.#generation || this.#stopped) return;
               this.#logger.error?.(
                 `[dsh-im:discord] bot ${this.#config.botId} message handling failed:`,
-                error,
+                extractConnectionEvidence(error).details,
               );
             });
           }
@@ -807,7 +810,8 @@ export class DiscordRuntime {
         const error = gatewayCloseError(Number(event.code) || 0);
         this.#status.ready = false;
         this.#status.connectionState = 'connecting';
-        this.#status.lastError = error.message;
+        this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#config?.botId, automatic: true }).publicError;
+        this.#status.lastError = this.#status.error.message;
         if (!settled) {
           settled = true;
           reject(error);
@@ -818,9 +822,11 @@ export class DiscordRuntime {
         }
         this.#scheduleReconnect();
       });
-      addSocketListener(socket, 'error', () => {
+      addSocketListener(socket, 'error', (event) => {
+        const error = event?.error ?? new Error('WebSocket error');
         if (generation !== this.#generation || this.#stopped) return;
-        this.#status.lastError = 'Discord Gateway WebSocket error';
+        this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#config?.botId, automatic: true }).publicError;
+        this.#status.lastError = this.#status.error.message;
       });
     });
   }
@@ -931,7 +937,7 @@ export class DiscordRuntime {
       this.#reconnectTimer = null;
       void this.#openSocket(Boolean(this.#sessionId)).catch((error) => {
         if (this.#stopped) return;
-        this.#logger.warn?.('[dsh-im:discord] Gateway reconnect failed:', error);
+        this.#logger.warn?.('[dsh-im:discord] Gateway reconnect failed:', extractConnectionEvidence(error).details);
         this.#scheduleReconnect();
       });
     }, delay);
@@ -955,7 +961,7 @@ export class DiscordRuntime {
     try {
       if (socket && socket.readyState < 2) socket.close(1000, 'Plugin stopped');
     } catch (error) {
-      this.#logger.warn?.(`[dsh-im:discord] bot ${this.#config.botId} failed to close Gateway:`, error);
+      this.#logger.warn?.(`[dsh-im:discord] bot ${this.#config.botId} failed to close Gateway:`, extractConnectionEvidence(error).details);
     }
     await Promise.race([
       bridge?.waitForIdle() ?? Promise.resolve(),

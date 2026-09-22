@@ -293,6 +293,10 @@ test('stepPushMode persists, normalizes, and reaches the live runtime without re
   assert.equal(fx.configStore.getBot(existing.id).stepPushMode, 'streaming_card');
   assert.deepEqual(modes, ['streaming_card']);
   assert.equal(fx.runtimes.get(existing.id).length, 1);
+  const live = await fx.controller.updateStepPushMode(existing.id, 'live_cot');
+  assert.equal(live.bots[0].stepPushMode, 'live_cot');
+  assert.equal(fx.configStore.getBot(existing.id).stepPushMode, 'live_cot');
+  assert.deepEqual(modes, ['streaming_card', 'live_cot']);
   await assert.rejects(
     fx.controller.updateStepPushMode(existing.id, 'bubble'),
     /Invalid Feishu step push mode/,

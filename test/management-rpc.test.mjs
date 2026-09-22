@@ -123,7 +123,7 @@ test('cancellation reaches a running handler and failed calls are never retried'
   assert.equal((await (await pending).json()).result.error.code, 'cancelled');
   assert.equal(calls, 1);
   let attempts = 0;
-  await assert.rejects(callManagementRpc({ rpc: { async call() { attempts += 1; throw new Error('HTTP 500'); } } }, '/feishu', 'bot.delete', {}), /HTTP 500/);
+  await assert.rejects(callManagementRpc({ rpc: { async call() { attempts += 1; throw new Error('HTTP 500'); } } }, '/feishu', 'bot.delete', {}), error => error.code === 'management-unreachable' && error.details.stage === 'management.request');
   assert.equal(attempts, 1);
 });
 

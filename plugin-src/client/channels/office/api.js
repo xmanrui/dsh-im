@@ -1,3 +1,4 @@
+import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-details.mjs';
 import {
   OFFICE_PROTOCOL_VERSION,
   OFFICE_RPC_CHANNEL,
@@ -12,6 +13,7 @@ export function unwrapOfficeRpc(result) {
   if (!result.ok) {
     const error = new Error(typeof result.error?.message === 'string' ? result.error.message : 'AI Office 操作失败');
     error.code = typeof result.error?.code === 'string' ? result.error.code : 'office-rpc-error';
+    Object.assign(error, diagnosticFields(result.error));
     throw error;
   }
   return result.value;

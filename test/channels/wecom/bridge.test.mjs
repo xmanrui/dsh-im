@@ -1,3 +1,4 @@
+import { loadDeferredImages } from '../../helpers/deferred-images.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -776,7 +777,8 @@ test('Enterprise WeChat downloads an image with its AES key and submits structur
     generateStreamId: () => 'stream-image',
     harness: {
       sessionExists: async () => true,
-      ask: async (sessionId, content) => {
+      ask: async (sessionId, content, options) => {
+        content = await loadDeferredImages(content, options);
         asked.push({ sessionId, content });
         return '图片识别完成';
       },
@@ -825,7 +827,8 @@ test('Enterprise WeChat preserves mixed-message text and image order', async () 
     generateStreamId: () => 'stream-mixed',
     harness: {
       sessionExists: async () => true,
-      ask: async (_sessionId, content) => { prompt = content; return 'ok'; },
+      ask: async (_sessionId, content, options) => {
+        content = await loadDeferredImages(content, options); prompt = content; return 'ok'; },
     },
     state: state(),
   });
@@ -1007,7 +1010,8 @@ test('Enterprise WeChat starts image download before an earlier conversation tur
     generateStreamId: (() => { let index = 0; return () => `queued-${++index}`; })(),
     harness: {
       sessionExists: async () => true,
-      async ask(_sessionId, prompt) {
+      async ask(_sessionId, prompt, options) {
+        prompt = await loadDeferredImages(prompt, options);
         prompts.push(prompt);
         if (prompt === '先处理这个慢任务') {
           firstStarted.resolve();
@@ -1058,7 +1062,8 @@ test('Enterprise WeChat bounds prefetched image memory while a conversation is q
     generateStreamId: (() => { let index = 0; return () => `bounded-${++index}`; })(),
     harness: {
       sessionExists: async () => true,
-      async ask(_sessionId, prompt) {
+      async ask(_sessionId, prompt, options) {
+        prompt = await loadDeferredImages(prompt, options);
         prompts.push(prompt);
         if (prompt === '阻塞队列') {
           firstStarted.resolve();

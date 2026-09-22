@@ -45,6 +45,8 @@ const required = [
   'plugin-src/host/channels/telegram/index.mjs',
   'plugin-src/host/channels/discord/index.mjs',
   'plugin-src/host/channels/whatsapp/index.mjs',
+  'plugin-src/host/channels/matrix/index.mjs',
+  'plugin-src/client/channels/matrix/index.js',
   'src/channels/feishu/feishu-runtime.mjs',
   'src/channels/weixin/weixin-runtime.mjs',
   'src/channels/dingtalk/dingtalk-runtime.mjs',
@@ -56,6 +58,8 @@ const required = [
   'src/channels/discord/discord-runtime.mjs',
   'src/channels/whatsapp/whatsapp-runtime.mjs',
   'src/channels/whatsapp/whatsapp-web-session.mjs',
+  'src/channels/matrix/matrix-runtime.mjs',
+  'src/channels/matrix/matrix-api.mjs',
   'src/channels/shared/context-enhancement.mjs',
 ];
 await Promise.all(required.map((path) => access(resolve(root, path))));
@@ -149,20 +153,28 @@ if (client.includes('settings.plugins.tab') || clientSources.includes('settings.
   throw new Error('client source or bundle still contains the legacy Plugins-tab settings entry');
 }
 // Connections still have no channel-enable toggle. Checkable inputs are owned
-// only by the shared context editor and the saved-target Session sync row.
+// only by the shared context editor, the saved-target Session sync row, the
+// email settings, and the Telegram thinking-traces block.
 // The context editor contains one switch template and one mapped field-input
-// template; the delivery target adds one ordinary checkbox template.
+// template; the delivery target adds one ordinary checkbox template; the
+// Telegram thinking-traces block adds one ordinary checkbox template.
 const contextEditorSource = await readFile(resolve(root, 'plugin-src/client/context-enhancement.js'), 'utf8');
 const deliverySettingsSource = await readFile(resolve(root, 'plugin-src/client/delivery-settings.js'), 'utf8');
+const emailSettingsSource = await readFile(resolve(root, 'plugin-src/client/channels/email/index.js'), 'utf8');
+const thinkingTracesSource = await readFile(resolve(root, 'plugin-src/client/channels/telegram/thinking-traces.js'), 'utf8');
 const otherClientSources = clientSources
   .replace(contextEditorSource, '')
-  .replace(deliverySettingsSource, '');
+  .replace(deliverySettingsSource, '')
+  .replace(emailSettingsSource, '')
+  .replace(thinkingTracesSource, '');
 if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || (deliverySettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySettingsSource)
+  || (thinkingTracesSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
+  || /role:\s*["']switch["']/u.test(thinkingTracesSource)
   || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 1
-  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 3) {
-  throw new Error('checkable inputs must be limited to context enhancement and Session sync');
+  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 4) {
+  throw new Error('checkable inputs must be limited to context enhancement, Session sync, email settings, and the Telegram thinking-traces toggle');
 }
 for (const marker of ['bot.context-enhancement.set', '<dsh_im_source>', '<dsh_im_source_guidance>']) {
   if (!host.includes(marker) || !client.includes(marker)) {
@@ -173,7 +185,7 @@ if (!client.includes('container-type: inline-size')
   || !client.includes('@container (max-width: 680px)')) {
   throw new Error('client bundle does not contain the narrow-panel DingTalk QR layout');
 }
-for (const marker of ['/feishu', '/weixin', '/dingtalk', '/wecom', '/qq', '/slack', '/telegram', '/discord', '/whatsapp']) {
+for (const marker of ['/feishu', '/weixin', '/dingtalk', '/wecom', '/qq', '/slack', '/telegram', '/discord', '/whatsapp', '/matrix']) {
   if (!host.includes(marker)) {
     throw new Error(`host bundle does not contain the internal ${marker} RPC provider`);
   }

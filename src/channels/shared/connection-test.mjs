@@ -45,12 +45,14 @@ export async function sendRememberedConnectionTest({ state, send, text, channelL
   return { sent: true };
 }
 
-export function publicConnectionTestResult(error) {
+export function publicConnectionTestResult(error, { diagnostics, botId } = {}) {
   if (!error) return Object.freeze({ sent: true });
   return Object.freeze({
     sent: false,
     code: error?.code === 'test-target-unavailable'
       ? 'test-target-unavailable'
       : 'test-message-failed',
+    ...(diagnostics && error?.code !== 'test-target-unavailable'
+      ? { error: diagnostics.report(error, { operation: 'connection.test', stage: 'connection.test', botId }).publicError } : {}),
   });
 }

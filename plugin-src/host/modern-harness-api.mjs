@@ -382,7 +382,7 @@ class ModernHarnessApi {
       return;
     }
     if (frame.type !== 'chunk' || frame.index !== stream.entries.length) return;
-    stream.entries.push({
+    const entry = {
       type: 'transient',
       event: {
         type: 'assistant/chunk',
@@ -392,7 +392,12 @@ class ModernHarnessApi {
         time: frame.time,
         data: { turn: stream.turn, step: stream.step, chunk: frame.chunk },
       },
-    });
+    };
+    stream.entries.push(entry);
+    // History only exposes these transient chunks while the attempt is open.
+    // Broadcast each one as it arrives so live IM renderers cannot miss a
+    // short reasoning phase that starts and commits between two history polls.
+    this.#broadcast({ type: 'session/event', sessionId, event: entry.event });
   }
 
   #withAssistantStream(sessionId, entries) {

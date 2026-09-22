@@ -142,3 +142,113 @@ test('HarnessReplyTracker still ignores duplicate sequences and unrelated turns'
 
   assert.equal(tracker.answer, '有效');
 });
+
+test('HarnessReplyTracker does not let pre-turn live frames skip the prompt turn', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: PROMPT_RPC_ID, afterSeq: 0 });
+
+  assert.deepEqual(tracker.consumeAll([
+    textDelta(5, { turn: 1, step: 0, text: '过早到达' }),
+  ], { live: true }), []);
+  assert.equal(tracker.lastSeq, 0);
+
+  const updates = tracker.consumeAll([
+    ...turnPrefix(1),
+    textDelta(3, { turn: 1, step: 0, text: '有效答案' }),
+    { type: 'turn/end', seq: 4, data: { turn: 1, reason: { kind: 'completed' } } },
+  ], { live: true });
+
+  assert.deepEqual(updates, [
+    { type: 'turn-start', turn: 1 },
+    { type: 'text', text: '有效答案' },
+    { type: 'turn-end', turn: 1, reason: { kind: 'completed' } },
+  ]);
+  assert.equal(tracker.answer, '有效答案');
+  assert.equal(tracker.finished, true);
+});
+
+function reasoningDelta(seq, text, turn = 1) {
+  return { type: 'assistant/chunk', seq, data: {
+    turn, step: 0, chunk: { type: 'reasoning-delta', text },
+  } };
+}
+
+for (const type of ['step/end', 'tool/call', 'tool/result', 'assistant/message', 'assistant/chunk', 'turn/end']) {
+  test(`live mux ${type} cannot skip missing history`, () => {
+    const tracker = new HarnessReplyTracker({ promptRpcId: PROMPT_RPC_ID });
+    tracker.consumeAll(turnPrefix(), { live: true });
+    assert.deepEqual(tracker.consumeAll([
+      { type, seq: 8, data: { turn: 1, chunk: { type: 'text-delta', text: '提前草稿' } } },
+    ], { live: true, fromMux: true }), []);
+    assert.equal(tracker.lastSeq, 2);
+    assert.equal(tracker.finished, false);
+    tracker.consumeAll([
+      assistantMessage(3, { step: 0, text: '完整答案' }),
+      { type: 'turn/end', seq: 9, data: { turn: 1 } },
+    ], { live: true });
+    assert.equal(tracker.answer, '完整答案');
+    assert.equal(tracker.finished, true);
+  });
+}
+
+test('live buffered reasoning keeps tool ordering, deduplicates history and rejects foreign or late frames', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: PROMPT_RPC_ID });
+  const early = reasoningDelta(1.5, '早期思考');
+  const later = reasoningDelta(4.5, '第二步思考');
+  assert.deepEqual(tracker.consumeAll([
+    reasoningDelta(0.5, '上一轮', 0), early, later,
+  ], { live: true, fromMux: true }), []);
+  const updates = tracker.consumeAll([
+    ...turnPrefix(), early,
+    { type: 'tool/call', seq: 3, data: { turn: 1, callId: 'call', name: 'read' } },
+    { type: 'tool/result', seq: 4, data: { turn: 1, callId: 'call', result: 'ok' } },
+    later, assistantMessage(5, { step: 1, text: '答案' }),
+    { type: 'turn/end', seq: 6, data: { turn: 1 } },
+  ], { live: true });
+  assert.deepEqual(updates.map(u => u.type), [
+    'turn-start', 'reasoning', 'tool', 'tool-result', 'reasoning', 'assistant-message', 'text', 'turn-end',
+  ]);
+  assert.deepEqual(updates.filter(u => u.type === 'reasoning').map(u => u.text), ['早期思考', '第二步思考']);
+  assert.deepEqual(tracker.consumeAll([reasoningDelta(7, '结束后迟到')], { live: true, fromMux: true }), []);
+  assert.equal(tracker.lastSeq, 6);
+});
+
+for (const seq of [10, 10.5]) {
+  test(`live mux reasoning seq ${seq} does not advance history cursor`, () => {
+    const tracker = new HarnessReplyTracker({ promptRpcId: PROMPT_RPC_ID });
+    tracker.consumeAll(turnPrefix(), { live: true });
+    const frame = reasoningDelta(seq, '思考');
+    assert.equal(tracker.consumeAll([frame], { live: true, fromMux: true })[0].text, '思考');
+    assert.equal(tracker.lastSeq, 2);
+    assert.deepEqual(tracker.consumeAll([frame], { live: true }), []);
+    assert.deepEqual(tracker.consumeAll([reasoningDelta(11, '其他任务', 2)], { live: true, fromMux: true }), []);
+    tracker.consumeAll([assistantMessage(3, { step: 0, text: '补回答案' })], { live: true });
+    assert.equal(tracker.answer, '补回答案');
+  });
+}
+
+for (const [count, textSize, retained] of [[300, 1, 256], [100, 1024, 64]]) {
+  test(`unbound reasoning cache bounds ${count} frames of ${textSize} characters`, () => {
+    const tracker = new HarnessReplyTracker({ promptRpcId: PROMPT_RPC_ID });
+    tracker.consumeAll(Array.from({ length: count }, (_, i) => reasoningDelta(i + 0.5, 'a'.repeat(textSize))),
+      { live: true, fromMux: true });
+    const updates = tracker.consumeAll([
+      { type: 'user/message', seq: 1000, data: { turn: 1, source: { rpcId: PROMPT_RPC_ID } } },
+      assistantMessage(1001, { step: 0, text: '答案' }),
+      { type: 'turn/end', seq: 1002, data: { turn: 1 } },
+    ], { live: true });
+    assert.equal(updates.filter(u => u.type === 'reasoning').length, retained);
+    assert.equal(updates[0].type, 'turn-start');
+    assert.equal(tracker.answer, '答案');
+    assert.equal(tracker.finished, true);
+  });
+}
+
+for (const reason of [{ kind: 'error' }, { kind: 'cancelled' }, { kind: 'completed' }]) {
+  test(`history ${reason.kind} finishes without requiring an assistant answer`, () => {
+    const tracker = new HarnessReplyTracker({ promptRpcId: PROMPT_RPC_ID });
+    tracker.consumeAll([...turnPrefix(), { type: 'turn/end', seq: 3, data: { turn: 1, reason } }], { live: true });
+    assert.equal(tracker.finished, true);
+    assert.deepEqual(tracker.reason, reason);
+    assert.equal(tracker.answer, '');
+  });
+}

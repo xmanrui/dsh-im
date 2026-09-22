@@ -1,3 +1,4 @@
+import { extractConnectionEvidence, atConnectionStage, createConnectionDiagnostics } from '../shared/connection-error.mjs';
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -135,6 +136,7 @@ export class DingtalkController {
   #createRuntime;
   #deleteState;
   #logger;
+  #diagnostics;
   #clock;
   #runtimes = new Map();
   #errors = new Map();
@@ -193,10 +195,17 @@ export class DingtalkController {
     this.#createRuntime = createRuntime;
     this.#deleteState = deleteState;
     this.#logger = logger;
+    this.#diagnostics = createConnectionDiagnostics({ channel: 'dingtalk', prefix: 'DT-CONN', logger });
     this.#clock = clock;
   }
 
   /** Starts all configured DingTalk runtimes whose secrets are available. */
+  get diagnostics() { return this.#diagnostics; }
+  #failure(error, code, message) {
+    const stage = code.startsWith('poll-') ? 'qr.poll' : code === 'activation-failed' ? 'activation' : 'qr.begin';
+    return this.#diagnostics.report(error, { reuse: true, stage, publicError: { code, message } }).publicError;
+  }
+
   async initialize() {
     if (this.#closed) return this.status();
     for (const config of this.#configStore.list()) {
@@ -209,16 +218,17 @@ export class DingtalkController {
       await this.#withBotTransition(config.botId, async () => {
         const latest = this.#configStore.get(config.botId);
         if (!latest || this.#closed) return;
-        const clientSecret = await this.#resolveSecret(latest.secretRef);
-        if (!clientSecret) {
-          this.#errors.set(
-            latest.botId,
-            safeError('missing-secret', t('钉钉机器人凭据缺失，请移除后重新扫码。')),
-          );
-          this.#touch();
-          return;
-        }
+        let clientSecret;
         try {
+          clientSecret = await this.#resolveSecret(latest.secretRef);
+          if (!clientSecret) {
+            this.#errors.set(
+              latest.botId,
+              safeError('missing-secret', t('钉钉机器人凭据缺失，请移除后重新扫码。')),
+            );
+            this.#touch();
+            return;
+          }
           await this.#startRuntime(latest, clientSecret);
           this.#errors.delete(latest.botId);
         } catch (error) {
@@ -282,7 +292,7 @@ export class DingtalkController {
         record.error = safeError('cancelled', t('扫码接入已取消。'));
       } else {
         record.state = 'failed';
-        record.error = safeError('qr-start-failed', t('无法生成钉钉二维码，请稍后重试。'));
+        record.error = this.#failure(error, 'qr-start-failed', t('无法生成钉钉二维码，请稍后重试。'));
       }
       if (this.#activeAttemptId === record.id) this.#activeAttemptId = null;
       this.#touch();
@@ -307,7 +317,7 @@ export class DingtalkController {
     await this.#withBotTransition(identity.botId, async () => {
       if (this.#closed) throw abortError();
       const previousConfig = this.#configStore.getByClientId(normalizedClientId);
-      const previousSecret = await this.#credentials.resolve(identity.secretRef).catch(() => undefined);
+      const previousSecret = await atConnectionStage('credential.read', () => this.#credentials.resolve(identity.secretRef), 'credential-store');
       if (this.#closed) throw abortError();
       const config = {
         botId: identity.botId,
@@ -315,9 +325,9 @@ export class DingtalkController {
         secretRef: identity.secretRef,
         approvedSenders: previousConfig?.approvedSenders ?? [],
       };
-      await this.#credentials.set(identity.secretRef, normalizedSecret);
+      await atConnectionStage('credential.save', () => this.#credentials.set(identity.secretRef, normalizedSecret), 'credential-store');
       try {
-        await this.#configStore.save(config);
+        await atConnectionStage('account.save', () => this.#configStore.save(config), 'account-config');
       } catch (error) {
         await this.#restoreCredential(identity.secretRef, previousSecret);
         throw error;
@@ -434,30 +444,37 @@ export class DingtalkController {
 
   /** Removes one bot, its secret, runtime, and local conversation state. */
   async deleteBot(botId) {
+    const warnings = [];
     const config = this.#configStore.get(botId);
     if (!config) throw new Error('Unknown DingTalk bot');
     await this.#withBotTransition(botId, async () => {
-      const previousSecret = await this.#credentials.resolve(config.secretRef).catch(() => undefined);
+      const previousSecret = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.secretRef), 'credential-store');
       await this.#stopRuntime(botId);
       try {
-        await this.#credentials.unset(config.secretRef);
-        await this.#configStore.remove(botId);
+        await atConnectionStage('credential.remove', () => this.#credentials.unset(config.secretRef), 'credential-store');
+        await atConnectionStage('account.remove', () => this.#configStore.remove(botId), 'account-config');
       } catch (error) {
-        if (cleanString(previousSecret?.value)) {
-          await this.#credentials.set(config.secretRef, previousSecret.value).catch(() => undefined);
-          await this.#startRuntime(config, previousSecret.value).catch(() => undefined);
+        if (!this.#configStore.get(botId)) {
+          warnings.push(this.#diagnostics.report(error, { operation: 'bot.delete', stage: 'workspace.cleanup', warning: true,
+            publicError: { code: 'workspace-cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError);
+        } else {
+          if (cleanString(previousSecret?.value)) {
+            await atConnectionStage('credential.save', () => this.#credentials.set(config.secretRef, previousSecret.value), 'credential-store').catch(() => undefined);
+            await this.#startRuntime(config, previousSecret.value).catch(() => undefined);
+          }
+          throw new Error('Unable to remove the DingTalk bot safely.', { cause: error });
         }
-        throw new Error('Unable to remove the DingTalk bot safely.', { cause: error });
       }
       try {
         await this.#deleteState({ botId, config });
-      } catch {
-        this.#logger.warn?.(`[dsh-dingtalk] bot ${botId} state cleanup failed`);
+      } catch (error) {
+        warnings.push(this.#diagnostics.report(error, { reuse: true, operation: 'bot.delete', stage: 'state.cleanup', warning: true,
+          publicError: { code: 'cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError);
       }
       this.#errors.delete(botId);
       this.#touch();
     });
-    return this.status();
+    return { ...this.status(), ...(warnings.length ? { warnings } : {}) };
   }
 
   /** Approves one opaque pending-sender request for a bot. */
@@ -517,7 +534,7 @@ export class DingtalkController {
         currentStatus = { state: 'error' };
       }
       const connected = isRuntimeConnected(runtime, currentStatus);
-      const accountError = this.#errors.get(config.botId);
+      const accountError = currentStatus.error ?? this.#errors.get(config.botId);
       const state = connected ? 'connected' : accountError ? 'error' : 'offline';
       const approvedIds = new Set(config.approvedSenders.map((sender) => sender.staffId));
       const pending = internalPendingSenders(currentStatus)
@@ -626,7 +643,7 @@ export class DingtalkController {
         if (this.#activeAttemptId === record.id) this.#activeAttemptId = null;
       } else if (record.state === 'connecting') {
         record.state = 'failed';
-        record.error = safeError(
+        record.error = this.#failure(error,
           'activation-failed',
           t('钉钉已授权，但无法安全保存接入配置。'),
         );
@@ -634,7 +651,7 @@ export class DingtalkController {
         this.#logger.error?.('[dsh-dingtalk] bot activation failed');
       } else {
         record.state = 'pending';
-        record.error = safeError('poll-failed', t('钉钉授权查询暂时失败，正在重试。'));
+        record.error = this.#failure(error, 'poll-failed', t('钉钉授权查询暂时失败，正在重试。'));
       }
     } finally {
       this.#touch();
@@ -645,7 +662,7 @@ export class DingtalkController {
   async #activateBot(record, { clientId, clientSecret }) {
     const identity = deriveDingtalkBotIdentity(clientId);
     const previousConfig = this.#configStore.getByClientId(clientId);
-    const previousSecret = await this.#credentials.resolve(identity.secretRef).catch(() => undefined);
+    const previousSecret = await atConnectionStage('credential.read', () => this.#credentials.resolve(identity.secretRef), 'credential-store');
     const config = {
       botId: identity.botId,
       clientId,
@@ -655,12 +672,12 @@ export class DingtalkController {
     return this.#withBotTransition(identity.botId, async () => {
       const rollback = async () => {
         await this.#stopRuntime(identity.botId);
-        if (previousConfig) await this.#configStore.save(previousConfig).catch(() => undefined);
+        if (previousConfig) await atConnectionStage('account.save', () => this.#configStore.save(previousConfig), 'account-config').catch(() => undefined);
         else if (this.#configStore.get(identity.botId)) {
-          const removed = await this.#configStore.remove(identity.botId).catch(() => null);
+          const removed = await atConnectionStage('account.remove', () => this.#configStore.remove(identity.botId), 'account-config').catch(() => null);
           if (removed) {
             await this.#deleteState({ botId: identity.botId, config }).catch((cleanupError) => {
-              this.#logger.warn?.('[dsh-dingtalk] failed to clean up cancelled bot state:', cleanupError);
+              this.#logger.warn?.('[dsh-dingtalk] failed to clean up cancelled bot state:', extractConnectionEvidence(cleanupError).details);
             });
           }
         }
@@ -669,10 +686,10 @@ export class DingtalkController {
           await this.#startRuntime(previousConfig, previousSecret.value).catch(() => undefined);
         }
       };
-      await this.#credentials.set(identity.secretRef, clientSecret);
+      await atConnectionStage('credential.save', () => this.#credentials.set(identity.secretRef, clientSecret), 'credential-store');
       try {
         this.#assertAttemptActive(record);
-        await this.#configStore.save(config);
+        await atConnectionStage('account.save', () => this.#configStore.save(config), 'account-config');
         this.#assertAttemptActive(record);
       } catch (error) {
         await rollback();
@@ -703,12 +720,12 @@ export class DingtalkController {
     return this.#withBotTransition(previousConfig.botId, async () => {
       const clientSecret = await this.#resolveSecret(previousConfig.secretRef);
       if (!clientSecret) throw new Error('The DingTalk client secret is missing');
-      await this.#configStore.save(nextConfig);
+      await atConnectionStage('account.save', () => this.#configStore.save(nextConfig), 'account-config');
       try {
         await this.#startRuntime(nextConfig, clientSecret);
         this.#errors.delete(previousConfig.botId);
       } catch (error) {
-        await this.#configStore.save(previousConfig).catch(() => undefined);
+        await atConnectionStage('account.save', () => this.#configStore.save(previousConfig), 'account-config').catch(() => undefined);
         await this.#startRuntime(previousConfig, clientSecret).catch(() => undefined);
         const publicError = this.#rememberConnectionFailure({
           config: previousConfig,
@@ -730,11 +747,11 @@ export class DingtalkController {
     if (this.#closed) throw abortError();
     let runtime;
     try {
-      runtime = await this.#createRuntime({
+      runtime = await atConnectionStage('runtime.prepare', () => this.#createRuntime({
         botId: config.botId,
         config: structuredClone(config),
         clientSecret,
-      });
+      }));
     } catch (error) {
       throw dingtalkRuntimeStartError('dingtalk-runtime-prepare-failed', error);
     }
@@ -774,12 +791,10 @@ export class DingtalkController {
       clientId: config.clientId,
       clientSecret,
     });
-    this.#errors.set(config.botId, failure.publicError);
-    this.#logger.error?.(
-      `[dsh-dingtalk] ${context} [${failure.publicError.referenceId}]`,
-      failure.diagnostic,
-    );
-    return failure.publicError;
+    const reported = this.#diagnostics.report(error, { reuse: true, botId: config.botId, stage: 'connection.start', publicError: { ...failure.publicError, details: { dependencies: failure.diagnostic.dependencies, proxyConfigured: failure.diagnostic.proxy.configured } } }).publicError;
+    const visible = { ...failure.publicError, details: reported.details };
+    this.#errors.set(config.botId, visible);
+    return visible;
   }
 
   async #stopRuntime(botId) {
@@ -791,14 +806,14 @@ export class DingtalkController {
   }
 
   async #resolveSecret(secretRef) {
-    const result = await this.#credentials.resolve(secretRef).catch(() => undefined);
+    const result = await atConnectionStage('credential.read', () => this.#credentials.resolve(secretRef), 'credential-store');
     return cleanString(result?.value);
   }
 
   async #restoreCredential(secretRef, previous) {
     try {
-      if (cleanString(previous?.value)) await this.#credentials.set(secretRef, previous.value);
-      else await this.#credentials.unset(secretRef);
+      if (cleanString(previous?.value)) await atConnectionStage('credential.save', () => this.#credentials.set(secretRef, previous.value), 'credential-store');
+      else await atConnectionStage('credential.remove', () => this.#credentials.unset(secretRef), 'credential-store');
     } catch {
       this.#logger.error?.(`[dsh-dingtalk] failed to restore credential ${secretRef}`);
     }

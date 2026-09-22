@@ -129,7 +129,7 @@ test('read-only credential errors use provider evidence and never error-message 
   fx.credentials.describe = () => { throw new Error('description failed'); };
   result = await handler('bot.delete', { botId: fx.config.botId, confirm: true });
   assert.equal(result.error.code, 'credential-remove-failed');
-  assert.equal(result.error.details.reason, undefined);
+  assert.equal(result.error.details.reason, 'unknown');
 });
 
 test('committed removal observer failure is a warning and never resurrects a token', async t => {

@@ -8,6 +8,7 @@ const STREAM_ELEMENT_ID = 'stream_md';
 const DEFAULT_INITIAL_TEXT = '已连接 DeepSeek Harness，正在思考…';
 const MAX_STREAM_CHARS = 28000;
 const MAX_FILE_OPERATION_TIMEOUT_MS = 120_000;
+const COT_API = '/open-apis/im/v1/message_cot';
 
 const FILE_DELIVERY_ERRORS = new Map([
   [99991672, ['artifact-permission-required', 'Feishu file delivery requires the im:resource permission.']],
@@ -363,6 +364,40 @@ export class VerifiedFeishuChannel {
       messageType: 'image',
       presentation: 'feishu-image',
     });
+  }
+
+  /** Open one native Feishu thinking-process message. */
+  async createCot(chatId, { replyTo, hidden = false } = {}) {
+    const response = assertApiSuccess('Feishu message_cot.create', await this.#client.request({
+      method: 'POST',
+      url: `${COT_API}?receive_id_type=chat_id`,
+      data: {
+        receive_id: chatId,
+        ...(replyTo ? { origin_message_id: replyTo } : {}),
+        cot_hidden: hidden === true,
+        enable_badge: false,
+        update_feed_rank: false,
+      },
+    }));
+    const cotId = response?.data?.cot_id;
+    const messageId = response?.data?.message_id;
+    if (!cotId || !messageId) {
+      throw new Error('Feishu message_cot.create returned no cot_id/message_id');
+    }
+    return { cotId, messageId };
+  }
+
+  /** Append ordered AG-UI events to one native thinking process. */
+  async writeCotEvents(handle, events) {
+    assertApiSuccess('Feishu message_cot.write', await this.#client.request({
+      method: 'PUT',
+      url: COT_API,
+      data: {
+        events,
+        message_id: handle.messageId,
+        cot_id: handle.cotId,
+      },
+    }));
   }
 
   async #sendArtifact(chatId, file, {

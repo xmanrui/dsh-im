@@ -37,16 +37,13 @@ function sessionWorkspace(sessionId, value) {
     }
   }
 
-  if (owners.length === 0) {
-    throw bindingError('session-not-registered', 'The session is not registered to a Harness workspace');
-  }
-  if (owners.length !== 1) {
+  if (owners.length > 1) {
     throw bindingError(
       'session-workspace-ambiguous',
       'The session is registered to more than one Harness workspace',
     );
   }
-  if (UNSAFE_WORKSPACE_PATH.test(owners[0].path)) {
+  if (owners.length && UNSAFE_WORKSPACE_PATH.test(owners[0].path)) {
     throw new Error('Harness returned an unsafe workspace path for the session');
   }
   return {
@@ -82,20 +79,28 @@ function sessionSummary(sessionId, value) {
   if (title !== undefined && title !== null && typeof title !== 'string') {
     throw new Error('Harness returned an invalid session title for session.list');
   }
-  return { title: typeof title === 'string' ? title : null };
+  return { cwd: summary.cwd, title: typeof title === 'string' ? title : null };
 }
 
 export async function adoptRegisteredWorkspaceSession(client, value, options = {}, timeoutMs = 30_000) {
   const sessionId = validatedSessionId(value);
   await client.ensureRunning(options);
   const workspaceList = await client.rpc('workspace.list', {}, timeoutMs, options);
-  const { workspace, archived } = sessionWorkspace(sessionId, workspaceList);
+  let { workspace, archived } = sessionWorkspace(sessionId, workspaceList);
   const summary = sessionSummary(
     sessionId,
     await client.rpc('session.list', {}, timeoutMs, options),
   );
+  if (!workspace) {
+    if (typeof summary.cwd !== 'string' || !isAbsolute(summary.cwd)
+      || UNSAFE_WORKSPACE_PATH.test(summary.cwd)
+      || !await client.isUngroupedWorkspace?.(summary.cwd)) {
+      throw bindingError('session-not-registered', 'The session is not registered to a Harness workspace');
+    }
+    workspace = { path: summary.cwd };
+  }
   const adopted = await client.rpc('session.create', {
-    workspaceId: workspace.workspaceId,
+    ...(workspace.workspaceId ? { workspaceId: workspace.workspaceId } : { cwd: workspace.path }),
     sessionId,
   }, timeoutMs, options);
   if (!adopted || adopted.sessionId !== sessionId) {

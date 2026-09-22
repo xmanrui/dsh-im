@@ -1,3 +1,4 @@
+import { createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
 import { randomUUID } from 'node:crypto';
 import { FeishuHarnessBridge } from './bridge.mjs';
 import { cardActionProbeCard } from './feishu-cards.mjs';
@@ -125,6 +126,7 @@ export class FeishuRuntime {
   #requestTimeoutMs;
   #wsAgent;
   #logger;
+  #diagnostics;
   #repair;
   #client = null;
   #bridge = null;
@@ -200,7 +202,7 @@ export class FeishuRuntime {
     this.#requestTimeoutMs = requestTimeoutMs;
     this.#slashCommands = Boolean(slashCommands);
     this.#wsAgent = wsAgent;
-    this.#logger = logger;
+    this.#logger = logger; this.#diagnostics = createConnectionDiagnostics({ channel: 'feishu', logger });
     this.#status = createBridgeStatus({ allowedSenderCount: normalizedOwners.length });
   }
 
@@ -277,10 +279,10 @@ export class FeishuRuntime {
     };
     this.#status.startedAt = new Date().toISOString();
     this.#status.feishuLongConnectionState = 'connecting';
-    this.#status.lastError = null;
+    this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
 
     try {
-      await this.#harness.ensureRunning({ signal });
+      await atConnectionStage('harness.check', () => this.#harness.ensureRunning({ signal }));
       assertCurrentStart();
       this.#status.harnessReachable = true;
 
@@ -391,15 +393,16 @@ export class FeishuRuntime {
           if (!isCurrentStart()) return;
           this.#status.feishuLongConnectionState = 'connected';
           this.#status.ready = true;
-          this.#status.lastError = null;
+          this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
           settleReady();
         },
         onError: (error) => {
           if (!isCurrentStart()) return;
           this.#status.feishuLongConnectionState = 'failed';
           this.#status.ready = false;
-          this.#status.lastError = error?.message ?? String(error);
-          this.#logger.error('[dsh-feishu] Feishu long connection failed:', this.#status.lastError);
+          this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#botId, automatic: true }).publicError;
+          this.#status.lastError = this.#status.error.message;
+
           settleError(error);
         },
         onReconnecting: () => {
@@ -411,7 +414,7 @@ export class FeishuRuntime {
           if (!isCurrentStart()) return;
           this.#status.feishuLongConnectionState = 'connected';
           this.#status.ready = true;
-          this.#status.lastError = null;
+          this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
         },
       });
       this.#wsClient = wsClient;
@@ -436,7 +439,8 @@ export class FeishuRuntime {
       if (signal.aborted) throw error;
       this.#status.ready = false;
       this.#status.feishuLongConnectionState = 'failed';
-      this.#status.lastError = error?.message ?? String(error);
+      this.#status.error = this.#diagnostics.report(error, { operation: 'connection.restore', reuse: true, botId: this.#botId, automatic: true }).publicError;
+      this.#status.lastError = this.#status.error.message;
       await this.#cleanup({ preserveError: true, abortController });
       throw error;
     }
@@ -624,7 +628,7 @@ export class FeishuRuntime {
     });
   }
 
-  async sendProactiveText(target, text, { signal } = {}) {
+  async sendProactiveText(target, text, { signal, format = 'plain' } = {}) {
     if (!this.#status.ready || !this.#client) {
       const error = new Error('飞书机器人尚未连接');
       error.code = 'bot-not-connected';
@@ -642,13 +646,23 @@ export class FeishuRuntime {
       error.code = 'invalid-target';
       throw error;
     }
+    if (format !== 'plain' && format !== 'markdown') {
+      const error = new TypeError('Message format must be plain or markdown');
+      error.code = 'bad-request';
+      throw error;
+    }
     signal?.throwIfAborted();
+    // Use the same native Markdown element as chat, without opening a stream
+    // or retrying as plain text after a possibly accepted delivery.
+    const content = format === 'markdown'
+      ? { schema: '2.0', body: { elements: [{ tag: 'markdown', content: text }] } }
+      : { text };
     const response = await this.#client.im.v1.message.create({
       params: { receive_id_type: receiveIdType },
       data: {
         receive_id: receiveId,
-        msg_type: 'text',
-        content: JSON.stringify({ text }),
+        msg_type: format === 'markdown' ? 'interactive' : 'text',
+        content: JSON.stringify(content),
       },
     });
     if (response?.code && response.code !== 0) {
@@ -720,6 +734,7 @@ export class FeishuRuntime {
 
   async #cleanup({ preserveError = false, abortController } = {}) {
     const error = preserveError ? this.#status.lastError : null;
+    const diagnostic = preserveError ? this.#status.error : null;
     if (this.#abortController === abortController) this.#abortController = null;
     abortController?.abort(new DOMException('Feishu runtime stopped', 'AbortError'));
     for (const probe of this.#pendingCardActionProbes.values()) {
@@ -742,7 +757,9 @@ export class FeishuRuntime {
     this.#client = null;
     this.#status.feishuLongConnectionState = preserveError ? 'failed' : 'idle';
     this.#status.slashCommandRegistration = 'idle';
+    this.#status.error = diagnostic;
     this.#status.lastError = error;
+    if (!preserveError) this.#diagnostics.clear();
     return this.status;
   }
 }

@@ -7,3 +7,4 @@ coverage/
 *.tgz
 .DS_Store
 .idea/
+e2e/

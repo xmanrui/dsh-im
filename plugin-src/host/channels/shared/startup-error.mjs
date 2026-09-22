@@ -3,7 +3,8 @@ import { t } from '../../../../src/channels/shared/i18n.mjs';
 const CHANNEL_NAMES = {
   weixin: '微信', feishu: '飞书', dingtalk: '钉钉', wecom: '企业微信',
   'wecom-app': '企业微信应用', qq: 'QQ', slack: 'Slack', telegram: 'Telegram',
-  discord: 'Discord', whatsapp: 'WhatsApp', office: 'AI Office',
+  discord: 'Discord', whatsapp: 'WhatsApp', imessage: 'iMessage',
+  email: '邮箱', matrix: 'Matrix', office: 'AI Office',
 };
 const INVALID_CONFIG_MESSAGES = new Set([
   'dsh-weixin config contains invalid account data',
@@ -11,9 +12,10 @@ const INVALID_CONFIG_MESSAGES = new Set([
   'dsh-feishu config contains duplicate bot identities',
   'dsh-feishu config is incomplete or invalid',
   'dsh-dingtalk config contains invalid bot data',
-  ...['Enterprise WeChat', 'Enterprise WeChat app', 'QQ', 'Slack', 'Telegram', 'Discord']
+  ...['Enterprise WeChat', 'Enterprise WeChat app', 'QQ', 'Slack', 'Telegram', 'Discord', 'Email']
     .map(channel => `dsh-im ${channel} config contains invalid bot data`),
   'dsh-im WhatsApp config contains invalid account data',
+  'dsh-im Matrix config contains invalid bot data',
   'dsh-im AI Office config is invalid',
   'dsh-im workspace config is invalid',
 ]);
@@ -47,7 +49,7 @@ export function publicChannelStartupError(channel, error) {
   }
   return {
     code: `${channel}-startup-failed`,
-    message: t('{channel}初始化失败。请查看 DSH 启动日志中 failed to activate {id} 后的错误，修复后重启 DSH。', params),
+    message: t('{channel}初始化失败。请展开诊断详情，并通过参考号查找 DSH 启动日志，修复后重启 DSH。', params),
     details: {},
   };
 }

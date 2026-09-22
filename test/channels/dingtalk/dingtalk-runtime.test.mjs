@@ -45,6 +45,40 @@ function stateFixture() {
   };
 }
 
+test('runtime clears monitor diagnostics after recovery and a normal stop', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const client = {
+    connected: true, socket: { readyState: 1 },
+    registerCallbackListener() {}, socketCallBackResponse() {},
+    async connect() { this.connected = true; this.socket.readyState = 1; },
+    async disconnect() { this.connected = false; this.socket.readyState = 3; },
+  };
+  const runtime = new DingtalkRuntime({
+    config: { botId: 'one', clientId: 'ding-client', approvedSenders: [] },
+    clientSecret: 'host-secret', harness: { ensureRunning: async () => true },
+    state: stateFixture(), logger: { error() {}, warn() {} },
+    streamFactory: async () => ({ client, topic: 'robot-topic' }),
+  });
+  t.after(() => runtime.stop());
+  await runtime.start();
+  client.connected = false; client.socket.readyState = 3;
+  t.mock.timers.tick(1_000);
+  const first = runtime.status.error;
+  assert.equal(first.details.reason, 'unknown');
+  assert.equal(first.details.stage, 'connection.poll');
+  client.connected = true; client.socket.readyState = 1;
+  t.mock.timers.tick(1_000);
+  assert.equal(runtime.status.error, null);
+  client.connected = false; client.socket.readyState = 3;
+  t.mock.timers.tick(1_000);
+  assert.notEqual(runtime.status.error.details.referenceId, first.details.referenceId);
+  await runtime.stop();
+  assert.equal(runtime.status.error, null);
+  await runtime.start();
+  assert.equal(runtime.status.ready, true);
+  assert.equal(runtime.status.error, null);
+});
+
 test('runtime sends a DingTalk connection test only through the remembered private webhook', async () => {
   const state = stateFixture();
   const sends = [];
@@ -436,7 +470,7 @@ test('runtime never reports ready when connect resolves before the socket opens 
   assert.equal(disconnects, 1);
   assert.equal(runtime.status.ready, false);
   assert.equal(runtime.status.dingtalkStreamState, 'failed');
-  assert.match(runtime.status.lastError, /handshake timed out/);
+  assert.equal(runtime.status.lastError, '钉钉连接未就绪，请稍后重试。');
 });
 
 test('runtime bounds a stalled SDK gateway lookup and disconnects a late connection', async () => {

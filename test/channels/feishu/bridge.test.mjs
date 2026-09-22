@@ -1,3 +1,4 @@
+import { loadDeferredImages } from '../../helpers/deferred-images.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
@@ -1010,7 +1011,8 @@ test('bridge downloads an inbound Feishu image once and submits structured Harne
     channel: {},
     harness: {
       sessionExists: async () => true,
-      ask: async (sessionId, content) => {
+      ask: async (sessionId, content, options) => {
+        content = await loadDeferredImages(content, options);
         asked.push({ sessionId, content });
         return '看到了一张图片';
       },
@@ -1335,7 +1337,7 @@ test('bridge tells users to grant im:message:readonly when Feishu rejects image 
     channel: {},
     harness: {
       sessionExists: async () => true,
-      ask: async () => assert.fail('permission failures must not reach Harness'),
+      ask: async (_sessionId, content, options) => { await loadDeferredImages(content, options); assert.fail('invalid images must not reach the model'); },
     },
     state: fixture.state,
     status: bridgeStatus(),
@@ -1382,7 +1384,8 @@ test('bridge sends Feishu post text and all embedded images as one structured pr
     channel: {},
     harness: {
       sessionExists: async () => true,
-      ask: async (sessionId, content) => {
+      ask: async (sessionId, content, options) => {
+        content = await loadDeferredImages(content, options);
         asked.push({ sessionId, content });
         return '两张图片都已收到';
       },
@@ -5056,7 +5059,8 @@ test('bridge does not expose internal error details in a Feishu failure reply', 
   assert.match(sent[0], /任务未完成，暂时无法确定原因/);
   assert.match(sent[0], /错误码：INTERNAL_UNKNOWN；参考号：MF-[A-F0-9]{8}$/);
   assert.doesNotMatch(sent[0], /secret-shaped-internal-detail|private\/path/);
-  assert.equal(status.lastError, 'secret-shaped-internal-detail /private/path');
+  assert.equal(status.lastError, status.lastMessageError.message);
+  assert.doesNotMatch(JSON.stringify(status), /secret-shaped-internal-detail|private\/path/);
 });
 
 test('Feishu exposes a structured model rate limit without changing connection state', async () => {
@@ -8961,6 +8965,81 @@ function stepPushHarness(askBody) {
   };
 }
 
+test('step push live_cot mode uses Feishu native process and sends the final answer separately', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const writes = [];
+  const creates = [];
+  const channel = {
+    ...stepPushChannel(),
+    createCot: async (chatId, options) => {
+      creates.push({ chatId, options });
+      return { cotId: 'cot-live', messageId: 'om-cot-live' };
+    },
+    writeCotEvents: async (_handle, events) => writes.push(...events),
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient((text) => sent.push(text)),
+    channel,
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      assert.equal(options.progressMode, 'live');
+      await options.onUpdate({ type: 'turn-start', turn: 4 });
+      await options.onUpdate({ type: 'reasoning', turn: 4, text: '分析请求' });
+      await options.onUpdate({
+        type: 'assistant-message',
+        turn: 4,
+        step: 0,
+        text: 'PROCESS_MARKER_9f3a 先读取文件',
+      });
+      await options.onUpdate({
+        type: 'tool',
+        turn: 4,
+        name: 'read_file',
+        callId: 'call-live',
+        arguments: '{"path":"a.md"}',
+      });
+      await options.onUpdate({
+        type: 'tool-result',
+        turn: 4,
+        callId: 'call-live',
+        text: '文件内容',
+      });
+      await options.onUpdate({ type: 'assistant-message', turn: 4, step: 1, text: 'FINAL_MARKER_9f3a 过程候选' });
+      await options.onUpdate({ type: 'turn-end', turn: 4, reason: { kind: 'completed' } });
+      return 'PROCESS_MARKER_9f3a 先读取文件\n\nFINAL_MARKER_9f3a 过程候选';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushMode: 'live_cot',
+  });
+
+  await bridge.accept(event('om_live_cot', '执行任务'));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(creates, [{
+    chatId: 'oc_chat',
+    options: { replyTo: 'om_live_cot', hidden: false },
+  }]);
+  assert.deepEqual(writes.map(({ event_type }) => event_type), [
+    'RUN_STARTED',
+    'REASONING_MESSAGE_START',
+    'REASONING_MESSAGE_CONTENT',
+    'TEXT_MESSAGE_START',
+    'TEXT_MESSAGE_CONTENT',
+    'TEXT_MESSAGE_END',
+    'REASONING_MESSAGE_END',
+    'TOOL_CALL_START',
+    'TOOL_CALL_ARGS',
+    'TOOL_CALL_END',
+    'TOOL_CALL_RESULT',
+    'RUN_FINISHED',
+  ]);
+  assert.deepEqual(sent, ['FINAL_MARKER_9f3a 过程候选']);
+  assert.ok(!sent.at(-1).includes('PROCESS_MARKER_9f3a'));
+});
+
 test('step push: tools and assistant notes push as discrete messages, final answer only in card', async () => {
   const fixture = stateFixture();
   const sent = [];
@@ -11478,4 +11557,227 @@ test('plain IM replies (stepPush off) register the in-flight turn and never open
   // mirror adopted plain IM turns and double-delivered their answers.
   assert.deepEqual(mirrorWrites, [], 'plain IM replies must never open a mirror card');
   assert.ok(streamCalls.length >= 1, 'the plain reply still delivers via the stream channel');
+});
+
+// Topic deduplication must follow the real Harness session, not message parsing.
+function topicAnchorFixture({ mode = 'text', ...options } = {}) {
+  const fixture = stateFixture();
+  const asked = [];
+  const reads = [];
+  const sent = [];
+  let sessionCount = 0;
+  const client = textClient(async (outgoing) => sent.push(outgoing));
+  client.im.v1.message.reply = async (request) => {
+    sent.push(request);
+    return { code: 0, data: { message_id: `om_answer_${sent.length}` } };
+  };
+  client.im.v1.message.get = async (request) => {
+    reads.push(request.path.message_id);
+    return { code: 0, data: { items: [{
+      message_id: request.path.message_id, chat_id: 'oc_group', msg_type: 'text',
+      body: { content: JSON.stringify({ text: `REPORT:${request.path.message_id}` }) },
+    }] } };
+  };
+  const harness = {
+    ensureRunning: async () => true,
+    sessionExists: async () => true,
+    createSession: async () => `session-anchor-${++sessionCount}`,
+    ask: async (sessionId, text, options) => { asked.push({ sessionId, text, options }); return 'answer'; },
+  };
+  const channel = mode === 'text' ? {} : {
+    stream: async (_chatId, callbacks) => {
+      if (mode === 'fallback') throw new Error('stream unavailable');
+      await callbacks.markdown({ setContent: async () => {} });
+      return { messageId: 'om_stream_answer' };
+    },
+  };
+  const bridge = new FeishuHarnessBridge({
+    client, channel, harness, state: fixture.state, status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']), botOpenId: 'ou_bot',
+    stepPush: mode === 'steps', logger: { info() {}, warn() {}, error() {} },
+    ...options,
+  });
+  let sequence = 0;
+  const send = async (text = 'continue', extra = {}) => {
+    await bridge.accept(groupMentionEvent(`om_anchor_in_${++sequence}`, text, {
+      thread_id: 'omt_anchor', root_id: 'om_root', parent_id: 'om_root', ...extra,
+    }));
+    await bridge.waitForIdle();
+  };
+  return { ...fixture, bridge, client, harness, send, asked, reads, sent };
+}
+
+function hasAnchor(prompt, id = 'om_root') {
+  return JSON.stringify(prompt).includes(`REPORT:${id}`);
+}
+
+for (const mode of ['text', 'stream', 'steps', 'fallback']) {
+  test(`topic anchor is injected once per successful AI session (${mode})`, async () => {
+    const f = topicAnchorFixture({ mode });
+    await f.send();
+    await f.send();
+    assert.equal(f.asked.length, 2);
+    assert.equal(f.asked[0].sessionId, f.asked[1].sessionId);
+    assert.ok(hasAnchor(f.asked[0].text));
+    assert.equal(hasAnchor(f.asked[1].text), false);
+    assert.deepEqual(f.reads, ['om_root']);
+  });
+}
+
+for (const command of ['/help', '/new']) {
+  test(`topic ${command} does not consume the first AI prompt's anchor`, async () => {
+    const f = topicAnchorFixture();
+    await f.send(command);
+    assert.equal(f.asked.length, 0);
+    assert.equal(f.reads.length, 0);
+    await f.send();
+    assert.ok(hasAnchor(f.asked[0].text));
+  });
+}
+
+test('topic /new and session rebinding restore the anchor in the actual new session', async () => {
+  const f = topicAnchorFixture();
+  await f.send();
+  await f.send('/new');
+  await f.send();
+  assert.notEqual(f.asked[0].sessionId, f.asked[1].sessionId);
+  assert.ok(hasAnchor(f.asked[1].text));
+  await f.state.setSession('group:oc_group:thread:omt_anchor', 'manually-bound-session');
+  await f.send();
+  assert.equal(f.asked[2].sessionId, 'manually-bound-session');
+  assert.ok(hasAnchor(f.asked[2].text));
+});
+
+test('rejected topic messages do not consume the allowed sender\'s anchor', async () => {
+  const scope = { mode: 'allowlist', open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
+    allowlist: { users: [{ id: 'ou_user', canExecuteCommands: true }] } };
+  const f = topicAnchorFixture({ accessPolicy: { getSettings: () => ({ direct: scope, group: scope }), isPrivileged: () => false } });
+  await f.send('not allowed', { senderOpenId: 'ou_denied' });
+  assert.equal(f.asked.length, 0);
+  assert.equal(f.reads.length, 0);
+  await f.send();
+  assert.ok(hasAnchor(f.asked[0].text));
+});
+
+for (const overrides of [{ thread_id: undefined }, { chat_type: 'p2p' }, { parent_id: 'om_answer' }]) {
+  test(`explicit reply references keep expanding: ${JSON.stringify(overrides)}`, async () => {
+    const f = topicAnchorFixture();
+    await f.send('first quote', overrides);
+    await f.send('second quote', overrides);
+    const id = overrides.parent_id ?? 'om_root';
+    assert.ok(hasAnchor(f.asked[0].text, id));
+    assert.ok(hasAnchor(f.asked[1].text, id));
+    assert.deepEqual(f.reads, [id, id]);
+  });
+}
+
+test('topic anchor lookup failure is retried after an otherwise successful turn', async () => {
+  for (const failure of ['throw', 'permission-denied', 'empty']) {
+    const f = topicAnchorFixture();
+    const get = f.client.im.v1.message.get;
+    f.client.im.v1.message.get = async () => {
+      if (failure === 'throw') throw new Error('temporary connection error');
+      if (failure === 'permission-denied') return { code: 99991672 };
+      return { code: 0, data: { items: [{ message_id: 'om_root', chat_id: 'oc_group', msg_type: 'text', body: { content: '{"text":""}' } }] } };
+    };
+    await f.send();
+    assert.equal(f.asked.length, 1);
+    assert.equal(hasAnchor(f.asked[0].text), false);
+    f.client.im.v1.message.get = get;
+    await f.send();
+    assert.ok(hasAnchor(f.asked[1].text));
+    await f.send();
+    assert.equal(hasAnchor(f.asked[2].text), false);
+  }
+});
+
+for (const code of ['request-failed', 'harness-reply-timeout', 'turn-stopped']) {
+  test(`topic anchor remains retryable after ${code}`, async () => {
+    const f = topicAnchorFixture();
+    const ask = f.harness.ask;
+    f.harness.ask = async () => { throw Object.assign(new Error(code), { code }); };
+    await f.send();
+    f.harness.ask = ask;
+    await f.send();
+    assert.ok(hasAnchor(f.asked[0].text));
+    assert.deepEqual(f.reads, ['om_root', 'om_root']);
+  });
+}
+
+test('topic anchor stays committed when only final Feishu delivery fails', async () => {
+  const f = topicAnchorFixture();
+  const messageApi = f.client.im.v1.message;
+  const reply = messageApi.reply;
+  const create = messageApi.create;
+  messageApi.reply = messageApi.create = async () => { throw new Error('delivery unavailable'); };
+  await f.send();
+  assert.ok(hasAnchor(f.asked[0].text));
+  messageApi.reply = reply;
+  messageApi.create = create;
+  await f.send();
+  assert.equal(hasAnchor(f.asked[1].text), false);
+  assert.deepEqual(f.reads, ['om_root']);
+});
+
+test('missing AI sessions and stale-workspace retries receive the topic anchor again', async () => {
+  const f = topicAnchorFixture();
+  await f.send();
+  f.harness.sessionExists = async () => false;
+  await f.send();
+  assert.notEqual(f.asked[0].sessionId, f.asked[1].sessionId);
+  assert.ok(hasAnchor(f.asked[1].text));
+  f.harness.sessionExists = async () => true;
+  const ask = f.harness.ask;
+  let stale = true;
+  f.harness.ask = async (...args) => {
+    if (stale) {
+      stale = false;
+      assert.equal(hasAnchor(args[1]), false, 'old session may skip its known anchor');
+      await f.state.clearSession('group:oc_group:thread:omt_anchor');
+      throw Object.assign(new Error('workspace moved'), { code: 'workspace-session-stale' });
+    }
+    return ask(...args);
+  };
+  await f.send();
+  assert.ok(hasAnchor(f.asked[2].text), 'replacement session must rebuild content with its anchor');
+});
+
+test('topic anchors are isolated between bots and between topics', async () => {
+  const first = topicAnchorFixture();
+  const otherBot = topicAnchorFixture();
+  await first.send();
+  await otherBot.send();
+  assert.ok(hasAnchor(otherBot.asked[0].text));
+  await first.send('other topic', { thread_id: 'omt_other', root_id: 'om_other', parent_id: 'om_other' });
+  assert.ok(hasAnchor(first.asked[1].text, 'om_other'));
+  await first.send();
+  assert.equal(hasAnchor(first.asked[2].text), false);
+});
+
+test('queued topic follow-ups see the successful prior turn\'s anchor record', async () => {
+  const f = topicAnchorFixture();
+  const started = deferred();
+  const release = deferred();
+  const ask = f.harness.ask;
+  f.harness.ask = async (...args) => {
+    if (f.asked.length === 0) { started.resolve(); await release.promise; }
+    return ask(...args);
+  };
+  const first = f.send();
+  await started.promise;
+  const second = f.send();
+  release.resolve();
+  await Promise.all([first, second]);
+  assert.equal(f.asked.length, 2);
+  assert.ok(hasAnchor(f.asked[0].text));
+  assert.equal(hasAnchor(f.asked[1].text), false);
+  assert.deepEqual(f.reads, ['om_root']);
+});
+
+test('reference-only topic messages retain their content even after anchor injection', async () => {
+  const f = topicAnchorFixture();
+  await f.send();
+  await f.send('');
+  assert.equal(f.asked.length, 2);
+  assert.ok(hasAnchor(f.asked[1].text));
 });

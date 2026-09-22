@@ -1,3 +1,4 @@
+import { diagnosticFields } from '../../src/channels/shared/diagnostic-details.mjs';
 function text(value, maxLength) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -12,6 +13,6 @@ export function normalizeLastMessageError(value) {
   const referenceId = text(value.referenceId, 40);
   const at = Number.isFinite(value.at) ? value.at : null;
   return code && reason && message && referenceId && at !== null
-    ? { code, reason, message, referenceId, at }
+    ? { code, reason, message, referenceId, at, ...(value.details ? diagnosticFields(value) : {}) }
     : null;
 }

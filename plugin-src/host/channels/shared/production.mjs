@@ -1,3 +1,4 @@
+import { getImageInputSettingsStore } from '../../../../src/channels/shared/image-input-settings-store.mjs';
 import { unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -16,6 +17,7 @@ import {
   createWorkspaceAwareController,
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
+import { prepareBotWorkspace } from '../../../../src/channels/shared/default-workspace.mjs';
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
 import { listModelCatalog } from '../../../../src/channels/shared/model-setting.mjs';
 import {
@@ -65,7 +67,7 @@ export async function createTokenProductionController(ctx, config, internals, de
   const agentPresetCatalog = () => listAgentPresetCatalog(ctx);
   const paths = pluginPaths(config, channel);
   const configStore = await new ResolvedConfigStore(paths.config).load();
-  const defaultWorkspace = resolve(config.workspace ?? process.cwd());
+  const { defaultWorkspace, ungroupedWorkspace } = await prepareBotWorkspace(config);
   const WorkspaceStore = internals.WorkspaceStore ?? BotWorkspaceStore;
   const workspaces = internals.workspaces
     ?? await new WorkspaceStore(paths.workspaces, { defaultWorkspace }).load();
@@ -78,6 +80,16 @@ export async function createTokenProductionController(ctx, config, internals, de
   const observedConfigStore = typeof configStore.remove === 'function'
     ? observeBotWorkspaceRemovals(configStore, { workspaces })
     : configStore;
+  // Idempotent, and shared with createRuntime below so both paths seed a new
+  // bot's workspace identically. A channel that must write something into the
+  // workspace store before the runtime exists (email pushes its sender
+  // allowlist into the access policy) needs the record to exist first —
+  // setAccessPolicy refuses a bot the store has never seen. The call is safe to
+  // repeat: ensure() only seeds the policy when the bot has none yet.
+  const ensureWorkspace = (botId, botConfig) => workspaces.ensure(botId, {
+    defaultAgentPreset: config.agentPreset,
+    initialAccessPolicy: seedAccessPolicy(botConfig),
+  });
   const stateStores = new Map();
   const statePath = (botId) => resolve(paths.bots, botId, 'state.json');
   const stateFor = async (botId) => {
@@ -105,32 +117,68 @@ export async function createTokenProductionController(ctx, config, internals, de
   const harness = new ResolvedHarness({
     ...connection,
     workspace: defaultWorkspace,
+    ungroupedWorkspace,
     autostart: false,
     dshBin: config.dshBin ?? 'dsh',
     ...(commandExecutor ? { commandExecutor } : {}),
     ...(controlExecutor ? { controlExecutor } : {}),
     ...(sessionMaintenanceExecutor ? { sessionMaintenanceExecutor } : {}),
     ...(fileIngressExecutor ? { fileIngressExecutor } : {}),
+    imageInputPolicy: () => getImageInputSettingsStore(config).get(),
   });
   const modelCatalog = () => listModelCatalog(harness);
+  // Assigned just below. A transport may need to write a rotated token back
+  // through the controller, which is only constructible after createRuntime is
+  // defined, so the reference is held in a slot rather than captured directly.
+  let controllerRef = null;
   const coreController = new ResolvedController({
     credentials: ctx.credentials,
     configStore: observedConfigStore,
     logger,
     ...(internals.inspectToken ? { inspectToken: internals.inspectToken } : {}),
-    createRuntime: async ({ botId, config: botConfig, token }) => {
+    // Optional per-channel hook: a channel whose own settings also express an
+    // access rule (email's sender allowlist) can push the derived policy into
+    // the workspace store, which is what the runtime actually reads.
+    ...(typeof definitions.accessPolicyForBot === 'function' ? {
+      syncAccessPolicy: async (botId, policy) => {
+        await workspaces.setAccessPolicy(botId, policy, {
+          incarnation: workspaces.incarnationFor(botId),
+        });
+      },
+      // Exposed so the controller can create the workspace record before it
+      // pushes a policy into it.
+      ensureWorkspace,
+    } : {}),
+    // Channels that pin conversations to an existing session need the per-bot
+    // state and the session catalog to drive their settings UI.
+    ...(definitions.supportsSessionBinding ? {
+      stateFor,
+      listWorkspaceSessions: (workspace) => harness.listWorkspaceSessions(workspace),
+      botWorkspaceFor: (botId) => workspaces.workspaceFor(botId),
+      defaultWorkspace,
+    } : {}),
+    createRuntime: async ({ botId, config: botConfig, token, credential, createTransport }) => {
       const state = await stateFor(botId);
-      await workspaces.ensure(botId, {
-        defaultAgentPreset: config.agentPreset,
-        initialAccessPolicy: seedAccessPolicy(botConfig),
-      });
+      await ensureWorkspace(botId, botConfig);
       const workspaceScope = createBotWorkspaceScope(harness, {
         botId, workspaces, state, agentPresetCatalog,
       });
+      const persistTokens = typeof definitions.persistBotCredential === 'function'
+        ? (tokens) => definitions.persistBotCredential({
+          botId, config: botConfig, tokens, controller: controllerRef,
+        })
+        : null;
       return new ResolvedRuntime({
         ...channelRuntimeOptions,
         config: botConfig,
         token,
+        // The mailbox may authenticate with an OAuth pair instead of a password.
+        ...(credential ? { credential } : {}),
+        // A transport that rotates its tokens needs them written back.
+        ...(persistTokens ? { onTokensRefreshed: persistTokens } : {}),
+        // The channel decides which transport a mailbox uses; without this the
+        // runtime falls back to its own IMAP/SMTP default.
+        ...(typeof createTransport === 'function' ? { createTransport } : {}),
         harness: workspaceScope.harness,
         state: workspaceScope.state,
         contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
@@ -159,6 +207,7 @@ export async function createTokenProductionController(ctx, config, internals, de
       }
     },
   });
+  controllerRef = coreController;
   const controller = createWorkspaceAwareController(coreController, {
     workspaces,
     stateFor,

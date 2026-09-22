@@ -1,3 +1,4 @@
+import { connectionErrorChain, connectionStageError } from '../shared/connection-error.mjs';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 
@@ -62,17 +63,7 @@ export function installedDingtalkConnectionDependencies() {
   return installedDependencyVersions;
 }
 
-function errorChain(error) {
-  const chain = [];
-  const seen = new Set();
-  let current = error;
-  while (current && typeof current === 'object' && chain.length < 4 && !seen.has(current)) {
-    seen.add(current);
-    chain.push(current);
-    current = current.cause;
-  }
-  return chain;
-}
+function errorChain(error) { return connectionErrorChain(error).chain; }
 
 function statusFrom(error) {
   if (Number.isInteger(error?.status)) return error.status;
@@ -153,7 +144,9 @@ export function dingtalkRuntimeStartError(code, cause) {
   );
   error.name = 'DingtalkRuntimeStartError';
   error.code = STAGE_CODES.has(code) ? code : 'dingtalk-runtime-prepare-failed';
-  return error;
+  return connectionStageError(error, ({ 'dingtalk-harness-connect-failed': 'harness.check',
+    'dingtalk-runtime-prepare-failed': 'runtime.prepare', 'dingtalk-stream-client-load-failed': 'sdk.load',
+    'dingtalk-stream-listener-failed': 'runtime.prepare', 'dingtalk-stream-connect-failed': 'connection.start' })[error.code]);
 }
 
 /** Creates browser-safe guidance plus a redacted Host-log diagnostic for one connection failure. */

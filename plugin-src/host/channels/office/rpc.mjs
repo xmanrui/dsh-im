@@ -1,3 +1,4 @@
+import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { OFFICE_RPC_CHANNEL, OFFICE_RPC_ENDPOINTS } from '../../../../src/channels/office/protocol.mjs';
@@ -15,6 +16,7 @@ function validConfigure(payload) {
 }
 
 export function createOfficeRpcHandler(controller) {
+  const diagnostics = controller.diagnostics ?? createConnectionDiagnostics({ channel: 'office' });
   for (const method of ['status', 'configure', 'reconnect', 'test', 'remove']) {
     if (typeof controller?.[method] !== 'function') throw new TypeError(`AI Office controller requires ${method}()`);
   }
@@ -35,7 +37,7 @@ export function createOfficeRpcHandler(controller) {
       const message = code === 'invalid-device-token' ? 'AI Office Device Token 无效。'
         : code === 'office-hook-unavailable' ? 'AI Office Hook 尚未上线或地址不正确。'
           : error instanceof TypeError ? error.message : 'AI Office 连接操作失败，请稍后重试。';
-      return { ok: false, error: { code, message } };
+      return diagnosticRpcResult(diagnostics, error, { ok: false, error: { code, message } }, { operation: endpoint, botId: payload?.botId, untrustedPublicError: true });
     }
   };
 }

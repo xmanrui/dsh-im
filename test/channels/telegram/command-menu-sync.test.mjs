@@ -376,7 +376,8 @@ test('invalid catalog warns without sending a partial menu or blocking readiness
   assert.equal(runtime.status.ready, true);
   assert.equal(menuCalls(apiServer).length, 0);
   assert.equal(warnings.length, 1);
-  assert.match(warnings[0][1].message, /commands are invalid/);
+  assert.equal(warnings[0][1].reason, 'unknown');
+  assert.equal(warnings[0][1].message, undefined);
 });
 
 for (const options of [{ identity: '987654321' }, { webhook: 'https://example.invalid/webhook' }]) {

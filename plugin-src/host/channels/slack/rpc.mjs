@@ -1,3 +1,4 @@
+import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
@@ -131,6 +132,7 @@ function operationError(error) {
 }
 
 export function createSlackRpcHandler(controller) {
+  const diagnostics = controller.diagnostics ?? createConnectionDiagnostics({ channel: 'slack' });
   for (const method of ['status', 'bindCredentials', 'reconnectBot', 'deleteBot']) {
     if (typeof controller?.[method] !== 'function') {
       throw new TypeError(`A complete Slack controller is required (${method})`);
@@ -171,7 +173,7 @@ export function createSlackRpcHandler(controller) {
           } catch (error) {
             testError = error;
           }
-          value = { ...value, testMessage: publicConnectionTestResult(testError) };
+          value = { ...value, testMessage: publicConnectionTestResult(testError, { diagnostics, botId: payload.botId }) };
         }
       }
       else if (endpoint === SLACK_ENDPOINTS.setWorkspace) {
@@ -203,9 +205,9 @@ export function createSlackRpcHandler(controller) {
         ? { ok: false, error: { code: 'cancelled', message: 'The request was cancelled.' } }
         : { ok: true, value: sanitizePublic(value) };
     } catch (error) {
-      return signal?.aborted
+      return diagnosticRpcResult(diagnostics, error, signal?.aborted
         ? { ok: false, error: { code: 'cancelled', message: 'The request was cancelled.' } }
-        : { ok: false, error: operationError(error) };
+        : { ok: false, error: operationError(error) }, { operation: endpoint, botId: payload?.botId });
     }
   };
 }

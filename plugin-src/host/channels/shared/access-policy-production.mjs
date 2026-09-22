@@ -91,7 +91,7 @@ export function initialAccessPolicyFor(channel, config = {}) {
       group: allowlistScope(),
     });
   }
-  if (['dingtalk', 'wecom', 'wecom-app', 'slack', 'discord', 'imessage'].includes(key)) {
+  if (['dingtalk', 'wecom', 'wecom-app', 'slack', 'discord', 'imessage', 'matrix'].includes(key)) {
     return createAccessPolicy({ direct: openScope(), group: openScope() });
   }
   throw new TypeError(`Unsupported access-policy channel: ${channel}`);

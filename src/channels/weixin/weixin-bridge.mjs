@@ -63,6 +63,7 @@ import {
 } from '../shared/semantic/delivery.mjs';
 import { recoverAssistantTextByTimestamp } from '../shared/session-reply-recovery.mjs';
 import {
+  messageFailureDiagnostic,
   channelDeliveryFailure,
   clearLastMessageFailure,
   messageFailureText,
@@ -467,7 +468,7 @@ export class WeixinHarnessBridge {
         const failure = setLastMessageFailure(this.#status, error);
         this.#logger.error?.(
           `[dsh-weixin] failed to process a command [${failure.referenceId}]:`,
-          error,
+          messageFailureDiagnostic(error, failure),
         );
         return this.#sendOutOfBand(key, sender, messageFailureText(failure), contextToken, runId)
           .catch(() => undefined);
@@ -623,7 +624,7 @@ export class WeixinHarnessBridge {
       const failure = setLastMessageFailure(this.#status, error);
       this.#logger.error?.(
         `[dsh-weixin] failed to process a batch input message [${failure.referenceId}]:`,
-        error,
+        messageFailureDiagnostic(error, failure),
       );
       await this.#sendOutOfBand(key, sender, messageFailureText(failure), contextToken, runId)
         .catch(() => undefined);
@@ -814,7 +815,7 @@ export class WeixinHarnessBridge {
       await this.#startTyping(sender, contextToken);
       try {
         let content = hasImages || hasReply
-          ? await promptContentForInboundMessage(promptMessage, { signal: this.#signal })
+          ? await promptContentForInboundMessage(promptMessage, { signal: this.#signal, deferImages: true })
           : undefined;
         const snapshot = this.#acceptedMessageIds.get(messageId);
         let contextEnhanced = false;
@@ -857,6 +858,7 @@ export class WeixinHarnessBridge {
               await this.#resumeTyping(key, sender, contextToken);
             },
             files: promptMessage.files,
+            images: promptMessage.images,
           },
         }));
         if (batchSubmission) {
@@ -934,7 +936,7 @@ export class WeixinHarnessBridge {
       });
       this.#logger.error?.(
         `[dsh-weixin] failed to process an inbound message [${failure.referenceId}]:`,
-        error,
+        messageFailureDiagnostic(error, failure),
       );
       try {
         await this.#send(
@@ -1251,7 +1253,7 @@ export class WeixinHarnessBridge {
     const failure = setLastMessageFailure(this.#status, error);
     this.#logger.error?.(
       `[dsh-weixin] failed to process an interaction reply [${failure.referenceId}]:`,
-      error,
+      messageFailureDiagnostic(error, failure),
     );
     if (!this.#state.hasSeen(messageId)) {
       await this.#state.markSeen(messageId).catch(() => undefined);

@@ -1,3 +1,4 @@
+import { loadDeferredImages } from '../../helpers/deferred-images.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -807,7 +808,8 @@ test('Weixin sends image-only messages to Harness as structured content', async 
     ownerUserId: 'owner-user',
     harness: {
       sessionExists: async () => true,
-      ask: async (sessionId, content) => {
+      ask: async (sessionId, content, options) => {
+        content = await loadDeferredImages(content, options);
         prompts.push({ sessionId, content });
         return '微信图片已识别';
       },
@@ -930,7 +932,7 @@ test('Weixin returns a specific retry message when encrypted image loading fails
     ownerUserId: 'owner-user',
     harness: {
       sessionExists: async () => true,
-      ask: async () => assert.fail('a failed image must not reach Harness'),
+      ask: async (_sessionId, content, options) => { await loadDeferredImages(content, options); assert.fail('invalid images must not reach the model'); },
     },
     state: fixture.state,
     logger: { error() {} },
@@ -2306,6 +2308,7 @@ test('bridge commands are local and internal failures return a safe traceable me
   assert.match(sent.at(-1), /错误码：INTERNAL_UNKNOWN；参考号：MF-[A-F0-9]{8}$/);
   assert.doesNotMatch(sent.at(-1), /private path|secret|token-shaped/);
   assert.deepEqual(status.lastMessageError, {
+    details: { reason: 'unknown' },
     code: 'INTERNAL_UNKNOWN',
     reason: 'INTERNAL_UNKNOWN',
     message: '任务未完成，暂时无法确定原因。请重试；若持续发生，请将参考号提供给管理员。',
@@ -2350,9 +2353,11 @@ test('Weixin reports a missing preset with recovery steps and the same reference
   assert.equal(sent.at(-1).endsWith(`参考号：${failure.referenceId}`), true);
   const log = logs.find(([text]) => text.includes(`[${failure.referenceId}]`));
   assert.ok(log, 'the reply reference must identify the logged failure');
-  assert.equal(log[1], error);
+  assert.equal(log[1].code, failure.code);
+  assert.equal(log[1].referenceId, failure.referenceId);
+  assert.equal(log[1].details.reason, 'unknown');
   assert.equal(error.code, 'agent-preset/not-found');
-  assert.doesNotMatch(JSON.stringify({ failure, sent }), /private|secret|removed-preset/u);
+  assert.doesNotMatch(JSON.stringify({ failure, sent, log }), /private|secret|removed-preset/u);
 });
 
 test('Weixin exposes a structured model rate limit without changing connection state', async () => {

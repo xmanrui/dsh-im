@@ -1,3 +1,4 @@
+import { atConnectionStage, createConnectionDiagnostics } from '../shared/connection-error.mjs';
 import { createHash } from 'node:crypto';
 
 import { normalizeOfficeBaseUrl, officeHookUrls } from './protocol.mjs';
@@ -15,6 +16,7 @@ export class OfficeController {
   #credentials;
   #store;
   #logger;
+  #diagnostics;
   #createRuntime;
   #runtime = null;
   #transition = Promise.resolve();
@@ -29,13 +31,16 @@ export class OfficeController {
     this.#credentials = credentials;
     this.#store = configStore;
     this.#logger = logger;
+    this.#diagnostics = createConnectionDiagnostics({ channel: 'office', logger });
     this.#createRuntime = createRuntime ?? ((options) => new OfficeRuntime(options));
   }
+
+  get diagnostics() { return this.#diagnostics; }
 
   async initialize() {
     const config = this.#store.get();
     if (config) {
-      const credential = await this.#credentials.resolve(config.deviceTokenRef).catch(() => undefined);
+      const credential = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.deviceTokenRef), 'credential-store');
       if (credential?.value) await this.#start(config, credential.value);
     }
     return this.status();
@@ -50,7 +55,7 @@ export class OfficeController {
       const baseUrl = normalizeOfficeBaseUrl(requestedBaseUrl).origin;
       const tokenRef = officeTokenRef(baseUrl, deviceId);
       const suppliedToken = clean(input.deviceToken);
-      const priorCredential = await this.#credentials.resolve(tokenRef).catch(() => undefined);
+      const priorCredential = await atConnectionStage('credential.read', () => this.#credentials.resolve(tokenRef), 'credential-store');
       const token = suppliedToken ?? priorCredential?.value;
       if (!token || token.length < 32) throw new TypeError('Device Token must contain at least 32 characters');
       const now = new Date().toISOString();
@@ -68,16 +73,16 @@ export class OfficeController {
       });
       if (!config) throw new TypeError('AI Office connector configuration is invalid');
 
-      await this.#credentials.set(tokenRef, token);
+      await atConnectionStage('credential.save', () => this.#credentials.set(tokenRef, token), 'credential-store');
       try {
-        await this.#store.save(config);
+        await atConnectionStage('account.save', () => this.#store.save(config), 'account-config');
       } catch (error) {
-        if (priorCredential?.value) await this.#credentials.set(tokenRef, priorCredential.value).catch(() => undefined);
-        else await this.#credentials.unset(tokenRef).catch(() => undefined);
+        if (priorCredential?.value) await atConnectionStage('credential.save', () => this.#credentials.set(tokenRef, priorCredential.value), 'credential-store').catch(() => undefined);
+        else await atConnectionStage('credential.remove', () => this.#credentials.unset(tokenRef), 'credential-store').catch(() => undefined);
         throw error;
       }
       if (previous?.deviceTokenRef && previous.deviceTokenRef !== tokenRef) {
-        await this.#credentials.unset(previous.deviceTokenRef).catch(() => undefined);
+        await atConnectionStage('credential.remove', () => this.#credentials.unset(previous.deviceTokenRef), 'credential-store');
       }
       await this.#start(config, token);
       return this.status();
@@ -104,18 +109,24 @@ export class OfficeController {
 
   async remove() {
     return this.#serial(async () => {
+      const warnings = [];
       const config = this.#store.get();
       await this.#stop();
-      if (config?.deviceTokenRef) await this.#credentials.unset(config.deviceTokenRef).catch(() => undefined);
-      await this.#store.clear();
-      return this.status();
+      await atConnectionStage('account.remove', () => this.#store.clear(), 'account-config');
+      if (config?.deviceTokenRef) {
+        await atConnectionStage('credential.remove', () => this.#credentials.unset(config.deviceTokenRef), 'credential-store').catch(error => {
+          warnings.push(this.#diagnostics.report(error, { reuse: true, operation: 'connector.remove', warning: true,
+            publicError: { code: 'cleanup-failed', message: '连接已移除，但登录凭据清理失败。' } }).publicError);
+        });
+      }
+      return { ...await this.status(), ...(warnings.length ? { warnings } : {}) };
     });
   }
 
   async status() {
     const config = this.#store.get();
     if (!config) return { schemaVersion: 1, configured: false, connected: false, state: 'unconfigured' };
-    const credential = await this.#credentials.resolve(config.deviceTokenRef).catch(() => undefined);
+    const credential = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.deviceTokenRef), 'credential-store');
     const runtime = this.#runtime?.status ?? null;
     return {
       schemaVersion: 1,
@@ -140,7 +151,7 @@ export class OfficeController {
   async close() { await this.#transition.catch(() => undefined); await this.#stop(); }
 
   async #resolveToken(config) {
-    const credential = await this.#credentials.resolve(config.deviceTokenRef).catch(() => undefined);
+    const credential = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.deviceTokenRef), 'credential-store');
     if (!credential?.value) throw new Error('AI Office Device Token is missing');
     return credential.value;
   }

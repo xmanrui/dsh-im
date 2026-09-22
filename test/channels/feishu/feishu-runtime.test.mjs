@@ -428,7 +428,9 @@ test('FeishuRuntime fails closed when Harness is unavailable', async () => {
   await assert.rejects(runtime.start(), /Harness unavailable/);
   assert.equal(runtime.status.ready, false);
   assert.equal(runtime.status.feishuLongConnectionState, 'failed');
-  assert.equal(runtime.status.lastError, 'Harness unavailable');
+  assert.equal(runtime.status.error.details.stage, 'harness.check');
+  assert.match(runtime.status.error.details.referenceId, /^IM-CONN-[A-F0-9]{8}$/);
+  assert.doesNotMatch(JSON.stringify(runtime.status), /Harness unavailable/);
 });
 
 async function startRuntimeForProbe(options = {}) {

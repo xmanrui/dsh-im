@@ -426,7 +426,7 @@ for (const idKey of ['botId', 'id']) {
     assert.equal(observed[saveMethod]({ [idKey]: 'bot_two' }), result);
     assert.equal(calls.length, 1, 'normal save starts synchronously, without a new queue/await');
     await mkdir(`${path}.tmp`);
-    await observed[method]('bot_one');
+    await assert.rejects(observed[method]('bot_one'), { code: 'EISDIR' });
     await assert.rejects(observed[saveMethod]({ [idKey]: 'bot_one' }));
     assert.equal(calls.length, 1, 'failed metadata cleanup prevents config save');
     assert.equal(observed[saveMethod]({ [idKey]: 'bot_two' }), result);

@@ -1,3 +1,4 @@
+import { createConnectionDiagnostics } from '../shared/connection-error.mjs';
 const ACTIVE_STATES = new Set([
   'starting',
   'qr_ready',
@@ -74,6 +75,7 @@ function copyUserInfo(userInfo) {
  * `onCredentials` callback.
  */
 export class RegistrationManager {
+  #diagnostics;
   #registerApp;
   #onCredentials;
   #now;
@@ -86,6 +88,7 @@ export class RegistrationManager {
   constructor({
     registerApp,
     onCredentials,
+    diagnostics = createConnectionDiagnostics({ channel: 'feishu' }),
     now = Date.now,
     setTimeout: setTimeoutFn = globalThis.setTimeout,
     clearTimeout: clearTimeoutFn = globalThis.clearTimeout,
@@ -100,6 +103,7 @@ export class RegistrationManager {
       throw new TypeError('RegistrationManager clock dependencies must be functions');
     }
 
+    this.#diagnostics = diagnostics;
     this.#registerApp = registerApp;
     this.#onCredentials = onCredentials;
     this.#now = now;
@@ -263,13 +267,13 @@ export class RegistrationManager {
         client_secret: clientSecret,
         user_info: userInfo,
       });
-    } catch {
+    } catch (error) {
       if (this.#isCurrent(run)) {
         this.#finishRun(run, REGISTRATION_STATES.ERROR, {
-          error: {
+          error: this.#diagnostics.report(error, { operation: 'provision.poll', stage: 'activation', publicError: {
             code: 'credentials_callback_failed',
             message: 'Unable to store the Feishu credentials.',
-          },
+          } }).publicError,
         });
       }
       return;
@@ -297,7 +301,7 @@ export class RegistrationManager {
       return;
     }
     this.#finishRun(run, REGISTRATION_STATES.ERROR, {
-      error: publicError(error),
+      error: this.#diagnostics.report(error, { operation: run.qrCodeUrl ? 'provision.poll' : 'provision.begin', publicError: publicError(error) }).publicError,
     });
   }
 

@@ -1,16 +1,20 @@
 export const IM_STYLE_ID = 'xmanrui-dsh-im-settings';
 
 const CSS = String.raw`
+.dim-connectionDiagnostic { min-width: 0; width: 100%; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; font-size: var(--dim-font-13); line-height: var(--dim-line-13); }
+.dim-connectionDiagnostic[data-warning="true"] { color: var(--dsw-alias-state-warn-primary, #d97706); }
+.dim-connectionDiagnostic p { margin: 4px 0; }
+.dim-connectionDiagnostic button { height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border: var(--dim-control-border); border-radius: var(--dim-radius-14); color: inherit; background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: var(--dim-line-12); cursor: pointer; }
+.dim-connectionDiagnostic button:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
 /* Native Tooltip skin, declared once. The tooltips in this sheet carry
    only their positioning; these nine declarations used to be repeated
    character for character in every one of them. */
 .dim-botNameTooltip,
+.dim-updateTooltip,
 .dim-githubTooltip,
 .dim-generalSettingsTooltip,
 .dim-generalSettingsButton[aria-current="page"] + .dim-generalSettingsTooltip,
 .dim-helpPanel,
-.dim-botSettingsTooltip,
-.dim-githubTooltip,
 .bxf-repairTooltip {
   padding: 3px 7px;
   border: 0;
@@ -235,7 +239,9 @@ body {
 .dim-updateButton:hover:not(:disabled) { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover-solid); }
 .dim-updateButton:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
 .dim-updateButton:disabled { opacity: 0.4; cursor: default; }
-.dim-updateTrigger { white-space: nowrap; }
+.dim-updateAction { position: relative; display: inline-flex; flex: none; }
+.dim-updateTrigger { width: 28px; height: 28px; flex: none; padding: 0; }
+.dim-updateTrigger svg { display: block; }
 .dim-updateBackdrop { position: fixed; inset: 0; z-index: var(--dim-z-portal); display: grid; place-items: center; padding: 24px; background: var(--dsw-alias-bg-mask-1, rgb(0 0 0 / 24%)); backdrop-filter: var(--dsw-mask-blur, blur(2px)); }
 .dim-updateBackdrop, .dim-updateBackdrop * { box-sizing: border-box; }
 .dim-updateDialog { width: min(480px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; border: 0; border-radius: var(--dim-radius-32); background: var(--dsw-alias-bg-layer-2, #fff); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); text-align: left; }
@@ -275,8 +281,9 @@ body {
 .dim-githubLink { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; flex: none; padding: 0; border: none; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-tertiary, #81858c); background: transparent; font-size: var(--dim-font-12); line-height: var(--dim-line-12); text-decoration: none; transition: color .15s ease, background .15s ease; }
 .dim-githubLink:hover { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover); }
 .dim-githubLink:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
-.dim-githubTooltip { position: absolute; top: calc(100% + 8px); right: 0; z-index: var(--dim-z-tooltip-page); width: max-content; max-width: min(220px, 80vw); white-space: nowrap; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
-.dim-githubAction:hover .dim-githubTooltip, .dim-githubAction:focus-within .dim-githubTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
+.dim-githubLink svg { display: block; }
+.dim-updateTooltip, .dim-githubTooltip { position: absolute; top: calc(100% + 8px); right: 0; z-index: var(--dim-z-tooltip-page); width: max-content; max-width: min(220px, 80vw); white-space: nowrap; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
+.dim-updateAction:hover .dim-updateTooltip, .dim-updateTrigger:focus-visible + .dim-updateTooltip, .dim-githubAction:hover .dim-githubTooltip, .dim-githubAction:focus-within .dim-githubTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .dim-generalSettingsAction { position: relative; display: inline-flex; flex: none; }
 .dim-generalSettingsButton { width: 28px; height: 28px; display: grid; place-items: center; flex: none; padding: 0; border: none; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-tertiary, #81858c); background: transparent; cursor: pointer; transition: color .15s ease, background .15s ease; }
 .dim-generalSettingsButton svg { display: block; }
@@ -866,7 +873,16 @@ body {
 .dim-collapsibleChevron { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; color: var(--dsw-alias-label-tertiary, #81858c); transition: transform var(--dim-disclosure-duration) var(--dim-disclosure-ease); transform-origin: 50% 50%; }
 .dim-collapsibleChevron svg { display: block; }
 .dim-collapsible.is-open .dim-collapsibleChevron { transform: rotate(90deg); }
-/* Animate height without measuring content; hide collapsed controls from focus and accessibility. */
+/* The per-account settings button the host's own account card carries. Its chevron
+   shares the section affordance's class name, so the rotation is scoped to the
+   button's own state and this block sits after the section rule above. */
+.dim-accountSettingsToggle { flex: none; width: 45px; height: 32px; display: inline-flex; gap: var(--dim-gap-5); align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--dim-radius-8); color: var(--dim-blue); background: color-mix(in srgb, var(--dim-blue) 8%, var(--dsw-alias-bg-layer-1, #fff)); cursor: pointer; }
+.dim-accountSettingsToggle > svg { flex: none; display: block; }
+.dim-accountSettingsToggle:hover { background: color-mix(in srgb, var(--dim-blue) 14%, var(--dsw-alias-bg-layer-1, #fff)); }
+.dim-accountSettingsToggle:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
+.dim-accountSettingsToggle .dim-collapsibleChevron { width: 12px; height: 16px; }
+.dim-accountSettingsToggle[aria-expanded="true"] .dim-collapsibleChevron { transform: rotate(180deg); }
+.dim-accountSettingsHeader { display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-12); margin-top: 12px; padding-top: 8px; border-top: 0.5px solid var(--dsw-alias-border-l2, #e5e6eb); color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-12); line-height: var(--dim-line-12); }/* Animate height without measuring content; hide collapsed controls from focus and accessibility. */
 .dim-collapsibleBody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dim-disclosure-duration) var(--dim-disclosure-ease); }
 .dim-collapsible.is-open > .dim-collapsibleBody { grid-template-rows: 1fr; }
 /* clip rather than hidden, plus a clip margin: the collapse animation still
@@ -895,11 +911,10 @@ body {
 .dim-panel .dim-botCard .dim-healthDot[data-tone="warning"] { background: var(--dsw-alias-state-warn-primary, #f59e0b); }
 .dim-panel .dim-botCard .dim-healthDot[data-tone="error"] { background: var(--dim-danger); }
 .dim-botSettingsAction { position: relative; flex: none; display: inline-flex; }
-.dim-botSettingsButton { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-secondary, #646a73); background: transparent; cursor: pointer; transition: color .15s ease, background .15s ease; }
+.dim-botSettingsButton { min-height: 32px; display: inline-flex; align-items: center; gap: var(--dim-gap-6); padding: 0 6px; border: 0; border-radius: var(--dim-radius-8); color: var(--dim-blue); background: transparent; font: inherit; font-size: var(--dim-font-12); line-height: var(--dim-line-12); white-space: nowrap; cursor: pointer; transition: color .15s ease, background .15s ease; }
 .dim-botSettingsButton:hover { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover); }
 .dim-botSettingsButton:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); outline-offset: 2px; }
-.dim-botSettingsTooltip { position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--dim-z-tooltip); width: max-content; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
-.dim-botSettingsAction:hover .dim-botSettingsTooltip, .dim-botSettingsAction:focus-within .dim-botSettingsTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
+/* Upstream replaced the hover tooltip with a visible label plus this caret, so the
 .dim-deliveryPage { min-width: 0; display: grid; }
 .dim-deliveryHeader { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--dim-gap-16); }
 .dim-botSettingsTabs { overflow-x: auto; scrollbar-width: none; }
@@ -1057,6 +1072,17 @@ body {
 .dim-generalSettingsTabsBar { min-width: 0; }
 .dim-generalSettingsTabPanel { min-width: 0; padding-top: 2px; }
 .dim-globalSection { min-width: 0; padding: 14px 16px; border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 16%)); border-radius: var(--dim-radius-16); background: none; }
+.dim-globalSection + .dim-globalSection { margin-top: 12px; }
+.dim-imageSettings { container-type: inline-size; }
+.dim-imageSettingsFields { min-width: 0; display: grid; gap: var(--dim-gap-12); margin-top: 12px; }
+.dim-imageSettingsField { min-width: 0; display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 160px); align-items: center; gap: var(--dim-gap-6) var(--dim-gap-16); }
+.dim-imageSettingsField label { min-width: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: var(--dim-font-13); line-height: var(--dim-line-13); overflow-wrap: anywhere; }
+.dim-imageSettingsField .dim-globalTtlInput { width: 100%; min-width: 0; }
+.dim-imageSettingsActions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--dim-gap-8); margin-top: 16px; }
+.dim-globalInline.dim-imageSettingsFeedback { margin: 10px 0 0; }
+@container (max-width: 380px) {
+  .dim-imageSettingsField { grid-template-columns: minmax(0, 1fr); }
+}
 .dim-globalHead { min-width: 0; display: flex; align-items: center; }
 .dim-globalHeadTitle { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--dim-gap-6); }
 .dim-globalHead h3 { min-width: 0; overflow: hidden; margin: 0; color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-15); line-height: var(--dim-line-15); font-weight: var(--dim-weight-600); text-overflow: ellipsis; white-space: nowrap; }

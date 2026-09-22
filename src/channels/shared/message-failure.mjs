@@ -1,3 +1,5 @@
+import { extractConnectionEvidence } from './connection-error.mjs';
+import { diagnosticFields } from './diagnostic-details.mjs';
 import { randomUUID } from 'node:crypto';
 
 import { t } from './i18n.mjs';
@@ -189,7 +191,9 @@ export function classifyMessageFailure(error, {
     && userMessage.trim()
     ? 'INPUT_INVALID'
     : classifiedCode;
+  const details = extractConnectionEvidence(error).details;
   return Object.freeze({
+    ...(code === 'INTERNAL_UNKNOWN' || details.reason !== 'unknown' || details.httpStatus || details.providerCode ? { details } : {}),
     code,
     reason: safeReason ?? safeFailureReason(error?.code) ?? code,
     message: typeof userMessage === 'string' && userMessage.trim()
@@ -204,9 +208,16 @@ export function messageFailureText(failure) {
   return `${failure.message}\n\n${t('错误码：{code}；参考号：{referenceId}', failure)}`;
 }
 
+export function messageFailureDiagnostic(error, failure) {
+  const evidence = extractConnectionEvidence(error);
+  return { code: failure.code, reason: failure.reason, referenceId: failure.referenceId,
+    details: evidence.details, errors: evidence.errors };
+}
+
 export function setLastMessageFailure(status, error, options) {
   const failure = classifyMessageFailure(error, options);
   status.lastMessageError = failure;
+  status.lastError = failure.message;
   return failure;
 }
 
@@ -241,5 +252,6 @@ export function publicMessageFailure(value) {
     message: value.message.slice(0, 500),
     referenceId: value.referenceId.slice(0, 40),
     at: value.at,
+    ...(value.details ? diagnosticFields(value) : {}),
   };
 }

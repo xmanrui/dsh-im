@@ -142,6 +142,7 @@ test('message failures use verified turn-end provider codes without exposing pro
 test('message failure text contains a safe code and traceable reference', () => {
   const failure = classifyMessageFailure(new Error('secret-shaped internal detail'), options);
   assert.deepEqual(failure, {
+    details: { reason: 'unknown' },
     code: 'INTERNAL_UNKNOWN',
     reason: 'INTERNAL_UNKNOWN',
     message: '任务未完成，暂时无法确定原因。请重试；若持续发生，请将参考号提供给管理员。',

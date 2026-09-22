@@ -1,8 +1,9 @@
+import { ConnectionError, normalizeConnectionError } from '../../connection-error.js';
 import { BotName } from '../../bot-alias.js';
 import * as React from 'react';
 
 import { WecomLogoGlyph } from '../../channel-logos.js';
-import { CollapsibleAccountSection } from '../shared/collapsible-account.js';
+import { AccountSettingsToggle, CollapsibleAccountSection } from '../shared/collapsible-account.js';
 import { h } from '../../i18n.js';
 import { HelpTip } from '../../help-tip.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
@@ -165,7 +166,7 @@ function BindForm({ busy, error, onSubmit, onCancel }) {
             label: '查看流式回复说明',
             disabled: busy,
           }, '企业微信客户端实时出字；微信端不支持时自动改为整段发送')))),
-    error ? h('div', { className: 'ddt-inlineError dim-inlineError', role: 'alert' }, h('p', null, error.message)) : null,
+    error ? h('div', { className: 'ddt-inlineError dim-inlineError', role: 'alert' }, h(ConnectionError, { error: error })) : null,
     h('div', { className: 'ddt-actions dim-viewActions' },
       h(Button, { kind: 'primary', onClick: () => formRef.current?.requestSubmit(), disabled: busy }, busy ? '正在绑定…' : '保存并连接'),
       h(Button, { kind: 'quiet', onClick: onCancel, disabled: busy }, '取消'))));
@@ -273,6 +274,13 @@ export function AccountCard({
   return h('article', { className: 'ddt-card dim-botCard', 'data-bot-id': account.botId },
     h('div', { className: 'ddt-cardBody dim-botCardBody' },
       h(CollapsibleAccountSection, {
+        settings: h(BotSettingsButton, {
+          channel: 'wecomApp',
+          botId: account.botId,
+          botName: account.bot.name,
+          connected: account.connected,
+          accessPolicy: account.accessPolicy,
+        }),
         id: elementId,
         header: h('div', { className: 'ddt-accountTop dim-botCardTop' },
         h('div', { className: 'ddt-accountIdentity dim-botIdentity' },
@@ -293,13 +301,7 @@ export function AccountCard({
             lastCheckedAt: account.health.lastCheckedAt,
             formatCheckedTime: checkedTime,
           }),
-          h(BotSettingsButton, {
-            channel: 'wecomApp',
-            botId: account.botId,
-            botName: account.bot.name,
-            connected: account.connected,
-            accessPolicy: account.accessPolicy,
-          })))
+          h(AccountSettingsToggle)))
       },
         h(CallbackUrlBox, {
           url: account.bot.callbackUrl,
@@ -338,6 +340,7 @@ export function AccountCard({
             h(Button, { className: 'dim-cardAction', onClick: onReconnect, disabled: Boolean(busy) }, busy === 'reconnect' ? '检查中…' : account.connected ? '检查连接' : '重试连接'),
             h(Button, { className: 'dim-cardAction', kind: 'danger', onClick: onRequestRemove, disabled: Boolean(busy) }, '移除接入')),
           summary ? h('div', { className: 'ddt-summary dim-cardSummary' }, summary) : null,
+          account.error ? h(ConnectionError, { error: account.error, showMessage: false }) : null,
           account.lastMessageError ? h(LastMessageErrorSummary, {
             className: 'ddt-summary',
             error: account.lastMessageError,
@@ -355,6 +358,7 @@ export function AccountCard({
 }
 
 export function WecomAppSettingsTab({ rpcCall }) {
+  const [operationError, setOperationError] = React.useState(null);
   const [model, setModel] = React.useState({
     phase: 'loading', bots: [], totals: { configured: 0, connected: 0 }, error: null,
     agentPresetCatalog: EMPTY_AGENT_PRESET_CATALOG,
@@ -404,7 +408,16 @@ export function WecomAppSettingsTab({ rpcCall }) {
 
   const invoke = React.useCallback(async (endpoint, payload = {}, signal) => {
     if (typeof rpcCall !== 'function') throw new TypeError('企业微信应用设置页缺少 RPC 连接');
-    return unwrapRpcResult(await rpcCall(endpoint, payload, signal));
+    const operation = !['connection.status', 'provision.poll', 'provision.begin', 'provision.cancel'].includes(endpoint);
+      if (operation && mounted.current) setOperationError(null);
+      try {
+        const value = unwrapRpcResult(await rpcCall(endpoint, payload, signal));
+        if (operation && mounted.current) setOperationError(value?.testMessage?.error ?? value?.warnings?.[0] ?? null);
+        return value;
+      } catch (error) {
+        if (operation && mounted.current && !signal?.aborted && error?.name !== 'AbortError') setOperationError(normalizeConnectionError(error));
+        throw error;
+      }
   }, [rpcCall]);
 
   const loadStatus = React.useCallback(async ({ signal, silent = false, restore = false } = {}) => {
@@ -612,6 +625,7 @@ export function WecomAppSettingsTab({ rpcCall }) {
   }, h(AgentPresetCatalogContext.Provider, {
     value: model.agentPresetCatalog ?? EMPTY_AGENT_PRESET_CATALOG,
   }, h('section', { className: 'ddt-page dwecomapp-page dim-channelPage', 'aria-label': '企业微信应用设置' },
+    operationError ? h(ConnectionError, { error: operationError }) : null,
     h(Heading, {
       totals: model.totals,
       adding: bindOpen,
@@ -622,7 +636,7 @@ export function WecomAppSettingsTab({ rpcCall }) {
     h('div', { className: 'ddt-visuallyHidden', role: 'status', 'aria-live': 'polite' }, notice),
     model.phase === 'loading' ? h(LoadingView)
       : model.phase === 'error'
-        ? h('div', { className: 'ddt-card dim-surfaceCard' }, h('div', { className: 'ddt-inlineError dim-inlineError' }, h('h3', null, '无法读取企业微信应用状态'), h('p', null, model.error?.message), h(Button, { onClick: () => void loadStatus() }, '重新读取')))
+        ? h('div', { className: 'ddt-card dim-surfaceCard' }, h('div', { className: 'ddt-inlineError dim-inlineError' }, h('h3', null, '无法读取企业微信应用状态'), h(ConnectionError, { error: model.error }), h(Button, { onClick: () => void loadStatus() }, '重新读取')))
         : h(React.Fragment, null,
             bindView,
             model.bots.length === 0 && !bindOpen

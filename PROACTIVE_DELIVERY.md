@@ -136,7 +136,7 @@ curl --request POST \
 { "sent": true }
 ```
 
-请求体严格只接受 `botId`、`targetId` 和 `text`，JSON 总大小不能超过 1 MiB。不要附加平台原生路由、`sessionId`、`chatRef`、临时 Webhook 或 `idempotencyKey`。
+请求体接受必填的 `botId`、`targetId`、`text` 和可选的 `format`（`plain` 或 `markdown`，默认 `plain`），JSON 总大小不能超过 1 MiB。不要附加平台原生路由、`sessionId`、`chatRef`、临时 Webhook 或 `idempotencyKey`。
 
 接口路径固定为 `POST /api/dsh-im/delivery/messages`，复用当前 DSH Host 的 WebServer，不会另开端口。示例中的 `3080` 是 Web profile 的默认端口；实际地址以 Host 启动时显示的地址为准。
 
@@ -164,11 +164,19 @@ export async function apply(ctx) {
 }
 ```
 
-实际使用时，把 `ctx.dshIm.send()` 放进你的定时任务、构建回调或业务事件处理函数中。可选的第四个参数当前支持取消信号：
+实际使用时，把 `ctx.dshIm.send()` 放进你的定时任务、构建回调或业务事件处理函数中。可选的第四个参数支持取消信号和文本格式：
 
 ```js
-await ctx.dshIm.send(botId, targetId, text, { signal });
+await ctx.dshIm.send(botId, targetId, text, { signal }); // 保持原有默认发送行为
+await ctx.dshIm.send(botId, targetId, '# 每日报告\n\n**检查完成**', {
+  signal,
+  format: 'markdown',
+});
 ```
+
+`format` 只接受 `plain` 和 `markdown`，省略时为 `plain`。当前 Markdown 格式适配用于飞书/Lark：私聊和群聊均通过原生 Markdown 卡片发送，不启动会话或流式输出；其他渠道保留原有发送行为，不保证 Markdown 渲染。HTTP 和 `message.send` RPC 可在请求体中添加同名 `format` 字段。
+
+Markdown 原文（含换行）完整传递，不进行静默截断或自动分段；消息仍受平台大小和 Markdown 语法限制。平台拒绝、超时或取消时沿用已有错误处理，不自动回退成纯文本重发，以免重复投递。旧版本 dsh-im 的 Host API 可能忽略这个新选项；调用方与 dsh-im 都需要加载支持该选项的代码。
 
 同 Host 插件也可以列出某个机器人的已保存目标：
 
@@ -225,7 +233,7 @@ const result = await callDelivery(connection, 'message.send', {
 // result: { sent: true }
 ```
 
-`message.send` 只接受 `{ botId, targetId, text }`。不要附加平台路由、`sessionId`、`chatRef`、临时 Webhook 或 `idempotencyKey`。
+`message.send` 接受 `{ botId, targetId, text, format? }`；`format` 只允许 `plain` 或 `markdown`。不要附加平台路由、`sessionId`、`chatRef`、临时 Webhook 或 `idempotencyKey`。
 
 ### 示例：投递每日报告
 

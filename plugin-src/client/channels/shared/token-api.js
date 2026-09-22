@@ -1,3 +1,4 @@
+import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-details.mjs';
 import { normalizeBotAlias } from '../../../../src/channels/shared/bot-alias.mjs';
 import { normalizeAgentPresetCatalog, normalizeAgentPresetId, SET_AGENT_PRESET_ENDPOINT } from '../../agent-preset.js';
 import { normalizeModelCatalog, normalizeModelSelection, SET_MODEL_ENDPOINT } from '../../model-setting.js';
@@ -37,6 +38,7 @@ export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   setContextEnhancement: 'bot.context-enhancement.set',
   setAccessPolicy: 'bot.access-policy.set',
   setAlias: 'bot.alias.set',
+  setThinkingTraces: 'bot.thinking-traces.set',
 });
 
 export function createTokenChannelApi(channel, connectionSummary, {
@@ -49,7 +51,8 @@ export function createTokenChannelApi(channel, connectionSummary, {
     if (!result.ok) {
       const error = new Error(text(result.error?.message, `${channel} 操作失败`));
       error.code = text(result.error?.code, `${channel.toUpperCase()}_RPC_ERROR`, 80);
-      throw error;
+      Object.assign(error, diagnosticFields(result.error));
+    throw error;
     }
     return result.value;
   };
@@ -67,6 +70,8 @@ export function createTokenChannelApi(channel, connectionSummary, {
       model: normalizeModelSelection(value.model),
       agentPreset: normalizeAgentPresetId(value.agentPreset),
       contextEnhancement: normalizeContextEnhancementConfig(value.contextEnhancement),
+      // Absent from the backend means ON; only an explicit false opts out.
+      thinkingTraces: value.thinkingTraces !== false,
       ...(Object.hasOwn(value, 'accessPolicy')
         ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }
         : {}),
@@ -85,6 +90,7 @@ export function createTokenChannelApi(channel, connectionSummary, {
       },
       lastMessageError: normalizeLastMessageError(value.lastMessageError),
       error: isRecord(value.error) ? {
+        ...diagnosticFields(value.error),
         code: text(value.error.code, `${channel.toUpperCase()}_ACCOUNT_ERROR`, 80),
         message: text(value.error.message, `${channel}连接尚未就绪`),
       } : null,
@@ -109,6 +115,7 @@ export function createTokenChannelApi(channel, connectionSummary, {
   };
 
   const presentError = (error) => ({
+    ...diagnosticFields(error),
     code: text(error?.code, `${channel.toUpperCase()}_ERROR`, 80),
     message: text(error?.message, `${channel}操作失败，请稍后重试`),
   });

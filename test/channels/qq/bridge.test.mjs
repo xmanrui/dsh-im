@@ -1,3 +1,4 @@
+import { loadDeferredImages } from '../../helpers/deferred-images.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -459,7 +460,8 @@ test('QQ sends image-only attachments to Harness and accepts the SDK file MIME f
     ownerUserOpenid: 'owner-openid',
     harness: {
       sessionExists: async () => true,
-      ask: async (sessionId, content) => {
+      ask: async (sessionId, content, options) => {
+        content = await loadDeferredImages(content, options);
         prompts.push({ sessionId, content });
         return '看到图片了';
       },
@@ -612,7 +614,7 @@ test('QQ rejects non-platform image URLs without fetching and returns a retryabl
     ownerUserOpenid: 'owner-openid',
     harness: {
       sessionExists: async () => true,
-      ask: async () => assert.fail('an untrusted image must not reach Harness'),
+      ask: async (_sessionId, content, options) => { await loadDeferredImages(content, options); assert.fail('invalid images must not reach the model'); },
     },
     state: fixture.state,
     logger: { error() {} },
@@ -1072,6 +1074,36 @@ test('QQ group messages append a stable tool failure notice without exposing pro
     '已存入两套记忆。\n\n---\n\n工具调用「add_observations」未成功，请检查工具配置或稍后重试。',
   ]);
   assert.doesNotMatch(sent[0], /Error calling|Status code|404/);
+});
+
+test('QQ sends neutral completion replies and retains tool failure notices', async () => {
+  for (const toolFailed of [false, true]) {
+    const sent = [];
+    const status = createQqBridgeStatus();
+    status.lastError = 'previous failure';
+    status.lastMessageError = { code: 'MODEL_EMPTY_REPLY' };
+    const fixture = stateFixture([['c2c:owner-openid', 'session-empty-completed']]);
+    const bridge = new QqHarnessBridge({
+      bot: { sendText: async (_target, text) => sent.push(text) },
+      ownerUserOpenid: 'owner-openid',
+      status,
+      harness: {
+        sessionExists: async () => true,
+        ask: async (_session, _text, { onUpdate }) => {
+          if (toolFailed) await onUpdate({ type: 'status', toolName: 'bash', error: 'private detail' });
+          return '本轮处理已结束，没有文本回复。';
+        },
+      },
+      state: fixture.state,
+    });
+    await bridge.accept(message());
+    assert.deepEqual(sent, [toolFailed
+      ? '本轮处理已结束，没有文本回复。\n\n---\n\n工具调用「bash」未成功，请检查工具配置或稍后重试。'
+      : '本轮处理已结束，没有文本回复。']);
+    assert.equal(status.messagesReplied, 1);
+    assert.equal(status.lastError, null);
+    assert.equal(status.lastMessageError, null);
+  }
 });
 
 test('QQ delivers final group answers as markdown messages', async () => {

@@ -88,7 +88,7 @@ test('WeCom preserves malformed configuration and exposes safe failure guidance 
   const result = await f.call();
   assert.equal(result.ok, false);
   assert.equal(result.error.code, 'wecom-startup-config-invalid');
-  assert.deepEqual(result.error.details, {});
+  { assert.equal(result.error.details.stage, 'startup.load'); assert.match(result.error.details.referenceId, /^IM-CONN-[A-F0-9]{8}$/); assert.equal(result.error.details.operation, 'startup'); }
   assert.doesNotMatch(JSON.stringify(result), /private-secret-value/);
   assert.equal(await readFile(f.configPath, 'utf8'), contents);
   assert.throws(() => unwrapRpcResult(result), error => {
@@ -96,7 +96,7 @@ test('WeCom preserves malformed configuration and exposes safe failure guidance 
     assert.match(presentError(error).message, /重启 DSH/);
     return error.code === 'wecom-startup-config-invalid';
   });
-  assert.ok(f.ctx.logger.buffer.some(message => message.args[0]?.includes('failed to activate wecom')));
+  assert.ok(f.ctx.logger.buffer.some(message => message.args[0]?.includes(result.error.details.referenceId)));
   assert.equal((await f.call('provision.begin')).error.code, 'wecom-startup-config-invalid');
   const aborted = new AbortController();
   aborted.abort();

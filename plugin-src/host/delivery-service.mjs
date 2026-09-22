@@ -290,7 +290,7 @@ export class DeliveryService {
     }
   }
 
-  async send(botId, targetIdOrDraft, text, { signal } = {}) {
+  async send(botId, targetIdOrDraft, text, { signal, format = 'plain' } = {}) {
     const id = botIdOf(botId);
     const targetKey = typeof targetIdOrDraft === 'string'
       ? targetIdOf(targetIdOrDraft)
@@ -298,6 +298,9 @@ export class DeliveryService {
     const draft = targetKey === null ? draftTargetObject(targetIdOrDraft) : null;
     if (typeof text !== 'string' || !text.trim()) {
       throw deliveryError('bad-request', 'Message text is required');
+    }
+    if (format !== 'plain' && format !== 'markdown') {
+      throw deliveryError('bad-request', 'Message format must be plain or markdown');
     }
     cancellation(signal);
     const adapter = await this.#adapterFor(id);
@@ -312,7 +315,10 @@ export class DeliveryService {
         if (!target) throw deliveryError('unknown-target', 'Unknown target');
       }
       cancellation(signal);
-      await adapter.sendText(id, target, text, { signal });
+      await adapter.sendText(id, target, text, {
+        signal,
+        ...(format === 'markdown' ? { format } : {}),
+      });
       return { sent: true };
     } catch (error) {
       if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {

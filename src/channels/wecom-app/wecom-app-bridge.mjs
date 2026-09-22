@@ -52,6 +52,7 @@ import {
   promptContentForInboundMessage,
 } from '../shared/semantic/reply-reference.mjs';
 import {
+  messageFailureDiagnostic,
   channelDeliveryFailure,
   clearLastMessageFailure,
   messageFailureText,
@@ -325,7 +326,7 @@ export class WecomAppBridge {
           const failure = setLastMessageFailure(this.#status, error);
           this.#logger.error?.(
             `[dsh-im:wecom-app] failed to process a command [${failure.referenceId}]:`,
-            error,
+            messageFailureDiagnostic(error, failure),
           );
           return this.#send(sender, messageFailureText(failure)).catch(() => undefined);
         })
@@ -426,7 +427,7 @@ export class WecomAppBridge {
       const failure = setLastMessageFailure(this.#status, error);
       this.#logger.error?.(
         `[dsh-im:wecom-app] failed to process a batch input message [${failure.referenceId}]:`,
-        error,
+        messageFailureDiagnostic(error, failure),
       );
       await this.#send(sender, messageFailureText(failure)).catch(() => undefined);
     }).finally(() => {
@@ -592,7 +593,7 @@ export class WecomAppBridge {
       let artifacts = [];
       try {
         let content = hasImages || hasReply
-          ? await promptContentForInboundMessage(promptMessage, { signal: this.#signal })
+          ? await promptContentForInboundMessage(promptMessage, { signal: this.#signal, deferImages: true })
           : undefined;
         const snapshot = this.#acceptedMessageIds.get(messageId);
         let contextEnhanced = false;
@@ -638,6 +639,7 @@ export class WecomAppBridge {
               await this.#handleInteractionResolved(resolution);
             },
             files: promptMessage.files,
+            images: promptMessage.images,
           },
         }));
         if (batchSubmission) {
@@ -720,7 +722,7 @@ export class WecomAppBridge {
       });
       this.#logger.error?.(
         `[dsh-im:wecom-app] failed to process an inbound message [${failure.referenceId}]:`,
-        error,
+        messageFailureDiagnostic(error, failure),
       );
       try {
         await this.#send(
@@ -1006,7 +1008,7 @@ export class WecomAppBridge {
     const failure = setLastMessageFailure(this.#status, error);
     this.#logger.error?.(
       `[dsh-im:wecom-app] failed to process an interaction reply [${failure.referenceId}]:`,
-      error,
+      messageFailureDiagnostic(error, failure),
     );
     if (!this.#state.hasSeen(messageId)) {
       await this.#state.markSeen(messageId).catch(() => undefined);

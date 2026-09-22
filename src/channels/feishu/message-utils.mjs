@@ -1,3 +1,4 @@
+import { imageDownloadLimitMessage } from '../shared/image-prompt.mjs';
 import { ImagePromptError } from '../shared/image-prompt.mjs';
 import { t } from '../shared/i18n.mjs';
 
@@ -256,7 +257,7 @@ async function readBoundedStream(stream, { signal, maxBytes }) {
         throw new ImagePromptError(
           'image-too-large',
           `Feishu image exceeds ${maxBytes} bytes`,
-          t('图片超过 5 MB，请压缩后重试。'),
+          imageDownloadLimitMessage(maxBytes),
         );
       }
       chunks.push(data);
@@ -392,7 +393,7 @@ function feishuImageSource(event, client, key) {
         throw new ImagePromptError(
           'image-too-large',
           `Feishu image declares ${size} bytes; the limit is ${maxBytes}`,
-          t('图片超过 5 MB，请压缩后重试。'),
+          imageDownloadLimitMessage(maxBytes),
         );
       }
       return readBoundedStream(resource?.getReadableStream?.(), { signal, maxBytes });

@@ -1,3 +1,4 @@
+import { ConnectionError } from '../../connection-error.js';
 import * as React from 'react';
 import { IMessageLogoGlyph } from '../../channel-logos.js';
 import { createTokenChannelSettings } from '../shared/token-channel.js';
@@ -21,7 +22,7 @@ function PermissionPanel({ permissions, busy, error, onSubmit, onCancel }) {
         h('strong', null, automationReady ? '✓ Messages 自动化权限已授予' : '2. 允许自动化控制 Messages'),
         automationReady ? null : h('p', null, '在“系统设置 → 隐私与安全性 → 自动化”中，允许运行 DeepSeek Harness 的应用控制 Messages。'),
         automationReady ? null : h('a', { href: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation' }, '打开自动化设置'))),
-    error ? h('p', { className: 'dim-inlineError', role: 'alert' }, error.message ?? String(error)) : null,
+    error ? h(ConnectionError, { error: error }) : null,
     h('div', { className: 'ddt-actions dim-viewActions' },
       h('button', { type: 'button', className: 'ddt-button', onClick: onCancel, disabled: busy }, '取消'),
       h('button', { type: 'button', className: 'ddt-button', 'data-kind': 'primary', onClick: () => onSubmit({}), disabled: busy },

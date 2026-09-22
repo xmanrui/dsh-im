@@ -1,3 +1,5 @@
+import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-details.mjs';
+import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import QRCode from 'qrcode';
@@ -169,7 +171,7 @@ function publicConnectionFailure(error) {
       ? source.referenceId
       : null;
   return code && message && hint && referenceId
-    ? { code, message, hint, referenceId }
+    ? { code, message, hint, referenceId, ...diagnosticFields(source) }
     : null;
 }
 
@@ -227,6 +229,7 @@ function assertController(controller) {
 }
 
 export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = {}) {
+  const diagnostics = controller.diagnostics ?? createConnectionDiagnostics({ channel: 'dingtalk' });
   assertController(controller);
   const qrCache = new Map();
   const cachedEncode = (url) => {
@@ -283,7 +286,7 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
               await controller.sendConnectionTest(payload.botId);
               testMessage = publicConnectionTestResult();
             } catch (error) {
-              testMessage = publicConnectionTestResult(error);
+              testMessage = publicConnectionTestResult(error, { diagnostics, botId: payload.botId });
             }
           }
         }
@@ -338,11 +341,11 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
     } catch (error) {
       const workspaceError = publicWorkspaceError(error);
       const connectionError = publicConnectionFailure(error);
-      return signal?.aborted ? cancelled() : workspaceError
+      return diagnosticRpcResult(diagnostics, error, signal?.aborted ? cancelled() : workspaceError
         ? { ok: false, error: workspaceError }
         : connectionError
           ? { ok: false, error: connectionError }
-        : internalFailure();
+        : internalFailure(), { operation: endpoint, botId: payload?.botId });
     }
   };
 }

@@ -72,6 +72,16 @@ export function registerManagementRpc(ctx, channel, handler, { authority } = {})
 }
 
 /** Keep channel UI callers unchanged while using DSH's native correlation and response validation. */
-export function callManagementRpc(connection, channel, method, payload, signal) {
-  return connection.rpc.call('/api', rpcEndpoint(channel), { method, payload }, signal);
+export async function callManagementRpc(connection, channel, method, payload, signal) {
+  try {
+    return await connection.rpc.call('/api', rpcEndpoint(channel), { method, payload }, signal);
+  } catch (cause) {
+    if (signal?.aborted || cause?.name === 'AbortError') throw cause;
+    const error = new Error('无法访问 DSH 管理接口，请检查 DSH 连接或重新登录后重试。', { cause });
+    error.code = 'management-unreachable';
+    error.details = { operation: method, stage: 'management.request', occurredAt: new Date().toISOString(),
+      ...(Number.isInteger(cause?.status) && cause.status >= 100 && cause.status <= 599 ? { httpStatus: cause.status } : {}),
+    };
+    throw error;
+  }
 }

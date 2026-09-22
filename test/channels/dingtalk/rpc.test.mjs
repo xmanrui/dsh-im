@@ -1,3 +1,4 @@
+import { assertTestMessageFailure } from '../../fixtures/connection-diagnostics.mjs';
 import { managementFetch } from '../../fixtures/management-rpc.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -116,7 +117,10 @@ test('RPC returns only the safe connection diagnostic projection', async () => {
     botId: 'dt_abc', sendTest: true,
   });
 
-  assert.deepEqual(result, { ok: false, error: publicError });
+  assert.equal(result.error.details.stage, 'connection.start');
+  assert.equal(result.error.details.referenceId, publicError.referenceId);
+  const { details, ...legacyError } = result.error;
+  assert.deepEqual({ ...result, error: legacyError }, { ok: false, error: publicError });
   assert.doesNotMatch(JSON.stringify(result), /must-not-leak|clientSecret|cause/);
 });
 
@@ -157,9 +161,7 @@ test('reconnect sends a DingTalk test message only for a connected bot and isola
     sendConnectionTest: async () => { throw new Error('expired webhook'); },
   }))(DINGTALK_ENDPOINTS.reconnectBot, { botId: 'dt_abc', sendTest: true });
   assert.equal(failedSend.ok, true);
-  assert.deepEqual(failedSend.value.testMessage, {
-    sent: false, code: 'test-message-failed',
-  });
+  assertTestMessageFailure(failedSend.value.testMessage);
 
   let offlineSendCalled = false;
   const offline = await createDingtalkRpcHandler(controller({

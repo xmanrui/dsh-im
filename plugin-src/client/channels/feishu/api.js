@@ -1,3 +1,4 @@
+import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-details.mjs';
 import { normalizeBotAlias } from '../../../../src/channels/shared/bot-alias.mjs';
 /**
  * Browser-safe contract for the Feishu Host plugin.
@@ -119,6 +120,7 @@ export function unwrapRpcResult(result) {
     const message = optionalString(result.error?.message) ?? "飞书服务请求失败";
     const error = new Error(message);
     error.code = optionalString(result.error?.code) ?? "FEISHU_RPC_ERROR";
+    Object.assign(error, diagnosticFields(result.error));
     throw error;
   }
   return result.value;
@@ -190,7 +192,7 @@ function normalizeError(value) {
   if (!isRecord(value)) return undefined;
   const message = optionalString(value.message);
   if (!message) return undefined;
-  return { message, code: optionalString(value.code) };
+  return { ...diagnosticFields(value), message, code: optionalString(value.code) };
 }
 
 function authoritativeState(value, connected) {
@@ -386,7 +388,7 @@ export function presentError(error) {
   const message = raw
     .replace(/(client[_-]?secret|app[_-]?secret|secret|token)\s*[:=]\s*[^\s,;]+/gi, "$1=••••••")
     .slice(0, 240);
-  return { message, code: optionalString(error?.code) };
+  return { message, code: optionalString(error?.code), ...diagnosticFields(error) };
 }
 
 export function formatRemaining(milliseconds) {

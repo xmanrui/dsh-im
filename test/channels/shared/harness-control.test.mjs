@@ -16,6 +16,8 @@ import {
   outboundArtifactRegistry,
 } from '../../../src/channels/shared/semantic/artifact.mjs';
 import { WORKSPACE_SESSION_STALE } from '../../../src/channels/shared/workspace-session.mjs';
+import { setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
+import { classifyMessageFailure } from '../../../src/channels/shared/message-failure.mjs';
 
 const CATALOG = {
   groups: [{
@@ -322,8 +324,9 @@ test('HarnessClient preserves structured turn failures for channel classificatio
     [{ kind: 'error', error: { code: 'RATE_LIMIT', message: 'private provider detail' } },
       'harness-turn-failed', 'RATE_LIMIT'],
     [{ kind: 'max-tokens' }, 'model-max-tokens', undefined],
-    [{ kind: 'completed' }, 'model-empty-response', undefined],
-    ['completed', 'model-empty-response', undefined],
+    [{ kind: 'error', error: { code: 'EMPTY_RESPONSE' } },
+      'harness-turn-failed', 'EMPTY_RESPONSE'],
+    [null, 'harness-turn-failed', undefined],
     ['stopped', 'turn-interrupted', undefined],
   ]) {
     const turn = controlledTurn();
@@ -335,9 +338,38 @@ test('HarnessClient preserves structured turn failures for channel classificatio
       assert.equal(error.code, expectedCode);
       assert.equal(error.providerCode, expectedProviderCode);
       assert.equal(error.promptAccepted, true);
+      assert.deepEqual(error.details, {
+        sessionId: turn.id,
+        promptRpcId: turn.promptRpcId(),
+        baselineSeq: -1,
+        turn: 7,
+        lastSeq: 4,
+      });
+      if (expectedProviderCode === 'EMPTY_RESPONSE') {
+        assert.equal(classifyMessageFailure(error).code, 'MODEL_EMPTY_REPLY');
+      }
       assert.doesNotMatch(error.message, /private provider detail/);
       return true;
     });
+  }
+});
+
+test('HarnessClient returns a localized neutral reply for explicitly completed empty turns', async () => {
+  try {
+    for (const language of ['zh', 'en']) {
+      setImHostLanguage(language);
+      for (const reason of ['completed', { kind: 'completed' }]) {
+        const turn = controlledTurn();
+        const asking = turn.client.ask(turn.id, 'work', { timeoutMs: 2_000 });
+        await turn.admitted;
+        turn.finish({ reason, text: ' \n ' });
+        assert.equal(await asking, language === 'en'
+          ? 'This turn has ended with no text reply.'
+          : '本轮处理已结束，没有文本回复。');
+      }
+    }
+  } finally {
+    setImHostLanguage('zh');
   }
 });
 

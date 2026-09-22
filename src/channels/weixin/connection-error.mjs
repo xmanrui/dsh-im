@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import packageInfo from '../../../package.json' with { type: 'json' };
+import { createConnectionDiagnostics, connectionHint } from '../shared/connection-error.mjs';
 import { t } from '../shared/i18n.mjs';
 import { CONFIG_ISSUE_LABELS, normalizeWeixinDiagnosticDetails } from './diagnostic-details.mjs';
 import { configReadErrorDetails } from '../shared/config-read-error.mjs';
@@ -73,7 +72,7 @@ const MESSAGES = Object.freeze({
 });
 
 const ownedStages = new WeakMap();
-const reportedErrors = new WeakMap();
+
 const CODE_STAGES = {
   'credential-read-failed': ['credential.read', 'credential-store'],
   'credential-save-failed': ['credential.save', 'credential-store'],
@@ -97,23 +96,12 @@ export function knownWeixinErrorCode(code) { return Object.hasOwn(MESSAGES, code
 
 /** Annotate at the operation that knows the failing resource; do not inspect exception prose. */
 export function weixinStageError(code, cause, stage) {
-  if (reportedErrors.has(cause)) return cause;
+  if (cause?.publicError) return cause;
   const error = new Error('Weixin operation failed', { cause });
   error.code = knownWeixinErrorCode(code) ? code : 'weixin-operation-failed';
   const defaults = CODE_STAGES[error.code] ?? [];
   ownedStages.set(error, { stage: stage ?? defaults[0], resource: defaults[1] });
   return error;
-}
-
-function chainOf(error) {
-  const chain = [];
-  const seen = new Set();
-  while (error && typeof error === 'object' && !seen.has(error) && chain.length < 4) {
-    seen.add(error);
-    chain.push(error);
-    error = error.cause;
-  }
-  return chain;
 }
 
 function hintFor(code, details) {
@@ -136,84 +124,30 @@ function hintFor(code, details) {
   if (code === 'stale-token' || code === 'missing-token') return t('请移除失效接入并重新扫码绑定。');
   if (details.httpStatus === 429) return t('微信服务限流，请稍后重试。');
   if (details.httpStatus === 401 || details.httpStatus === 403) return t('访问被拒绝，请检查服务访问限制；HTTP 状态本身不能确认登录凭据已失效。');
-  if (code === 'network-error' || code === 'timeout') return t('请检查运行 DSH 的机器能否访问微信服务，然后重试。');
+  if (code === 'network-error' || code === 'timeout' || details.reason === 'multiple-causes') return connectionHint(details);
   return t('请按参考号查看 DSH 日志，并复制诊断信息反馈。');
 }
 
-export function createWeixinDiagnostics({ logger = console, now = Date.now } = {}) {
-  const recent = new Map();
-  function write(level, record) {
-    try { logger[level]?.(`[dsh-weixin] ${JSON.stringify(record)}`); } catch { /* Diagnostics must not change the operation outcome. */ }
-  }
-  function report(cause, context = {}) {
-    if (reportedErrors.has(cause)) return cause;
-    const chain = chainOf(cause);
-    const selected = chain.find(error => knownWeixinErrorCode(error.code));
-    const code = selected?.code ?? (knownWeixinErrorCode(context.code) ? context.code : 'weixin-operation-failed');
-    const staged = chain.map(error => ownedStages.get(error)).find(Boolean) ?? {};
-    const configDetails = chain.map(configReadErrorDetails).find(Boolean) ?? {};
-    const defaults = CODE_STAGES[code] ?? [];
-    const reason = chain.map(error => normalizeWeixinDiagnosticDetails({ reason: error.code }).reason).find(Boolean)
-      ?? (chain.some(error => error instanceof SyntaxError) ? 'invalid-json' : undefined);
-    const numeric = field => chain.map(error => normalizeWeixinDiagnosticDetails({ [field]: field === 'httpStatus' ? error.status : error[field] })[field]).find(value => value !== undefined);
-    const details = normalizeWeixinDiagnosticDetails({
-      ...context, ...configDetails,
-      file: { 'account-config': 'config.json', 'workspace-config': 'workspaces.json' }[configDetails.resource],
-      stage: staged.stage ?? defaults[0] ?? (code.startsWith('harness-') ? 'harness.check' : context.stage),
-      resource: staged.resource ?? defaults[1] ?? configDetails.resource ?? context.resource,
-      reason: reason ?? configDetails.reason ?? context.reason, httpStatus: numeric('httpStatus'), providerCode: numeric('providerCode'), pluginVersion: packageInfo.version,
-    });
-    const botId = /^wx_[a-f0-9]{24}$/.test(context.botId ?? '') ? context.botId : undefined;
-    const key = JSON.stringify([botId, details.operation, details.stage, code, details.reason, details.httpStatus, details.providerCode,
-      details.resource, details.file, details.field, details.issue]);
-    const previous = recent.get(key);
-    const time = now();
-    if (context.automatic && previous && time - previous.time < 60_000) {
-      previous.retries += 1;
-      const wrapped = new Error(previous.publicError.message, { cause });
-      wrapped.code = code;
-      wrapped.publicError = structuredClone(previous.publicError);
-      reportedErrors.set(wrapped, true);
-      return wrapped;
-    }
-    if (previous?.retries) write('warn', { event: 'connection-retries', referenceId: previous.publicError.details.referenceId, retries: previous.retries });
-    details.referenceId = `WX-CONN-${randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase()}`;
-    details.occurredAt = new Date(time).toISOString();
-    details.hint = hintFor(code, details);
-    const message = code === 'weixin-startup-config-invalid' && details.file
-      ? t('微信配置格式错误：{file}。请查看诊断详情，修复后重启 DSH。', { file: details.file })
-      : t(MESSAGES[code], { status: details.httpStatus ?? '?' });
-    const publicError = { code, message, details };
-    const wrapped = new Error(publicError.message, { cause });
-    wrapped.code = code;
-    wrapped.publicError = publicError;
-    reportedErrors.set(wrapped, true);
-    if (context.automatic) {
-      if (recent.size >= 128) recent.delete(recent.keys().next().value);
-      recent.set(key, { time, publicError: structuredClone(publicError), retries: 0, botId });
-    }
-    write(context.warning ? 'warn' : 'error', {
-      event: context.warning ? 'connection-warning' : 'connection-failure', code, ...details,
-      ...(botId ? { botId } : {}), pluginVersion: packageInfo.version, nodeVersion: process.versions.node, platform: process.platform,
-      ...(/^WX-CONN-[A-F0-9]{8}$/.test(context.parentReferenceId ?? '') ? { parentReferenceId: context.parentReferenceId } : {}),
-      ...Object.fromEntries(['durationMs', 'timeoutMs'].filter(field => Number.isFinite(cause?.[field]) && cause[field] >= 0).map(field => [field, cause[field]])),
-    });
-    return wrapped;
-  }
-  function clear(botId) {
-    for (const [key, entry] of recent) {
-      if (botId !== undefined && entry.botId !== botId) continue;
-      if (entry.retries) write('info', { event: 'connection-retries', referenceId: entry.publicError.details.referenceId, retries: entry.retries });
-      recent.delete(key);
-    }
-  }
-  function outcome(error, rollback) {
-    if (!reportedErrors.has(error)) return;
-    const details = normalizeWeixinDiagnosticDetails({ rollback });
-    if (!details.rollback) return;
-    error.publicError.details.rollback = details.rollback;
-    error.publicError.details.hint = hintFor(error.code, error.publicError.details);
-    write('info', { event: 'connection-outcome', referenceId: error.publicError.details.referenceId, ...details });
-  }
-  return { report, clear, outcome };
+export function createWeixinDiagnostics(options = {}) {
+  return createConnectionDiagnostics({ ...options, channel: 'weixin', prefix: 'WX-CONN',
+    describe(cause, context, evidence) {
+      const chain = evidence.chain;
+      const selected = chain.find(error => knownWeixinErrorCode(error.code));
+      const code = selected?.code ?? (knownWeixinErrorCode(context.code) ? context.code : 'weixin-operation-failed');
+      const staged = chain.map(error => ownedStages.get(error)).find(Boolean) ?? {};
+      const configDetails = chain.map(configReadErrorDetails).find(Boolean) ?? {};
+      const defaults = CODE_STAGES[code] ?? [];
+      const details = normalizeWeixinDiagnosticDetails({
+        ...context, ...evidence.details, ...configDetails,
+        file: { 'account-config': 'config.json', 'workspace-config': 'workspaces.json' }[configDetails.resource],
+        stage: staged.stage ?? defaults[0] ?? (code.startsWith('harness-') ? 'harness.check' : context.stage),
+        resource: staged.resource ?? defaults[1] ?? configDetails.resource ?? context.resource,
+        reason: evidence.details.reason === 'unknown' ? configDetails.reason ?? context.reason ?? 'unknown' : evidence.details.reason,
+      });
+      const message = code === 'weixin-startup-config-invalid' && details.file
+        ? t('微信配置格式错误：{file}。请查看诊断详情，修复后重启 DSH。', { file: details.file })
+        : t(MESSAGES[code], { status: details.httpStatus ?? '?' });
+      return { publicError: { code, message }, details, hint: hintFor(code, details) };
+    },
+  });
 }

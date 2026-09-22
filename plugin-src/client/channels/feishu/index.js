@@ -1,9 +1,10 @@
+import { ConnectionError, normalizeConnectionError } from '../../connection-error.js';
 import { BotName } from '../../bot-alias.js';
 import * as React from "react";
 
 import { FeishuLogoGlyph } from "../../channel-logos.js";
 import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from "../../credential-binding.js";
-import { CollapsibleAccountSection } from "../shared/collapsible-account.js";
+import { AccountSettingsToggle, CollapsibleAccountSection } from "../shared/collapsible-account.js";
 import { RowSelect } from "../../row-selector.js";
 import { h } from "../../i18n.js";
 import { HelpTip } from '../../help-tip.js';
@@ -397,7 +398,7 @@ function ProvisionError({ error, provision, onRetry, onCancel, busy }) {
         h("h3", null, repairing
           ? "权限与回调没有补全完成"
           : grantingGroupMessages ? "群消息权限没有开通完成" : "新机器人没有添加完成"),
-        h("p", null, error.message),
+        h(ConnectionError, { error: error }),
         error.code ? h("span", { className: "bxf-errorCode" }, error.code) : null,
         h("div", { className: "bxf-actions dim-viewActions" },
           h(Button, { kind: "primary", onClick: onRetry, disabled: busy },
@@ -466,7 +467,7 @@ function RemoveConfirmation({ bot, busy, onConfirm, onCancel }) {
   );
 }
 
-/** One select for the step-push presentation: off / per-step posts / process card. */
+/** One select for the step-push presentation. */
 function StepPushEditor({ value = false, mode = "post", disabled = false, onSave, onModeSave }) {
   const titleId = React.useId();
   const helpId = `${titleId}-help`;
@@ -495,7 +496,7 @@ function StepPushEditor({ value = false, mode = "post", disabled = false, onSave
         if (value === true) await onSave?.(false);
         return;
       }
-      const nextMode = next === "streaming_card" ? "streaming_card" : "post";
+      const nextMode = ["streaming_card", "live_cot"].includes(next) ? next : "post";
       // Enabling (or switching presentation) may need both writes; the flag
       // must land before the mode so the runtime never sees a mode without
       // step push enabled.
@@ -506,7 +507,9 @@ function StepPushEditor({ value = false, mode = "post", disabled = false, onSave
 
   const helpText = current === "off"
     ? "适合日常问答：执行过程中不显示工具调用等中间步骤，只回复最终结果"
-    : current === "streaming_card"
+    : current === "live_cot"
+      ? "使用飞书原生思考过程展示推理、工具调用与结果，最终答案单独发送"
+      : current === "streaming_card"
       ? "推荐长任务使用：过程与最终答案都在同一张卡片里实时更新，不刷屏"
       : "每一步都单独发一条消息（含工具调用和过程说明）；注意长任务会连续发送较多消息";
 
@@ -518,7 +521,7 @@ function StepPushEditor({ value = false, mode = "post", disabled = false, onSave
     h("div", { className: "dim-feishuGroupControlHeader" },
       h("h3", { id: titleId }, "任务过程展示"),
       h(HelpTip, { id: helpId, label: "查看分步直推说明" },
-        "设置任务执行过程的呈现方式：不显示、实时卡片或逐步消息")),
+        "设置任务执行过程的呈现方式：不显示、原生直播、实时卡片或逐步消息")),
     saving
       ? h("span", { className: "dim-feishuGroupControlStatus", role: "status" }, "保存中…")
       : null,
@@ -535,6 +538,7 @@ function StepPushEditor({ value = false, mode = "post", disabled = false, onSave
     onChange: change,
     options: [
       { value: "off", label: "不显示过程（只发送最终答案）" },
+      { value: "live_cot", label: "实时直播（飞书原生思考过程）" },
       { value: "streaming_card", label: "实时过程卡（全程一张卡片动态更新）" },
       { value: "post", label: "逐步直播（每一步单独发一条消息）" },
     ],
@@ -588,6 +592,18 @@ export function BotCard({
   },
     h("div", { className: "bxf-cardBody dim-botCardBody" },
       h(CollapsibleAccountSection, {
+        settings: h(BotSettingsButton, {
+          channel: "feishu",
+          botId: connection.botId,
+          botName: bot.name,
+          connected,
+          accessPolicy: connection.accessPolicy,
+          channelSettings: {
+            groupResponseMode: connection.groupResponseMode,
+            groupTopicReply: connection.groupTopicReply,
+            groupMessagePermissionGranted: connection.groupMessagePermissionGranted,
+          },
+        }),
         id: `bxf-settings-${connection.botId.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
         header: h("div", { className: "bxf-connectedTop dim-botCardTop" },
           h("div", { className: "bxf-botIdentity dim-botIdentity" },
@@ -612,18 +628,7 @@ export function BotCard({
               formatCheckedTime,
               healthState: stateForDisplay,
             }),
-            h(BotSettingsButton, {
-              channel: "feishu",
-              botId: connection.botId,
-              botName: bot.name,
-              connected,
-              accessPolicy: connection.accessPolicy,
-              channelSettings: {
-                groupResponseMode: connection.groupResponseMode,
-                groupTopicReply: connection.groupTopicReply,
-                groupMessagePermissionGranted: connection.groupMessagePermissionGranted,
-              },
-            }))),
+            h(AccountSettingsToggle))),
       },
         h(WorkspaceEditor, {
           workspace: connection.workspace,
@@ -692,6 +697,7 @@ export function BotCard({
             }, "移除接入")),
           summary ? h("div", { className: "bxf-healthSummary dim-cardSummary", "data-error": actionError || connection.error ? "true" : undefined },
             summary) : null,
+          (actionError || connection.error) ? h(ConnectionError, { error: actionError || connection.error, showMessage: false }) : null,
           connection.lastMessageError ? h(LastMessageErrorSummary, {
             className: "bxf-healthSummary",
             error: connection.lastMessageError,
@@ -762,7 +768,7 @@ function PageError({ error, onRetry, busy }) {
     h("div", { className: "bxf-error dim-inlineError", role: "alert" },
       h("div", null,
         h("h3", null, "无法读取飞书机器人"),
-        h("p", null, error.message),
+        h(ConnectionError, { error: error }),
         error.code ? h("span", { className: "bxf-errorCode" }, error.code) : null,
         h("div", { className: "bxf-actions dim-viewActions" },
           h(Button, { kind: "primary", onClick: onRetry, disabled: busy },
@@ -804,6 +810,7 @@ export function mergeFeishuSnapshotState(
 }
 
 export function FeishuSettingsTab({ rpcCall }) {
+  const [operationError, setOperationError] = React.useState(null);
   const [model, setModel] = React.useState({
     phase: "loading",
     revision: 0,
@@ -849,7 +856,16 @@ export function FeishuSettingsTab({ rpcCall }) {
   }, [scheduleAnimationFrame]);
 
   const invoke = React.useCallback(async (endpoint, payload = {}, signal) => {
-    return unwrapRpcResult(await rpcCall(endpoint, payload, signal));
+    const operation = !['connection.status', 'provision.poll', 'provision.begin', 'provision.cancel'].includes(endpoint);
+    if (operation && mountedRef.current) setOperationError(null);
+    try {
+      const value = unwrapRpcResult(await rpcCall(endpoint, payload, signal));
+      if (operation && mountedRef.current) setOperationError(value?.testMessage?.error ?? value?.warnings?.[0] ?? null);
+      return value;
+    } catch (error) {
+      if (endpoint === 'bot.delete' && mountedRef.current && !signal?.aborted && error?.name !== 'AbortError') setOperationError(normalizeConnectionError(error));
+      throw error;
+    }
   }, [rpcCall]);
 
   const mergeSnapshot = React.useCallback((snapshot, { restoreProvisioning = false } = {}) => {
@@ -1482,6 +1498,7 @@ export function FeishuSettingsTab({ rpcCall }) {
   }, h(AgentPresetCatalogContext.Provider, {
     value: model.agentPresetCatalog ?? EMPTY_AGENT_PRESET_CATALOG,
   }, h("section", { className: "bxf-page dim-channelPage", "aria-label": "飞书机器人设置" },
+    operationError ? h(ConnectionError, { error: operationError }) : null,
     h(Heading, {
       totals: model.totals,
       onAdd: () => void startProvisioning(),

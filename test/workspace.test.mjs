@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } fr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { defaultImWorkspace } from '../src/channels/shared/default-workspace.mjs';
 
 import {
   BotWorkspaceStore,
@@ -322,10 +323,10 @@ test('BotWorkspaceStore keeps delivery targets bot-scoped and removes them with 
   assert.equal(saved.deliveryTargets.bot_two['same-target'].route.userId, 'user-two');
 });
 
-test('BotWorkspaceStore uses process.cwd() when a bot has no configured workspace', async (t) => {
+test('BotWorkspaceStore uses the IM directory when a bot has no configured workspace', async (t) => {
   const { root } = await fixture(t);
   const store = await new BotWorkspaceStore(join(root, 'cwd-workspaces.json')).load();
-  assert.equal(await store.ensure('bot_cwd'), process.cwd());
+  assert.equal(await store.ensure('bot_cwd'), defaultImWorkspace());
 });
 
 test('connection test targets survive a new workspace scope for the same bot', async (t) => {
@@ -2357,4 +2358,42 @@ test('/sessionlist follows the conversation workspace unless a workspace is give
   await runWorkspaceCommand(`/sessionlist ${defaultWorkspace}`, harness, key);
   assert.equal(listed.at(-1), defaultWorkspace);
   assert.equal(listed.filter((path) => path === defaultWorkspace).length, 2);
+});
+
+test('workspace prompt preparation receives the resolved session and repeats after a stale binding', async () => {
+  let sessionId = 'old-session';
+  const prepared = [];
+  const asked = [];
+  const state = {
+    sessionFor: () => sessionId,
+    setSession: async (_key, id) => { sessionId = id; },
+  };
+  const harness = {
+    sessionExists: async () => true,
+    createSession: async () => 'new-session',
+    ask: async (id, content) => {
+      asked.push({ id, content });
+      if (id === 'old-session') {
+        sessionId = null;
+        throw Object.assign(new Error('workspace switched'), { code: 'workspace-session-stale' });
+      }
+      return 'ok';
+    },
+  };
+  const result = await askInWorkspaceSession({
+    harness, state, key: 'conversation', text: 'user text', content: 'base content',
+    prepareContent: async (input) => {
+      prepared.push(input);
+      return `${input.sessionId}: ${input.content}`;
+    },
+  });
+  assert.deepEqual(prepared, [
+    { sessionId: 'old-session', content: 'base content', text: 'user text' },
+    { sessionId: 'new-session', content: 'base content', text: 'user text' },
+  ]);
+  assert.deepEqual(asked, [
+    { id: 'old-session', content: 'old-session: base content' },
+    { id: 'new-session', content: 'new-session: base content' },
+  ]);
+  assert.equal(result.sessionId, 'new-session');
 });

@@ -3,6 +3,7 @@ export default {
   '这个问题已在其他客户端处理，无需再次回答。':
     'This question has already been answered from another client; no further reply is needed.',
   '任务已完成。': 'Task completed.',
+  '本轮处理已结束，没有文本回复。': 'This turn has ended with no text reply.',
   '结果文件': 'result file',
   '结果文件「{name}」的发送结果未能确认，请先检查聊天内是否已收到，不要立即重试。':
     'The delivery result of the result file "{name}" could not be confirmed. Please check whether it already arrived in the chat before retrying.',

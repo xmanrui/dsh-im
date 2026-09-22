@@ -39,6 +39,8 @@ import { DiscordAccountCard } from '../plugin-src/client/channels/discord/index.
 import { WhatsappAccountCard } from '../plugin-src/client/channels/whatsapp/index.js';
 import { IMessageAccountCard } from '../plugin-src/client/channels/imessage/index.js';
 import { IMSettingsTab } from '../plugin-src/client/index.js';
+import { BotSettingsContext } from '../plugin-src/client/channel-card-meta.js';
+import { AccountCard as WecomAppAccountCard } from '../plugin-src/client/channels/wecom-app/index.js';
 
 const { act, create } = TestRenderer;
 
@@ -145,7 +147,7 @@ test('delivery settings define only the ten supported IM channel routes', () => 
   assert.equal(ACCESS_CHANNEL_DEFINITIONS.weixin.groupSupported, false);
 });
 
-test('all nine robot cards add one accessible settings gear beside existing content', () => {
+test('robot card settings toggle expands in place and more settings preserves the bot scope', () => {
   const account = {
     botId: 'bot_card_01',
     connected: true,
@@ -166,6 +168,7 @@ test('all nine robot cards add one accessible settings gear beside existing cont
     ['weixin', WeixinAccountCard, { account }],
     ['dingtalk', DingtalkAccountCard, { account }],
     ['wecom', WecomAccountCard, { account }],
+    ['wecomApp', WecomAppAccountCard, { account }],
     ['qq', QqAccountCard, { account }],
     ['slack', SlackAccountCard, { account }],
     ['telegram', TelegramAccountCard, { account }],
@@ -179,11 +182,42 @@ test('all nine robot cards add one accessible settings gear beside existing cont
     assert.equal((markup.match(/aria-label="更多机器人设置"/g) ?? []).length, 1);
     assert.match(markup, /class="dim-botCardTools"/);
     assert.match(markup, new RegExp(`data-delivery-channel="${channel}"`));
-    assert.match(markup, /role="tooltip"[^>]*>更多机器人设置</);
+    assert.match(markup, /aria-label="展开该账号的设置" aria-expanded="false"/);
+    let renderer;
+    const opened = [];
+    act(() => { renderer = create(React.createElement(BotSettingsContext.Provider, {
+      value: { openBotSettings: (value) => opened.push(value) },
+    }, React.createElement(Card, props))); });
+    try {
+      const header = renderer.root.findByProps({ className: 'dim-collapsibleHead' });
+      const tools = header.findByProps({ className: 'dim-botCardTools' });
+      const toggle = tools.findByType('button');
+      const healthBefore = textOf(tools.findByProps({ className: 'dim-botHealthGroup' }));
+      assert.equal(textOf(toggle), '', `${channel}: the entry has no visible settings label`);
+      assert.equal(header.findAllByProps({ 'aria-label': '更多机器人设置' }).length, 0);
+      assert.equal(toggle.props['aria-controls'], renderer.root.findByProps({ className: 'dim-collapsibleBody' }).props.id);
+      let stopped = false;
+      act(() => toggle.props.onClick({ stopPropagation() { stopped = true; } }));
+      assert.ok(stopped, `${channel}: the button must not also toggle the header`);
+      assert.equal(toggle.props['aria-expanded'], 'true');
+      assert.equal(opened.length, 0, `${channel}: expanding must not navigate away`);
+      assert.equal(textOf(tools.findByProps({ className: 'dim-botHealthGroup' })), healthBefore);
+      const toolbar = renderer.root.findByProps({ className: 'dim-accountSettingsHeader' });
+      const more = toolbar.findByProps({ 'aria-label': '更多机器人设置' });
+      assert.equal(textOf(more), '更多设置');
+      act(() => more.props.onClick());
+      assert.equal(opened.length, 1);
+      assert.equal(opened[0].channel, channel);
+      assert.equal(opened[0].botId, account.botId);
+      act(() => toggle.props.onClick({ stopPropagation() {} }));
+      assert.equal(toggle.props['aria-expanded'], 'false');
+    } finally {
+      act(() => renderer.unmount());
+    }
   }
 });
 
-test('the card gear opens a bot-scoped page in the current channel panel and returns in place', async (t) => {
+test('expanded card more settings opens a bot-scoped page and returns in place', async (t) => {
   const previousWindow = globalThis.window;
   globalThis.window = {
     setInterval() { return 1; },
@@ -232,6 +266,7 @@ test('the card gear opens a bot-scoped page in the current channel panel and ret
   });
 
   const card = renderer.root.findByProps({ 'data-bot-id': 'wx_stable_bot' });
+  act(() => card.findByProps({ 'aria-label': '展开该账号的设置' }).props.onClick({ stopPropagation() {} }));
   await act(async () => {
     card.findByProps({ 'aria-label': '更多机器人设置' }).props.onClick();
     await flush();
@@ -334,6 +369,9 @@ test('only Feishu adds a group tab and it contains only the two migrated control
     renderer.root.findByProps({ id: 'dim-tab-feishu' }).props.onClick();
     await flush();
     await flush();
+  });
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '展开该账号的设置' }).props.onClick({ stopPropagation() {} });
   });
   await act(async () => {
     renderer.root.findByProps({ 'aria-label': '更多机器人设置' }).props.onClick();

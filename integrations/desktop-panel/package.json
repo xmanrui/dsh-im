@@ -1,0 +1,25 @@
+{
+  "name": "dsh-im-desktop-panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Persistent local DSH-IM sidebar integration for Deepseek Harness Desktop",
+  "main": "./host.js",
+  "exports": {
+    ".": "./host.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@xmanrui/dsh-im",
+        "dsh-tauri"
+      ]
+    }
+  }
+}

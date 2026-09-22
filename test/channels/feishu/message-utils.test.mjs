@@ -521,6 +521,17 @@ test('Feishu does not treat the current thread root as its own reply reference',
   assert.equal('replyTo' in message, false);
 });
 
+test('Feishu topic parsing is stateless across admission, handling and later messages', () => {
+  const event = (id) => ({ message: {
+    message_id: id, chat_type: 'group', chat_id: 'oc_topic',
+    thread_id: 'omt_topic', root_id: 'om_root', parent_id: 'om_root',
+    message_type: 'text', content: JSON.stringify({ text: 'continue' }),
+  } });
+  for (const id of ['om_first', 'om_first', 'om_second']) {
+    assert.equal(extractInboundMessage(event(id), {}).replyTo.messageId, 'om_root');
+  }
+});
+
 test('extractInboundMessage exposes a native Feishu file as a lazy unbounded resource download', async () => {
   const calls = [];
   const bytes = Buffer.from('ordinary-file-payload');

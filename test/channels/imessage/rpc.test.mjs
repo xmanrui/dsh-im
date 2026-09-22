@@ -30,12 +30,14 @@ test('iMessage RPC failures include details for the DSH connection envelope', as
   }));
 
   const result = await handle(IMESSAGE_ENDPOINTS.bindNative, {}, undefined);
+  assert.equal(result.error.details.stage, 'permission.check');
+  assert.match(result.error.details.referenceId, /^IM-CONN-[A-F0-9]{8}$/);
   assert.deepEqual(result, {
     ok: false,
     error: {
       code: 'messages-database-permission-required',
-      message: '请授予完全磁盘访问权限',
-      details: {},
+      message: '请在 macOS 系统设置中授予 DSH 完全磁盘访问权限，以读取 Messages 数据库。',
+      details: result.error.details,
     },
   });
 });

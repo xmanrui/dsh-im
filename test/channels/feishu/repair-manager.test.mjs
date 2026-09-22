@@ -149,7 +149,10 @@ test('an unsafe SDK URL becomes a safe terminal registration error', async () =>
   });
   manager.start();
   await waitFor(() => manager.status().state === 'error');
-  assert.deepEqual(manager.status().error, {
+  assert.equal(manager.status().error.details.stage, 'qr.begin');
+  assert.match(manager.status().error.details.referenceId, /^IM-CONN-[A-F0-9]{8}$/);
+  const { details, ...legacyError } = manager.status().error;
+  assert.deepEqual(legacyError, {
     code: 'registration_failed',
     message: 'Unable to register the Feishu app.',
   });

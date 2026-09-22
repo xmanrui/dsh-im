@@ -68,6 +68,8 @@ export class DingtalkDeviceAuthError extends Error {
     this.name = 'DingtalkDeviceAuthError';
     this.code = code;
     this.action = action;
+    if (Number.isInteger(options.status)) this.status = options.status;
+    if (Number.isFinite(options.timeoutMs)) this.timeoutMs = options.timeoutMs;
   }
 }
 
@@ -199,7 +201,7 @@ export class DingtalkDeviceAuth {
           'timeout',
           `DingTalk ${action} request timed out`,
           action,
-          { cause: error },
+          { cause: error, timeoutMs: this.#timeoutMs },
         );
       }
       if (error?.name === 'AbortError') throw error;
@@ -215,6 +217,7 @@ export class DingtalkDeviceAuth {
         'http-error',
         `DingTalk ${action} request failed`,
         action,
+        { status: response?.status },
       );
     }
     let value;

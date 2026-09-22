@@ -28,7 +28,12 @@ export class TelegramController extends TokenBotController {
       bots: snapshot.bots.map((bot) => {
         const config = this.#configStore.get(bot.botId);
         const accessPolicy = normalizeTelegramAccessPolicy(config ?? {});
-        return { ...bot, accessPolicy };
+        return {
+          ...bot,
+          accessPolicy,
+          // Default ON; only an explicit false in the config opts out.
+          thinkingTraces: config?.thinkingTraces !== false,
+        };
       }),
     };
   }
@@ -36,5 +41,12 @@ export class TelegramController extends TokenBotController {
   async setAccessPolicy(botId, value) {
     const accessPolicy = normalizeTelegramAccessPolicy(value);
     return this.updateBotConfig(botId, (config) => ({ ...config, ...accessPolicy }));
+  }
+
+  async setThinkingTraces(botId, value) {
+    return this.updateBotConfig(botId, (config) => ({
+      ...config,
+      thinkingTraces: value === true,
+    }));
   }
 }

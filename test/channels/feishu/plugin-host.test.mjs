@@ -1,3 +1,4 @@
+import { assertTestMessageFailure } from '../../fixtures/connection-diagnostics.mjs';
 import { managementFetch } from '../../fixtures/management-rpc.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
@@ -1059,10 +1060,7 @@ test('Feishu reconnect test delivery is best-effort and requires the target bot 
     signal(),
   );
   assert.equal(failedSend.ok, true);
-  assert.deepEqual(failedSend.value.testMessage, {
-    sent: false,
-    code: 'test-message-failed',
-  });
+  assertTestMessageFailure(failedSend.value.testMessage);
   assert.doesNotMatch(JSON.stringify(failedSend), /private Feishu provider failure/);
   assert.equal(sendCalls, 1);
 
@@ -1129,12 +1127,14 @@ test('dependency failures and AbortSignal use valid RpcResult error branches', a
   };
   const fx = await rpcFixture(controller);
   const failure = await fx.registration.handler(FEISHU_ENDPOINTS.status, {}, signal());
+  assert.equal(failure.error.details.stage, 'status.read');
+  assert.match(failure.error.details.referenceId, /^IM-CONN-[A-F0-9]{8}$/);
   assert.deepEqual(failure, {
     ok: false,
     error: {
       code: 'internal',
       message: 'The Feishu integration operation failed.',
-      details: {},
+      details: failure.error.details,
     },
   });
   assert.doesNotMatch(JSON.stringify(failure), new RegExp(secret));

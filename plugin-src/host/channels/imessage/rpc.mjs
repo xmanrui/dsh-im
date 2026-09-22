@@ -1,3 +1,4 @@
+import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { createTokenBotRpcHandler } from '../shared/rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
@@ -28,32 +29,38 @@ function withRpcDetails(result) {
 }
 
 export function createIMessageRpcHandler(controller) {
+  const diagnostics = controller.diagnostics ?? createConnectionDiagnostics({ channel: 'imessage' });
   const tokenHandler = createTokenBotRpcHandler(controller, {
     channel: 'iMessage',
   });
   return async (endpoint, payload, signal) => {
     if (endpoint === IMESSAGE_ENDPOINTS.status) {
-      const value = await controller.status();
-      return { ok: true, value: { ...value, permissions: await controller.permissions() } };
+      try {
+        const value = await controller.status();
+        return { ok: true, value: { ...value, permissions: await controller.permissions() } };
+      } catch (error) {
+        return diagnosticRpcResult(diagnostics, error, { ok: false, error: { code: 'status-failed' } },
+          { operation: endpoint, untrustedPublicError: true });
+      }
     }
     if (endpoint === IMESSAGE_ENDPOINTS.permissions) {
       try {
         return { ok: true, value: await controller.permissions() };
       } catch (error) {
-        return withRpcDetails({
+        return diagnosticRpcResult(diagnostics, error, withRpcDetails({
           ok: false,
           error: { code: 'permissions-check-failed', message: error.message },
-        });
+        }), { operation: endpoint, botId: payload?.botId, untrustedPublicError: true });
       }
     }
     if (endpoint === IMESSAGE_ENDPOINTS.bindNative) {
       try {
         return { ok: true, value: await controller.bindNative() };
       } catch (error) {
-        return withRpcDetails({
+        return diagnosticRpcResult(diagnostics, error, withRpcDetails({
           ok: false,
           error: { code: error.code ?? 'imessage-bind-failed', message: error.message },
-        });
+        }), { operation: endpoint, botId: payload?.botId, untrustedPublicError: true });
       }
     }
     const translated = endpoint === IMESSAGE_ENDPOINTS.setModel ? 'bot.model.set' : endpoint;

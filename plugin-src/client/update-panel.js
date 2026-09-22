@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import validSemver from 'semver/functions/valid.js';
 import compareVersionsDescending from 'semver/functions/rcompare.js';
 
-import { h } from './i18n.js';
+import { h, localizeText } from './i18n.js';
 import { HelpTip } from './help-tip.js';
 import { createPollScheduler } from './lifecycle.js';
 
@@ -73,14 +73,17 @@ function summary(snapshot, action, error) {
   if (snapshot?.job?.state === 'restart-required' || snapshot?.blockedReason === 'pending-restart') {
     return '已安装，待手动重启';
   }
-  if (snapshot?.job?.state === 'completed') return '更新已生效';
-  if (snapshot?.job?.state === 'failed') return '更新失败';
-  if (snapshot?.job?.state === 'interrupted') return '上次更新已中断，请检查安装状态后重试。';
   if (error) return '更新请求失败';
+  if (!snapshot?.job?.recoverable) {
+    if (snapshot?.job?.state === 'failed') return '更新失败';
+    if (snapshot?.job?.state === 'interrupted') return '上次更新已中断，请检查安装状态后重试。';
+  }
+  if (snapshot?.blockedReason === 'no-update') return '当前版本无需更新';
+  if (snapshot?.blockedReason) return '暂时无法安装更新';
   if (snapshot?.canInstall) return '发现新版本';
   if (snapshot?.checkedAt && snapshot.latestVersion === snapshot.runningVersion) return '已是最新版本';
-  if (snapshot?.blockedReason === 'no-update') return '当前版本无需更新';
   if (snapshot?.checkedAt) return '已获取 npm 最新版本';
+  if (snapshot?.job?.state === 'completed') return '更新已生效';
   return '检查 npm 最新版本，不会自动安装。';
 }
 
@@ -103,7 +106,7 @@ function manualUpdateCommand(snapshot) {
   const targets = [
     snapshot.latestVersion,
     pendingRestart ? snapshot.installedVersion : null,
-    snapshot.job?.state !== 'completed' ? snapshot.job?.targetVersion : null,
+    snapshot.job?.state !== 'completed' && !snapshot.job?.recoverable ? snapshot.job?.targetVersion : null,
   ].filter(validVersion);
   // Keep a known target pinned, and never suggest downgrading an installed/running version.
   const version = targets.length
@@ -239,6 +242,7 @@ function UpdateDialog({ children, onClose }) {
 }
 
 export function UpdatePanel({ rpcCall, clientVersion, onStatus }) {
+  const tooltipId = React.useId();
   const [snapshot, setSnapshot] = React.useState(null);
   const [action, setAction] = React.useState('status');
   const [error, setError] = React.useState(null);
@@ -396,28 +400,44 @@ export function UpdatePanel({ rpcCall, clientVersion, onStatus }) {
   const blocked = BLOCKED_REASONS[snapshot?.blockedReason] ?? ERROR_MESSAGES[snapshot?.blockedReason];
   const canConfirm = snapshot?.canInstall && snapshot.checkId && !activeJob && !restartRequired;
   const versionsDiffer = snapshot && clientVersion && snapshot.runningVersion !== clientVersion;
-  const failedJob = ['failed', 'interrupted'].includes(snapshot?.job?.state);
+  const failedJob = ['failed', 'interrupted'].includes(snapshot?.job?.state) && !snapshot.job.recoverable;
   const jobMessage = snapshot?.job?.message;
-  const targetVersion = snapshot?.job?.targetVersion;
+  const targetVersion = activeJob || restartRequired ? snapshot?.job?.targetVersion : null;
+  const historicalTargetVersion = !activeJob && !restartRequired ? snapshot?.job?.targetVersion : null;
+  const latestVersion = !activeJob && !restartRequired && !error && snapshot?.checkedAt
+    ? snapshot.latestVersion : null;
   const manualCommand = manualUpdateCommand(snapshot);
   const buttonLabel = action === 'checking' ? '检查中…'
     : action === 'starting' || activeJob ? '正在更新…'
       : restartRequired ? '待手动重启'
         : snapshot?.canInstall ? '更新至'
           : '检查更新';
+  const buttonDescription = localizeText(buttonLabel) + (buttonLabel === '更新至' ? ` v${snapshot.latestVersion}` : '');
 
   return h(React.Fragment, null,
-    h('button', {
-      type: 'button',
-      className: 'dim-updateButton dim-updateTrigger',
-      disabled: busyAction,
-      'aria-haspopup': 'dialog',
-      onClick: () => {
-        setOpen(true);
-        if (restartRequired) void refreshStatus();
-        else if (!snapshot?.canInstall && !snapshot?.job) void check();
+    h('span', { className: 'dim-updateAction' },
+      h('button', {
+        type: 'button',
+        className: 'dim-updateButton dim-updateTrigger',
+        disabled: busyAction,
+        'aria-label': buttonDescription,
+        'aria-describedby': tooltipId,
+        'aria-haspopup': 'dialog',
+        onClick: () => {
+          setOpen(true);
+          if (restartRequired) void refreshStatus();
+          else if (!snapshot?.canInstall && !activeJob && !uncertainInstall) void check();
+        },
+      }, h('svg', {
+        width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none',
+        stroke: 'currentColor', strokeWidth: 2.3, strokeLinecap: 'round', strokeLinejoin: 'round',
+        focusable: 'false', 'aria-hidden': 'true',
       },
-    }, buttonLabel, buttonLabel === '更新至' ? ` v${snapshot.latestVersion}` : null),
+      h('path', { d: 'M3 12a9 9 0 0 1 15.36-6.36L21 8' }),
+      h('path', { d: 'M21 3v5h-5' }),
+      h('path', { d: 'M21 12a9 9 0 0 1-15.36 6.36L3 16' }),
+      h('path', { d: 'M8 16H3v5' }))),
+      h('span', { id: tooltipId, className: 'dim-updateTooltip', role: 'tooltip' }, buttonDescription)),
     open ? h(UpdateDialog, { onClose: () => setOpen(false) },
       h('div', { className: 'dim-updateBody' },
         h('dl', { className: 'dim-updateVersions' },
@@ -427,6 +447,10 @@ export function UpdatePanel({ rpcCall, clientVersion, onStatus }) {
                 h('dt', null, '已安装版本'), h('dd', null, `v${snapshot.installedVersion}`)) : null,
           targetVersion ? h(React.Fragment, null,
             h('dt', null, '目标版本'), h('dd', null, `v${targetVersion}`)) : null,
+          latestVersion ? h(React.Fragment, null,
+            h('dt', null, '最新版本'), h('dd', null, `v${latestVersion}`)) : null,
+          historicalTargetVersion ? h(React.Fragment, null,
+            h('dt', null, '上次更新目标'), h('dd', null, `v${historicalTargetVersion}`)) : null,
           h('dt', null, '目标 profile'), h('dd', null, snapshot?.profileName ?? '无法确认')),
         h('div', {
           className: `dim-updateStatus${error || failedJob ? ' dim-updateStatusError' : ''}`,

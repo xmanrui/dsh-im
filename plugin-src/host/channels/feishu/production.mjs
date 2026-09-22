@@ -1,3 +1,4 @@
+import { getImageInputSettingsStore } from '../../../../src/channels/shared/image-input-settings-store.mjs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { unlink } from 'node:fs/promises';
@@ -26,6 +27,7 @@ import {
   createWorkspaceAwareController,
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
+import { prepareBotWorkspace } from '../../../../src/channels/shared/default-workspace.mjs';
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
 import { listModelCatalog } from '../../../../src/channels/shared/model-setting.mjs';
 import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
@@ -117,7 +119,7 @@ export async function createProductionController(ctx, config = {}, internals = {
   const agentPresetCatalog = () => listAgentPresetCatalog(ctx);
   const paths = pluginPaths(config);
   const configStore = await new ConfigStore(paths.config).load();
-  const defaultWorkspace = resolve(config.workspace ?? process.cwd());
+  const { defaultWorkspace, ungroupedWorkspace } = await prepareBotWorkspace(config);
   const WorkspaceStore = internals.WorkspaceStore ?? BotWorkspaceStore;
   const workspaces = internals.workspaces
     ?? await new WorkspaceStore(paths.workspaces, { defaultWorkspace }).load();
@@ -201,6 +203,7 @@ export async function createProductionController(ctx, config = {}, internals = {
   const harness = new Harness({
     ...connection,
     workspace: defaultWorkspace,
+    ungroupedWorkspace,
     // This plugin is already hosted by a running DSH process. Starting a
     // second DSH would create a competing server and lifecycle.
     autostart: false,
@@ -209,12 +212,14 @@ export async function createProductionController(ctx, config = {}, internals = {
     ...(controlExecutor ? { controlExecutor } : {}),
     ...(sessionMaintenanceExecutor ? { sessionMaintenanceExecutor } : {}),
     ...(fileIngressExecutor ? { fileIngressExecutor } : {}),
+    imageInputPolicy: () => getImageInputSettingsStore(config).get(),
   });
   const proxyEnv = internals.proxyEnv ?? process.env;
   const wsAgent = createFeishuWebSocketAgent(proxyEnv, internals.createProxyAgent);
 
   const modelCatalog = () => listModelCatalog(harness);
   const coreController = new Controller({
+    logger,
     registerApp: (options) => lark.registerApp(options),
     verifyApp,
     credentials: ctx.credentials,

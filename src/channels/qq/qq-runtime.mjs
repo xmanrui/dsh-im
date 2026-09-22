@@ -1,3 +1,4 @@
+import { extractConnectionEvidence, createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
 import { QQBot, contentSanitizer, typingIndicator } from '@tencent-connect/qqbot-nodejs';
 
 import {
@@ -35,6 +36,7 @@ export class QqRuntime {
   #contextEnhancement;
   #accessPolicy;
   #logger;
+  #diagnostics;
   #replyTimeoutMs;
   #connectTimeoutMs;
   #createBot;
@@ -68,7 +70,7 @@ export class QqRuntime {
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
-    this.#logger = logger;
+    this.#logger = logger; this.#diagnostics = createConnectionDiagnostics({ channel: 'qq', logger });
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#connectTimeoutMs = connectTimeoutMs;
     this.#createBot = createBot;
@@ -137,8 +139,8 @@ export class QqRuntime {
     await this.stop();
     this.#status.startedAt = new Date().toISOString();
     this.#status.qqConnectionState = 'connecting';
-    this.#status.lastError = null;
-    await this.#harness.ensureRunning();
+    this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
+    await atConnectionStage('harness.check', () => this.#harness.ensureRunning());
     this.#status.harnessReachable = true;
 
     const sdkLogger = {
@@ -211,14 +213,15 @@ export class QqRuntime {
       this.#status.qqConnectionState = 'connected';
       this.#status.lastCheckedAt = now;
       this.#status.lastConnectedAt = now;
-      this.#status.lastError = null;
+      this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
       readyResolve();
     };
     const onError = (error) => {
       if (!this.#status.ready) readyReject(error);
       else {
-        this.#status.lastError = error?.message ?? String(error);
-        this.#logger.warn?.(`[dsh-im:qq] bot ${this.#config.botId} connection error:`, error);
+        this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#config?.botId, automatic: true }).publicError;
+        this.#status.lastError = this.#status.error.message;
+        this.#logger.warn?.(`[dsh-im:qq] bot ${this.#config.botId} connection error:`, extractConnectionEvidence(error).details);
       }
     };
     const onMessage = (_ctx, message) => {
@@ -228,7 +231,7 @@ export class QqRuntime {
         if (controller.signal.aborted) return;
         this.#logger.error?.(
           `[dsh-im:qq] bot ${this.#config.botId} message handling failed:`,
-          error,
+          extractConnectionEvidence(error).details,
         );
       });
     };
@@ -244,8 +247,9 @@ export class QqRuntime {
       readyReject(error);
       this.#status.ready = false;
       this.#status.qqConnectionState = 'failed';
-      this.#status.lastError = error?.message ?? String(error);
-      this.#logger.error?.(`[dsh-im:qq] bot ${this.#config.botId} connection stopped:`, error);
+      this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#config?.botId, automatic: true }).publicError;
+      this.#status.lastError = this.#status.error.message;
+      this.#logger.error?.(`[dsh-im:qq] bot ${this.#config.botId} connection stopped:`, extractConnectionEvidence(error).details);
     });
 
     let timer;
@@ -264,7 +268,8 @@ export class QqRuntime {
     } catch (error) {
       this.#status.ready = false;
       this.#status.qqConnectionState = 'failed';
-      this.#status.lastError = error?.message ?? String(error);
+      this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#config?.botId, automatic: true }).publicError;
+      this.#status.lastError = this.#status.error.message;
       await this.stop();
       throw error;
     } finally {
@@ -284,7 +289,7 @@ export class QqRuntime {
     try {
       bot?.stop();
     } catch (error) {
-      this.#logger.warn?.(`[dsh-im:qq] bot ${this.#config.botId} failed to stop cleanly:`, error);
+      this.#logger.warn?.(`[dsh-im:qq] bot ${this.#config.botId} failed to stop cleanly:`, extractConnectionEvidence(error).details);
     }
     await Promise.race([
       runTask?.catch(() => undefined) ?? Promise.resolve(),

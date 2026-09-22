@@ -105,7 +105,7 @@ test('the gesture is declared once, so one edit moves every disclosure', async (
   assert.ok(sheet.includes('.dim-collapsible:not(.is-open) .dim-collapsibleBodyInner { visibility: hidden; }'));
 
   // No surface may keep a private copy of the mechanism.
-  for (const file of ['channels/weixin/connection-error.js', 'context-enhancement.js', 'channels/shared/collapsible-account.js']) {
+  for (const file of ['connection-error.js', 'context-enhancement.js', 'channels/shared/collapsible-account.js']) {
     const text = await source(`../plugin-src/client/${file}`);
     // The host's own block-level disclosure IS a native details/summary; what is
     // forbidden is carrying its chrome as inline styles, which is how the WeChat
@@ -135,7 +135,10 @@ test('no disclosure renderer outside the shared primitive survives in the client
 });
 
 test('the diagnostic expands into named roles, not inline chrome', async () => {
-  const diagnostic = await source('../plugin-src/client/channels/weixin/connection-error.js');
+  // The WeChat diagnostic's chrome lives in the shared connection diagnostic now:
+  // upstream generalized the component and weixin re-exports it, so the roles this
+  // test guards moved with it.
+  const diagnostic = await source('../plugin-src/client/connection-error.js');
   // Its chrome was three inline styles; every one of them is now a class, so the
   // sheet is the only place the surface can be restyled from.
   assert.ok(!/style: \{/.test(diagnostic), 'no inline style survives in the diagnostic');

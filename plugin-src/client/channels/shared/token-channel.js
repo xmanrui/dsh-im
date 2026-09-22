@@ -1,8 +1,9 @@
+import { ConnectionError, normalizeConnectionError } from '../../connection-error.js';
 import { BotName } from '../../bot-alias.js';
 import * as React from 'react';
 
 import { CredentialActionIcon, CredentialBindingPanel } from '../../credential-binding.js';
-import { CollapsibleAccountSection } from './collapsible-account.js';
+import { AccountSettingsToggle, CollapsibleAccountSection } from './collapsible-account.js';
 import { h } from '../../i18n.js';
 import { installDingtalkStyles } from '../dingtalk/styles.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
@@ -82,7 +83,7 @@ export function createTokenChannelSettings(definition) {
     accountSettingsEndpoint = null,
   } = definition;
 
-  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onAliasSave, onModelSave, onAgentPresetSave, onContextEnhancementSave, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove }) {
+  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onAliasSave, onModelSave, onAgentPresetSave, onContextEnhancementSave, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove, rpcCall, reload }) {
     const state = busy === 'reconnect' ? 'connecting' : account.state;
     const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
     const stateLabel = account.connected ? '运行正常' : state === 'connecting' ? '正在连接' : '连接未就绪';
@@ -91,6 +92,13 @@ export function createTokenChannelSettings(definition) {
     return h('article', { className: 'ddt-card dim-botCard', 'data-bot-id': account.botId },
       h('div', { className: 'ddt-cardBody dim-botCardBody' },
         h(CollapsibleAccountSection, {
+          settings: h(BotSettingsButton, {
+            channel: channel.toLowerCase(),
+            botId: account.botId,
+            botName: account.bot.name,
+            connected: account.connected,
+            accessPolicy: account.accessPolicy,
+          }),
           id: `tok-settings-${account.botId.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
           header: h('div', { className: 'ddt-accountTop dim-botCardTop' },
             h('div', { className: 'ddt-accountIdentity dim-botIdentity' },
@@ -112,13 +120,7 @@ export function createTokenChannelSettings(definition) {
                 lastCheckedAt: account.health.lastCheckedAt,
                 formatCheckedTime: checkedTime,
               }),
-              h(BotSettingsButton, {
-                channel: channel.toLowerCase(),
-                botId: account.botId,
-                botName: account.bot.name,
-                connected: account.connected,
-                accessPolicy: account.accessPolicy,
-              }))),
+              h(AccountSettingsToggle))),
         },
           h(WorkspaceEditor, {
             workspace: account.workspace,
@@ -144,6 +146,11 @@ export function createTokenChannelSettings(definition) {
           account,
           busy: Boolean(busy),
           onSave: onAccountSettingsSave,
+          // Channels with extra settings panels (email session binding) call
+          // their own endpoints through the same RPC bridge.
+          rpcCall,
+          endpoints,
+          onChanged: reload,
         }) : null,
         h('div', { className: 'ddt-accountFooter dim-cardFooter' },
           h('div', { className: 'dim-cardFooterLayout' },
@@ -160,6 +167,7 @@ export function createTokenChannelSettings(definition) {
                 disabled: Boolean(busy),
               }, '移除接入')),
             summary ? h('div', { className: 'ddt-summary dim-cardSummary' }, summary) : null,
+          account.error ? h(ConnectionError, { error: account.error, showMessage: false }) : null,
             account.lastMessageError ? h(LastMessageErrorSummary, {
               className: 'ddt-summary',
               error: account.lastMessageError,
@@ -180,6 +188,7 @@ export function createTokenChannelSettings(definition) {
   }
 
   function SettingsTab({ rpcCall }) {
+    const [operationError, setOperationError] = React.useState(null);
     const [model, setModel] = React.useState({
       phase: 'loading', bots: [], totals: { configured: 0, connected: 0 }, error: null,
       agentPresetCatalog: EMPTY_AGENT_PRESET_CATALOG,
@@ -207,7 +216,16 @@ export function createTokenChannelSettings(definition) {
 
     const invoke = React.useCallback(async (endpoint, payload = {}, signal) => {
       if (typeof rpcCall !== 'function') throw new TypeError(`${channel} 设置页缺少 RPC 连接`);
-      return api.unwrapRpcResult(await rpcCall(endpoint, payload, signal));
+      const operation = !['connection.status', 'provision.poll', 'provision.begin', 'provision.cancel'].includes(endpoint);
+      if (operation && mounted.current) setOperationError(null);
+      try {
+        const value = api.unwrapRpcResult(await rpcCall(endpoint, payload, signal));
+        if (operation && mounted.current) setOperationError(value?.testMessage?.error ?? value?.warnings?.[0] ?? null);
+        return value;
+      } catch (error) {
+        if (operation && mounted.current && !signal?.aborted && error?.name !== 'AbortError') setOperationError(normalizeConnectionError(error));
+        throw error;
+      }
     }, [rpcCall]);
 
     const loadStatus = React.useCallback(async ({ signal, silent = false } = {}) => {
@@ -331,6 +349,8 @@ export function createTokenChannelSettings(definition) {
           h('ul', { className: 'ddt-list dim-botList' }, model.bots.map((account) =>
             h('li', { key: account.botId }, h(AccountCard, {
               account,
+              rpcCall,
+              reload: loadStatus,
               busy: busyByBot[account.botId],
               testNotice: testNoticeByBot[account.botId],
               removing: removeTarget === account.botId,
@@ -398,6 +418,7 @@ export function createTokenChannelSettings(definition) {
       className: `ddt-page ${pageClass} dim-channelPage`,
       'aria-label': `${channel} 设置`,
     },
+    operationError ? h(ConnectionError, { error: operationError }) : null,
     h('div', { className: 'ddt-heading' },
       h('div', { className: 'ddt-tools' },
         h('div', { className: 'dim-bindActions' },
@@ -422,7 +443,7 @@ export function createTokenChannelSettings(definition) {
         ? h('div', { className: 'ddt-card dim-surfaceCard' },
             h('div', { className: 'ddt-inlineError dim-inlineError' },
               h('h3', null, `无法读取 ${channel} 机器人状态`),
-              h('p', null, model.error?.message),
+              h(ConnectionError, { error: model.error }),
               h(Button, { onClick: () => void loadStatus() }, '重新读取')))
         : h(React.Fragment, null,
             credentialOpen ? (CredentialPanel
@@ -433,6 +454,11 @@ export function createTokenChannelSettings(definition) {
                   error: credentialError,
                   onSubmit: bindCredentials,
                   onCancel: () => { setCredentialOpen(false); setCredentialError(null); },
+                  // A transport that authorizes out of band (the Agent mailbox
+                  // shows a QR code) drives its own endpoints through the bridge.
+                  rpcCall,
+                  endpoints,
+                  onAuthorized: bindCredentials,
                 })
               : h(CredentialBindingPanel, {
                   channel,

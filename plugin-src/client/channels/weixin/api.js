@@ -1,3 +1,4 @@
+import { normalizeConnectionError as normalizeTestError } from '../../connection-error.js';
 import { normalizeWeixinDiagnosticDetails } from '../../../../src/channels/weixin/diagnostic-details.mjs';
 import { normalizeBotAlias } from '../../../../src/channels/shared/bot-alias.mjs';
 import { normalizeAgentPresetCatalog, normalizeAgentPresetId, SET_AGENT_PRESET_ENDPOINT } from '../../agent-preset.js';
@@ -55,7 +56,7 @@ function normalizeTestMessage(value) {
   const code = value.code === 'test-target-unavailable'
     ? 'test-target-unavailable'
     : 'test-message-failed';
-  return { sent: false, code };
+  return { sent: false, code, ...(value.error ? { error: normalizeTestError(value.error) } : {}) };
 }
 
 export function normalizeConnectionError(value, fallbackCode = 'WEIXIN_ERROR', fallbackMessage = '微信操作失败，请稍后重试') {

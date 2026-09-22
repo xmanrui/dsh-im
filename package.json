@@ -1,7 +1,7 @@
 {
   "name": "@xmanrui/dsh-im",
-  "version": "4.21.2",
-  "description": "把十一种 IM 渠道和公网 AI Office 接入本机 DeepSeek Harness。 Connect eleven IM channels and a public AI Office to a local DeepSeek Harness.",
+  "version": "4.25.0",
+  "description": "把十二种 IM 渠道和公网 AI Office 接入本机 DeepSeek Harness。 Connect twelve IM channels and a public AI Office to a local DeepSeek Harness.",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -21,6 +21,7 @@
     "discord",
     "whatsapp",
     "imessage",
+    "matrix",
     "ai-office"
   ],
   "author": "xmanrui (https://github.com/xmanrui)",
@@ -80,6 +81,10 @@
     {
       "name": "wings1848",
       "url": "https://github.com/wings1848"
+    },
+    {
+      "name": "Zhe (Phil) Yang",
+      "url": "https://github.com/yangzhe1991"
     }
   ],
   "license": "MIT",
@@ -110,10 +115,16 @@
     "cordis.patch.yml",
     "lib",
     "plugin-src",
-    "scripts",
+    "scripts/verify-interface-language.mjs",
+    "scripts/verify-lan-management.mjs",
+    "scripts/verify-model-setting.mjs",
+    "scripts/verify-package.mjs",
+    "scripts/verify-session-channel-logos.mjs",
+    "scripts/verify-session-title-prefix.mjs",
     "src",
     "PROACTIVE_DELIVERY.md",
     "PROACTIVE_DELIVERY.en.md",
+    "docs/client-integration.md",
     "LICENSE",
     "README.md",
     "README.en.md",
@@ -157,10 +168,14 @@
     "node": ">=22.19"
   },
   "dependencies": {
+    "@matrix-org/olm": "3.2.15",
     "@tencent-connect/qqbot-connector": "1.2.0",
     "@tencent-connect/qqbot-nodejs": "1.0.4",
     "@wecom/aibot-node-sdk": "1.0.7",
     "dingtalk-stream": "2.1.4",
+    "imapflow": "^2.0.5",
+    "mailparser": "^3.9.28",
+    "nodemailer": "^10.0.10",
     "qrcode": "1.5.4",
     "undici": "7.29.0"
   },
@@ -179,5 +194,9 @@
     "doc": "docs",
     "lib": "lib",
     "test": "test"
+  },
+  "optionalDependencies": {
+    "@tencent-qqmail/agently-cli": "^1.0.18",
+    "sharp": "0.35.4"
   }
 }

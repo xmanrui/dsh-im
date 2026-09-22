@@ -50,6 +50,23 @@ export const SLASH_COMMAND_MANIFEST = Object.freeze([
   { command: 'unwatch', icon: 'clear_outlined', default: '取消关注会话', en_us: 'Unwatch a session' },
   { command: 'watchlist', icon: 'flag_outlined', default: '查看关注列表', en_us: 'List watched sessions' },
   { command: 'archived', icon: 'folder_outlined', default: '设置归档会话显隐（on/off）', en_us: 'Show or hide archived sessions (on/off)' },
+  { command: 'history', icon: 'chat-ai_outlined', default: '查看最近历史消息（仅私聊）', en_us: 'Show recent history (private chats only)' },
+  { command: 'workspace', icon: 'folder_outlined', default: '切换工作区', en_us: 'Switch workspace' },
+  { command: 'conv', icon: 'folder_outlined', default: '设置当前对话专属工作区', en_us: 'Set the workspace for this conversation' },
+  { command: 'session', icon: 'chat-ai_outlined', default: '绑定已有会话', en_us: 'Bind an existing session' },
+  { command: 'models', icon: 'ai-functions_outlined', default: '列出可用模型', en_us: 'List available models' },
+  { command: 'model', icon: 'ai-agent_outlined', default: '查看或切换当前模型', en_us: 'Show or switch the current model' },
+  { command: 'reasoninglist', icon: 'ai-deepthink_outlined', default: '列出可用推理等级', en_us: 'List available reasoning efforts' },
+  { command: 'reasoning', icon: 'ai-deepthink_outlined', default: '查看或切换推理等级', en_us: 'Show or switch the reasoning effort' },
+  { command: 'presetlist', icon: 'skill_outlined', default: '列出可用 Agent 预设', en_us: 'List available Agent Presets' },
+  { command: 'preset', icon: 'skill_outlined', default: '查看或切换 Agent 预设', en_us: 'Show or switch the Agent Preset' },
+  { command: 'stop', icon: 'clear_outlined', default: '停止当前任务', en_us: 'Stop the current task' },
+  { command: 'steer', icon: 'promptword_outlined', default: '给当前任务补充指令', en_us: 'Send additional instructions to the current task' },
+  { command: 'batch', icon: 'chat-ai_outlined', default: '开始批量输入（仅私聊）', en_us: 'Start batch input (private chats only)' },
+  { command: 'send', icon: 'chat-ai_outlined', default: '提交当前批次（仅私聊）', en_us: 'Submit the current batch (private chats only)' },
+  { command: 'cancel', icon: 'clear_outlined', default: '取消当前批次（仅私聊）', en_us: 'Cancel the current batch (private chats only)' },
+  { command: 'version', icon: 'ai-functions_outlined', default: '查看插件版本', en_us: 'Show the plugin version' },
+  { command: 'repair', icon: 'ai-functions_outlined', default: '补全飞书权限与卡片回调（仅私聊）', en_us: 'Complete Feishu permissions and card callbacks (private chats only)' },
 ]);
 
 // Commands that require a parameter are registered too, so the user can type

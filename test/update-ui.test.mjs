@@ -144,6 +144,96 @@ test('version details hide npm, registry and client metadata while preserving ru
   }
 });
 
+test('historical jobs do not suppress a new check or its available version', async (t) => {
+  for (const state of ['completed', 'failed', 'interrupted']) {
+    const job = {
+      id: 'old-job', state, targetVersion: '4.21.1',
+      message: state === 'completed' ? null : 'installation-changed',
+      recoverable: state !== 'completed',
+    };
+    const base = snapshot({ runningVersion: '4.23.0', installedVersion: '4.23.0', profileName: 'web', job });
+    const calls = [];
+    const renderer = await mount(t, async (endpoint, payload) => {
+      calls.push({ endpoint, payload });
+      if (endpoint === 'update.status') return ok(base);
+      if (endpoint === 'update.check') return ok({ ...base, latestVersion: '4.24.0', canInstall: true,
+        checkedAt: 1_000, checkId: 'new-check' });
+      return ok({ ...base, job: { id: 'new-job', state: 'restart-required', targetVersion: '4.24.0' },
+        installedVersion: '4.24.0', blockedReason: 'pending-restart' });
+    }, { clientVersion: '4.23.0' });
+
+    await click(renderer, '检查更新');
+    assert.deepEqual(calls.map(call => call.endpoint), ['update.status', 'update.check']);
+    assert.equal(textOf(renderer.root.findByProps({ role: 'status' })), '发现新版本');
+    assert.doesNotMatch(renderer.root.findByProps({ role: 'status' }).props.className, /dim-updateStatusError/);
+    const details = renderer.root.findByProps({ className: 'dim-updateVersions' });
+    assert.match(textOf(details), /最新版本v4\.24\.0/);
+    assert.match(textOf(details), /上次更新目标v4\.21\.1/);
+    assert.equal(details.findAllByType('dt').some(node => textOf(node) === '目标版本'), false);
+    assert.equal(manualCommandOf(renderer), 'dsh plugin --profile web add -w @xmanrui/dsh-im@4.24.0');
+    await click(renderer, '安装更新');
+    assert.equal(calls.at(-1).payload.checkId, 'new-check');
+    assert.match(textOf(renderer.toJSON()), /目标版本v4\.24\.0/);
+    assert.match(textOf(renderer.toJSON()), /已安装，待手动重启/);
+  }
+});
+
+test('fresh check results and errors take priority over recovered or completed history', async (t) => {
+  for (const state of ['completed', 'interrupted']) {
+    const job = { id: 'history', state, targetVersion: '3.0.7', recoverable: state !== 'completed' };
+    let fail = false;
+    let blockedReason = null;
+    const renderer = await mount(t, async (endpoint) => {
+      if (endpoint === 'update.status') return ok(snapshot({ job }));
+      if (fail) throw Object.assign(new Error('check-failed'), { code: 'check-failed' });
+      return ok(snapshot({ job, latestVersion: '3.0.8', checkedAt: 1_000, blockedReason }));
+    });
+    await click(renderer, '检查更新');
+    assert.equal(textOf(renderer.root.findByProps({ role: 'status' })), '已是最新版本');
+    blockedReason = 'registry-conflict';
+    await click(renderer, '重新检查');
+    assert.doesNotMatch(textOf(renderer.root.findByProps({ role: 'status' })), /已是最新版本|更新已生效/);
+    assert.match(textOf(renderer.toJSON()), /当前 npm 源配置与官方源不一致/);
+    fail = true;
+    await click(renderer, '重新检查');
+    assert.equal(textOf(renderer.root.findByProps({ role: 'status' })), '更新请求失败');
+    assert.equal(buttonNamed(renderer, '安装更新'), undefined);
+    assert.doesNotMatch(textOf(renderer.toJSON()), /最新版本v3\.0\.8/);
+  }
+});
+
+test('an active or unconfirmed historical job keeps its failure and installation target visible', async (t) => {
+  for (const state of ['installing', 'verifying', 'restart-required', 'interrupted']) {
+    const calls = [];
+    const current = available({ canInstall: false, checkId: null, latestVersion: '3.0.10',
+      blockedReason: state === 'interrupted' ? 'recovery-required' : null,
+      job: { id: 'job', state, targetVersion: '3.0.9', message: 'recovery-required', recoverable: false } });
+    const renderer = await mount(t, async (endpoint) => { calls.push(endpoint); return ok(current); });
+    await click(renderer, state === 'restart-required' ? '待手动重启'
+      : state === 'interrupted' ? '检查更新' : '正在更新…');
+    assert.equal(buttonNamed(renderer, '安装更新'), undefined);
+    if (state === 'interrupted') assert.match(textOf(renderer.toJSON()), /上次更新已中断/);
+    else {
+      assert.match(textOf(renderer.toJSON()), /目标版本v3\.0\.9/);
+      assert.doesNotMatch(textOf(renderer.toJSON()), /最新版本v3\.0\.10/);
+      assert.equal(calls.includes('update.check'), false);
+    }
+  }
+});
+
+test('recovered historical version labels and fresh results have English copy', async (t) => {
+  setImTranslator((key) => en[key] ?? key);
+  t.after(() => setImTranslator(null));
+  const current = available({ job: { id: 'history', state: 'interrupted', targetVersion: '3.0.7',
+    message: 'installation-changed', recoverable: true } });
+  const renderer = await mount(t, async () => ok(current));
+  await click(renderer, 'Update to v3.0.9');
+  assert.match(textOf(renderer.toJSON()), /Latest versionv3\.0\.9/);
+  assert.match(textOf(renderer.toJSON()), /Previous update targetv3\.0\.7/);
+  assert.match(textOf(renderer.toJSON()), /Update available/);
+  assert.doesNotMatch(textOf(renderer.toJSON()), /[\p{Script=Han}]/u);
+});
+
 test('confirmed installation ignores double clicks, polls the Host and stops at manual restart', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const pendingInstall = deferred();
@@ -571,7 +661,7 @@ test('disk changes and a persisted failure render actionable localized status', 
     job: { id: 'failed_job', state: 'failed', targetVersion: '3.0.9', message: 'install-failed' },
   })));
   await click(failed, '检查更新');
-  assert.match(textOf(failed.toJSON()), /目标版本v3.0.9/);
+  assert.match(textOf(failed.toJSON()), /上次更新目标v3.0.9/);
   assert.match(textOf(failed.toJSON()), /安装失败，请检查当前安装状态后重试/);
   assert.doesNotMatch(textOf(failed.toJSON()), /install-failed/);
 
@@ -607,7 +697,7 @@ test('update confirmation, source protection and failures have English copy', as
   current.runningVersion = '3.0.9';
   current.installedVersion = '3.0.9';
   await click(renderer, 'Check again');
-  assert.match(textOf(renderer.toJSON()), /Updated version is active/);
+  assert.match(textOf(renderer.toJSON()), /Up to date/);
   assert.doesNotMatch(textOf(renderer.toJSON()), /Update is running|[\p{Script=Han}]/u);
 });
 
@@ -709,6 +799,11 @@ test('manual commands use the current profile and a known target without downgra
     { profileName: '测试环境', expected: '"测试环境"', version: 'latest' },
     { profileName: 'web', latestVersion: '3.1.1; echo unsafe', expected: 'web', version: 'latest' },
     { profileName: 'web', job: { state: 'completed', targetVersion: '3.0.8' }, expected: 'web', version: 'latest' },
+    { profileName: 'web', job: { state: 'interrupted', targetVersion: '3.1.5', recoverable: true },
+      expected: 'web', version: 'latest' },
+    { profileName: 'web', latestVersion: '3.1.3',
+      job: { state: 'interrupted', targetVersion: '3.1.5', recoverable: true },
+      expected: 'web', version: '3.1.3' },
   ];
   for (const { expected, version, ...fields } of cases) {
     const renderer = await mount(t, async () => ok(snapshot(fields)));

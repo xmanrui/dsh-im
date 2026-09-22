@@ -1,3 +1,4 @@
+import { ConnectionError } from './connection-error.js';
 import * as React from 'react';
 
 import { h, isEnglish } from './i18n.js';
@@ -6,7 +7,7 @@ export const BotSettingsContext = React.createContext(Object.freeze({
   openBotSettings() {},
 }));
 
-function SettingsGlyph() {
+export function SettingsGlyph() {
   return h('svg', {
     viewBox: '0 0 24 24',
     width: 16,
@@ -31,14 +32,12 @@ export function BotSettingsButton({
   channelSettings,
 }) {
   const { openBotSettings } = React.useContext(BotSettingsContext);
-  const tooltipId = React.useId();
   return h('span', { className: 'dim-botSettingsAction' },
     h('button', {
       type: 'button',
       className: 'dim-botSettingsButton',
       'data-delivery-channel': channel,
       'aria-label': '更多机器人设置',
-      'aria-describedby': tooltipId,
       onClick: () => openBotSettings?.({
         ...(channelSettings && typeof channelSettings === 'object' ? channelSettings : {}),
         channel,
@@ -47,12 +46,8 @@ export function BotSettingsButton({
         connected: Boolean(connected),
         accessPolicy,
       }),
-    }, h(SettingsGlyph)),
-    h('span', {
-      id: tooltipId,
-      className: 'dim-botSettingsTooltip',
-      role: 'tooltip',
-    }, '更多机器人设置'));
+    }, h(SettingsGlyph), h('span', null, '更多设置'),
+    h('span', { className: 'dim-moreSettingsChevron', 'aria-hidden': 'true' })));
 }
 
 function messageErrorTime(value) {
@@ -115,6 +110,7 @@ export function LastMessageErrorSummary({ className = '', error }) {
   h('strong', null, '最近一条消息处理失败'),
   '：',
   h('span', null, error.message),
+    error.details ? h(ConnectionError, { error, showMessage: false }) : null,
   '（',
   h('span', null, '错误码'),
   ` ${error.code} · `,

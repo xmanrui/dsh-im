@@ -302,7 +302,7 @@ test('runtime activation failure retains the authorized bot for reconnect withou
   assert.match(status.bots[0].error.hint, /dsh web 日志/);
   assert.equal(logs.length, 1);
   assert.match(logs[0][0], new RegExp(status.bots[0].error.referenceId));
-  assert.equal(logs[0][1].category, 'stream-connect-failed');
+  assert.equal(JSON.parse(logs[0][0].slice(logs[0][0].indexOf('{'))).code, 'stream-connect-failed');
   assert.equal(events.some(([event]) => event === 'unset' || event === 'remove'), false);
   assert.doesNotMatch(
     JSON.stringify({ completed, status, logs }),

@@ -6,6 +6,8 @@ After installation, the backend still requires a manual restart, and the panel r
 
 If the existing page still shows a restart notice after you restart manually, click **Refresh status** in the dialog or reopen **Restart needed**. This reads the current Host status without checking npm or refreshing the page.
 
+After an update or rollback through a terminal or plugin market, restart the Host so the updater can verify the current installation again. When no installation lock remains, installation validation passes, and the running and installed versions match, historical update records no longer block subsequent updates. There is no need to delete state files. **Latest version** comes from the current version check; **Previous update target** describes a historical attempt, not the next installation. Users whose install button is already blocked by an old record must first install a version containing this fix through the manual command or plugin market, then restart manually.
+
 The button reuses Desktop's package-management service or the current Harness CLI for an exact-version install equivalent to the following (replace the example profile and version with the confirmed values):
 
 ```sh

@@ -87,6 +87,146 @@ async function waitForJob(service, expected) {
   assert.fail(`Expected ${expected}, received ${JSON.stringify(snapshot)}`);
 }
 
+async function historicalUpdate(t, state = 'restart-required') {
+  const f = await fixture(t, {
+    service: { runningVersion: '4.21.0' },
+    environment: { installedVersion: '4.21.0' },
+  });
+  f.state.release = release('4.21.1');
+  await f.submit('historical-request');
+  await waitForJob(f.service, 'restart-required');
+  await f.service.close();
+  const directory = await f.directory();
+  const statePath = join(directory, 'state.json');
+  const job = JSON.parse(await readFile(statePath, 'utf8'));
+  await writeFile(statePath, JSON.stringify({ ...job, state }));
+  f.environment.installedVersion = '4.23.0';
+  f.environment.installationKey = 'external-installation';
+  f.state.release = release('4.24.0');
+  return { ...f, directory, statePath };
+}
+
+test('historical successful jobs allow subsequent updates after external upgrades or rollbacks', async (t) => {
+  for (const state of ['restart-required', 'completed']) {
+    for (const version of ['4.23.0', '4.20.0']) {
+      await t.test(`${state}, now running ${version}`, async (t) => {
+        const f = await historicalUpdate(t, state);
+        f.environment.installedVersion = version;
+        const original = await readFile(f.statePath, 'utf8');
+        const host = f.restart(version);
+        for (let attempt = 0; attempt < 3; attempt++) {
+          f.state.time += 3_000;
+          const result = await host.check();
+          assert.equal(result.job.targetVersion, '4.21.1');
+          assert.equal(result.job.state, 'interrupted');
+          assert.equal(result.job.message, 'installation-changed');
+          assert.equal(result.job.recoverable, true);
+          assert.equal(result.latestVersion, '4.24.0');
+          assert.equal(result.blockedReason, null);
+          assert.equal(result.canInstall, true);
+        }
+        await host.close();
+        const restarted = f.restart(version);
+        assert.equal((await restarted.status()).job.recoverable, true);
+        const checked = await restarted.check();
+        assert.equal(await readFile(f.statePath, 'utf8'), original);
+        const replay = await restarted.install({ checkId: checked.checkId, requestId: 'historical-request' });
+        assert.equal(replay.job.targetVersion, '4.21.1');
+        assert.deepEqual(f.state.installs, ['4.21.1']);
+
+        await restarted.install({ checkId: checked.checkId, requestId: 'next-update' });
+        const finished = await waitForJob(restarted, 'restart-required');
+        assert.equal(finished.job.targetVersion, '4.24.0');
+        assert.equal(finished.job.recoverable, false);
+        await restarted.close();
+        const nextHost = f.restart('4.24.0');
+        assert.equal((await nextHost.status()).job.state, 'completed');
+        f.state.release = release('4.25.0');
+        const next = await nextHost.check();
+        await nextHost.install({ checkId: next.checkId, requestId: 'following-update' });
+        await waitForJob(nextHost, 'restart-required');
+        assert.deepEqual(f.state.installs, ['4.21.1', '4.24.0', '4.25.0']);
+      });
+    }
+  }
+});
+
+test('historical recovery preserves locks, installation validation and restart requirements', async (t) => {
+  const cases = [
+    { name: 'live lock', lock: { id: 'other', pid: process.pid } },
+    { name: 'stale lock', lock: { id: 'other', pid: 999_999_999 } },
+    { name: 'null lock', lock: null },
+    { name: 'invalid package', environment: { packageValid: false } },
+    { name: 'ineligible environment', environment: { eligible: false } },
+    { name: 'source installation', environment: { sourceInstall: true, blockedReason: 'source-install', eligible: false } },
+    { name: 'changed profile', environment: { blockedReason: 'installation-changed', eligible: false } },
+    { name: 'unavailable executor', environment: { blockedReason: 'executor-unavailable', eligible: false } },
+    { name: 'registry conflict', environment: { blockedReason: 'registry-conflict', eligible: false } },
+    { name: 'not restarted', runningVersion: '4.21.1' },
+  ];
+  for (const state of ['restart-required', 'completed']) {
+    for (const scenario of cases) {
+      await t.test(`${state}: ${scenario.name}`, async (t) => {
+        const f = await historicalUpdate(t, state);
+        Object.assign(f.environment, scenario.environment);
+        const lockPath = join(f.directory, 'install.lock');
+        if ('lock' in scenario) await writeFile(lockPath, JSON.stringify(scenario.lock));
+        const original = await readFile(f.statePath, 'utf8');
+        const host = f.restart(scenario.runningVersion ?? '4.23.0');
+        const result = await host.check();
+        assert.equal(result.job.recoverable, false);
+        assert.equal(result.canInstall, false);
+        assert.equal(result.checkId, null);
+        await assert.rejects(host.install({ checkId: 'not-confirmed', requestId: 'blocked' }));
+        assert.deepEqual(f.state.installs, ['4.21.1']);
+        assert.equal(await readFile(f.statePath, 'utf8'), original);
+        if ('lock' in scenario) assert.equal(await readFile(lockPath, 'utf8'), JSON.stringify(scenario.lock));
+      });
+    }
+  }
+});
+
+test('recovered history cannot bypass failed checks, expired confirmation or changed installation', async (t) => {
+  const f = await historicalUpdate(t);
+  const host = f.restart('4.23.0');
+  let checked = await host.check();
+  assert.equal(checked.canInstall, true);
+  f.state.time += 3_000;
+  f.state.failFetch = true;
+  await assert.rejects(host.check(), { code: 'check-failed' });
+  assert.equal((await host.status()).canInstall, false);
+  await assert.rejects(host.install({ checkId: checked.checkId, requestId: 'failed-check' }), { code: 'check-expired' });
+
+  f.state.failFetch = false;
+  checked = await host.check();
+  f.state.time += 10 * 60_000;
+  await assert.rejects(host.install({ checkId: checked.checkId, requestId: 'expired' }), { code: 'check-expired' });
+  checked = await host.check();
+  f.environment.installationKey = 'another-external-change';
+  await assert.rejects(host.install({ checkId: checked.checkId, requestId: 'changed' }), { code: 'installation-changed' });
+  assert.deepEqual(f.state.installs, ['4.21.1']);
+});
+
+test('recovery flags are derived again and do not override the new release Node requirement', async (t) => {
+  const f = await historicalUpdate(t);
+  const host = f.restart('4.23.0');
+  assert.equal((await host.check()).job.recoverable, true);
+  f.state.time += 3_000;
+  f.state.release = release('4.24.0', { engines: { node: '>=99' } });
+  const incompatible = await host.check();
+  assert.equal(incompatible.job.recoverable, true);
+  assert.equal(incompatible.blockedReason, 'incompatible-node');
+  assert.equal(incompatible.canInstall, false);
+
+  const job = JSON.parse(await readFile(f.statePath, 'utf8'));
+  await writeFile(f.statePath, JSON.stringify({ ...job, recoverable: true }));
+  f.environment.packageValid = false;
+  const invalid = await host.status();
+  assert.equal(invalid.job.recoverable, false);
+  assert.equal(invalid.blockedReason, 'recovery-required');
+  assert.equal(invalid.canInstall, false);
+});
+
 test('status is local and npm checking only happens on demand', async (t) => {
   const f = await fixture(t);
   assert.equal((await f.service.status()).latestVersion, null);

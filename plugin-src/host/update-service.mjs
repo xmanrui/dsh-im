@@ -113,7 +113,7 @@ function processAlive(pid) {
 function publicJob(job) {
   if (!job) return null;
   const { id, state, targetVersion, message } = job;
-  return { id, state, targetVersion, message };
+  return { id, state, targetVersion, message, recoverable: job.recoverable === true };
 }
 
 /** One update job per profile. Persist intent before starting pnpm, and never apply a restart here. */
@@ -158,27 +158,32 @@ export function createUpdateService({
     if (!JOB_STATES.has(job.state) || typeof job.id !== 'string' || !semver.valid(job.targetVersion)) {
       throw updateError('state-unavailable');
     }
-    if (ACTIVE_STATES.has(job.state) && job.id !== activeJob?.id) {
+    // Recovery is derived from the current installation, never a persisted flag.
+    job = { ...job, recoverable: false };
+    const historical = job.id !== activeJob?.id;
+    if (ACTIVE_STATES.has(job.state) && historical) {
       if (lock === NO_LOCK || lock?.id !== job.id || !processAlive(lock?.pid)) {
         job = { ...job, state: 'interrupted', message: 'recovery-required' };
       }
     }
-    if (job.id !== activeJob?.id && !ACTIVE_STATES.has(job.state)) {
-      if (lock !== NO_LOCK) return { ...job, state: 'interrupted', message: 'recovery-required' };
-      // A later Host can retry after a verified manual repair. Never infer this
-      // from version equality while an old process lock is still present.
-      if (['failed', 'interrupted'].includes(job.state) && environment.packageValid === true
-        && environment.installedVersion === runningVersion && !environment.blockedReason) {
-        return job.targetVersion === runningVersion
-          ? { ...job, state: 'completed', message: 'recovered' }
-          : { ...job, recoverable: true };
-      }
+    if (historical && !ACTIVE_STATES.has(job.state) && lock !== NO_LOCK) {
+      return { ...job, state: 'interrupted', message: 'recovery-required' };
     }
     if (job.state === 'restart-required' || job.state === 'completed') {
       if (environment.installedVersion !== job.targetVersion || environment.packageValid !== true) {
-        return { ...job, state: 'interrupted', message: 'installation-changed' };
+        job = { ...job, state: 'interrupted', message: 'installation-changed' };
+      } else {
+        job = { ...job, state: runningVersion === job.targetVersion ? 'completed' : 'restart-required' };
       }
-      return { ...job, state: runningVersion === job.targetVersion ? 'completed' : 'restart-required' };
+    }
+    // Reconcile after deriving the job state so an external upgrade or rollback
+    // can also recover. Keep history read-only and do not claim its target ran.
+    if (historical && lock === NO_LOCK && ['failed', 'interrupted'].includes(job.state)
+      && environment.packageValid === true && environment.eligible === true
+      && environment.installedVersion === runningVersion && !environment.blockedReason) {
+      return job.targetVersion === runningVersion
+        ? { ...job, state: 'completed', message: 'recovered' }
+        : { ...job, recoverable: true };
     }
     return job;
   }

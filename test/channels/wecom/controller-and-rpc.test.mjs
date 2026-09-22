@@ -1,3 +1,4 @@
+import { assertTestMessageFailure } from '../../fixtures/connection-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -178,7 +179,7 @@ test('Enterprise WeChat reconnect optionally sends a test message without changi
     sendConnectionTest: async () => { throw new Error('provider rejected'); },
   })(WECOM_ENDPOINTS.reconnectBot, { botId: 'wecom_bot', sendTest: true });
   assert.equal(failedSend.ok, true);
-  assert.deepEqual(failedSend.value.testMessage, { sent: false, code: 'test-message-failed' });
+  assertTestMessageFailure(failedSend.value.testMessage);
 
   let offlineSendCalled = false;
   const offline = await createWecomRpcHandler({

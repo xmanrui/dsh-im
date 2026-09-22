@@ -9,6 +9,7 @@ export const SESSION_CHANNEL_LABELS = Object.freeze(Object.fromEntries(Object.en
   discord: ['Discord', 'Discord'],
   whatsapp: ['WhatsApp', 'WhatsApp'],
   imessage: ['iMessage', 'iMessage'],
+  matrix: ['Matrix', 'Matrix'],
   office: ['AI Office', 'AI Office'],
 }).map(([channel, labels]) => [channel, Object.freeze(labels)])));
 

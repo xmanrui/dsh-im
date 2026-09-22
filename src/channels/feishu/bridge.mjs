@@ -115,6 +115,7 @@ import {
   FEISHU_STEP_PUSH_MODES,
   normalizeFeishuStepPushMode,
 } from './step-push-mode.mjs';
+import { FeishuLiveCot } from './live-cot.mjs';
 
 // Lazily evaluated: t() must run after setImHostLanguage, not at import time.
 const INTERACTION_RESOLVED_TEXT = () => t('这个问题已在其他客户端处理，无需再次回答。');
@@ -123,6 +124,7 @@ const RESOLVED_REPLY_TTL_MS = 30 * 60_000;
 const ROOT_CANDIDATE_TTL_MS = 30 * 60_000;
 /** Bound main-feed roots awaiting a topic so silent drops cannot grow them. */
 const MAX_ROOT_CANDIDATES = 512;
+const MAX_TOPIC_ANCHORS = 4_000;
 
 const MENU_COMMAND = /^\/m(?:enu)?$/i;
 const REPAIR_COMMAND_PREFIX = /^\/repair(?:\s|$)/i;
@@ -607,7 +609,7 @@ export class FeishuHarnessBridge {
   #groupTopicReply = false;
   /** When true, streaming turns push tool calls and interim notes as discrete messages. */
   #stepPush = false;
-  /** Step push presentation: 'post' (discrete messages) or 'streaming_card'. */
+  /** Step push presentation: discrete posts, a CardKit card, or native live CoT. */
   #stepPushMode = FEISHU_STEP_PUSH_MODES.POST;
   /** Per-conversation step push state: key → { lastSentAt, count, breakerLogged }. */
   #stepPushSendState = new Map();
@@ -623,6 +625,8 @@ export class FeishuHarnessBridge {
   #anchorTopicReply = new Map();
   /** Main-feed roots this bot intends to auto-open as topics, awaiting thread_id. */
   #rootCandidates = new Map();
+  /** Last successfully injected topic root per conversation and AI session. */
+  #topicAnchors = new Map();
   #repair;
   #repairAttempt = null;
   #repairMonitorVersion = 0;
@@ -4062,7 +4066,7 @@ export class FeishuHarnessBridge {
     await Promise.allSettled(sessionIds.map((sessionId) => this.#scheduleCompensation(sessionId)));
   }
 
-  #interactionAskOptions(event, key, files) {
+  #interactionAskOptions(event, key, files, images) {
     return {
       timeoutMs: this.#replyTimeoutMs,
       signal: this.#signal,
@@ -4076,6 +4080,7 @@ export class FeishuHarnessBridge {
       }),
       onInteractionResolved: (resolution) => this.#handleInteractionResolved(resolution),
       files,
+      images,
     };
   }
 
@@ -4873,6 +4878,72 @@ export class FeishuHarnessBridge {
     };
   }
 
+  async #preparePrompt(event, key, message) {
+    const snapshot = this.#acceptedMessageIds.get(event.message.message_id);
+    const build = async (input) => {
+      const rich = hasInboundImages(input) || hasReplyReference(input);
+      const original = rich
+        ? await promptContentForInboundMessage(input, { signal: this.#signal, deferImages: true })
+        : input.content;
+      const enhanced = enhanceContextContent(original, snapshot, () => ({
+        channel: 'feishu',
+        senderId: senderOpenId(event),
+        chatId: event.message.chat_id,
+        threadId: event.message.thread_id,
+      }));
+      return {
+        content: rich || enhanced !== original ? enhanced : undefined,
+        contextEnhanced: enhanced !== original,
+        sourceGuidance: snapshot?.config?.guidance,
+      };
+    };
+    const rootId = nonEmptyString(event.message.root_id);
+    const topicAnchor = event.message.chat_type === 'group'
+      && nonEmptyString(event.message.thread_id)
+      && rootId && message.replyTo?.messageId === rootId
+      // A reference-only message must not become an empty prompt.
+      && (nonEmptyString(message.content) || hasInboundImages(message) || hasInboundFiles(message));
+    if (!topicAnchor) return build(message);
+
+    const withoutAnchor = { ...message };
+    delete withoutAnchor.replyTo;
+    const base = await build(withoutAnchor);
+    let preparedSessionId;
+    let anchorLoaded = false;
+    return {
+      ...base,
+      prepareContent: async ({ sessionId }) => {
+        preparedSessionId = sessionId;
+        anchorLoaded = false;
+        const previous = this.#topicAnchors.get(key);
+        if (previous?.sessionId === sessionId && previous.rootMessageId === rootId) {
+          return base.content ?? message.content;
+        }
+        const prepared = await build({
+          ...message,
+          replyTo: {
+            ...message.replyTo,
+            load: async (options) => {
+              const reference = await message.replyTo.load(options);
+              anchorLoaded = !reference?.unavailableReason && Boolean(
+                nonEmptyString(reference?.content) || reference?.attachments?.length,
+              );
+              return reference;
+            },
+          },
+        });
+        return prepared.content;
+      },
+      onAskComplete: (sessionId) => {
+        if (!anchorLoaded || sessionId !== preparedSessionId) return;
+        if (!this.#topicAnchors.has(key) && this.#topicAnchors.size >= MAX_TOPIC_ANCHORS) {
+          this.#topicAnchors.delete(this.#topicAnchors.keys().next().value);
+        }
+        this.#topicAnchors.set(key, { sessionId, rootMessageId: rootId });
+      },
+    };
+  }
+
   /**
    * 分步直推：`#answerWithStream` 流式分支在开关开启时的完整替代路径。
    * 过程（工具调用、助手中间说明）与最终答案均以富文本 post 逐条直推
@@ -4884,30 +4955,18 @@ export class FeishuHarnessBridge {
     const messageId = event.message.message_id;
     const text = message.content;
     let askCompleted = false;
-    const markAskComplete = () => {
+    const markAskComplete = (sessionId) => {
       if (askCompleted) return;
       askCompleted = true;
+      prompt.onAskComplete?.(sessionId);
       this.#endImTurn(key);
       onAskComplete?.();
     };
     // 与流式分支一致的提示内容构造：图片与回复引用展开为富提示内容，已接受
     // 的上下文增强按原样重放。直推分流发生在 `#answerWithStream` 构造之前，
     // 这里就是本回合唯一一次构造（无重复的 prompt 往返）。
-    let content = hasInboundImages(message) || hasReplyReference(message)
-      ? await promptContentForInboundMessage(message, { signal: this.#signal })
-      : undefined;
-    const snapshot = this.#acceptedMessageIds.get(messageId);
-    let contextEnhanced = false;
-    if (snapshot) {
-      const originalContent = content ?? text;
-      content = enhanceContextContent(originalContent, snapshot, () => ({
-        channel: 'feishu',
-        senderId: senderOpenId(event),
-        chatId: event.message.chat_id,
-        threadId: event.message.thread_id,
-      }));
-      contextEnhanced = content !== originalContent;
-    }
+    const prompt = await this.#preparePrompt(event, key, message);
+    const { content, contextEnhanced } = prompt;
     // Every turn reopens the per-conversation circuit breaker.
     const priorState = this.#stepPushSendState.get(key);
     if (this.#stepPushSendState.size >= MAX_STEP_PUSH_SEND_STATES && !priorState) {
@@ -4930,6 +4989,19 @@ export class FeishuHarnessBridge {
     // 流式卡片模式：每轮一张过程卡（原地 patch），过程与最终答案都进卡；
     // post 模式维持逐条直推。先预建卡片状态，纯问答回合也能在收尾时开卡。
     const streamingCard = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.STREAMING_CARD;
+    const liveCot = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.LIVE_COT
+      && typeof this.#channel?.createCot === 'function'
+      && typeof this.#channel?.writeCotEvents === 'function';
+    const cot = liveCot
+      ? new FeishuLiveCot(this.#channel, chatId, {
+          replyTo: messageId,
+          hidden: false,
+          onFailure: (error) => this.#logger.warn?.(
+            '[dsh-feishu] native live process failed; final answer will continue:',
+            error?.message ?? String(error),
+          ),
+        })
+      : null;
     if (streamingCard) {
       if (this.#stepCards.has(key)) {
         // 上一轮异常退出留下的「运行中」卡片先收尾，避免与本轮混淆。
@@ -4940,7 +5012,7 @@ export class FeishuHarnessBridge {
     // /stop 打标：回合进行中收到停止请求时，封存为「已停止」而非「已完成」。
     const stepStopFlag = streamingCard ? { requested: false } : null;
     if (streamingCard) this.#stepStopFlags.set(key, stepStopFlag);
-    const baseAskOptions = this.#interactionAskOptions(event, key, message.files);
+    const baseAskOptions = this.#interactionAskOptions(event, key, message.files, message.images);
 
     // 上下文注入动作在详细级别下也体现为一条步骤（注入细节可忽略）。
     // 不计入工具/助手消息的熔断计数（规格口径：熔断只管「工具 + 助手」）。
@@ -4982,7 +5054,9 @@ export class FeishuHarnessBridge {
         messageId,
       );
     };
-    const watchdog = streamingCard ? null : this.#startThinkingStatusWatchdog(key, chatId, messageId);
+    const watchdog = streamingCard || liveCot
+      ? null
+      : this.#startThinkingStatusWatchdog(key, chatId, messageId);
     let completed;
     try {
       completed = await askInWorkspaceSession({
@@ -4993,13 +5067,14 @@ export class FeishuHarnessBridge {
       text,
       content,
       titleText: event.batchSubmission?.title,
-      sourceGuidance: snapshot?.config?.guidance,
+      sourceGuidance: prompt.sourceGuidance,
+      prepareContent: prompt.prepareContent,
       contextEnhanced,
       createOptions: { signal: this.#signal },
       existsOptions: { signal: this.#signal },
       askOptions: {
         ...baseAskOptions,
-        progressMode: 'all',
+        progressMode: liveCot ? 'live' : 'all',
         // 提问/审批卡弹出前先定格当前过程卡，答案随之流到交互消息之后
         // 的新卡上（与主流式路径的 rotate 语义一致）。
         ...(streamingCard ? {
@@ -5011,6 +5086,15 @@ export class FeishuHarnessBridge {
           },
         } : {}),
         onUpdate: async (update) => {
+          if (liveCot) {
+            await cot.handle(update);
+            if (update.type === 'assistant-message') {
+              pendingStep = update;
+            } else if (update.type === 'tool') {
+              pendingStep = null;
+            }
+            return;
+          }
           if (update.type === 'assistant-message') {
             if (pendingStep && Number(update.step) > Number(pendingStep.step)) {
               await flushPendingStep();
@@ -5053,6 +5137,7 @@ export class FeishuHarnessBridge {
       },
       });
     } catch (error) {
+      await cot?.finish(error);
       if (streamingCard) {
         this.#stepStopFlags.delete(key);
         await this.#finishStepCard(key, { stopped: true });
@@ -5062,7 +5147,8 @@ export class FeishuHarnessBridge {
       // 回合结束（成功/失败/中断）：停看门狗并撤回残留思考中心跳。
       await watchdog?.stop();
     }
-    markAskComplete();
+    markAskComplete(completed.sessionId);
+    await cot?.finish();
     const finalStepText = pendingStep ? pendingStep.text : null;
     pendingStep = null;
     const finalText = (typeof finalStepText === 'string' && finalStepText.trim())
@@ -5129,7 +5215,7 @@ export class FeishuHarnessBridge {
       }
       textReceipt = createDeliveryReceipt({
         deliveryId: messageId,
-        presentation: 'feishu-step-push-post',
+        presentation: liveCot ? 'feishu-live-cot-answer' : 'feishu-step-push-post',
         providerMessageIds,
       });
       this.#status.streamResponses = (this.#status.streamResponses ?? 0) + 1;
@@ -5200,9 +5286,10 @@ export class FeishuHarnessBridge {
     const messageId = event.message.message_id;
     const text = message.content;
     let askCompleted = false;
-    const markAskComplete = () => {
+    const markAskComplete = (sessionId) => {
       if (askCompleted) return;
       askCompleted = true;
+      prompt.onAskComplete?.(sessionId);
       this.#endImTurn(key);
       onAskComplete?.();
     };
@@ -5213,23 +5300,10 @@ export class FeishuHarnessBridge {
     if (this.#stepPush && this.#channel?.stream) {
       return this.#answerWithStepPush(event, key, message, { onAskComplete });
     }
-    let content = hasInboundImages(message) || hasReplyReference(message)
-      ? await promptContentForInboundMessage(message, { signal: this.#signal })
-      : undefined;
-    const snapshot = this.#acceptedMessageIds.get(messageId);
-    let contextEnhanced = false;
-    if (snapshot) {
-      const originalContent = content ?? text;
-      content = enhanceContextContent(originalContent, snapshot, () => ({
-        channel: 'feishu',
-        senderId: senderOpenId(event),
-        chatId: event.message.chat_id,
-        threadId: event.message.thread_id,
-      }));
-      contextEnhanced = content !== originalContent;
-    }
+    const prompt = await this.#preparePrompt(event, key, message);
+    const { content, contextEnhanced } = prompt;
     if (!this.#channel?.stream) {
-      const { answer, artifacts = [] } = await askInWorkspaceSession({
+      const { sessionId, answer, artifacts = [] } = await askInWorkspaceSession({
         deferredDelivery: () => ({ coordinator: this.#deferred, chatId, replyToMessageId: messageId }),
         harness: this.#harness,
         state: this.#state,
@@ -5237,13 +5311,14 @@ export class FeishuHarnessBridge {
         text,
         content,
         titleText: event.batchSubmission?.title,
-        sourceGuidance: snapshot?.config?.guidance,
+        sourceGuidance: prompt.sourceGuidance,
+        prepareContent: prompt.prepareContent,
         contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
-        askOptions: this.#interactionAskOptions(event, key, message.files),
+        askOptions: this.#interactionAskOptions(event, key, message.files, message.images),
       });
-      markAskComplete();
+      markAskComplete(sessionId);
       let textReceipt;
       let textSendError = null;
       try {
@@ -5285,7 +5360,7 @@ export class FeishuHarnessBridge {
       stream = await this.#channel.stream(chatId, {
         markdown: async (controller) => {
           promptStarted = true;
-          const baseAskOptions = this.#interactionAskOptions(event, key, message.files);
+          const baseAskOptions = this.#interactionAskOptions(event, key, message.files, message.images);
           const askOptions = {
             ...baseAskOptions,
             // issue #86：独立交互消息（提问/审批）会落在占位卡下方，呈现前
@@ -5318,13 +5393,14 @@ export class FeishuHarnessBridge {
             text,
             content,
             titleText: event.batchSubmission?.title,
-            sourceGuidance: snapshot?.config?.guidance,
+            sourceGuidance: prompt.sourceGuidance,
+            prepareContent: prompt.prepareContent,
             contextEnhanced,
             createOptions: { signal: this.#signal },
             existsOptions: { signal: this.#signal },
             askOptions,
           });
-          markAskComplete();
+          markAskComplete(completed.sessionId);
           completedAnswer = completed.answer;
           completedArtifacts = completed.artifacts ?? [];
           await controller.setContent(answerTextForDelivery(completedAnswer, completedArtifacts));
@@ -5382,7 +5458,7 @@ export class FeishuHarnessBridge {
       if (promptStarted) throw error;
 
       this.#logger.warn?.('[dsh-feishu] native stream unavailable; using text fallback:', error.message);
-      const { answer, artifacts = [] } = await askInWorkspaceSession({
+      const { sessionId, answer, artifacts = [] } = await askInWorkspaceSession({
         deferredDelivery: () => ({ coordinator: this.#deferred, chatId, replyToMessageId: messageId }),
         harness: this.#harness,
         state: this.#state,
@@ -5390,13 +5466,14 @@ export class FeishuHarnessBridge {
         text,
         content,
         titleText: event.batchSubmission?.title,
-        sourceGuidance: snapshot?.config?.guidance,
+        sourceGuidance: prompt.sourceGuidance,
+        prepareContent: prompt.prepareContent,
         contextEnhanced,
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
-        askOptions: this.#interactionAskOptions(event, key, message.files),
+        askOptions: this.#interactionAskOptions(event, key, message.files, message.images),
       });
-      markAskComplete();
+      markAskComplete(sessionId);
       let textReceipt;
       let textSendError = null;
       try {

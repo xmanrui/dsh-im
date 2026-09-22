@@ -650,7 +650,8 @@ test('shared bridge surfaces a definite final delivery failure without rerunning
       assert.equal(receipt.deliveryOutcome, 'failed');
       assert.equal(receipt.reason, 'telegram-403');
       assert.deepEqual(receipt.artifacts, []);
-      assert.equal(bridge.status.lastError, 'Channel message delivery failed');
+      assert.equal(bridge.status.lastMessageError.code, 'CHANNEL_DELIVERY');
+      assert.equal(bridge.status.lastError, bridge.status.lastMessageError.message);
     });
   }
 });

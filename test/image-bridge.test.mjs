@@ -1,3 +1,4 @@
+import { loadDeferredImages } from './helpers/deferred-images.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -30,7 +31,8 @@ function bridgeFixture() {
       ensureRunning: async () => true,
       sessionExists: async () => true,
       createSession: async () => 'session-image',
-      ask: async (_sessionId, prompt) => {
+      ask: async (_sessionId, prompt, options) => {
+        prompt = await loadDeferredImages(prompt, options);
         prompts.push(prompt);
         return '识别成功';
       },

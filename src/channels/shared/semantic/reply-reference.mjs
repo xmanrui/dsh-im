@@ -138,11 +138,11 @@ export function hasReplyReference(message) {
   return objectReference(message?.replyTo);
 }
 
-export async function promptContentForInboundMessage(message, { signal } = {}) {
+export async function promptContentForInboundMessage(message, { signal, deferImages = false } = {}) {
   if (!hasReplyReference(message)) {
-    return promptContentForMessage(message, { signal });
+    return promptContentForMessage(message, { signal, deferImages });
   }
   const reference = normalizeReference(await resolveReference(message.replyTo, signal));
-  const currentContent = await promptContentForMessage(message, { signal });
+  const currentContent = await promptContentForMessage(message, { signal, deferImages });
   return [{ type: 'text', text: replyBlock(reference) }, ...currentContent];
 }

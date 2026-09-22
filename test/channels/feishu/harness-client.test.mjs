@@ -803,70 +803,126 @@ test('HarnessClient retains staged files when an accepted turn outcome is unknow
   assert.equal(cleanupCalls, 0, 'uncertain accepted turns may still be reading the staged path');
 });
 
-test('HarnessClient delivers an existing file-only Turn directly', async (t) => {
-  outboundArtifactRegistry.clear();
-  t.after(() => outboundArtifactRegistry.clear());
-  const workspace = await mkdtemp(join(tmpdir(), 'dsh-im-file-only-'));
-  t.after(() => rm(workspace, { recursive: true, force: true }));
-  const client = new HarnessClient({
-    baseUrl: 'http://127.0.0.1:3080',
-    workspace,
-  });
-  client.ensureRunning = async () => undefined;
-  const tool = createOutboundArtifactTool({ registry: outboundArtifactRegistry });
-  const delivered = [];
-  await writeFile(join(workspace, 'file-only.txt'), 'file only');
-  let promptRpcId;
-  let prompted = false;
-  const agent = {
-    session: {
-      header: { id: 'session-file-only', cwd: workspace },
-      events: [],
-    },
-  };
-  client.rpc = async (method, _payload, _timeoutMs, options) => {
-    if (method === 'session.history' && !prompted) return { events: [] };
-    if (method === 'session.prompt') {
-      prompted = true;
-      promptRpcId = options.rpcId;
-      agent.session.events = [
-        { type: 'turn/start', data: { turn: 2 } },
-        { type: 'user/message', data: { turn: 2, source: { rpcId: promptRpcId } } },
-      ];
-      const exec = {
-        name: OUTBOUND_ARTIFACT_TOOL,
-        callId: 'file-only-call',
-        token: Symbol('file-only-call'),
-        agent,
-        signal: new AbortController().signal,
-      };
-      await tool.definition.execute({ path: 'file-only.txt' }, exec);
-      tool.onResult(exec, { isError: false });
-      return {};
-    }
-    return {
-      events: [
-        { event: { type: 'turn/start', seq: 1, data: { turn: 2 } } },
-        {
-          event: {
-            type: 'user/message',
-            seq: 2,
-            data: { turn: 2, source: { rpcId: promptRpcId } },
-          },
-        },
-        { event: { type: 'turn/end', seq: 3, data: { turn: 2, reason: { kind: 'completed' } } } },
-      ],
+for (const failHandoff of [false, true]) {
+  test(`HarnessClient handles a file-only Turn with ${failHandoff ? 'failed' : 'successful'} handoff`, async (t) => {
+    outboundArtifactRegistry.clear();
+    t.after(() => outboundArtifactRegistry.clear());
+    const workspace = await mkdtemp(join(tmpdir(), 'dsh-im-file-only-'));
+    t.after(() => rm(workspace, { recursive: true, force: true }));
+    const client = new HarnessClient({
+      baseUrl: 'http://127.0.0.1:3080',
+      workspace,
+    });
+    client.ensureRunning = async () => undefined;
+    const tool = createOutboundArtifactTool({ registry: outboundArtifactRegistry });
+    const delivered = [];
+    await writeFile(join(workspace, 'file-only.txt'), 'file only');
+    let promptRpcId;
+    let prompted = false;
+    const agent = {
+      session: {
+        header: { id: 'session-file-only', cwd: workspace },
+        events: [],
+      },
     };
-  };
+    client.rpc = async (method, _payload, _timeoutMs, options) => {
+      if (method === 'session.history' && !prompted) return { events: [] };
+      if (method === 'session.prompt') {
+        prompted = true;
+        promptRpcId = options.rpcId;
+        agent.session.events = [
+          { type: 'turn/start', data: { turn: 2 } },
+          { type: 'user/message', data: { turn: 2, source: { rpcId: promptRpcId } } },
+        ];
+        const exec = {
+          name: OUTBOUND_ARTIFACT_TOOL,
+          callId: 'file-only-call',
+          token: Symbol('file-only-call'),
+          agent,
+          signal: new AbortController().signal,
+        };
+        await tool.definition.execute({ path: 'file-only.txt' }, exec);
+        tool.onResult(exec, { isError: false });
+        return {};
+      }
+      return {
+        events: [
+          { event: { type: 'turn/start', seq: 1, data: { turn: 2 } } },
+          {
+            event: {
+              type: 'user/message',
+              seq: 2,
+              data: { turn: 2, source: { rpcId: promptRpcId } },
+            },
+          },
+          { event: { type: 'turn/end', seq: 3, data: { turn: 2, reason: { kind: 'completed' } } } },
+        ],
+      };
+    };
 
-  const answer = await client.ask('session-file-only', 'create and return a file', {
-    onArtifact: async (artifact) => delivered.push(artifact),
+    const handoffError = Object.assign(new Error('artifact handoff failed'), { code: 'artifact-unavailable' });
+    const asking = client.ask('session-file-only', 'create and return a file', {
+      onArtifact: async (artifact) => {
+        if (failHandoff) throw handoffError;
+        delivered.push(artifact);
+      },
+    });
+    if (failHandoff) {
+      await assert.rejects(asking, (error) => error === handoffError);
+      assert.deepEqual(delivered, []);
+      assert.deepEqual(outboundArtifactRegistry.take('session-file-only', 2), []);
+      return;
+    }
+    const answer = await asking;
+    assert.equal(answer, '');
+    assert.equal(delivered.length, 1);
+    const file = await materializeOutboundArtifact(delivered[0]);
+    assert.equal(file.bytes.toString(), 'file only');
+    releaseOutboundArtifact(delivered[0]);
   });
-  assert.equal(answer, '');
-  assert.equal(delivered.length, 1);
-  const file = await materializeOutboundArtifact(delivered[0]);
-  assert.equal(file.bytes.toString(), 'file only');
-  releaseOutboundArtifact(delivered[0]);
+}
+
+test('HarnessClient completes tool-only turns and retains earlier visible text and tool errors', async () => {
+  for (const earlierText of ['', '开始执行。']) {
+    let promptRpcId;
+    const updates = [];
+    const client = new HarnessClient({ baseUrl: 'http://127.0.0.1:3080', workspace: '/tmp/workspace' });
+    client.ensureRunning = async () => undefined;
+    client.rpc = async (method, _payload, _timeoutMs, options) => {
+      if (method === 'session.prompt') {
+        promptRpcId = options.rpcId;
+        return {};
+      }
+      assert.equal(method, 'session.history');
+      if (!promptRpcId) return { events: [] };
+      return { events: [
+        { seq: 1, type: 'turn/start', data: { turn: 2 } },
+        { seq: 2, type: 'user/message', data: { turn: 2, source: { rpcId: promptRpcId } } },
+        { seq: 3, type: 'assistant/message', data: { turn: 2, step: 0, message: {
+          content: [{ type: 'text', text: earlierText }],
+        } } },
+        { seq: 4, type: 'assistant/message', data: { turn: 2, step: 1, message: {
+          content: [
+            { type: 'reasoning', text: 'internal reasoning' },
+            { type: 'tool-call', name: 'bash', callId: 'call-one', arguments: { command: 'example' } },
+          ],
+        } } },
+        { seq: 5, type: 'tool/call', data: { turn: 2, name: 'bash', callId: 'call-one' } },
+        { seq: 6, type: 'tool/result', data: { turn: 2, callId: 'call-one',
+          ...(earlierText ? { error: { message: 'tool failed' } } : {}),
+          message: { content: [{ type: 'text', text: 'tool output is not the answer' }] },
+        } },
+        { seq: 7, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+      ].map((event) => ({ event })) };
+    };
+    const answer = await client.ask('session-tool-only', 'work', {
+      progressMode: 'all', onUpdate: (update) => updates.push(update),
+    });
+    assert.equal(answer, earlierText || '本轮处理已结束，没有文本回复。');
+    assert.equal(updates.some((update) => update.type === 'tool'), true);
+    assert.equal(updates.some((update) => update.error === 'tool failed'), Boolean(earlierText));
+    assert.doesNotMatch(answer, /internal reasoning|tool output/);
+  }
 });
 
 test('HarnessReplyTracker correlates the prompt and emits only answer text', () => {
@@ -997,6 +1053,128 @@ test('tracker exposes per-step assistant messages and tool arguments', () => {
     ['bash', '{"command":"ls -la"}'],
     ['echo', '{"a":1}'],
   ]);
+});
+
+test('tracker live mode exposes native-process reasoning, tool results, and boundaries', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: 'rpc-live', afterSeq: 0 });
+  const updates = tracker.consumeAll([
+    { type: 'turn/start', seq: 1, data: { turn: 3 } },
+    { type: 'user/message', seq: 2, data: { turn: 3, source: { rpcId: 'rpc-live' } } },
+    { type: 'assistant/chunk', seq: 3, data: {
+      turn: 3,
+      step: 0,
+      chunk: { type: 'reasoning-delta', index: 0, text: '分析中' },
+    } },
+    { type: 'tool/call', seq: 4, data: {
+      turn: 3,
+      step: 0,
+      callId: 'call-live',
+      name: 'read_file',
+      arguments: '{"path":"a.md"}',
+    } },
+    { type: 'tool/result', seq: 5, data: {
+      turn: 3,
+      step: 0,
+      message: {
+        content: [{
+          type: 'tool-result',
+          toolCallId: 'call-live',
+          content: [{ type: 'text', text: '文件内容' }],
+        }],
+      },
+    } },
+    { type: 'turn/end', seq: 6, data: { turn: 3, reason: { kind: 'completed' } } },
+  ], { live: true });
+
+  assert.deepEqual(updates, [
+    { type: 'turn-start', turn: 3 },
+    { type: 'reasoning', turn: 3, text: '分析中' },
+    {
+      type: 'tool',
+      name: 'read_file',
+      arguments: '{"path":"a.md"}',
+      callId: 'call-live',
+      turn: 3,
+    },
+    {
+      type: 'tool-result',
+      turn: 3,
+      callId: 'call-live',
+      toolName: 'read_file',
+      text: '文件内容',
+    },
+    { type: 'turn-end', turn: 3, reason: { kind: 'completed' } },
+  ]);
+});
+
+test('tracker accepts a late fractional reasoning chunk after a newer durable event', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: 'rpc-race', afterSeq: 0 });
+  tracker.consumeAll([
+    { type: 'turn/start', seq: 1, data: { turn: 3 } },
+    { type: 'user/message', seq: 2, data: {
+      turn: 3,
+      source: { rpcId: 'rpc-race' },
+    } },
+    { type: 'assistant/message', seq: 4, data: {
+      turn: 3,
+      step: 0,
+      message: { content: [{ type: 'text', text: '阶段结果' }] },
+    } },
+  ], { live: true });
+
+  const updates = tracker.consumeAll([{
+    type: 'assistant/chunk',
+    seq: 3.5,
+    data: {
+      turn: 3,
+      step: 0,
+      chunk: { type: 'reasoning-delta', index: 0, text: '迟到推理' },
+    },
+  }], { live: true });
+
+  assert.deepEqual(updates, [{
+    type: 'reasoning',
+    turn: 3,
+    text: '迟到推理',
+  }]);
+  assert.deepEqual(tracker.consumeAll([{
+    type: 'assistant/chunk',
+    seq: 3.5,
+    data: {
+      turn: 3,
+      step: 0,
+      chunk: { type: 'reasoning-delta', index: 0, text: '迟到推理' },
+    },
+  }], { live: true }), []);
+  assert.equal(tracker.lastSeq, 4);
+});
+
+test('tracker rejects a late fractional text chunk after its canonical message', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: 'rpc-text-race', afterSeq: 0 });
+  tracker.consumeAll([
+    { type: 'turn/start', seq: 1, data: { turn: 3 } },
+    { type: 'user/message', seq: 2, data: {
+      turn: 3,
+      source: { rpcId: 'rpc-text-race' },
+    } },
+    { type: 'assistant/message', seq: 4, data: {
+      turn: 3,
+      step: 0,
+      message: { content: [{ type: 'text', text: '最终答案' }] },
+    } },
+  ], { live: true });
+
+  assert.deepEqual(tracker.consumeAll([{
+    type: 'assistant/chunk',
+    seq: 3.5,
+    data: {
+      turn: 3,
+      step: 0,
+      chunk: { type: 'text-delta', index: 0, text: '迟到片段' },
+    },
+  }], { live: true }), []);
+  assert.equal(tracker.answer, '最终答案');
+  assert.equal(tracker.lastSeq, 4);
 });
 
 test('a canonical message equal to committed text dedupes the trailing text update', () => {
@@ -1131,6 +1309,146 @@ test('latest-mode ask() filters assistant-message updates out of delivered progr
   // latest 模式下 assistant-message 更新不进入 onUpdate；流式 text 与最终 text 照常透出。
   assert.deepEqual(delivered, [
     { type: 'text', text: '第一段' },
+    { type: 'text', text: '最终结果' },
+  ]);
+});
+
+test('default ask() consumers never receive reasoning updates from canonical messages', async () => {
+  const client = new HarnessClient({
+    baseUrl: 'http://127.0.0.1:3080',
+    workspace: '/tmp/dsh-feishu-workspace',
+  });
+  client.ensureRunning = async () => undefined;
+  let promptRpcId;
+  let prompted = false;
+  let seq = 0;
+  let historyPolls = 0;
+  let sessionListPolls = 0;
+  const events = [];
+  client.rpc = async (method, _payload, _timeoutMs, options) => {
+    if (method === 'session.history') {
+      if (!prompted) return { events: [] };
+      historyPolls += 1;
+      if (historyPolls === 1) {
+        events.push(
+          { type: 'turn/start', seq: ++seq, data: { turn: 1 } },
+          { type: 'user/message', seq: ++seq, data: { turn: 1, source: { rpcId: promptRpcId } } },
+          { type: 'assistant/chunk', seq: ++seq, data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: '第一段' } } },
+        );
+      } else if (historyPolls === 2) {
+        // 本轮唯一变化是 canonical 定稿携带 reasoning：未订阅 reasoning 时该批次不应投递任何进度。
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: {
+            turn: 1, step: 1,
+            message: { content: [
+              { type: 'reasoning', text: 'Let me check the files first.' },
+              { type: 'text', text: '第一段' },
+            ] },
+          } },
+        );
+      } else if (historyPolls === 3) {
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '最终结果' }] } } },
+          { type: 'turn/end', seq: ++seq, data: { turn: 1, reason: { kind: 'completed' } } },
+        );
+      }
+      return { events: events.map((event) => ({ event })) };
+    }
+    if (method === 'session.prompt') {
+      prompted = true;
+      promptRpcId = options.rpcId;
+      return {};
+    }
+    if (method === 'session.list') {
+      sessionListPolls += 1;
+      return { items: [{ sessionId: 'session-reasoning-default', running: false }] };
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  };
+
+  const delivered = [];
+  const answer = await client.ask('session-reasoning-default', 'long task', {
+    timeoutMs: 450,
+    control: { owner: {}, key: 'route' },
+    onUpdate: async (update) => { delivered.push(update); },
+  });
+  assert.equal(answer, '最终结果');
+  assert.equal(historyPolls, 3);
+  // 默认模式（无 reasoning 选项）下 reasoning 更新不出现在 onUpdate 中：
+  // 钉钉、企微等以 update.text 作进度展示的渠道因此不受思考内容影响。
+  assert.deepEqual(delivered, [
+    { type: 'text', text: '第一段' },
+    { type: 'text', text: '最终结果' },
+  ]);
+});
+
+test('reasoning-subscribed all-mode ask() receives reasoning updates', async () => {
+  const client = new HarnessClient({
+    baseUrl: 'http://127.0.0.1:3080',
+    workspace: '/tmp/dsh-feishu-workspace',
+  });
+  client.ensureRunning = async () => undefined;
+  let promptRpcId;
+  let prompted = false;
+  let seq = 0;
+  let historyPolls = 0;
+  let sessionListPolls = 0;
+  const events = [];
+  client.rpc = async (method, _payload, _timeoutMs, options) => {
+    if (method === 'session.history') {
+      if (!prompted) return { events: [] };
+      historyPolls += 1;
+      if (historyPolls === 1) {
+        events.push(
+          { type: 'turn/start', seq: ++seq, data: { turn: 1 } },
+          { type: 'user/message', seq: ++seq, data: { turn: 1, source: { rpcId: promptRpcId } } },
+        );
+      } else if (historyPolls === 2) {
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: {
+            turn: 1, step: 1,
+            message: { content: [
+              { type: 'reasoning', text: 'Let me check the files first.' },
+              { type: 'text', text: '第一段' },
+            ] },
+          } },
+        );
+      } else if (historyPolls === 3) {
+        events.push(
+          { type: 'assistant/message', seq: ++seq, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '最终结果' }] } } },
+          { type: 'turn/end', seq: ++seq, data: { turn: 1, reason: { kind: 'completed' } } },
+        );
+      }
+      return { events: events.map((event) => ({ event })) };
+    }
+    if (method === 'session.prompt') {
+      prompted = true;
+      promptRpcId = options.rpcId;
+      return {};
+    }
+    if (method === 'session.list') {
+      sessionListPolls += 1;
+      return { items: [{ sessionId: 'session-reasoning-all', running: false }] };
+    }
+    throw new Error(`unexpected rpc ${method}`);
+  };
+
+  const delivered = [];
+  const answer = await client.ask('session-reasoning-all', 'long task', {
+    timeoutMs: 450,
+    control: { owner: {}, key: 'route' },
+    progressMode: 'all',
+    reasoning: true,
+    onUpdate: async (update) => { delivered.push(update); },
+  });
+  assert.equal(answer, '最终结果');
+  assert.equal(historyPolls, 3);
+  // 显式订阅（progressMode all + reasoning）时 reasoning 按序透出，供留痕渠道展示。
+  assert.deepEqual(delivered, [
+    { type: 'assistant-message', step: 1, text: '第一段' },
+    { type: 'reasoning', step: 1, text: 'Let me check the files first.' },
+    { type: 'text', text: '第一段' },
+    { type: 'assistant-message', step: 1, text: '最终结果' },
     { type: 'text', text: '最终结果' },
   ]);
 });
@@ -1344,4 +1662,125 @@ test('ask() publishes the guidance a channel captured and never reads the prompt
   // Turning the scope off clears the Session's snapshot again.
   await client.ask(sessionId, '普通消息', { timeoutMs: 450, sourceGuidance: '' });
   assert.equal(imSourceGuidance.get(sessionId), undefined);
+});
+
+test('tracker retains early live reasoning until the request binds its turn', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: 'rpc-early', afterSeq: 0 });
+
+  // Reasoning streams before the durable user/message binds the turn
+  // (order: turn/start, step/start, reasoning, user/message). It must still
+  // wait for the matching request before surfacing, without advancing lastSeq.
+  const early = tracker.consumeAll([
+    { type: 'turn/start', seq: 1, data: { turn: 7 } },
+    { type: 'assistant/chunk', seq: 1.5, data: {
+      turn: 7,
+      step: 0,
+      chunk: { type: 'reasoning-delta', index: 0, text: '绑定前推理' },
+    } },
+  ], { live: true });
+
+  assert.deepEqual(early, []);
+  // The transient (fractional) frame must not touch the durable cursor,
+  // so the reconnect guard for durable events stays intact.
+  assert.equal(tracker.lastSeq, 0);
+
+  // The same fractional frame is deduped on replay.
+  assert.deepEqual(tracker.consumeAll([
+    { type: 'assistant/chunk', seq: 1.5, data: {
+      turn: 7,
+      step: 0,
+      chunk: { type: 'reasoning-delta', index: 0, text: '绑定前推理' },
+    } },
+  ], { live: true }), []);
+
+  // Once the durable user/message binds, normal streaming continues intact.
+  const bound = tracker.consumeAll([
+    { type: 'user/message', seq: 2, data: { turn: 7, source: { rpcId: 'rpc-early' } } },
+    { type: 'assistant/chunk', seq: 3, data: {
+      turn: 7,
+      step: 0,
+      chunk: { type: 'reasoning-delta', index: 0, text: '绑定后推理' },
+    } },
+    { type: 'turn/end', seq: 4, data: { turn: 7, reason: { kind: 'completed' } } },
+  ], { live: true });
+
+  assert.deepEqual(bound, [
+    { type: 'turn-start', turn: 7 },
+    { type: 'reasoning', turn: 7, text: '绑定前推理' },
+    { type: 'reasoning', turn: 7, text: '绑定后推理' },
+    { type: 'turn-end', turn: 7, reason: { kind: 'completed' } },
+  ]);
+  assert.equal(tracker.lastSeq, 4);
+});
+
+test('tracker recovers the final answer when a live turn/end outruns history after binding', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: 'rpc-gap', afterSeq: -1 });
+
+  // Bind the turn and stream one process message over the mux (seq 0..2).
+  tracker.consumeAll([
+    { type: 'turn/start', seq: 0, data: { turn: 3 } },
+    { type: 'user/message', seq: 1, data: { turn: 3, source: { rpcId: 'rpc-gap' } } },
+    { type: 'assistant/message', seq: 2, data: {
+      turn: 3,
+      step: 0,
+      message: { content: [{ type: 'text', text: '先读取文件' }] },
+    } },
+  ], { live: true });
+  assert.equal(tracker.turn, 3);
+  assert.equal(tracker.answer, '先读取文件');
+
+  // Disconnect drops the final answer (seq 3); reconnect delivers turn/end
+  // (seq 4) over the mux first. It must not finish the turn or advance the
+  // cursor across the gap, or the pending final answer would be skipped.
+  tracker.consumeAll([
+    { type: 'turn/end', seq: 4, data: { turn: 3, reason: { kind: 'completed' } } },
+  ], { live: true, fromMux: true });
+  assert.equal(tracker.finished, false);
+  assert.equal(tracker.lastSeq, 2);
+
+  // History poll backfills the hole in order: final answer then the end.
+  tracker.consumeAll([
+    { type: 'turn/start', seq: 0, data: { turn: 3 } },
+    { type: 'user/message', seq: 1, data: { turn: 3, source: { rpcId: 'rpc-gap' } } },
+    { type: 'assistant/message', seq: 2, data: {
+      turn: 3,
+      step: 0,
+      message: { content: [{ type: 'text', text: '先读取文件' }] },
+    } },
+    { type: 'assistant/message', seq: 3, data: {
+      turn: 3,
+      step: 1,
+      message: { content: [{ type: 'text', text: '最终答案' }] },
+    } },
+    { type: 'turn/end', seq: 4, data: { turn: 3, reason: { kind: 'completed' } } },
+  ], { live: true });
+
+  assert.equal(tracker.finished, true);
+  assert.deepEqual(tracker.reason, { kind: 'completed' });
+  assert.equal(tracker.lastSeq, 4);
+  assert.equal(tracker.answer, '先读取文件\n\n最终答案');
+});
+
+test('tracker (all mode) recovers the final answer in the same reconnect scenario', () => {
+  // Contrast baseline: in all mode the premature turn/end never arrives over a
+  // mux, so history backfill alone delivers everything in order.
+  const tracker = new HarnessReplyTracker({ promptRpcId: 'rpc-gap-all', afterSeq: -1 });
+  tracker.consumeAll([
+    { type: 'turn/start', seq: 0, data: { turn: 3 } },
+    { type: 'user/message', seq: 1, data: { turn: 3, source: { rpcId: 'rpc-gap-all' } } },
+    { type: 'assistant/message', seq: 2, data: {
+      turn: 3,
+      step: 0,
+      message: { content: [{ type: 'text', text: '先读取文件' }] },
+    } },
+    { type: 'assistant/message', seq: 3, data: {
+      turn: 3,
+      step: 1,
+      message: { content: [{ type: 'text', text: '最终答案' }] },
+    } },
+    { type: 'turn/end', seq: 4, data: { turn: 3, reason: { kind: 'completed' } } },
+  ]);
+
+  assert.equal(tracker.finished, true);
+  assert.equal(tracker.answer, '先读取文件\n\n最终答案');
 });

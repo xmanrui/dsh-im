@@ -1,3 +1,4 @@
+import { extractConnectionEvidence, atConnectionStage, createConnectionDiagnostics } from '../shared/connection-error.mjs';
 import { connectionTestMessage } from '../shared/connection-test.mjs';
 import { publicMessageFailure } from '../shared/message-failure.mjs';
 import { t } from '../shared/i18n.mjs';
@@ -20,6 +21,7 @@ export class SlackController {
   #createRuntime;
   #deleteState;
   #logger;
+  #diagnostics;
   #runtimes = new Map();
   #errors = new Map();
   #transitions = new Map();
@@ -51,6 +53,14 @@ export class SlackController {
     this.#createRuntime = createRuntime;
     this.#deleteState = deleteState;
     this.#logger = logger;
+    this.#diagnostics = createConnectionDiagnostics({ channel: 'slack', logger });
+  }
+
+  get diagnostics() { return this.#diagnostics; }
+
+  #failure(error, code, message) {
+    const stage = code.startsWith('qr-') ? 'qr.begin' : code === 'activation-failed' ? 'activation' : 'connection.start';
+    return this.#diagnostics.report(error, { reuse: true, stage, publicError: { code, message } }).publicError;
   }
 
   async initialize() {
@@ -58,26 +68,23 @@ export class SlackController {
     for (const config of this.#configStore.list()) {
       await this.#withBotTransition(config.botId, async () => {
         if (this.#closed || this.#runtimes.get(config.botId)?.status?.ready) return;
-        const resolved = await this.#resolveCredentials(config);
-        if (!resolved) {
-          this.#errors.set(config.botId, safeError(
-            'missing-token',
-            t('Slack机器人凭据缺失，请移除后重新接入。'),
-          ));
-          return;
-        }
         try {
+          const resolved = await this.#resolveCredentials(config);
+          if (!resolved) {
+            this.#errors.set(config.botId, safeError(
+              'missing-token',
+              t('Slack机器人凭据缺失，请移除后重新接入。'),
+            ));
+            return;
+          }
           await this.#startRuntime(config, resolved);
           this.#errors.delete(config.botId);
         } catch (error) {
-          this.#errors.set(config.botId, safeError(
+          this.#errors.set(config.botId, this.#failure(error,
             'connection-failed',
             t('Slack Socket Mode 连接未就绪，插件会自动重试。'),
           ));
-          this.#logger.warn?.(
-            `[dsh-im:slack] bot ${config.botId} failed to initialize:`,
-            error,
-          );
+
         } finally {
           this.#touch();
         }
@@ -105,8 +112,8 @@ export class SlackController {
     await this.#withBotTransition(identity.botId, async () => {
       if (this.#closed) throw new Error('Slack controller is closed');
       const previousConfig = this.#configStore.getByPlatformId(platformId);
-      const previousBotToken = await this.#credentials.resolve(identity.botTokenRef).catch(() => undefined);
-      const previousAppToken = await this.#credentials.resolve(identity.appTokenRef).catch(() => undefined);
+      const previousBotToken = await atConnectionStage('credential.read', () => this.#credentials.resolve(identity.botTokenRef), 'credential-store');
+      const previousAppToken = await atConnectionStage('credential.read', () => this.#credentials.resolve(identity.appTokenRef), 'credential-store');
       const config = {
         ...identity,
         platformId,
@@ -118,9 +125,9 @@ export class SlackController {
         connectedAt: new Date().toISOString(),
       };
       try {
-        await this.#credentials.set(identity.botTokenRef, normalizedBotToken);
-        await this.#credentials.set(identity.appTokenRef, normalizedAppToken);
-        await this.#configStore.save(config);
+        await atConnectionStage('credential.save', () => this.#credentials.set(identity.botTokenRef, normalizedBotToken), 'credential-store');
+        await atConnectionStage('credential.save', () => this.#credentials.set(identity.appTokenRef, normalizedAppToken), 'credential-store');
+        await atConnectionStage('account.save', () => this.#configStore.save(config), 'account-config');
       } catch (error) {
         await Promise.all([
           this.#restoreCredential(identity.botTokenRef, previousBotToken),
@@ -135,14 +142,11 @@ export class SlackController {
         });
         this.#errors.delete(identity.botId);
       } catch (error) {
-        this.#errors.set(identity.botId, safeError(
+        this.#errors.set(identity.botId, this.#failure(error,
           'connection-failed',
           t('Slack机器人已接入，Socket Mode 连接暂未就绪。'),
         ));
-        this.#logger.warn?.(
-          `[dsh-im:slack] bot ${identity.botId} credential connection failed:`,
-          error,
-        );
+
       }
       this.#touch();
     });
@@ -159,7 +163,7 @@ export class SlackController {
         await this.#startRuntime(config, resolved);
         this.#errors.delete(botId);
       } catch (error) {
-        this.#errors.set(botId, safeError(
+        this.#errors.set(botId, this.#failure(error,
           'connection-failed',
           t('Slack Socket Mode 连接仍未就绪，请检查两个 Token。'),
         ));
@@ -204,36 +208,40 @@ export class SlackController {
   }
 
   async deleteBot(botId) {
+    const warnings = [];
     const config = this.#configStore.get(botId);
     if (!config) throw new Error('Unknown Slack bot');
     await this.#withBotTransition(botId, async () => {
-      const previousBotToken = await this.#credentials.resolve(config.botTokenRef).catch(() => undefined);
-      const previousAppToken = await this.#credentials.resolve(config.appTokenRef).catch(() => undefined);
+      const previousBotToken = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.botTokenRef), 'credential-store');
+      const previousAppToken = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.appTokenRef), 'credential-store');
       await this.#stopRuntime(botId);
       try {
-        await this.#credentials.unset(config.botTokenRef);
-        await this.#credentials.unset(config.appTokenRef);
-        await this.#configStore.remove(botId);
+        await atConnectionStage('credential.remove', () => this.#credentials.unset(config.botTokenRef), 'credential-store');
+        await atConnectionStage('credential.remove', () => this.#credentials.unset(config.appTokenRef), 'credential-store');
+        await atConnectionStage('account.remove', () => this.#configStore.remove(botId), 'account-config');
       } catch (error) {
-        await Promise.all([
-          this.#restoreCredential(config.botTokenRef, previousBotToken),
-          this.#restoreCredential(config.appTokenRef, previousAppToken),
-        ]);
-        if (previousBotToken?.value && previousAppToken?.value) {
-          await this.#startRuntime(config, {
-            botToken: previousBotToken.value,
-            appToken: previousAppToken.value,
-          }).catch(() => undefined);
+        if (!this.#configStore.get(botId)) {
+          warnings.push(this.#diagnostics.report(error, { operation: 'bot.delete', stage: 'workspace.cleanup', warning: true,
+            publicError: { code: 'workspace-cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError);
+        } else {
+          await Promise.all([
+            this.#restoreCredential(config.botTokenRef, previousBotToken),
+            this.#restoreCredential(config.appTokenRef, previousAppToken),
+          ]);
+          if (previousBotToken?.value && previousAppToken?.value) {
+            await this.#startRuntime(config, {
+              botToken: previousBotToken.value,
+              appToken: previousAppToken.value,
+            }).catch(() => undefined);
+          }
+          throw new Error('Unable to remove the Slack bot safely.', { cause: error });
         }
-        throw new Error('Unable to remove the Slack bot safely.', { cause: error });
       }
-      await this.#deleteState({ botId, config }).catch((error) => {
-        this.#logger.warn?.(`[dsh-im:slack] bot ${botId} state cleanup failed:`, error);
-      });
+      await this.#deleteState({ botId, config }).catch(error => { warnings.push(this.#diagnostics.report(error, { reuse: true, operation: 'bot.delete', stage: 'state.cleanup', resource: 'account-state', warning: true, publicError: { code: 'cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError); });
       this.#errors.delete(botId);
       this.#touch();
     });
-    return this.status();
+    return { ...this.status(), ...(warnings.length ? { warnings } : {}) };
   }
 
   status() {
@@ -270,7 +278,7 @@ export class SlackController {
           messagesReplied: runtimeStatus?.messagesReplied ?? 0,
         },
         lastMessageError: publicMessageFailure(runtimeStatus?.lastMessageError),
-        error: structuredClone(this.#errors.get(config.botId) ?? null),
+        error: structuredClone(runtimeStatus?.error ?? this.#errors.get(config.botId) ?? null),
       };
     });
     const connected = bots.filter((bot) => bot.connected).length;
@@ -296,12 +304,12 @@ export class SlackController {
     if (this.#closed) throw new Error('Slack controller is closed');
     await this.#stopRuntime(config.botId);
     if (this.#closed) throw new Error('Slack controller is closed');
-    const runtime = await this.#createRuntime({
+    const runtime = await atConnectionStage('runtime.prepare', () => this.#createRuntime({
       botId: config.botId,
       config,
       botToken,
       appToken,
-    });
+    }));
     if (!runtime || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
       throw new TypeError('createRuntime returned an invalid Slack runtime');
     }
@@ -319,14 +327,14 @@ export class SlackController {
     const runtime = this.#runtimes.get(botId);
     this.#runtimes.delete(botId);
     await runtime?.stop().catch((error) => {
-      this.#logger.warn?.(`[dsh-im:slack] bot ${botId} failed to stop cleanly:`, error);
+      this.#logger.warn?.(`[dsh-im:slack] bot ${botId} failed to stop cleanly:`, extractConnectionEvidence(error).details);
     });
   }
 
   async #resolveCredentials(config) {
     const [bot, app] = await Promise.all([
-      this.#credentials.resolve(config.botTokenRef).catch(() => undefined),
-      this.#credentials.resolve(config.appTokenRef).catch(() => undefined),
+      atConnectionStage('credential.read', () => this.#credentials.resolve(config.botTokenRef), 'credential-store'),
+      atConnectionStage('credential.read', () => this.#credentials.resolve(config.appTokenRef), 'credential-store'),
     ]);
     const botToken = cleanString(bot?.value);
     const appToken = cleanString(app?.value);
@@ -334,8 +342,8 @@ export class SlackController {
   }
 
   async #restoreCredential(ref, previous) {
-    if (previous?.value) await this.#credentials.set(ref, previous.value).catch(() => undefined);
-    else await this.#credentials.unset(ref).catch(() => undefined);
+    if (previous?.value) await atConnectionStage('credential.save', () => this.#credentials.set(ref, previous.value), 'credential-store').catch(() => undefined);
+    else await atConnectionStage('credential.remove', () => this.#credentials.unset(ref), 'credential-store').catch(() => undefined);
   }
 
   #withBotTransition(botId, operation) {

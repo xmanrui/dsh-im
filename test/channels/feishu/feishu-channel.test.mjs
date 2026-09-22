@@ -14,8 +14,15 @@ function fakeClient(overrides = {}) {
     reactionsRemoved: [],
     fileUploads: [],
     imageUploads: [],
+    rawRequests: [],
   };
   const client = {
+    request: async (request) => {
+      calls.rawRequests.push(request);
+      return request.method === 'POST'
+        ? { code: 0, data: { cot_id: 'cot-test', message_id: 'om-cot-test' } }
+        : { code: 0 };
+    },
     cardkit: { v1: {
       card: {
         create: async (request) => {
@@ -83,6 +90,7 @@ function fakeClient(overrides = {}) {
   if (overrides.uploadImage) client.im.v1.image.create = overrides.uploadImage;
   if (overrides.replyMessage) client.im.v1.message.reply = overrides.replyMessage;
   if (overrides.createMessage) client.im.v1.message.create = overrides.createMessage;
+  if (overrides.rawRequest) client.request = overrides.rawRequest;
   return { client, calls };
 }
 
@@ -288,6 +296,46 @@ test('VerifiedFeishuChannel checks reaction API results', async () => {
   assert.equal(reactionId, 'reaction-test');
   assert.equal(calls.reactionsAdded[0].data.reaction_type.emoji_type, 'OnIt');
   assert.equal(calls.reactionsRemoved[0].path.reaction_id, 'reaction-test');
+});
+
+test('VerifiedFeishuChannel opens and writes a native thinking process', async () => {
+  const { client, calls } = fakeClient();
+  const channel = new VerifiedFeishuChannel({ client });
+
+  const handle = await channel.createCot('oc_chat', {
+    replyTo: 'om_user',
+    hidden: false,
+  });
+  const events = [{
+    event_type: 'RUN_STARTED',
+    content: '{"runId":"turn-1"}',
+    timestamp: '1',
+  }];
+  await channel.writeCotEvents(handle, events);
+
+  assert.deepEqual(handle, { cotId: 'cot-test', messageId: 'om-cot-test' });
+  assert.deepEqual(calls.rawRequests, [
+    {
+      method: 'POST',
+      url: '/open-apis/im/v1/message_cot?receive_id_type=chat_id',
+      data: {
+        receive_id: 'oc_chat',
+        origin_message_id: 'om_user',
+        cot_hidden: false,
+        enable_badge: false,
+        update_feed_rank: false,
+      },
+    },
+    {
+      method: 'PUT',
+      url: '/open-apis/im/v1/message_cot',
+      data: {
+        events,
+        message_id: 'om-cot-test',
+        cot_id: 'cot-test',
+      },
+    },
+  ]);
 });
 
 test('VerifiedFeishuChannel uploads a materialized result and replies with a native file message', async () => {

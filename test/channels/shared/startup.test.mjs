@@ -17,7 +17,9 @@ const channels = await Promise.all([
   ['wecom', 'WecomConfigStore'], ['wecom-app', 'WecomAppConfigStore'],
   ['qq', 'QqConfigStore'], ['slack', 'SlackConfigStore'],
   ['telegram', 'TelegramConfigStore'], ['discord', 'DiscordConfigStore'],
-  ['whatsapp', 'WhatsappConfigStore'], ['office', 'OfficeConfigStore'],
+  ['whatsapp', 'WhatsappConfigStore'],
+  ['matrix', 'MatrixConfigStore', 'matrix-config-store'],
+  ['email', 'EmailConfigStore'], ['office', 'OfficeConfigStore'],
 ].map(async ([id, storeName, storeFile = 'config-store']) => ({
   id,
   key: id === 'wecom-app' ? 'wecomApp' : id,
@@ -138,7 +140,7 @@ for (const { id, apply, Store, api } of channels) {
           assert.equal(result.error.details.field, 'version');
           assert.equal(result.error.details.issue, 'unsupported-version');
         }
-      } else assert.deepEqual(result.error.details, {});
+      } else { assert.equal(result.error.details.stage, 'startup.load'); assert.match(result.error.details.referenceId, /^IM-CONN-[A-F0-9]{8}$/); assert.equal(result.error.details.operation, 'startup'); }
       assert.doesNotMatch(JSON.stringify(result), /private-secret-value/);
       assert.equal(await readFile(config[filename], 'utf8'), contents);
       assert.throws(() => (api.unwrapRpcResult ?? api.unwrapOfficeRpc)(result), error => {
@@ -255,6 +257,23 @@ test('startup rolls back prepared resources even when delivery cleanup fails', a
   assert.equal(closed, 1);
   assert.equal(unregistered, 1);
   assert.equal(f.routes.size, 0);
+});
+
+test('an uncaught endpoint failure keeps a final Host diagnostic instead of becoming a management transport failure', async t => {
+  const f = await fixture(t);
+  const fiber = f.start((ctx, config) => installProductionChannel(ctx, config, {
+    channel: 'telegram', rpcChannel: '/telegram',
+    createProduction: async () => ({ controller: {}, async close() {} }),
+    createHandler: () => async () => { throw new Error('private-endpoint-error', { cause: Object.assign(new Error('private-host'), { code: 'ENOTFOUND' }) }); },
+  }), {});
+  await fiber.await();
+  const result = await f.call('telegram', 'bot.reconnect');
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'telegram-operation-failed');
+  assert.equal(result.error.details.reason, 'ENOTFOUND');
+  assert.equal(result.error.details.stage, 'connection.start');
+  assert.match(result.error.details.referenceId, /^IM-CONN-[A-F0-9]{8}$/);
+  assert.doesNotMatch(JSON.stringify(result), /private/);
 });
 
 test('a host language change refreshes every started channel menu and releases on unload', async t => {

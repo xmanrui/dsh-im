@@ -1,3 +1,4 @@
+import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import QRCode from 'qrcode';
@@ -131,6 +132,7 @@ async function publicStatus(status, encodeQr) {
 }
 
 export function createWecomRpcHandler(controller, { encodeQr = qrDataUrl } = {}) {
+  const diagnostics = controller.diagnostics ?? createConnectionDiagnostics({ channel: 'wecom' });
   for (const method of ['status', 'startProvisioning', 'registrationStatus', 'cancelProvisioning', 'bindCredentials', 'reconnectBot', 'deleteBot']) {
     if (typeof controller?.[method] !== 'function') {
       throw new TypeError(`A complete Enterprise WeChat controller is required (${method})`);
@@ -185,7 +187,7 @@ export function createWecomRpcHandler(controller, { encodeQr = qrDataUrl } = {})
               await controller.sendConnectionTest(payload.botId);
               testMessage = publicConnectionTestResult();
             } catch (error) {
-              testMessage = publicConnectionTestResult(error);
+              testMessage = publicConnectionTestResult(error, { diagnostics, botId: payload.botId });
             }
           }
         }
@@ -231,10 +233,10 @@ export function createWecomRpcHandler(controller, { encodeQr = qrDataUrl } = {})
         : { ok: true, value };
     } catch (error) {
       const workspaceError = publicWorkspaceError(error);
-      return signal?.aborted
+      return diagnosticRpcResult(diagnostics, error, signal?.aborted
         ? { ok: false, error: { code: 'cancelled', message: 'The request was cancelled.' } }
         : { ok: false, error: workspaceError
-          ?? { code: 'wecom-operation-failed', message: '企业微信操作失败，请稍后重试。' } };
+          ?? { code: 'wecom-operation-failed', message: '企业微信操作失败，请稍后重试。' } }, { operation: endpoint, botId: payload?.botId });
     }
   };
 }

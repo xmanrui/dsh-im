@@ -76,6 +76,25 @@ test('delivery HTTP POST forwards the exact public payload to the shared service
   assert.deepEqual(calls[0].slice(1, 4), ['bot_one', 'daily-report', '测试消息']);
 });
 
+test('delivery HTTP accepts optional Markdown format and rejects invalid format before sending', async () => {
+  const { service, calls } = serviceFixture();
+  await withServer(createDeliveryHttpHandler(service), async (url) => {
+    const payload = { botId: 'bot_one', targetId: 'daily-report', text: '# Report\n\n**done**' };
+    for (const format of ['plain', 'markdown']) {
+      const result = await request(url, { body: JSON.stringify({ ...payload, format }) });
+      assert.equal(result.status, 200);
+      assert.equal(calls.at(-1)[4].format, format);
+      assert.equal(calls.at(-1)[3], payload.text);
+    }
+    for (const format of ['html', null, 1, ['markdown']]) {
+      const result = await request(url, { body: JSON.stringify({ ...payload, format }) });
+      assert.equal(result.status, 400);
+      assert.equal(result.body.error.code, 'bad-request');
+    }
+  });
+  assert.equal(calls.length, 2);
+});
+
 test('delivery HTTP rejects unsupported methods, media types, JSON, fields, and oversized bodies', async () => {
   const { service, calls } = serviceFixture();
   await withServer(createDeliveryHttpHandler(service), async (url) => {

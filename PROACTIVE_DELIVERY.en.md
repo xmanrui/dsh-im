@@ -136,7 +136,7 @@ A successful request returns:
 { "sent": true }
 ```
 
-The body accepts exactly `botId`, `targetId`, and `text`, with a maximum total JSON size of 1 MiB. Do not add a native platform route, `sessionId`, `chatRef`, temporary webhook, or `idempotencyKey`.
+The body accepts the required `botId`, `targetId`, and `text` fields, plus optional `format` (`plain` or `markdown`, default `plain`), with a maximum total JSON size of 1 MiB. Do not add a native platform route, `sessionId`, `chatRef`, temporary webhook, or `idempotencyKey`.
 
 The fixed endpoint is `POST /api/dsh-im/delivery/messages`. It reuses the current DSH Host WebServer and does not open another port. Port `3080` is the default for the Web profile; use the address printed by the running Host when it differs.
 
@@ -164,11 +164,19 @@ export async function apply(ctx) {
 }
 ```
 
-In a real plugin, call `ctx.dshIm.send()` from your existing scheduled job, build callback, or business-event handler. Its optional fourth argument currently supports an abort signal:
+In a real plugin, call `ctx.dshIm.send()` from your existing scheduled job, build callback, or business-event handler. Its optional fourth argument supports an abort signal and a text format:
 
 ```js
-await ctx.dshIm.send(botId, targetId, text, { signal });
+await ctx.dshIm.send(botId, targetId, text, { signal }); // Keep existing default behavior
+await ctx.dshIm.send(botId, targetId, '# Daily report\n\n**Checks complete**', {
+  signal,
+  format: 'markdown',
+});
 ```
+
+`format` accepts only `plain` and `markdown`, defaulting to `plain`. Markdown formatting is currently implemented for Feishu/Lark: both direct and group destinations receive a native Markdown card without starting a Session or a stream. Other channels retain their existing delivery behavior; Markdown rendering is not guaranteed there. HTTP and `message.send` RPC accept the same optional `format` field in their payloads.
+
+The original Markdown, including whitespace, is preserved without silent truncation or automatic splitting; platform message-size and Markdown-syntax limits still apply. Rejection, timeout, and cancellation use the existing error handling, with no automatic plain-text resend that could duplicate delivery. Older dsh-im Host APIs may ignore this option; both the consumer and dsh-im must load the updated code.
 
 A same-Host plugin may also list the saved targets for one bot:
 
@@ -225,7 +233,7 @@ const result = await callDelivery(connection, 'message.send', {
 // result: { sent: true }
 ```
 
-`message.send` accepts exactly `{ botId, targetId, text }`. Do not add a native route, `sessionId`, `chatRef`, temporary webhook, or `idempotencyKey`.
+`message.send` accepts `{ botId, targetId, text, format? }`; `format` must be `plain` or `markdown`. Do not add a native route, `sessionId`, `chatRef`, temporary webhook, or `idempotencyKey`.
 
 ### Example: deliver a daily report
 

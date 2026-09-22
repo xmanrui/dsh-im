@@ -2,6 +2,7 @@ import { OFFICE_HOOK_PATHS, OFFICE_PROTOCOL_VERSION, officeHookUrls } from './pr
 
 function safeTransportError(operation, response) {
   const error = new Error(`AI Office ${operation} failed: HTTP ${response.status}`);
+  error.status = response.status;
   error.code = response.status === 401 ? 'invalid-device-token'
     : response.status === 404 ? 'office-hook-unavailable'
       : response.status === 409 ? 'office-job-conflict' : 'office-transport-failed';

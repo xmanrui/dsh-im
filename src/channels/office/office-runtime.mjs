@@ -1,3 +1,4 @@
+import { extractConnectionEvidence, createConnectionDiagnostics } from '../shared/connection-error.mjs';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { t } from '../shared/i18n.mjs';
@@ -22,6 +23,7 @@ export class OfficeRuntime {
   #config;
   #token;
   #logger;
+  #diagnostics;
   #transport;
   #sleep;
   #controller = null;
@@ -41,6 +43,7 @@ export class OfficeRuntime {
     this.#config = config;
     this.#token = token;
     this.#logger = logger;
+    this.#diagnostics = createConnectionDiagnostics({ channel: 'office', logger });
     this.#sleep = sleepImpl;
     this.#transport = transport ?? new OfficeTransport({
       baseUrl: config.baseUrl, deviceId: config.deviceId, token,
@@ -88,7 +91,7 @@ export class OfficeRuntime {
     this.#task = this.#run(this.#controller.signal).finally(() => { this.#task = null; });
     this.#task.catch((error) => {
       if (this.#controller?.signal.aborted) return;
-      this.#logger.error?.('[dsh-im:office] connector stopped:', error);
+      this.#logger.error?.('[dsh-im:office] connector stopped:', extractConnectionEvidence(error).details);
     });
     return this.status;
   }
@@ -112,7 +115,7 @@ export class OfficeRuntime {
           onOpen: () => {
             this.#status.connected = true;
             this.#status.state = 'connected';
-            this.#status.error = null;
+            this.#status.error = null; this.#diagnostics.clear();
             streamOpened = true;
           },
           onEvent: async (event) => {
@@ -129,7 +132,7 @@ export class OfficeRuntime {
         attemptController.abort();
         this.#status.connected = false;
         this.#status.state = 'reconnecting';
-        this.#status.error = safeConnectionError(error);
+        this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', automatic: true, publicError: safeConnectionError(error) }).publicError;
         this.#status.reconnects += 1;
         const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)];
         attempt += 1;

@@ -1,3 +1,4 @@
+import { ConnectionError } from '../../connection-error.js';
 import * as React from 'react';
 
 import { h } from '../../i18n.js';
@@ -76,15 +77,15 @@ export function OfficeSettingsTab({ rpcCall, initialStatus }) {
 
   const load = React.useCallback(async () => {
     try { adopt(await invoke(OFFICE_RPC_ENDPOINTS.status)); setPhase('ready'); setError(''); }
-    catch (caught) { setPhase('error'); setError(caught.message); }
+    catch (caught) { setPhase('error'); setError(caught); }
   }, [adopt, invoke]);
 
   React.useEffect(() => { void load(); }, [load]);
 
   const run = async (name, operation) => {
     setBusy(name); setError(''); setNotice('');
-    try { const value = await operation(); adopt(value); setNotice(name === 'test' ? '连接测试通过。' : '配置已保存。'); }
-    catch (caught) { setError(caught.message); }
+    try { const value = await operation(); adopt(value); if (value?.warnings?.length) setError(value.warnings[0]); setNotice(name === 'test' ? '连接测试通过。' : '配置已保存。'); }
+    catch (caught) { setError(caught); }
     finally { setBusy(''); }
   };
 
@@ -134,9 +135,9 @@ export function OfficeSettingsTab({ rpcCall, initialStatus }) {
         h('label', { className: 'dof-field', 'data-wide': 'true' }, 'Instruction Preset 映射',
           h('textarea', { value: form.instructionPresets, placeholder: 'action-items=转换为负责人、截止和验收明确的工单', onChange: (event) => setForm({ ...form, instructionPresets: event.target.value }) }),
           h('small', null, '每行 alias=指令；新增 preset 不需要改 Office 代码。'))),
-      error ? h('p', { className: 'dof-error', role: 'alert' }, error) : null,
+      error ? h(ConnectionError, { error }) : null,
       notice ? h('p', { className: 'dof-notice', role: 'status' }, notice) : null,
-      health.error?.message ? h('p', { className: 'dof-error' }, health.error.message) : null,
+      health.error?.message ? h(ConnectionError, { error: health.error }) : null,
       h('div', { className: 'dof-actions dim-viewActions' },
         h(Button, { kind: 'primary', disabled: Boolean(busy), onClick: () => void run('save', () => invoke(OFFICE_RPC_ENDPOINTS.configure, {
           baseUrl: form.baseUrl,

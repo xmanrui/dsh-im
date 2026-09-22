@@ -94,6 +94,7 @@ export async function askInWorkspaceSession({
   key,
   text,
   content,
+  prepareContent,
   titleText,
   sourceGuidance,
   contextEnhanced = false,
@@ -165,8 +166,13 @@ export async function askInWorkspaceSession({
         await originalOnArtifact?.(artifact);
       };
       let answer;
+      // Prepare session-dependent context after binding, outside the binding
+      // lock. A stale-workspace retry must prepare it for the new session too.
+      const prompt = prepareContent
+        ? await prepareContent({ sessionId: binding.sessionId, content, text })
+        : content ?? text;
       try {
-        answer = await binding.session.ask(content ?? text, artifactOptions);
+        answer = await binding.session.ask(prompt, artifactOptions);
       } catch (error) {
         if (error?.code === 'harness-reply-timeout' && deferredDelivery) {
           try {

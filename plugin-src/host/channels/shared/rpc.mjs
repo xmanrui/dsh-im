@@ -1,3 +1,4 @@
+import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from './bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from './context-enhancement-rpc.mjs';
@@ -14,6 +15,7 @@ import {
   validAgentPresetPayload,
 } from './agent-preset-rpc.mjs';
 import { SET_MODEL_ENDPOINT, validModelPayload } from './model-setting-rpc.mjs';
+import { SET_THINKING_TRACES_ENDPOINT, validThinkingTracesPayload } from './thinking-traces-rpc.mjs';
 
 export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   status: 'connection.status',
@@ -26,6 +28,7 @@ export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
+  setThinkingTraces: SET_THINKING_TRACES_ENDPOINT,
 });
 
 const ENDPOINTS = Object.freeze(Object.values(TOKEN_BOT_ENDPOINTS));
@@ -96,6 +99,10 @@ function payloadFailure(endpoint, payload) {
     return validAliasPayload(payload)
       ? null : '请输入有效的别名（最多 80 个字符）。';
   }
+  if (endpoint === TOKEN_BOT_ENDPOINTS.setThinkingTraces) {
+    return validThinkingTracesPayload(payload)
+      ? null : '请提交有效的思考过程留痕设置。';
+  }
   return 'Unknown bot endpoint.';
 }
 
@@ -131,6 +138,7 @@ function operationError(channel, error) {
 }
 
 export function createTokenBotRpcHandler(controller, { channel }) {
+  const diagnostics = controller.diagnostics ?? createConnectionDiagnostics({ channel: channel.toLowerCase() });
   for (const method of ['status', 'bindCredentials', 'reconnectBot', 'deleteBot']) {
     if (typeof controller?.[method] !== 'function') {
       throw new TypeError(`A complete ${channel} controller is required (${method})`);
@@ -172,7 +180,7 @@ export function createTokenBotRpcHandler(controller, { channel }) {
           } catch (error) {
             testError = error;
           }
-          value = { ...value, testMessage: publicConnectionTestResult(testError) };
+          value = { ...value, testMessage: publicConnectionTestResult(testError, { diagnostics, botId: payload.botId }) };
         }
       } else if (endpoint === TOKEN_BOT_ENDPOINTS.setWorkspace) {
         if (typeof controller.updateWorkspace !== 'function') throw new Error('Workspace update is unavailable');
@@ -192,6 +200,9 @@ export function createTokenBotRpcHandler(controller, { channel }) {
       } else if (endpoint === TOKEN_BOT_ENDPOINTS.setAgentPreset) {
         if (typeof controller.updateAgentPreset !== 'function') throw new Error('Agent preset update is unavailable');
         value = await controller.updateAgentPreset(payload.botId, payload.agentPreset);
+      } else if (endpoint === TOKEN_BOT_ENDPOINTS.setThinkingTraces) {
+        if (typeof controller.setThinkingTraces !== 'function') throw new Error('Thinking traces update is unavailable');
+        value = await controller.setThinkingTraces(payload.botId, payload.thinkingTraces);
       } else {
         value = await controller.deleteBot(payload.botId);
       }
@@ -199,9 +210,9 @@ export function createTokenBotRpcHandler(controller, { channel }) {
         ? { ok: false, error: { code: 'cancelled', message: 'The request was cancelled.' } }
         : { ok: true, value: sanitizePublic(value) };
     } catch (error) {
-      return signal?.aborted
+      return diagnosticRpcResult(diagnostics, error, signal?.aborted
         ? { ok: false, error: { code: 'cancelled', message: 'The request was cancelled.' } }
-        : { ok: false, error: operationError(channel, error) };
+        : { ok: false, error: operationError(channel, error) }, { operation: endpoint, botId: payload?.botId });
     }
   };
 }

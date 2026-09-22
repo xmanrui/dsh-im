@@ -397,7 +397,8 @@ test('successful menus do not clear Harness failures or errors from concurrent r
   release({ sessions: [] });
   await recovering;
   assert.deepEqual(f.bridge.status.lastMessageError, concurrentFailure);
-  assert.equal(f.bridge.status.lastError, 'Harness offline');
+  assert.equal(f.bridge.status.lastMessageError.code, 'HARNESS_CONNECT');
+  assert.equal(f.bridge.status.lastError, concurrentFailure.message);
 });
 
 test('all list pages stay within WeCom button limits', () => {

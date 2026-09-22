@@ -85,7 +85,7 @@ export class CallbackRepairManager {
   #appId;
   #domain;
 
-  constructor({ registerApp, onCredentials, appId, domain = 'feishu' } = {}) {
+  constructor({ registerApp, onCredentials, appId, domain = 'feishu', diagnostics } = {}) {
     if (typeof registerApp !== 'function') throw new TypeError('registerApp is required');
     if (typeof onCredentials !== 'function') throw new TypeError('onCredentials is required');
     if (typeof appId !== 'string' || !appId.trim()) throw new TypeError('appId is required');
@@ -94,6 +94,7 @@ export class CallbackRepairManager {
     this.#appId = appId.trim();
     this.#domain = domain;
     this.#manager = new RegistrationManager({
+      diagnostics,
       registerApp: (options) => registerApp({
         ...options,
         onQRCodeReady: (info) => {

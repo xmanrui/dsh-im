@@ -1,3 +1,4 @@
+import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-details.mjs';
 import { normalizeBotAlias } from '../../../../src/channels/shared/bot-alias.mjs';
 import { normalizeAgentPresetCatalog, normalizeAgentPresetId, SET_AGENT_PRESET_ENDPOINT } from '../../agent-preset.js';
 import { normalizeModelCatalog, normalizeModelSelection, SET_MODEL_ENDPOINT } from '../../model-setting.js';
@@ -52,6 +53,7 @@ export function unwrapRpcResult(result) {
   if (!result.ok) {
     const error = new Error(text(result.error?.message, 'WhatsApp 操作失败'));
     error.code = text(result.error?.code, 'WHATSAPP_RPC_ERROR', 80);
+    Object.assign(error, diagnosticFields(result.error));
     throw error;
   }
   return result.value;
@@ -79,6 +81,7 @@ export function normalizeProvisioning(value, now = Date.now()) {
   if (qrCodeDataUrl) result.qrCodeDataUrl = qrCodeDataUrl;
   if (id(source.botId)) result.botId = id(source.botId);
   if (isRecord(source.error)) result.error = {
+    ...diagnosticFields(source.error),
     code: text(source.error.code, 'WHATSAPP_PROVISION_FAILED', 80),
     message: text(source.error.message, 'WhatsApp 没有接入完成'),
   };
@@ -112,6 +115,7 @@ function normalizeBot(value) {
     },
     lastMessageError: normalizeLastMessageError(value.lastMessageError),
     error: isRecord(value.error) ? {
+      ...diagnosticFields(value.error),
       code: text(value.error.code, 'WHATSAPP_ACCOUNT_ERROR', 80),
       message: text(value.error.message, 'WhatsApp 连接尚未就绪'),
     } : null,
@@ -136,6 +140,7 @@ export function normalizeSnapshot(value) {
 
 export function presentError(error) {
   return {
+    ...diagnosticFields(error),
     code: text(error?.code, 'WHATSAPP_ERROR', 80),
     message: text(error?.message, 'WhatsApp 操作失败，请稍后重试'),
   };

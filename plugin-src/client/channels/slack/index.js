@@ -1,3 +1,4 @@
+import { ConnectionError } from '../../connection-error.js';
 import * as React from 'react';
 
 import { SlackLogoGlyph } from '../../channel-logos.js';
@@ -89,7 +90,7 @@ export function SlackCredentialPanel({ busy, error, onSubmit, onCancel }) {
           required: true,
         })),
       h('p', { className: 'dsl-tokenHint' }, 'Bot Token 来自 OAuth & Permissions；App Token 来自 Basic Information，并且必须包含 connections:write。')),
-    error ? h('p', { className: 'dim-credentialError', role: 'alert' }, error.message ?? String(error)) : null,
+    error ? h(ConnectionError, { error: error }) : null,
     h('div', { className: 'ddt-actions dim-viewActions dim-credentialActions' },
       h('button', {
         type: 'submit',

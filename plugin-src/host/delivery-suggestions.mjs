@@ -9,6 +9,7 @@ const CHANNELS = new Set([
   'telegram',
   'discord',
   'whatsapp',
+  'matrix',
 ]);
 
 function isRecord(value) {
@@ -80,6 +81,15 @@ function whatsappSuggestion(key) {
   return group ? { kind: 'group', route: { jid: group[1] } } : null;
 }
 
+function matrixSuggestion(key) {
+  const dm = /^dm:(@[A-Za-z0-9._=\-\/+]+:[A-Za-z0-9.-]+(?::\d{1,5})?)$/.exec(key);
+  if (dm) return { kind: 'dm', route: { userId: dm[1] } };
+  const room = /^room:([!#][^:$\s]+:[A-Za-z0-9.-]+(?::\d{1,5})?)(?:\$(\$[^\s]+))?$/u.exec(key);
+  if (!room) return null;
+  if (room[2] === undefined) return { kind: 'room', route: { roomId: room[1] } };
+  return { kind: 'thread', route: { roomId: room[1], threadId: room[2] } };
+}
+
 /** Convert one persisted conversation key into a stable proactive-delivery route. */
 export function deliverySuggestionFromConversationKey(channel, key) {
   if (!CHANNELS.has(channel) || typeof key !== 'string') return null;
@@ -113,6 +123,8 @@ export function deliverySuggestionFromConversationKey(channel, key) {
       return discordSuggestion(key);
     case 'whatsapp':
       return whatsappSuggestion(key);
+    case 'matrix':
+      return matrixSuggestion(key);
     default:
       return null;
   }
@@ -133,6 +145,7 @@ export function privateDeliverySuggestionFromConversationKey(channel, key) {
     telegram: 'direct',
     discord: 'direct',
     whatsapp: 'direct',
+    matrix: 'dm',
   }[channel];
   if (!privatePrefix || prefix !== privatePrefix) return null;
   return deliverySuggestionFromConversationKey(channel, key);

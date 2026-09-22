@@ -4,6 +4,7 @@ import {
   TELEGRAM_ENDPOINTS,
   telegramClientApi,
 } from './api.js';
+import { ThinkingTracesSettings } from './thinking-traces.js';
 import { installTelegramStyles } from './styles.js';
 
 const channel = createTokenChannelSettings({
@@ -19,6 +20,8 @@ const channel = createTokenChannelSettings({
   emptyTitle: '接入 Telegram 机器人',
   emptyDescription: '先通过 @BotFather 获取 Bot Token，再在这里完成接入。',
   platformLabel: 'Telegram',
+  AccountSettings: ThinkingTracesSettings,
+  accountSettingsEndpoint: 'bot.thinking-traces.set',
 });
 
 export const TelegramSettingsTab = channel.SettingsTab;

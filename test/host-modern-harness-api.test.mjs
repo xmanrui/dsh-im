@@ -301,6 +301,11 @@ test('modern adapter exposes DSH v2 live assistant chunks through legacy history
   };
   const fixture = fakeContext(gateway);
   const api = modernHarnessApi(fixture.ctx);
+  const muxController = new AbortController();
+  const mux = api.events.mux(
+    { rpcId: 'live-events', payload: {} },
+    muxController.signal,
+  )[Symbol.asyncIterator]();
 
   await api.sessions.history({ rpcId: 'baseline', payload: { sessionId: 'session' } });
   const agent = { session: { id: 'session', seq: 2 } };
@@ -310,6 +315,7 @@ test('modern adapter exposes DSH v2 live assistant chunks through legacy history
       type: 'start', attemptId: 'session:1', revision: 1, turn: 1, step: 1,
     },
   });
+  const firstLiveFrame = mux.next();
   fixture.emit('agent/assistant-stream', {
     agent,
     frame: {
@@ -317,6 +323,7 @@ test('modern adapter exposes DSH v2 live assistant chunks through legacy history
       chunk: { type: 'text-delta', index: 0, text: '你好' },
     },
   });
+  const secondLiveFrame = mux.next();
   fixture.emit('agent/assistant-stream', {
     agent,
     frame: {
@@ -334,6 +341,12 @@ test('modern adapter exposes DSH v2 live assistant chunks through legacy history
   assert.deepEqual(chunks.map(({ event }) => event.data.chunk.text), ['你好', '，世界']);
   assert.ok(chunks.every(({ event }) => event.seq > 1 && event.seq < 2));
   assert.ok(chunks[0].event.seq < chunks[1].event.seq);
+  assert.deepEqual(
+    (await Promise.all([firstLiveFrame, secondLiveFrame]))
+      .map(({ value }) => value.payload.event),
+    chunks.map(({ event }) => event),
+    'transient chunks must also reach mux consumers before history drops them',
+  );
 
   fixture.emit('agent/assistant-stream', {
     agent,
@@ -348,6 +361,8 @@ test('modern adapter exposes DSH v2 live assistant chunks through legacy history
   assert.equal(settled.result.value.events.some(
     ({ event }) => event.type === 'assistant/chunk',
   ), false);
+  muxController.abort();
+  await mux.return();
 });
 
 forEachSessionApi('an approval', async (sessionApi) => {

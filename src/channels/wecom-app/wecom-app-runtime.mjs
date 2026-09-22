@@ -1,3 +1,4 @@
+import { atConnectionStage } from '../shared/connection-error.mjs';
 import {
   WecomAppApi,
   WecomAppError,
@@ -104,7 +105,7 @@ export class WecomAppRuntime {
     this.#status.startedAt = new Date().toISOString();
     this.#status.lastError = null;
     this.#status.wecomAppConnectionState = 'connecting';
-    await this.#harness.ensureRunning({ signal: this.#signal() });
+    await atConnectionStage('harness.check', () => this.#harness.ensureRunning({ signal: this.#signal() }));
     this.#status.harnessReachable = true;
 
     this.#api = new WecomAppApi({

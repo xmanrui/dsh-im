@@ -1,3 +1,4 @@
+import { extractConnectionEvidence, atConnectionStage, createConnectionDiagnostics } from '../shared/connection-error.mjs';
 import { randomUUID } from 'node:crypto';
 
 import { connectionTestMessage } from '../shared/connection-test.mjs';
@@ -43,6 +44,7 @@ export class QqController {
   #createRuntime;
   #deleteState;
   #logger;
+  #diagnostics;
   #runtimes = new Map();
   #errors = new Map();
   #attempts = new Map();
@@ -75,6 +77,14 @@ export class QqController {
     this.#createRuntime = createRuntime;
     this.#deleteState = deleteState;
     this.#logger = logger;
+    this.#diagnostics = createConnectionDiagnostics({ channel: 'qq', logger });
+  }
+
+  get diagnostics() { return this.#diagnostics; }
+
+  #failure(error, code, message) {
+    const stage = code.startsWith('qr-') ? 'qr.begin' : code === 'activation-failed' ? 'activation' : 'connection.start';
+    return this.#diagnostics.report(error, { reuse: true, stage, publicError: { code, message } }).publicError;
   }
 
   async initialize() {
@@ -82,17 +92,17 @@ export class QqController {
     for (const config of this.#configStore.list()) {
       await this.#withBotTransition(config.botId, async () => {
         if (this.#closed || this.#runtimes.get(config.botId)?.status?.ready) return;
-        const appSecret = await this.#resolveSecret(config.secretRef);
-        if (!appSecret) {
-          this.#errors.set(config.botId, safeError('missing-secret', t('QQ 机器人凭据缺失，请移除后重新扫码。')));
-          return;
-        }
         try {
+          const appSecret = await this.#resolveSecret(config.secretRef);
+          if (!appSecret) {
+            this.#errors.set(config.botId, safeError('missing-secret', t('QQ 机器人凭据缺失，请移除后重新扫码。')));
+            return;
+          }
           await this.#startRuntime(config, appSecret);
           this.#errors.delete(config.botId);
         } catch (error) {
-          this.#errors.set(config.botId, connectionError(error, t('QQ 连接未就绪，插件会自动重试。')));
-          this.#logger.warn?.(`[dsh-im:qq] bot ${config.botId} failed to initialize:`, error);
+          this.#errors.set(config.botId, this.#diagnostics.report(error, { reuse: true, publicError: connectionError(error, t('QQ 连接未就绪，插件会自动重试。')) , stage: 'connection.start' }).publicError);
+
         } finally {
           this.#touch();
         }
@@ -154,7 +164,7 @@ export class QqController {
         onFailure: (error) => {
           if (record.controller.signal.aborted || TERMINAL_ATTEMPT_STATES.has(record.state)) return;
           record.state = 'failed';
-          record.error = safeError('qr-connect-failed', t('QQ 扫码服务暂时不可用，请重新生成二维码。'));
+          record.error = this.#failure(error, 'qr-connect-failed', t('QQ 扫码服务暂时不可用，请重新生成二维码。'));
           if (this.#activeAttemptId === record.id) this.#activeAttemptId = null;
           this.#touch();
           firstQrReject(error);
@@ -168,7 +178,7 @@ export class QqController {
         record.error = safeError('cancelled', t('扫码绑定已取消。'));
       } else if (!TERMINAL_ATTEMPT_STATES.has(record.state)) {
         record.state = 'failed';
-        record.error = safeError('qr-start-failed', t('无法生成 QQ 二维码，请稍后重试。'));
+        record.error = this.#failure(error, 'qr-start-failed', t('无法生成 QQ 二维码，请稍后重试。'));
       }
       if (this.#activeAttemptId === record.id) this.#activeAttemptId = null;
       this.#touch();
@@ -193,7 +203,7 @@ export class QqController {
     await this.#withBotTransition(identity.botId, async () => {
       if (this.#closed) throw new Error('QQ controller is closed');
       const previousConfig = this.#configStore.getByAppId(normalizedAppId);
-      const previousSecret = await this.#credentials.resolve(identity.secretRef).catch(() => undefined);
+      const previousSecret = await atConnectionStage('credential.read', () => this.#credentials.resolve(identity.secretRef), 'credential-store');
       if (this.#closed) throw new Error('QQ controller is closed');
       const config = {
         botId: identity.botId,
@@ -203,9 +213,9 @@ export class QqController {
         createdAt: previousConfig?.createdAt ?? new Date().toISOString(),
         connectedAt: new Date().toISOString(),
       };
-      await this.#credentials.set(identity.secretRef, normalizedSecret);
+      await atConnectionStage('credential.save', () => this.#credentials.set(identity.secretRef, normalizedSecret), 'credential-store');
       try {
-        await this.#configStore.save(config);
+        await atConnectionStage('account.save', () => this.#configStore.save(config), 'account-config');
       } catch (error) {
         await this.#restoreCredential(identity.secretRef, previousSecret);
         throw error;
@@ -214,8 +224,8 @@ export class QqController {
         await this.#startRuntime(config, normalizedSecret);
         this.#errors.delete(identity.botId);
       } catch (error) {
-        this.#errors.set(identity.botId, connectionError(error, t('QQ 机器人已绑定，消息连接暂未就绪。')));
-        this.#logger.warn?.(`[dsh-im:qq] bot ${identity.botId} credential connection failed:`, error);
+        this.#errors.set(identity.botId, this.#diagnostics.report(error, { reuse: true, publicError: connectionError(error, t('QQ 机器人已绑定，消息连接暂未就绪。')) , stage: 'connection.start' }).publicError);
+
       }
       this.#touch();
     });
@@ -247,7 +257,7 @@ export class QqController {
         await this.#startRuntime(config, secret);
         this.#errors.delete(botId);
       } catch (error) {
-        this.#errors.set(botId, connectionError(error, t('QQ 连接仍未就绪，请稍后重试。')));
+        this.#errors.set(botId, this.#diagnostics.report(error, { reuse: true, publicError: connectionError(error, t('QQ 连接仍未就绪，请稍后重试。')) , stage: 'connection.start' }).publicError);
         throw error;
       } finally {
         this.#touch();
@@ -288,28 +298,32 @@ export class QqController {
   }
 
   async deleteBot(botId) {
+    const warnings = [];
     const config = this.#configStore.get(botId);
     if (!config) throw new Error('Unknown QQ bot');
     await this.#withBotTransition(botId, async () => {
-      const previous = await this.#credentials.resolve(config.secretRef).catch(() => undefined);
+      const previous = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.secretRef), 'credential-store');
       await this.#stopRuntime(botId);
       try {
-        await this.#credentials.unset(config.secretRef);
-        await this.#configStore.remove(botId);
+        await atConnectionStage('credential.remove', () => this.#credentials.unset(config.secretRef), 'credential-store');
+        await atConnectionStage('account.remove', () => this.#configStore.remove(botId), 'account-config');
       } catch (error) {
-        if (previous?.value) {
-          await this.#credentials.set(config.secretRef, previous.value).catch(() => undefined);
-          await this.#startRuntime(config, previous.value).catch(() => undefined);
+        if (!this.#configStore.get(botId)) {
+          warnings.push(this.#diagnostics.report(error, { operation: 'bot.delete', stage: 'workspace.cleanup', warning: true,
+            publicError: { code: 'workspace-cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError);
+        } else {
+          if (previous?.value) {
+            await atConnectionStage('credential.save', () => this.#credentials.set(config.secretRef, previous.value), 'credential-store').catch(() => undefined);
+            await this.#startRuntime(config, previous.value).catch(() => undefined);
+          }
+          throw new Error('Unable to remove the QQ bot safely.', { cause: error });
         }
-        throw new Error('Unable to remove the QQ bot safely.', { cause: error });
       }
-      await this.#deleteState({ botId, config }).catch((error) => {
-        this.#logger.warn?.(`[dsh-im:qq] bot ${botId} state cleanup failed:`, error);
-      });
+      await this.#deleteState({ botId, config }).catch(error => { warnings.push(this.#diagnostics.report(error, { reuse: true, operation: 'bot.delete', stage: 'state.cleanup', resource: 'account-state', warning: true, publicError: { code: 'cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError); });
       this.#errors.delete(botId);
       this.#touch();
     });
-    return this.status();
+    return { ...this.status(), ...(warnings.length ? { warnings } : {}) };
   }
 
   status() {
@@ -341,7 +355,7 @@ export class QqController {
           messagesReplied: runtimeStatus?.messagesReplied ?? 0,
         },
         lastMessageError: publicMessageFailure(runtimeStatus?.lastMessageError),
-        error: structuredClone(this.#errors.get(config.botId) ?? null),
+        error: structuredClone(runtimeStatus?.error ?? this.#errors.get(config.botId) ?? null),
       };
     });
     const connectedCount = bots.filter((bot) => bot.connected).length;
@@ -390,8 +404,8 @@ export class QqController {
         record.error = safeError('cancelled', t('扫码绑定已取消。'));
       } else {
         record.state = 'failed';
-        record.error = safeError('activation-failed', t('QQ 已授权，但无法安全保存接入配置。'));
-        this.#logger.error?.('[dsh-im:qq] provisioning failed:', error);
+        record.error = this.#failure(error, 'activation-failed', t('QQ 已授权，但无法安全保存接入配置。'));
+
       }
     } finally {
       record.dispose?.();
@@ -403,7 +417,7 @@ export class QqController {
   async #activateBot(record, { appId, appSecret, ownerUserOpenid }) {
     const identity = deriveQqBotIdentity(appId);
     const previousConfig = this.#configStore.getByAppId(appId);
-    const previousSecret = await this.#credentials.resolve(identity.secretRef).catch(() => undefined);
+    const previousSecret = await atConnectionStage('credential.read', () => this.#credentials.resolve(identity.secretRef), 'credential-store');
     const config = {
       botId: identity.botId,
       appId,
@@ -413,10 +427,10 @@ export class QqController {
       connectedAt: new Date().toISOString(),
     };
     return this.#withBotTransition(identity.botId, async () => {
-      await this.#credentials.set(identity.secretRef, appSecret);
+      await atConnectionStage('credential.save', () => this.#credentials.set(identity.secretRef, appSecret), 'credential-store');
       try {
         if (record.controller.signal.aborted) throw new DOMException('Cancelled', 'AbortError');
-        await this.#configStore.save(config);
+        await atConnectionStage('account.save', () => this.#configStore.save(config), 'account-config');
       } catch (error) {
         await this.#restoreCredential(identity.secretRef, previousSecret);
         throw error;
@@ -428,20 +442,20 @@ export class QqController {
       } catch (error) {
         if (record.controller.signal.aborted) {
           await this.#stopRuntime(identity.botId);
-          if (previousConfig) await this.#configStore.save(previousConfig).catch(() => undefined);
+          if (previousConfig) await atConnectionStage('account.save', () => this.#configStore.save(previousConfig), 'account-config').catch(() => undefined);
           else {
-            const removed = await this.#configStore.remove(identity.botId).catch(() => null);
+            const removed = await atConnectionStage('account.remove', () => this.#configStore.remove(identity.botId), 'account-config').catch(() => null);
             if (removed) {
               await this.#deleteState({ botId: identity.botId, config }).catch((cleanupError) => {
-                this.#logger.warn?.('[dsh-im:qq] cancelled bot state cleanup failed:', cleanupError);
+                this.#logger.warn?.('[dsh-im:qq] cancelled bot state cleanup failed:', extractConnectionEvidence(cleanupError).details);
               });
             }
           }
           await this.#restoreCredential(identity.secretRef, previousSecret);
           throw error;
         }
-        this.#errors.set(identity.botId, connectionError(error, t('QQ 机器人已绑定，消息连接暂未就绪。')));
-        this.#logger.warn?.(`[dsh-im:qq] bot ${identity.botId} activation connection failed:`, error);
+        this.#errors.set(identity.botId, this.#diagnostics.report(error, { reuse: true, publicError: connectionError(error, t('QQ 机器人已绑定，消息连接暂未就绪。')) , stage: 'connection.start' }).publicError);
+
       }
       this.#touch();
       return identity.botId;
@@ -452,7 +466,7 @@ export class QqController {
     if (this.#closed) throw new Error('QQ controller is closed');
     await this.#stopRuntime(config.botId);
     if (this.#closed) throw new Error('QQ controller is closed');
-    const runtime = await this.#createRuntime({ botId: config.botId, config, appSecret });
+    const runtime = await atConnectionStage('runtime.prepare', () => this.#createRuntime({ botId: config.botId, config, appSecret }));
     if (!runtime || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
       throw new TypeError('createRuntime returned an invalid QQ runtime');
     }
@@ -470,18 +484,18 @@ export class QqController {
     const runtime = this.#runtimes.get(botId);
     this.#runtimes.delete(botId);
     await runtime?.stop().catch((error) => {
-      this.#logger.warn?.(`[dsh-im:qq] bot ${botId} failed to stop cleanly:`, error);
+      this.#logger.warn?.(`[dsh-im:qq] bot ${botId} failed to stop cleanly:`, extractConnectionEvidence(error).details);
     });
   }
 
   async #resolveSecret(ref) {
-    const result = await this.#credentials.resolve(ref).catch(() => undefined);
+    const result = await atConnectionStage('credential.read', () => this.#credentials.resolve(ref), 'credential-store');
     return cleanString(result?.value);
   }
 
   async #restoreCredential(ref, previous) {
-    if (previous?.value) await this.#credentials.set(ref, previous.value).catch(() => undefined);
-    else await this.#credentials.unset(ref).catch(() => undefined);
+    if (previous?.value) await atConnectionStage('credential.save', () => this.#credentials.set(ref, previous.value), 'credential-store').catch(() => undefined);
+    else await atConnectionStage('credential.remove', () => this.#credentials.unset(ref), 'credential-store').catch(() => undefined);
   }
 
   #withBotTransition(botId, operation) {

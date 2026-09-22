@@ -8,6 +8,7 @@ import {
 } from '../../src/channels/shared/inbound-ttl.mjs';
 import { h } from './i18n.js';
 import { HelpTip } from './help-tip.js';
+import { DEFAULT_IMAGE_INPUT_SETTINGS, normalizeImageInputSettings } from '../../src/channels/shared/image-input-policy.mjs';
 
 export const GLOBAL_SETTINGS_RPC_CHANNEL = '/dsh-im-settings';
 
@@ -20,6 +21,8 @@ export const GLOBAL_SETTINGS_ENDPOINTS = Object.freeze({
   getTtl: 'settings.inbound-ttl.get',
   setTtl: 'settings.inbound-ttl.set',
   sweep: 'settings.inbound-ttl.sweep',
+  getImages: 'settings.image-input.get',
+  setImages: 'settings.image-input.set',
 });
 
 function presentError(error, fallback) {
@@ -60,6 +63,92 @@ function GlobalButton({ children, kind = 'secondary', className = '', ...props }
     className: `dim-deliveryButton ${className}`.trim(),
     'data-kind': kind,
   }, children);
+}
+
+export function ImageInputSettings({ rpcCall }) {
+  const [values, setValues] = React.useState(DEFAULT_IMAGE_INPUT_SETTINGS);
+  const [phase, setPhase] = React.useState('loading');
+  const [error, setError] = React.useState(null);
+  const [saved, setSaved] = React.useState(false);
+  const mounted = React.useRef(false);
+  const saving = React.useRef(false);
+  const id = React.useId();
+  const load = React.useCallback(async (signal) => {
+    setPhase('loading');
+    setError(null);
+    try {
+      const result = unwrapRpcResult(await rpcCall(GLOBAL_SETTINGS_ENDPOINTS.getImages, {}, signal));
+      if (signal?.aborted || !mounted.current) return;
+      const settings = normalizeImageInputSettings(result);
+      if (!settings) throw new Error('通用设置返回了无法识别的响应。');
+      setValues(settings);
+      setPhase('ready');
+    } catch (caught) {
+      if (signal?.aborted || !mounted.current) return;
+      setError(presentError(caught, '无法读取或保存图片设置，请稍后重试。'));
+      setPhase('error');
+    }
+  }, [rpcCall]);
+  React.useEffect(() => {
+    mounted.current = true;
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => { mounted.current = false; controller.abort(); };
+  }, [load]);
+  const save = async (event) => {
+    event.preventDefault();
+    if (saving.current || phase !== 'ready') return;
+    const settings = normalizeImageInputSettings(values);
+    setSaved(false);
+    if (!settings) {
+      setError('图片限制无效：请输入正整数，原图接收上限和总量上限不能小于单图上限。');
+      return;
+    }
+    saving.current = true;
+    setPhase('saving');
+    setError(null);
+    try {
+      const result = unwrapRpcResult(await rpcCall(GLOBAL_SETTINGS_ENDPOINTS.setImages, settings));
+      if (!normalizeImageInputSettings(result)) throw new Error('通用设置返回了无法识别的响应。');
+      if (mounted.current) { setValues(result); setSaved(true); }
+    } catch (caught) {
+      if (mounted.current) setError(presentError(caught, '无法读取或保存图片设置，请稍后重试。'));
+    } finally {
+      saving.current = false;
+      if (mounted.current) setPhase('ready');
+    }
+  };
+  const fields = [
+    ['maxDownloadMb', '原图接收上限 (MB)'],
+    ['maxImageMb', '模型单图上限 (MB)'],
+    ['maxTotalMb', '模型图片总量上限 (MB)'],
+    ['maxImages', '每条消息最多图片数'],
+  ];
+  return h('section', { className: 'dim-globalSection dim-imageSettings', 'aria-label': '图片输入', 'aria-busy': phase === 'loading' || phase === 'saving' },
+    h('div', { className: 'dim-globalHead' },
+      h('div', { className: 'dim-globalHeadTitle' },
+        h('div', { className: 'dim-helpRow' },
+          h('h3', null, '图片输入'),
+          h(HelpTip, {
+            id: `${id}-help`,
+            label: '查看图片输入说明',
+            disabled: phase === 'loading' || phase === 'saving',
+          },
+          '适用于支持图片的聊天渠道。原图按附件保留时长保存，发送给模型的副本会自动缩放或压缩；无法直接发送时交给模型按文件处理。')))),
+    h('form', { onSubmit: save },
+      h('div', { className: 'dim-imageSettingsFields' },
+        ...fields.map(([key, label]) => h('div', { className: 'dim-imageSettingsField', key },
+          h('label', { htmlFor: `${id}-${key}` }, label),
+          h('input', { id: `${id}-${key}`, className: 'dim-globalTtlInput', type: 'number', min: 1, step: 1,
+            value: values[key], disabled: phase !== 'ready',
+            onChange: (event) => { setValues((current) => ({ ...current, [key]: event.target.value })); setSaved(false); setError(null); },
+          })))),
+      h('div', { className: 'dim-imageSettingsActions' },
+        h(GlobalButton, { type: 'submit', kind: 'primary', className: 'dim-globalSaveButton', disabled: phase !== 'ready' }, phase === 'saving' ? '保存中…' : '保存图片设置'),
+        phase === 'error' ? h(GlobalButton, { className: 'dim-globalSaveButton', onClick: () => void load() }, '重试') : null)),
+    error ? h('p', { className: 'dim-globalInline dim-imageSettingsFeedback', 'data-tone': 'error', role: 'alert' }, error) : null,
+    saved ? h('p', { className: 'dim-globalInline dim-imageSettingsFeedback', role: 'status' }, '已保存') : null,
+    phase === 'loading' ? h('p', { className: 'dim-globalInline dim-imageSettingsFeedback', role: 'status' }, '正在读取图片设置…') : null);
 }
 
 export function GlobalSettingsPanel({ rpcCall }) {
@@ -337,5 +426,6 @@ export function GlobalSettingsPanel({ rpcCall }) {
           role: inlineStatus.role,
           'aria-live': inlineStatus.role === 'status' ? 'polite' : undefined,
         }, inlineStatus.message)
-        : null))));
+        : null)),
+    h(ImageInputSettings, { rpcCall })));
 }

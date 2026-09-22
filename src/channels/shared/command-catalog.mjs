@@ -1,6 +1,6 @@
 import { t } from './i18n.mjs';
 
-const TEXT_CHANNELS = Object.freeze(['telegram', 'slack', 'discord', 'whatsapp']);
+const TEXT_CHANNELS = Object.freeze(['telegram', 'slack', 'discord', 'whatsapp', 'matrix']);
 
 function defineCatalogCommand(name, description, help, { aliases = [], ...options } = {}) {
   return Object.freeze({

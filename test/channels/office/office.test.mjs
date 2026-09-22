@@ -350,9 +350,13 @@ test('AI Office RPC validates configuration and keeps transport failures safe', 
     workspaces: {}, instructionPresets: {},
   })).ok, true);
   assert.equal(calls.length, 1);
-  assert.deepEqual(await handler(OFFICE_RPC_ENDPOINTS.test, {}), {
-    ok: false, error: { code: 'office-hook-unavailable', message: 'AI Office Hook 尚未上线或地址不正确。' },
-  });
+  const result = await handler(OFFICE_RPC_ENDPOINTS.test, {});
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'office-hook-unavailable');
+  assert.equal(result.error.message, 'AI Office Hook 尚未上线或地址不正确。');
+  assert.equal(result.error.details.stage, 'connection.test');
+  assert.match(result.error.details.referenceId, /^IM-CONN-[A-F0-9]{8}$/);
+  assert.doesNotMatch(JSON.stringify(result), /internal URL/);
 });
 
 test('AI Office settings renders connection fields and fixed hook preview', () => {

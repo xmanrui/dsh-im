@@ -1,3 +1,4 @@
+import { createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
 import { sendRememberedConnectionTest } from '../shared/connection-test.mjs';
 import { MacOSMessagesApi, normalizeIMessage } from './imessage-api.mjs';
 import { createIMessageBridgeStatus, IMessageHarnessBridge } from './imessage-bridge.mjs';
@@ -26,6 +27,7 @@ export function createIMessageRuntimeStatus() {
 
 export class IMessageRuntime {
   #config; #token; #harness; #state; #contextEnhancement; #accessPolicy; #logger;
+  #diagnostics;
   #replyTimeoutMs; #pollIntervalMs; #createApi; #status = createIMessageRuntimeStatus();
   #api; #bridge; #abortController; #timer; #polling; #stopped = true;
   constructor({ config, token, harness, state, contextEnhancement, accessPolicy, logger = console,
@@ -33,7 +35,7 @@ export class IMessageRuntime {
     createApi = (options) => new MacOSMessagesApi(options) }) {
     if (!config || !token || !harness || !state) throw new TypeError('IMessageRuntime requires config, token, Harness, and state');
     this.#config = config; this.#token = token; this.#harness = harness; this.#state = state;
-    this.#contextEnhancement = contextEnhancement; this.#accessPolicy = accessPolicy; this.#logger = logger;
+    this.#contextEnhancement = contextEnhancement; this.#accessPolicy = accessPolicy; this.#logger = logger; this.#diagnostics = createConnectionDiagnostics({ channel: 'imessage', logger });
     this.#replyTimeoutMs = replyTimeoutMs; this.#pollIntervalMs = pollIntervalMs; this.#createApi = createApi;
   }
   get status() { return structuredClone(this.#status); }
@@ -60,7 +62,7 @@ export class IMessageRuntime {
     await this.stop(); this.#stopped = false; this.#status.startedAt = new Date().toISOString(); this.#status.connectionState = 'connecting';
     this.#abortController = new AbortController();
     try {
-      await this.#harness.ensureRunning(); this.#status.harnessReachable = true;
+      await atConnectionStage('harness.check', () => this.#harness.ensureRunning()); this.#status.harnessReachable = true;
       this.#api = this.#createApi({ signal: this.#abortController.signal });
       const permissions = await this.#api.getPermissions();
       if (permissions.database !== 'granted' || permissions.automation !== 'granted') {
@@ -78,7 +80,8 @@ export class IMessageRuntime {
         logger: this.#logger, replyTimeoutMs: this.#replyTimeoutMs, signal: this.#abortController.signal });
       this.#status.ready = true; this.#status.connectionState = 'connected'; this.#status.lastConnectedAt = Date.now();
       this.#schedulePoll(0); return this.status;
-    } catch (error) { this.#status.ready = false; this.#status.connectionState = 'failed'; this.#status.lastError = error.message; await this.stop(); throw error; }
+    } catch (error) { this.#status.ready = false; this.#status.connectionState = 'failed'; this.#status.error = this.#diagnostics.report(error, { operation: 'connection.restore', reuse: true, botId: this.#config?.botId, automatic: true }).publicError;
+      this.#status.lastError = this.#status.error.message; await this.stop(); throw error; }
   }
   async stop() { this.#stopped = true; clearTimeout(this.#timer); this.#timer = null; this.#abortController?.abort(); await this.#polling?.catch(() => {}); this.#polling = null; this.#bridge = null; this.#api = null; this.#status.ready = false; }
   #schedulePoll(delay) { if (this.#stopped) return; this.#timer = setTimeout(() => { this.#polling = this.#poll().finally(() => this.#schedulePoll(this.#pollIntervalMs)); }, delay); this.#timer.unref?.(); }
@@ -92,7 +95,8 @@ export class IMessageRuntime {
         if (message) await this.#bridge.accept(message);
         if (Number.isSafeInteger(raw.rowid)) await this.#state.setCursor(raw.rowid);
       }
-      this.#status.lastCheckedAt = Date.now(); this.#status.lastError = null;
-    } catch (error) { if (!this.#stopped) { this.#status.lastError = error.message; this.#logger.warn?.('[dsh-im:imessage] polling failed', error); } }
+      this.#status.lastCheckedAt = Date.now(); this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
+    } catch (error) { if (!this.#stopped) { this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#config?.botId, automatic: true }).publicError;
+      this.#status.lastError = this.#status.error.message;  } }
   }
 }

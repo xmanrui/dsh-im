@@ -203,11 +203,12 @@ function fixture(channel, { contextEnhancement, onAsk } = {}) {
         guild_id: group ? 'guild' : undefined, content: text, mentions: [{ id: 'bot' }],
       }, 'bot');
     } else if (channel === 'whatsapp') {
+      const accountJid = '16505550123@s.whatsapp.net';
       const raw = { key: { id: String(id), remoteJid: group ? 'chat@g.us' : `${actor}@s.whatsapp.net`,
         participant: group ? `${actor}@s.whatsapp.net` : undefined, fromMe: false },
-      message: { extendedTextMessage: { text, contextInfo: { mentionedJid: ['bot@s.whatsapp.net'] } } } };
+      message: { extendedTextMessage: { text, contextInfo: { mentionedJid: [accountJid] } } } };
       nameValue(raw, 'pushName');
-      value = normalizeWhatsappMessage(raw, 'bot@s.whatsapp.net');
+      value = normalizeWhatsappMessage(raw, accountJid);
     } else if (channel === 'slack') {
       value = normalizeSlackEvent({ event_id: String(id), event: { type: group ? 'app_mention' : 'message',
         ts: String(id), channel: 'chat', channel_type: group ? 'channel' : 'im', user: actor,

@@ -14,7 +14,11 @@ const externalRuntimePackages = [
   '@tencent-connect/qqbot-nodejs',
   '@wecom/aibot-node-sdk',
   'dingtalk-stream',
+  'imapflow',
+  'mailparser',
+  'nodemailer',
   'qrcode',
+  'sharp',
   'undici',
 ];
 const external = externalRuntimePackages.flatMap((name) => [name, `${name}/*`]);

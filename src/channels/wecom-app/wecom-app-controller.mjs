@@ -1,3 +1,4 @@
+import { extractConnectionEvidence, atConnectionStage, createConnectionDiagnostics } from '../shared/connection-error.mjs';
 import {
   deriveWecomAppIdentity,
   generateCallbackSecret,
@@ -42,6 +43,7 @@ export class WecomAppController {
   #createRuntime;
   #deleteState;
   #logger;
+  #diagnostics;
   #buildCallbackUrl;
   #runtimes = new Map();
   #errors = new Map();
@@ -71,7 +73,15 @@ export class WecomAppController {
     this.#createRuntime = createRuntime;
     this.#deleteState = deleteState;
     this.#logger = logger;
+    this.#diagnostics = createConnectionDiagnostics({ channel: 'wecom-app', logger });
     this.#buildCallbackUrl = typeof buildCallbackUrl === 'function' ? buildCallbackUrl : null;
+  }
+
+  get diagnostics() { return this.#diagnostics; }
+
+  #failure(error, code, message) {
+    const stage = code.startsWith('qr-') ? 'qr.begin' : code === 'activation-failed' ? 'activation' : 'connection.start';
+    return this.#diagnostics.report(error, { reuse: true, stage, publicError: { code, message } }).publicError;
   }
 
   async initialize() {
@@ -79,17 +89,17 @@ export class WecomAppController {
     for (const config of this.#configStore.list()) {
       await this.#withBotTransition(config.botId, async () => {
         if (this.#runtimes.has(config.botId)) return;
-        const secrets = await this.#resolveSecrets(config);
-        if (!secrets) {
-          this.#errors.set(config.botId, safeError('missing-credentials', t('企业微信应用凭据缺失，请重新绑定。')));
-          return;
-        }
         try {
+          const secrets = await this.#resolveSecrets(config);
+          if (!secrets) {
+            this.#errors.set(config.botId, safeError('missing-credentials', t('企业微信应用凭据缺失，请重新绑定。')));
+            return;
+          }
           await this.#startRuntime(config, secrets);
           this.#errors.delete(config.botId);
         } catch (error) {
-          this.#errors.set(config.botId, safeError('connection-failed', t('企业微信应用连接未就绪，插件会自动重试。')));
-          this.#logger.warn?.(`[dsh-im:wecom-app] bot ${config.botId} failed to initialize`, error);
+          this.#errors.set(config.botId, this.#failure(error, 'connection-failed', t('企业微信应用连接未就绪，插件会自动重试。')));
+
         } finally {
           this.#touch();
         }
@@ -147,7 +157,7 @@ export class WecomAppController {
         encodingAESKey: normalizedAesKey,
       });
       try {
-        await this.#configStore.save(config);
+        await atConnectionStage('account.save', () => this.#configStore.save(config), 'account-config');
       } catch (error) {
         await this.#restoreSecrets(identity, previous);
         throw error;
@@ -160,8 +170,8 @@ export class WecomAppController {
         });
         this.#errors.delete(botId);
       } catch (error) {
-        this.#errors.set(botId, safeError('connection-failed', t('企业微信应用已绑定，但尚未就绪。')));
-        this.#logger.warn?.(`[dsh-im:wecom-app] bot ${botId} credential connection failed`, error);
+        this.#errors.set(botId, this.#failure(error, 'connection-failed', t('企业微信应用已绑定，但尚未就绪。')));
+
       }
       this.#touch();
     });
@@ -202,8 +212,8 @@ export class WecomAppController {
           try {
             await this.#startRuntime(updated, secrets);
           } catch (error) {
-            this.#errors.set(botId, safeError('connection-failed', t('企业微信应用已更新，但尚未就绪。')));
-            this.#logger.warn?.(`[dsh-im:wecom-app] bot ${botId} restart after settings update failed`, error);
+            this.#errors.set(botId, this.#failure(error, 'connection-failed', t('企业微信应用已更新，但尚未就绪。')));
+
           }
         }
       }
@@ -224,8 +234,7 @@ export class WecomAppController {
         try {
           await this.#startRuntime(updated, secrets);
         } catch (error) {
-          this.#errors.set(botId, safeError('connection-failed', t('回调密钥已重置，但机器人重启失败，请手动重连。')));
-          this.#logger.warn?.(`[dsh-im:wecom-app] bot ${botId} restart after secret reset failed`, error);
+          this.#errors.set(botId, this.#failure(error, 'connection-failed', t('回调密钥已重置，但机器人重启失败，请手动重连。')));
         }
       }
       this.#touch();
@@ -243,7 +252,7 @@ export class WecomAppController {
         await this.#startRuntime(config, secrets);
         this.#errors.delete(botId);
       } catch (error) {
-        this.#errors.set(botId, safeError('connection-failed', t('企业微信应用仍未就绪，请稍后重试。')));
+        this.#errors.set(botId, this.#failure(error, 'connection-failed', t('企业微信应用仍未就绪，请稍后重试。')));
         throw error;
       } finally {
         this.#touch();
@@ -282,30 +291,34 @@ export class WecomAppController {
   }
 
   async deleteBot(botId) {
+    const warnings = [];
     const config = this.#configStore.get(botId);
     if (!config) throw new Error('Unknown Enterprise WeChat app bot');
     await this.#withBotTransition(botId, async () => {
       const previous = await this.#resolveSecrets(config);
       await this.#stopRuntime(botId);
       try {
-        await this.#credentials.unset(config.secretRef);
-        await this.#credentials.unset(config.callbackTokenRef);
-        await this.#credentials.unset(config.callbackKeyRef);
-        await this.#configStore.remove(botId);
+        await atConnectionStage('credential.remove', () => this.#credentials.unset(config.secretRef), 'credential-store');
+        await atConnectionStage('credential.remove', () => this.#credentials.unset(config.callbackTokenRef), 'credential-store');
+        await atConnectionStage('credential.remove', () => this.#credentials.unset(config.callbackKeyRef), 'credential-store');
+        await atConnectionStage('account.remove', () => this.#configStore.remove(botId), 'account-config');
       } catch (error) {
-        if (previous) {
-          await this.#setSecrets(config, previous).catch(() => undefined);
-          await this.#startRuntime(config, previous).catch(() => undefined);
+        if (!this.#configStore.get(botId)) {
+          warnings.push(this.#diagnostics.report(error, { operation: 'bot.delete', stage: 'workspace.cleanup', warning: true,
+            publicError: { code: 'workspace-cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError);
+        } else {
+          if (previous) {
+            await this.#setSecrets(config, previous).catch(() => undefined);
+            await this.#startRuntime(config, previous).catch(() => undefined);
+          }
+          throw new Error('Unable to remove the Enterprise WeChat app bot safely.', { cause: error });
         }
-        throw new Error('Unable to remove the Enterprise WeChat app bot safely.', { cause: error });
       }
-      await this.#deleteState({ botId, config }).catch((error) => {
-        this.#logger.warn?.(`[dsh-im:wecom-app] bot ${botId} state cleanup failed:`, error);
-      });
+      await this.#deleteState({ botId, config }).catch(error => { warnings.push(this.#diagnostics.report(error, { reuse: true, operation: 'bot.delete', stage: 'state.cleanup', resource: 'account-state', warning: true, publicError: { code: 'cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError); });
       this.#errors.delete(botId);
       this.#touch();
     });
-    return this.status();
+    return { ...this.status(), ...(warnings.length ? { warnings } : {}) };
   }
 
   status() {
@@ -347,7 +360,7 @@ export class WecomAppController {
           messagesReplied: runtimeStatus?.messagesReplied ?? 0,
         },
         lastMessageError: publicMessageFailure(runtimeStatus?.lastMessageError),
-        error: structuredClone(this.#errors.get(config.botId) ?? null),
+        error: structuredClone(runtimeStatus?.error ?? this.#errors.get(config.botId) ?? null),
       };
     });
     const connectedCount = bots.filter((bot) => bot.connected).length;
@@ -373,7 +386,7 @@ export class WecomAppController {
     if (this.#closed) throw new Error('Enterprise WeChat app controller is closed');
     await this.#stopRuntime(config.botId);
     if (this.#closed) throw new Error('Enterprise WeChat app controller is closed');
-    const runtime = await this.#createRuntime({ botId: config.botId, config, secrets });
+    const runtime = await atConnectionStage('runtime.prepare', () => this.#createRuntime({ botId: config.botId, config, secrets }));
     if (!runtime || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
       throw new TypeError('createRuntime returned an invalid Enterprise WeChat app runtime');
     }
@@ -391,7 +404,7 @@ export class WecomAppController {
     const runtime = this.#runtimes.get(botId);
     this.#runtimes.delete(botId);
     await runtime?.stop().catch((error) => {
-      this.#logger.warn?.(`[dsh-im:wecom-app] bot ${botId} failed to stop cleanly:`, error);
+      this.#logger.warn?.(`[dsh-im:wecom-app] bot ${botId} failed to stop cleanly:`, extractConnectionEvidence(error).details);
     });
   }
 
@@ -404,13 +417,13 @@ export class WecomAppController {
   }
 
   async #setSecrets(identity, { corpSecret, token, encodingAESKey }) {
-    await this.#credentials.set(identity.secretRef, corpSecret);
-    await this.#credentials.set(identity.callbackTokenRef, token);
-    await this.#credentials.set(identity.callbackKeyRef, encodingAESKey);
+    await atConnectionStage('credential.save', () => this.#credentials.set(identity.secretRef, corpSecret), 'credential-store');
+    await atConnectionStage('credential.save', () => this.#credentials.set(identity.callbackTokenRef, token), 'credential-store');
+    await atConnectionStage('credential.save', () => this.#credentials.set(identity.callbackKeyRef, encodingAESKey), 'credential-store');
   }
 
   async #resolveSecret(ref) {
-    const result = await this.#credentials.resolve(ref).catch(() => undefined);
+    const result = await atConnectionStage('credential.read', () => this.#credentials.resolve(ref), 'credential-store');
     return cleanString(result?.value);
   }
 
@@ -419,9 +432,9 @@ export class WecomAppController {
       await this.#setSecrets(identity, previous).catch(() => undefined);
       return;
     }
-    await this.#credentials.unset(identity.secretRef).catch(() => undefined);
-    await this.#credentials.unset(identity.callbackTokenRef).catch(() => undefined);
-    await this.#credentials.unset(identity.callbackKeyRef).catch(() => undefined);
+    await atConnectionStage('credential.remove', () => this.#credentials.unset(identity.secretRef), 'credential-store').catch(() => undefined);
+    await atConnectionStage('credential.remove', () => this.#credentials.unset(identity.callbackTokenRef), 'credential-store').catch(() => undefined);
+    await atConnectionStage('credential.remove', () => this.#credentials.unset(identity.callbackKeyRef), 'credential-store').catch(() => undefined);
   }
 
   #withBotTransition(botId, operation) {

@@ -522,7 +522,7 @@ export class SlackApi {
       });
     } catch (error) {
       if (error?.name === 'AbortError' || error?.name === 'TimeoutError') throw error;
-      throw new Error(`Slack ${method} transport failed`);
+      throw new Error(`Slack ${method} transport failed`, { cause: error });
     }
 
     if (tokenKind === 'bot') {
@@ -533,8 +533,8 @@ export class SlackApi {
     let payload;
     try {
       payload = await response.json();
-    } catch {
-      throw new Error(`Slack ${method} returned invalid JSON`);
+    } catch (cause) {
+      throw Object.assign(new Error(`Slack ${method} returned invalid JSON`, { cause }), { status: response?.status });
     }
     if (response.status === 429 && retry) {
       const seconds = Number(response.headers.get('retry-after')) || 1;

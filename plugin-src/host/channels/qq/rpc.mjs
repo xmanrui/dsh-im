@@ -1,3 +1,4 @@
+import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import QRCode from 'qrcode';
@@ -132,6 +133,7 @@ async function publicStatus(status, encodeQr) {
 }
 
 export function createQqRpcHandler(controller, { encodeQr = qrDataUrl } = {}) {
+  const diagnostics = controller.diagnostics ?? createConnectionDiagnostics({ channel: 'qq' });
   for (const method of ['status', 'startProvisioning', 'registrationStatus', 'cancelProvisioning', 'bindCredentials', 'reconnectBot', 'deleteBot']) {
     if (typeof controller?.[method] !== 'function') throw new TypeError(`A complete QQ controller is required (${method})`);
   }
@@ -183,7 +185,7 @@ export function createQqRpcHandler(controller, { encodeQr = qrDataUrl } = {}) {
             } catch (error) {
               testError = error;
             }
-            testMessage = publicConnectionTestResult(testError);
+            testMessage = publicConnectionTestResult(testError, { diagnostics, botId: payload.botId });
           }
         }
         value = await publicStatus({
@@ -231,10 +233,10 @@ export function createQqRpcHandler(controller, { encodeQr = qrDataUrl } = {}) {
         : { ok: true, value };
     } catch (error) {
       const workspaceError = publicWorkspaceError(error);
-      return signal?.aborted
+      return diagnosticRpcResult(diagnostics, error, signal?.aborted
         ? { ok: false, error: { code: 'cancelled', message: 'The request was cancelled.' } }
         : { ok: false, error: publicQqStateError(error) ?? workspaceError
-          ?? { code: 'qq-operation-failed', message: 'QQ 操作失败，请稍后重试。' } };
+          ?? { code: 'qq-operation-failed', message: 'QQ 操作失败，请稍后重试。' } }, { operation: endpoint, botId: payload?.botId });
     }
   };
 }

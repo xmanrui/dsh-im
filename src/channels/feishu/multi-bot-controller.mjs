@@ -1,3 +1,4 @@
+import { atConnectionStage, createConnectionDiagnostics } from '../shared/connection-error.mjs';
 import { randomUUID } from 'node:crypto';
 import { connectionTestMessage } from '../shared/connection-test.mjs';
 import { publicMessageFailure } from '../shared/message-failure.mjs';
@@ -115,6 +116,7 @@ function optionalNonEmptyString(value) {
  * runtime lifecycles may proceed independently.
  */
 export class MultiBotDshFeishuController {
+  #diagnostics;
   #registerApp;
   #verifyApp;
   #credentials;
@@ -138,6 +140,7 @@ export class MultiBotDshFeishuController {
   constructor({
     registerApp,
     verifyApp,
+    logger = console,
     credentials,
     configStore,
     createRuntime,
@@ -159,6 +162,7 @@ export class MultiBotDshFeishuController {
       || callbackProbeTimeoutMs > MAX_CALLBACK_PROBE_TIMEOUT_MS) {
       throw new TypeError('callbackProbeTimeoutMs must be between 1 and 600000ms');
     }
+    this.#diagnostics = createConnectionDiagnostics({ channel: 'feishu', logger });
     this.#registerApp = registerApp;
     this.#verifyApp = verifyApp;
     this.#credentials = credentials;
@@ -191,12 +195,12 @@ export class MultiBotDshFeishuController {
       }
       let resolved;
       try {
-        resolved = await this.#credentials.resolve(config.secretRef);
-      } catch {
-        this.#botErrors.set(config.id, {
+        resolved = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.secretRef), 'credential-store');
+      } catch (error) {
+        this.#botErrors.set(config.id, this.#diagnostics.report(error, { reuse: true, botId: config.id, publicError: {
           code: 'missing_credentials',
           message: '无法读取机器人凭据，请检查凭据存储。',
-        });
+        } }).publicError);
         return;
       }
       if (!resolved?.value) {
@@ -209,11 +213,11 @@ export class MultiBotDshFeishuController {
       try {
         await this.#startRuntime(config, resolved.value);
         this.#botErrors.delete(config.id);
-      } catch {
-        this.#botErrors.set(config.id, {
+      } catch (error) {
+        this.#botErrors.set(config.id, this.#diagnostics.report(error, { reuse: true, botId: config.id, stage: 'connection.start', publicError: {
           code: 'connection_failed',
           message: '机器人暂时无法连接飞书，请重试。',
-        });
+        } }).publicError);
       }
     })));
     if (attempted) this.#touch();
@@ -228,6 +232,7 @@ export class MultiBotDshFeishuController {
     }
     const record = { id, manager: null, botId: null, createdNew: false, cancelled: false };
     record.manager = new RegistrationManager({
+      diagnostics: this.#diagnostics,
       registerApp: this.#registerApp,
       onCredentials: (result) => this.#serializeConfig(() => this.#acceptCredentials(record, result)),
     });
@@ -290,6 +295,7 @@ export class MultiBotDshFeishuController {
       },
     };
     record.manager = new CallbackRepairManager({
+      diagnostics: this.#diagnostics,
       registerApp: this.#registerApp,
       appId: target.appId,
       domain: target.domain,
@@ -349,6 +355,7 @@ export class MultiBotDshFeishuController {
       initiator: { actorOpenId: null, chatId: null },
     };
     record.manager = new GroupMessagePermissionManager({
+      diagnostics: this.#diagnostics,
       registerApp: this.#registerApp,
       appId: target.appId,
       domain: target.domain,
@@ -407,6 +414,8 @@ export class MultiBotDshFeishuController {
     return this.registrationStatus(attemptId) ?? this.status();
   }
 
+  get diagnostics() { return this.#diagnostics; }
+
   status(botId) {
     return this.#status({
       registration: this.#registrations.get(this.#latestRegistrationId) ?? null,
@@ -440,7 +449,7 @@ export class MultiBotDshFeishuController {
         throw new Error('Bot id generator returned an invalid or duplicate id');
       }
       const secretRef = existing?.secretRef ?? secretRefFor(botId);
-      const previousSecret = await this.#credentials.resolve(secretRef).catch(() => undefined);
+      const previousSecret = await atConnectionStage('credential.read', () => this.#credentials.resolve(secretRef), 'credential-store').catch(() => undefined);
       const config = {
         ...existing,
         id: botId,
@@ -460,7 +469,7 @@ export class MultiBotDshFeishuController {
         createdAt: existing?.createdAt ?? new Date().toISOString(),
       };
 
-      await this.#credentials.set(secretRef, normalizedSecret);
+      await atConnectionStage('credential.save', () => this.#credentials.set(secretRef, normalizedSecret), 'credential-store');
       let saved;
       try {
         saved = await this.#configStore.saveBot(config);
@@ -473,11 +482,11 @@ export class MultiBotDshFeishuController {
         try {
           await this.#startRuntime(saved, normalizedSecret);
           this.#botErrors.delete(botId);
-        } catch {
-          this.#botErrors.set(botId, {
+        } catch (error) {
+          this.#botErrors.set(botId, this.#diagnostics.report(error, { reuse: true, botId: botId, publicError: {
             code: 'connection_failed',
             message: '机器人已经绑定，但长连接未就绪，请点击重试。',
-          });
+          } }).publicError);
         }
       });
       this.#touch();
@@ -501,8 +510,8 @@ export class MultiBotDshFeishuController {
       }
       let resolved;
       try {
-        resolved = await this.#credentials.resolve(config.secretRef);
-      } catch {
+        resolved = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.secretRef), 'credential-store');
+      } catch (error) {
         resolved = null;
       }
       if (!resolved?.value) {
@@ -516,11 +525,11 @@ export class MultiBotDshFeishuController {
       try {
         await this.#startRuntime(config, resolved.value);
         this.#botErrors.delete(botId);
-      } catch {
-        this.#botErrors.set(botId, {
+      } catch (error) {
+        this.#botErrors.set(botId, this.#diagnostics.report(error, { reuse: true, botId: botId, stage: 'connection.start', publicError: {
           code: 'connection_failed',
           message: '机器人暂时无法连接飞书，请重试。',
-        });
+        } }).publicError);
       }
       this.#touch();
       return this.status(botId);
@@ -691,7 +700,7 @@ export class MultiBotDshFeishuController {
     const bots = this.#configStore.list().map((config) => {
       const connection = connectionStatus(this.#runtimes.get(config.id));
       const connected = isConnected(connection);
-      const error = this.#botErrors.get(config.id) ?? null;
+      const error = connectionStatus(this.#runtimes.get(config.id)).error ?? this.#botErrors.get(config.id) ?? null;
       return {
         botId: config.id,
         phase: botPhase({ connected, error, connection }),
@@ -832,7 +841,7 @@ export class MultiBotDshFeishuController {
 
       let previous;
       try {
-        previous = await this.#credentials.resolve(current.secretRef);
+        previous = await atConnectionStage('credential.read', () => this.#credentials.resolve(current.secretRef), 'credential-store');
       } catch (error) {
         throw this.#callbackRepairError(
           record,
@@ -844,9 +853,9 @@ export class MultiBotDshFeishuController {
       if (previous?.value !== appSecret) {
         record.stage = 'persisting_secret';
         try {
-          await this.#credentials.set(current.secretRef, appSecret);
+          await atConnectionStage('credential.save', () => this.#credentials.set(current.secretRef, appSecret), 'credential-store');
         } catch (writeError) {
-          const observed = await this.#credentials.resolve(current.secretRef).catch(() => null);
+          const observed = await atConnectionStage('credential.read', () => this.#credentials.resolve(current.secretRef), 'credential-store').catch(() => null);
           if (observed?.value !== appSecret) {
             throw this.#callbackRepairError(
               record,
@@ -856,7 +865,7 @@ export class MultiBotDshFeishuController {
             );
           }
         }
-        const persisted = await this.#credentials.resolve(current.secretRef).catch(() => null);
+        const persisted = await atConnectionStage('credential.read', () => this.#credentials.resolve(current.secretRef), 'credential-store').catch(() => null);
         if (persisted?.value !== appSecret) {
           throw this.#callbackRepairError(
             record,
@@ -887,10 +896,10 @@ export class MultiBotDshFeishuController {
       try {
         await this.#startRuntime(saved, appSecret);
       } catch (error) {
-        this.#botErrors.set(record.botId, {
+        this.#botErrors.set(record.botId, this.#diagnostics.report(error, { reuse: true, botId: record.botId, stage: 'connection.start', publicError: {
           code: 'connection_failed',
           message: '群消息权限已开通，但机器人长连接未就绪，请点击重试。',
-        });
+        } }).publicError);
         this.#touch();
         throw this.#callbackRepairError(
           record,
@@ -981,7 +990,7 @@ export class MultiBotDshFeishuController {
 
         let previous;
         try {
-          previous = await this.#credentials.resolve(current.secretRef);
+          previous = await atConnectionStage('credential.read', () => this.#credentials.resolve(current.secretRef), 'credential-store');
         } catch (error) {
           throw this.#callbackRepairError(
             record,
@@ -994,9 +1003,9 @@ export class MultiBotDshFeishuController {
         if (credentialChanged) {
           record.stage = 'persisting_secret';
           try {
-            await this.#credentials.set(current.secretRef, appSecret);
+            await atConnectionStage('credential.save', () => this.#credentials.set(current.secretRef, appSecret), 'credential-store');
           } catch (writeError) {
-            const observed = await this.#credentials.resolve(current.secretRef).catch(() => null);
+            const observed = await atConnectionStage('credential.read', () => this.#credentials.resolve(current.secretRef), 'credential-store').catch(() => null);
             if (observed?.value !== appSecret) {
               throw this.#callbackRepairError(
                 record,
@@ -1006,7 +1015,7 @@ export class MultiBotDshFeishuController {
               );
             }
           }
-          const persisted = await this.#credentials.resolve(current.secretRef).catch(() => null);
+          const persisted = await atConnectionStage('credential.read', () => this.#credentials.resolve(current.secretRef), 'credential-store').catch(() => null);
           if (persisted?.value !== appSecret) {
             throw this.#callbackRepairError(
               record,
@@ -1029,10 +1038,10 @@ export class MultiBotDshFeishuController {
           // The returned credential was already verified and persisted. Do
           // not restore a potentially revoked old secret; reconnectBot can
           // safely retry this forward state later.
-          this.#botErrors.set(record.botId, {
+          this.#botErrors.set(record.botId, this.#diagnostics.report(error, { reuse: true, botId: record.botId, publicError: {
             code: 'connection_failed',
             message: '机器人回调修复已保存，但长连接未就绪，请点击重试。',
-          });
+          } }).publicError);
           this.#touch();
           throw this.#callbackRepairError(
             record,
@@ -1120,8 +1129,8 @@ export class MultiBotDshFeishuController {
     }
     const secretRef = existing?.secretRef ?? secretRefFor(botId);
     const previousOwnership = this.#botOwnership.get(botId);
-    const previousSecret = await this.#credentials.resolve(secretRef).catch(() => undefined);
-    await this.#credentials.set(secretRef, appSecret);
+    const previousSecret = await atConnectionStage('credential.read', () => this.#credentials.resolve(secretRef), 'credential-store').catch(() => undefined);
+    await atConnectionStage('credential.save', () => this.#credentials.set(secretRef, appSecret), 'credential-store');
     let config;
     try {
       config = await this.#configStore.saveBot({
@@ -1219,29 +1228,29 @@ export class MultiBotDshFeishuController {
             this.#botErrors.delete(botId);
           } else {
             await this.#withBotTransition(botId, () => this.#stopRuntime(botId));
-            this.#botErrors.set(botId, {
+            this.#botErrors.set(botId, this.#diagnostics.report(error, { reuse: true, botId: botId, publicError: {
               code: 'deletion_pending',
               message: '机器人正在等待完成本地删除，请重试移除。',
-            });
+            } }).publicError);
           }
           this.#touch();
           throw error;
         } catch (restoreError) {
           if (restoreError === error) throw error;
-          this.#botErrors.set(botId, {
+          this.#botErrors.set(botId, this.#diagnostics.report(restoreError, { reuse: true, botId: botId, publicError: {
             code: 'connection_failed',
             message: '机器人连接更新失败，且原连接无法恢复，请重试。',
-          });
+          } }).publicError);
           this.#touch();
           throw new Error('Unable to restore the previous Feishu bot connection.', {
             cause: restoreError,
           });
         }
       }
-      this.#botErrors.set(botId, {
+      this.#botErrors.set(botId, this.#diagnostics.report(error, { reuse: true, botId: botId, publicError: {
         code: 'connection_failed',
         message: '机器人已经创建，但长连接未就绪，请点击重试。',
-      });
+      } }).publicError);
       this.#touch();
       throw error;
     }
@@ -1249,12 +1258,12 @@ export class MultiBotDshFeishuController {
 
   async #startRuntime(config, appSecret) {
     await this.#stopRuntime(config.id);
-    const runtime = await this.#createRuntime({
+    const runtime = await atConnectionStage('runtime.prepare', () => this.#createRuntime({
       botId: config.id,
       config,
       appSecret,
       repair: this.#runtimeRepairCapability(config.id),
-    });
+    }));
     this.#runtimes.set(config.id, runtime);
     try {
       await runtime.start();
@@ -1300,21 +1309,21 @@ export class MultiBotDshFeishuController {
     }
     await this.#stopRuntime(botId);
     try {
-      await this.#credentials.unset(config.secretRef);
+      await atConnectionStage('credential.remove', () => this.#credentials.unset(config.secretRef), 'credential-store');
     } catch (error) {
-      this.#botErrors.set(botId, {
+      this.#botErrors.set(botId, this.#diagnostics.report(error, { reuse: true, botId: botId, publicError: {
         code: 'credential_removal_failed',
         message: '无法删除机器人凭据，请稍后重试。',
-      });
+      } }).publicError);
       throw new Error('Unable to remove the Feishu credential.', { cause: error });
     }
     try {
       await this.#deleteState({ botId, config });
     } catch (error) {
-      this.#botErrors.set(botId, {
+      this.#botErrors.set(botId, this.#diagnostics.report(error, { reuse: true, botId: botId, publicError: {
         code: 'state_cleanup_failed',
         message: '无法删除机器人的本地会话数据，请稍后重试。',
-      });
+      } }).publicError);
       throw new Error('Unable to remove the Feishu bot session state.', { cause: error });
     }
     await this.#configStore.removeBot(botId);
@@ -1323,8 +1332,8 @@ export class MultiBotDshFeishuController {
   }
 
   async #restoreCredential(secretRef, previous) {
-    if (previous?.value) await this.#credentials.set(secretRef, previous.value);
-    else await this.#credentials.unset(secretRef);
+    if (previous?.value) await atConnectionStage('credential.save', () => this.#credentials.set(secretRef, previous.value), 'credential-store');
+    else await atConnectionStage('credential.remove', () => this.#credentials.unset(secretRef), 'credential-store');
   }
 
   #requireBot(botId) {

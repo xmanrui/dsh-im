@@ -1,3 +1,4 @@
+import { extractConnectionEvidence, atConnectionStage, createConnectionDiagnostics } from '../shared/connection-error.mjs';
 import { randomUUID } from 'node:crypto';
 
 import { connectionTestMessage } from '../shared/connection-test.mjs';
@@ -39,6 +40,7 @@ export class WhatsappController {
   #deleteAuth;
   #deleteState;
   #logger;
+  #diagnostics;
   #runtimes = new Map();
   #errors = new Map();
   #attempts = new Map();
@@ -71,6 +73,14 @@ export class WhatsappController {
     this.#deleteAuth = deleteAuth;
     this.#deleteState = deleteState;
     this.#logger = logger;
+    this.#diagnostics = createConnectionDiagnostics({ channel: 'whatsapp', logger });
+  }
+
+  get diagnostics() { return this.#diagnostics; }
+
+  #failure(error, code, message) {
+    const stage = code.startsWith('qr-') ? 'qr.begin' : code === 'activation-failed' ? 'activation' : 'connection.start';
+    return this.#diagnostics.report(error, { reuse: true, stage, publicError: { code, message } }).publicError;
   }
 
   async initialize() {
@@ -82,7 +92,7 @@ export class WhatsappController {
           await this.#startRuntime(config);
           this.#errors.delete(config.botId);
         } catch (error) {
-          this.#errors.set(config.botId, safeError(
+          this.#errors.set(config.botId, this.#failure(error,
             error?.code === 'relink-required' ? 'relink-required' : 'connection-failed',
             error?.code === 'relink-required'
               ? t('WhatsApp 关联设备已失效，请移除后重新扫码。')
@@ -191,7 +201,7 @@ export class WhatsappController {
         await this.#startRuntime(config);
         this.#errors.delete(botId);
       } catch (error) {
-        this.#errors.set(botId, safeError(
+        this.#errors.set(botId, this.#failure(error,
           error?.code === 'relink-required' ? 'relink-required' : 'connection-failed',
           error?.code === 'relink-required'
             ? t('WhatsApp 关联设备已失效，请移除后重新扫码。')
@@ -245,7 +255,7 @@ export class WhatsappController {
       if (this.#closed) throw new Error('WhatsApp controller is closed');
       const config = this.#configStore.get(botId);
       if (!config) throw new Error('Unknown WhatsApp bot');
-      const saved = await this.#configStore.save({ ...config, ...accessPolicy });
+      const saved = await atConnectionStage('account.save', () => this.#configStore.save({ ...config, ...accessPolicy }), 'account-config');
       this.#runtimes.get(botId)?.setAccessPolicy?.(saved);
       this.#touch();
     });
@@ -253,24 +263,31 @@ export class WhatsappController {
   }
 
   async deleteBot(botId) {
+    const warnings = [];
     const config = this.#configStore.get(botId);
     if (!config) throw new Error('Unknown WhatsApp bot');
     await this.#withBotTransition(botId, async () => {
       await this.#stopRuntime(botId);
       try {
-        await this.#configStore.remove(botId);
+        await atConnectionStage('account.remove', () => this.#configStore.remove(botId), 'account-config');
       } catch (error) {
-        await this.#startRuntime(config).catch(() => undefined);
-        throw error;
+        if (!this.#configStore.get(botId)) {
+          warnings.push(this.#diagnostics.report(error, { operation: 'bot.delete', stage: 'workspace.cleanup', warning: true,
+            publicError: { code: 'workspace-cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError);
+        } else {
+          await this.#startRuntime(config).catch(() => undefined);
+          throw error;
+        }
       }
-      await Promise.allSettled([
+      const cleanup = await Promise.allSettled([
         this.#deleteAuth(config.authDirectory),
         this.#deleteState({ botId, config }),
       ]);
+      for (const result of cleanup) if (result.status === 'rejected') warnings.push(this.#diagnostics.report(result.reason, { operation: 'bot.delete', stage: 'state.cleanup', warning: true, publicError: { code: 'cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError);
       this.#errors.delete(botId);
       this.#touch();
     });
-    return this.status();
+    return { ...this.status(), ...(warnings.length ? { warnings } : {}) };
   }
 
   status() {
@@ -302,7 +319,7 @@ export class WhatsappController {
         },
         lastMessageError: publicMessageFailure(runtimeStatus?.lastMessageError),
         accessPolicy: normalizeWhatsappAccessPolicy(config),
-        error: structuredClone(this.#errors.get(config.botId) ?? null),
+        error: structuredClone(runtimeStatus?.error ?? this.#errors.get(config.botId) ?? null),
       };
     });
     const connectedCount = bots.filter((bot) => bot.connected).length;
@@ -351,13 +368,13 @@ export class WhatsappController {
     };
     try {
       if (record.controller.signal.aborted || this.#closed) throw Object.assign(new Error(), { name: 'AbortError' });
-      await this.#configStore.save(config);
+      await atConnectionStage('account.save', () => this.#configStore.save(config), 'account-config');
       if (record.controller.signal.aborted || this.#closed) throw Object.assign(new Error(), { name: 'AbortError' });
       try {
         await this.#startRuntime(config);
         this.#errors.delete(botId);
       } catch (error) {
-        this.#errors.set(botId, safeError('connection-failed', t('WhatsApp 已绑定，消息连接暂未就绪。')));
+        this.#errors.set(botId, this.#failure(error, 'connection-failed', t('WhatsApp 已绑定，消息连接暂未就绪。')));
         this.#logger.warn?.(`[dsh-im:whatsapp] bot ${botId} did not reconnect after QR binding`);
       }
       if (previous?.authDirectory && previous.authDirectory !== config.authDirectory) {
@@ -368,12 +385,12 @@ export class WhatsappController {
     } catch (error) {
       if (record.controller.signal.aborted || this.#closed || error?.name === 'AbortError') {
         await this.#stopRuntime(botId);
-        if (previous) await this.#configStore.save(previous).catch(() => undefined);
+        if (previous) await atConnectionStage('account.save', () => this.#configStore.save(previous), 'account-config').catch(() => undefined);
         else {
-          const removed = await this.#configStore.remove(botId).catch(() => null);
+          const removed = await atConnectionStage('account.remove', () => this.#configStore.remove(botId), 'account-config').catch(() => null);
           if (removed) {
             await this.#deleteState({ botId, config }).catch((cleanupError) => {
-              this.#logger.warn?.('[dsh-im:whatsapp] cancelled bot state cleanup failed:', cleanupError);
+              this.#logger.warn?.('[dsh-im:whatsapp] cancelled bot state cleanup failed:', extractConnectionEvidence(cleanupError).details);
             });
           }
         }
@@ -384,7 +401,7 @@ export class WhatsappController {
       } else {
         await this.#deleteAuth(record.authDirectory).catch(() => undefined);
         record.state = 'failed';
-        record.error = safeError('activation-failed', t('WhatsApp 已扫码，但无法保存关联设备。'));
+        record.error = this.#failure(error, 'activation-failed', t('WhatsApp 已扫码，但无法保存关联设备。'));
         this.#logger.error?.('[dsh-im:whatsapp] unable to persist linked-device session');
       }
     } finally {
@@ -413,11 +430,11 @@ export class WhatsappController {
     if (this.#closed) throw new Error('WhatsApp controller is closed');
     await this.#stopRuntime(config.botId);
     if (this.#closed) throw new Error('WhatsApp controller is closed');
-    const runtime = await this.#createRuntime({
+    const runtime = await atConnectionStage('runtime.prepare', () => this.#createRuntime({
       botId: config.botId,
       config,
       authDir: this.#authPath(config.authDirectory),
-    });
+    }));
     if (!runtime || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
       throw new TypeError('createRuntime returned an invalid WhatsApp runtime');
     }

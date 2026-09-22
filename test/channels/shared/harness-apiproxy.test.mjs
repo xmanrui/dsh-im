@@ -108,6 +108,100 @@ function hostFixture() {
   return host;
 }
 
+for (const withStepEnd of [false, true]) {
+for (const progressMode of ['all', 'live']) {
+  test(`${progressMode} recovers a final message missed after the turn is bound (step/end=${withStepEnd})`, async () => {
+    const host = hostFixture();
+    let emission;
+    let sawEarlierAnswer = false;
+    host.onPrompt = (rpcId) => {
+      emission = (async () => {
+        host.append({ type: 'turn/start', seq: 0, data: { turn: 1 } });
+        host.append({ type: 'user/message', seq: 1, data: { turn: 1, source: { rpcId } } });
+        host.append({ type: 'assistant/message', seq: 2, data: {
+          turn: 1, step: 0, message: { content: [{ type: 'text', text: '先读取文件' }] },
+        } });
+        // Wait for the real client to consume the beginning of the turn,
+        // through the authoritative history poll.
+        await eventually(() => sawEarlierAnswer);
+        for (const stream of host.streams) stream.end();
+        // Durable history retains the final message emitted during the gap.
+        host.history.push({ event: { type: 'assistant/message', seq: 3, data: {
+          turn: 1, step: 1, message: { content: [{ type: 'text', text: '最终答案' }] },
+        } } });
+        await eventually(() => host.opened >= 2 && host.streams.size > 0);
+        if (withStepEnd) host.append({ type: 'step/end', seq: 4, data: { turn: 1, step: 1 } });
+        host.append({ type: 'turn/end', seq: withStepEnd ? 5 : 4, data: {
+          turn: 1, reason: { kind: 'completed' },
+        } });
+      })();
+    };
+    const client = localClient(host.apiProxy);
+    try {
+      const answer = await client.ask('session', 'hello', {
+        progressMode,
+        onUpdate: (update) => {
+          if (update.type === 'assistant-message' && update.text === '先读取文件') {
+            sawEarlierAnswer = true;
+          }
+        },
+        onInteraction: () => {},
+        timeoutMs: 3000,
+      });
+      assert.equal(answer, '先读取文件\n\n最终答案');
+    } finally {
+      await emission;
+    }
+  });
+}
+}
+
+test('queued live request does not publish the previous turn reasoning', async () => {
+  const { FeishuLiveCot } = await import('../../../src/channels/feishu/live-cot.mjs');
+  const host = hostFixture();
+  host.history.push(
+    { event: { type: 'turn/start', seq: 0, data: { turn: 1 } } },
+    { event: { type: 'user/message', seq: 1, data: { turn: 1, source: { rpcId: 'another-request' } } } },
+  );
+  const written = [];
+  const cot = new FeishuLiveCot({
+    createCot: async () => ({ cotId: 'cot-own', messageId: 'om-own' }),
+    writeCotEvents: async (_handle, events) => written.push(...events),
+  }, 'chat-own');
+  const reasoning = (turn, seq, text) => host.emit({
+    rpcId: `reasoning-${turn}`,
+    payload: { type: 'session/event', sessionId: 'session', event: {
+      type: 'assistant/chunk', seq, data: { turn, step: 0,
+        chunk: { type: 'reasoning-delta', index: 0, text } },
+    } },
+  });
+  host.onPrompt = (rpcId) => {
+    // The previous request is still running while this prompt waits in queue.
+    reasoning(1, 1.5, '上一轮任务的推理内容');
+    host.append({ type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } });
+    host.append({ type: 'turn/start', seq: 3, data: { turn: 2 } });
+    host.append({ type: 'user/message', seq: 4, data: { turn: 2, source: { rpcId } } });
+    reasoning(2, 4.5, '当前任务的推理内容');
+    host.append({ type: 'assistant/message', seq: 5, data: { turn: 2, step: 0,
+      message: { content: [{ type: 'text', text: '当前任务的最终答案' }] } },
+    });
+    host.append({ type: 'turn/end', seq: 6, data: { turn: 2, reason: { kind: 'completed' } } });
+  };
+  const client = localClient(host.apiProxy);
+  assert.equal(await client.ask('session', 'current request', {
+    progressMode: 'live', onUpdate: (update) => cot.handle(update), timeoutMs: 3000,
+  }), '当前任务的最终答案');
+  await cot.finish();
+  const decoded = written.map((event) => ({ type: event.event_type, ...JSON.parse(event.content) }));
+  assert.deepEqual({
+    reasoning: decoded.filter((event) => event.type === 'REASONING_MESSAGE_CONTENT').map((event) => event.delta),
+    runIds: decoded.filter((event) => event.type === 'RUN_STARTED' || event.type === 'RUN_FINISHED').map((event) => event.runId),
+  }, {
+    reasoning: ['当前任务的推理内容'],
+    runIds: ['turn-2', 'turn-2'],
+  });
+});
+
 test('in-process RPC preserves IDs, payloads, namespace receivers and errors', async () => {
   const calls = [];
   const apiProxy = {};
@@ -303,6 +397,56 @@ test('ask uses an initially empty in-process mux and correlates replies with its
   assert.match(host.prompts[0].rpcId, /^local-test-/);
   assert.equal(host.prompts[0].payload.mode, 'queue');
   assert.equal(host.streams.size, 0, 'ask completion must dispose its mux subscription');
+});
+
+test('live ask consumes transient reasoning from mux even when history never retains it', async () => {
+  const host = hostFixture();
+  const updates = [];
+  host.onPrompt = (rpcId) => {
+    host.append({ type: 'turn/start', seq: 0, data: { turn: 1 } });
+    host.append({ type: 'user/message', seq: 1, data: { turn: 1, source: { rpcId } } });
+    host.emit({
+      rpcId: 'transient-reasoning',
+      payload: {
+        type: 'session/event',
+        sessionId: 'session',
+        event: {
+          type: 'assistant/chunk',
+          seq: 1.5,
+          data: {
+            turn: 1,
+            step: 0,
+            chunk: { type: 'reasoning-delta', index: 0, text: '瞬时推理' },
+          },
+        },
+      },
+    });
+    host.append({ type: 'assistant/message', seq: 2, data: {
+      turn: 1,
+      step: 0,
+      message: { content: [{ type: 'text', text: '最终答案' }] },
+    } });
+    host.append({ type: 'turn/end', seq: 3, data: {
+      turn: 1,
+      reason: { kind: 'completed' },
+    } });
+  };
+  const client = localClient(host.apiProxy, { rpcIdPrefix: 'live-test' });
+
+  const answer = await client.ask('session', 'hello', {
+    progressMode: 'live',
+    onUpdate: (update) => updates.push(update),
+    timeoutMs: 1_000,
+  });
+
+  assert.equal(answer, '最终答案');
+  assert.equal(updates.some(
+    (update) => update.type === 'reasoning' && update.text === '瞬时推理',
+  ), true);
+  assert.equal(host.history.some(
+    ({ event }) => event.type === 'assistant/chunk',
+  ), false);
+  assert.equal(host.streams.size, 0);
 });
 
 test('clients on one Host share interaction ownership across context wrappers and reconnect safely', async () => {

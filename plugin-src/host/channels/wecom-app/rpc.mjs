@@ -1,3 +1,4 @@
+import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
@@ -136,6 +137,7 @@ function publicStatus(status) {
 }
 
 export function createWecomAppRpcHandler(controller) {
+  const diagnostics = controller.diagnostics ?? createConnectionDiagnostics({ channel: 'wecom-app' });
   for (const method of ['status', 'bindApp', 'updateAppSettings', 'resetCallbackSecret', 'reconnectBot', 'deleteBot']) {
     if (typeof controller?.[method] !== 'function') {
       throw new TypeError(`A complete Enterprise WeChat app controller is required (${method})`);
@@ -178,7 +180,7 @@ export function createWecomAppRpcHandler(controller) {
               await controller.sendConnectionTest(payload.botId);
               testMessage = publicConnectionTestResult();
             } catch (error) {
-              testMessage = publicConnectionTestResult(error);
+              testMessage = publicConnectionTestResult(error, { diagnostics, botId: payload.botId });
             }
           }
         }
@@ -215,11 +217,11 @@ export function createWecomAppRpcHandler(controller) {
         : { ok: true, value };
     } catch (error) {
       const workspaceError = publicWorkspaceError(error);
-      return signal?.aborted
+      return diagnosticRpcResult(diagnostics, error, signal?.aborted
         ? { ok: false, error: { code: 'cancelled', message: 'The request was cancelled.', details: {} } }
         : { ok: false, error: workspaceError
           ? { ...workspaceError, details: {} }
-          : { code: 'wecom-app-operation-failed', message: '企业微信应用操作失败，请稍后重试。', details: {} } };
+          : { code: 'wecom-app-operation-failed', message: '企业微信应用操作失败，请稍后重试。', details: {} } }, { operation: endpoint, botId: payload?.botId });
     }
   };
 }

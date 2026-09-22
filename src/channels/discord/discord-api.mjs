@@ -295,16 +295,16 @@ export class DiscordApi {
       });
     } catch (error) {
       if (error?.name === 'AbortError' || error?.name === 'TimeoutError') throw error;
-      throw new Error(`Discord ${method} transport failed`);
+      throw new Error(`Discord ${method} transport failed`, { cause: error });
     }
 
     let parsed = null;
     if (expectBody || response.status === 429 || !response.ok) {
       try {
         parsed = await response.json();
-      } catch {
+      } catch (cause) {
         if (expectBody) {
-          const error = new Error(`Discord ${method} returned invalid JSON`);
+          const error = new Error(`Discord ${method} returned invalid JSON`, { cause });
           error.status = response?.status;
           throw error;
         }

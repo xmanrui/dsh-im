@@ -1,3 +1,4 @@
+import { extractConnectionEvidence, atConnectionStage, createConnectionDiagnostics } from './connection-error.mjs';
 import { connectionTestMessage } from './connection-test.mjs';
 import { t } from './i18n.mjs';
 import { publicMessageFailure } from './message-failure.mjs';
@@ -20,6 +21,7 @@ export class TokenBotController {
   #createRuntime;
   #deleteState;
   #logger;
+  #diagnostics;
   #runtimes = new Map();
   #errors = new Map();
   #transitions = new Map();
@@ -61,6 +63,14 @@ export class TokenBotController {
     this.#createRuntime = createRuntime;
     this.#deleteState = deleteState;
     this.#logger = logger;
+    this.#diagnostics = createConnectionDiagnostics({ channel: descriptor.key, logger });
+  }
+
+  get diagnostics() { return this.#diagnostics; }
+
+  #failure(error, code, message) {
+    const stage = code.startsWith('qr-') ? 'qr.begin' : code === 'activation-failed' ? 'activation' : 'connection.start';
+    return this.#diagnostics.report(error, { reuse: true, stage, publicError: { code, message } }).publicError;
   }
 
   async initialize() {
@@ -68,30 +78,27 @@ export class TokenBotController {
     for (const config of this.#configStore.list()) {
       await this.#withBotTransition(config.botId, async () => {
         if (this.#closed || this.#runtimes.get(config.botId)?.status?.ready) return;
-        const token = await this.#resolveToken(config.tokenRef);
-        if (!token) {
-          this.#errors.set(config.botId, safeError(
-            'missing-token',
-            t('{label}机器人凭据缺失，请移除后重新接入。', {
-              label: this.#descriptor.label,
-            }),
-          ));
-          return;
-        }
         try {
+          const token = await this.#resolveToken(config.tokenRef);
+          if (!token) {
+            this.#errors.set(config.botId, safeError(
+              'missing-token',
+              t('{label}机器人凭据缺失，请移除后重新接入。', {
+                label: this.#descriptor.label,
+              }),
+            ));
+            return;
+          }
           await this.#startRuntime(config, token);
           this.#errors.delete(config.botId);
         } catch (error) {
-          this.#errors.set(config.botId, safeError(
+          this.#errors.set(config.botId, this.#failure(error,
             'connection-failed',
             t('{label}连接未就绪，插件会自动重试。', {
               label: this.#descriptor.label,
             }),
           ));
-          this.#logger.warn?.(
-            `[dsh-im:${this.#descriptor.key}] bot ${config.botId} failed to initialize:`,
-            error,
-          );
+
         } finally {
           this.#touch();
         }
@@ -112,7 +119,7 @@ export class TokenBotController {
     await this.#withBotTransition(identity.botId, async () => {
       if (this.#closed) throw new Error(`${this.#descriptor.label} controller is closed`);
       const previousConfig = this.#configStore.getByPlatformId(platformId);
-      const previousToken = await this.#credentials.resolve(identity.tokenRef).catch(() => undefined);
+      const previousToken = await atConnectionStage('credential.read', () => this.#credentials.resolve(identity.tokenRef), 'credential-store');
       const config = {
         botId: identity.botId,
         platformId,
@@ -122,9 +129,9 @@ export class TokenBotController {
         createdAt: previousConfig?.createdAt ?? new Date().toISOString(),
         connectedAt: new Date().toISOString(),
       };
-      await this.#credentials.set(identity.tokenRef, normalizedToken);
+      await atConnectionStage('credential.save', () => this.#credentials.set(identity.tokenRef, normalizedToken), 'credential-store');
       try {
-        await this.#configStore.save(config);
+        await atConnectionStage('account.save', () => this.#configStore.save(config), 'account-config');
       } catch (error) {
         await this.#restoreCredential(identity.tokenRef, previousToken);
         throw error;
@@ -133,16 +140,13 @@ export class TokenBotController {
         await this.#startRuntime(config, normalizedToken);
         this.#errors.delete(identity.botId);
       } catch (error) {
-        this.#errors.set(identity.botId, safeError(
+        this.#errors.set(identity.botId, this.#failure(error,
           'connection-failed',
           t('{label}机器人已接入，消息连接暂未就绪。', {
             label: this.#descriptor.label,
           }),
         ));
-        this.#logger.warn?.(
-          `[dsh-im:${this.#descriptor.key}] bot ${identity.botId} credential connection failed:`,
-          error,
-        );
+
       }
       this.#touch();
     });
@@ -159,7 +163,7 @@ export class TokenBotController {
         await this.#startRuntime(config, token);
         this.#errors.delete(botId);
       } catch (error) {
-        this.#errors.set(botId, safeError(
+        this.#errors.set(botId, this.#failure(error,
           'connection-failed',
           t('{label}连接仍未就绪，请稍后重试。', {
             label: this.#descriptor.label,
@@ -184,12 +188,12 @@ export class TokenBotController {
       if (!token) throw new Error(`${this.#descriptor.label} bot token is missing`);
       if (this.#closed) throw new Error(`${this.#descriptor.label} controller is closed`);
       const nextConfig = update(config);
-      const savedConfig = await this.#configStore.save(nextConfig);
+      const savedConfig = await atConnectionStage('account.save', () => this.#configStore.save(nextConfig), 'account-config');
       try {
         await this.#startRuntime(savedConfig, token);
         this.#errors.delete(botId);
       } catch (error) {
-        this.#errors.set(botId, safeError(
+        this.#errors.set(botId, this.#failure(error,
           'connection-failed',
           t('{label}连接仍未就绪，请稍后重试。', {
             label: this.#descriptor.label,
@@ -244,31 +248,32 @@ export class TokenBotController {
   }
 
   async deleteBot(botId) {
+    const warnings = [];
     const config = this.#configStore.get(botId);
     if (!config) throw new Error(`Unknown ${this.#descriptor.label} bot`);
     await this.#withBotTransition(botId, async () => {
-      const previous = await this.#credentials.resolve(config.tokenRef).catch(() => undefined);
+      const previous = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.tokenRef), 'credential-store');
       await this.#stopRuntime(botId);
       try {
-        await this.#credentials.unset(config.tokenRef);
-        await this.#configStore.remove(botId);
+        await atConnectionStage('credential.remove', () => this.#credentials.unset(config.tokenRef), 'credential-store');
+        await atConnectionStage('account.remove', () => this.#configStore.remove(botId), 'account-config');
       } catch (error) {
-        if (previous?.value) {
-          await this.#credentials.set(config.tokenRef, previous.value).catch(() => undefined);
-          await this.#startRuntime(config, previous.value).catch(() => undefined);
+        if (!this.#configStore.get(botId)) {
+          warnings.push(this.#diagnostics.report(error, { operation: 'bot.delete', stage: 'workspace.cleanup', warning: true,
+            publicError: { code: 'workspace-cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError);
+        } else {
+          if (previous?.value) {
+            await atConnectionStage('credential.save', () => this.#credentials.set(config.tokenRef, previous.value), 'credential-store').catch(() => undefined);
+            await this.#startRuntime(config, previous.value).catch(() => undefined);
+          }
+          throw new Error(`Unable to remove the ${this.#descriptor.label} bot safely.`, { cause: error });
         }
-        throw new Error(`Unable to remove the ${this.#descriptor.label} bot safely.`, { cause: error });
       }
-      await this.#deleteState({ botId, config }).catch((error) => {
-        this.#logger.warn?.(
-          `[dsh-im:${this.#descriptor.key}] bot ${botId} state cleanup failed:`,
-          error,
-        );
-      });
+      await this.#deleteState({ botId, config }).catch(error => { warnings.push(this.#diagnostics.report(error, { reuse: true, operation: 'bot.delete', stage: 'state.cleanup', resource: 'account-state', warning: true, publicError: { code: 'cleanup-failed', message: '账号已移除，但本地状态清理失败。' } }).publicError); });
       this.#errors.delete(botId);
       this.#touch();
     });
-    return this.status();
+    return { ...this.status(), ...(warnings.length ? { warnings } : {}) };
   }
 
   status() {
@@ -309,7 +314,7 @@ export class TokenBotController {
           messagesReplied: runtimeStatus?.messagesReplied ?? 0,
         },
         lastMessageError: publicMessageFailure(runtimeStatus?.lastMessageError),
-        error: structuredClone(this.#errors.get(config.botId) ?? null),
+        error: structuredClone(runtimeStatus?.error ?? this.#errors.get(config.botId) ?? null),
       };
     });
     const connectedCount = bots.filter((bot) => bot.connected).length;
@@ -342,7 +347,7 @@ export class TokenBotController {
       } catch (error) {
         this.#logger.warn?.(
           `[dsh-im:${this.#descriptor.key}] bot ${botId} command menu refresh failed:`,
-          error,
+          extractConnectionEvidence(error).details,
         );
         return false;
       }
@@ -361,7 +366,7 @@ export class TokenBotController {
     if (this.#closed) throw new Error(`${this.#descriptor.label} controller is closed`);
     await this.#stopRuntime(config.botId);
     if (this.#closed) throw new Error(`${this.#descriptor.label} controller is closed`);
-    const runtime = await this.#createRuntime({ botId: config.botId, config, token });
+    const runtime = await atConnectionStage('runtime.prepare', () => this.#createRuntime({ botId: config.botId, config, token }));
     if (!runtime || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
       throw new TypeError(`createRuntime returned an invalid ${this.#descriptor.label} runtime`);
     }
@@ -381,19 +386,19 @@ export class TokenBotController {
     await runtime?.stop().catch((error) => {
       this.#logger.warn?.(
         `[dsh-im:${this.#descriptor.key}] bot ${botId} failed to stop cleanly:`,
-        error,
+        extractConnectionEvidence(error).details,
       );
     });
   }
 
   async #resolveToken(ref) {
-    const result = await this.#credentials.resolve(ref).catch(() => undefined);
+    const result = await atConnectionStage('credential.read', () => this.#credentials.resolve(ref), 'credential-store');
     return cleanString(result?.value);
   }
 
   async #restoreCredential(ref, previous) {
-    if (previous?.value) await this.#credentials.set(ref, previous.value).catch(() => undefined);
-    else await this.#credentials.unset(ref).catch(() => undefined);
+    if (previous?.value) await atConnectionStage('credential.save', () => this.#credentials.set(ref, previous.value), 'credential-store').catch(() => undefined);
+    else await atConnectionStage('credential.remove', () => this.#credentials.unset(ref), 'credential-store').catch(() => undefined);
   }
 
   #withBotTransition(botId, operation) {

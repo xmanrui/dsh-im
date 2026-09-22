@@ -96,6 +96,9 @@ test('PluginConfigStore defaults stepPushMode to post and normalizes unknown val
   await store.save({ ...store.get(), stepPushMode: 'streaming_card' });
   assert.equal((await new PluginConfigStore(path).load()).get().stepPushMode, 'streaming_card');
 
+  await store.save({ ...store.get(), stepPushMode: 'live_cot' });
+  assert.equal((await new PluginConfigStore(path).load()).get().stepPushMode, 'live_cot');
+
   await store.clear();
 });
 
@@ -180,6 +183,7 @@ test('PluginConfigStore preserves old step-push settings when loading missing mo
     { stepPush: true }, { stepPush: false },
     { stepPush: true, stepPushMode: 'post' },
     { stepPush: true, stepPushMode: 'streaming_card' },
+    { stepPush: true, stepPushMode: 'live_cot' },
   ];
   await writeFile(path, JSON.stringify({ version: 2, bots: cases.map((settings, index) => ({
     id: 'bot_legacy_' + index, appId: 'cli_legacy_' + index,

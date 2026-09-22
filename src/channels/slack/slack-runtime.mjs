@@ -1,3 +1,4 @@
+import { extractConnectionEvidence, createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
 import { splitMessageText } from '../shared/editable-message-stream.mjs';
 import { t } from '../shared/i18n.mjs';
 import { SlackApi } from './slack-api.mjs';
@@ -410,6 +411,7 @@ export class SlackRuntime {
   #contextEnhancement;
   #accessPolicy;
   #logger;
+  #diagnostics;
   #replyTimeoutMs;
   #connectTimeoutMs;
   #createApi;
@@ -451,7 +453,7 @@ export class SlackRuntime {
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
-    this.#logger = logger;
+    this.#logger = logger; this.#diagnostics = createConnectionDiagnostics({ channel: 'slack', logger });
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#connectTimeoutMs = connectTimeoutMs;
     this.#createApi = createApi;
@@ -510,8 +512,8 @@ export class SlackRuntime {
     this.#reconnectAttempt = 0;
     this.#status.startedAt = new Date().toISOString();
     this.#status.connectionState = 'connecting';
-    this.#status.lastError = null;
-    await this.#harness.ensureRunning();
+    this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
+    await atConnectionStage('harness.check', () => this.#harness.ensureRunning());
     this.#status.harnessReachable = true;
     const controller = new AbortController();
     this.#abortController = controller;
@@ -540,7 +542,7 @@ export class SlackRuntime {
           this.#connect(),
           new Promise((_, reject) => {
             timer = setTimeout(
-              () => reject(new Error('Slack Socket Mode did not become ready in time')),
+              () => reject(Object.assign(new Error('Slack Socket Mode did not become ready in time'), { code: 'ETIMEDOUT', timeoutMs: this.#connectTimeoutMs })),
               this.#connectTimeoutMs,
             );
             timer?.unref?.();
@@ -553,7 +555,8 @@ export class SlackRuntime {
     } catch (error) {
       this.#status.ready = false;
       this.#status.connectionState = 'failed';
-      this.#status.lastError = error?.message ?? String(error);
+      this.#status.error = this.#diagnostics.report(error, { operation: 'connection.restore', reuse: true, botId: this.#config?.botId, automatic: true }).publicError;
+      this.#status.lastError = this.#status.error.message;
       await this.stop();
       throw error;
     }
@@ -582,7 +585,7 @@ export class SlackRuntime {
         this.#status.connectionState = 'connected';
         this.#status.lastCheckedAt = now;
         this.#status.lastConnectedAt = now;
-        this.#status.lastError = null;
+        this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
         resolve();
       };
 
@@ -624,7 +627,7 @@ export class SlackRuntime {
             if (generation !== this.#generation || this.#stopped) return;
             this.#logger.error?.(
               `[dsh-im:slack] bot ${this.#config.botId} message handling failed:`,
-              error,
+              extractConnectionEvidence(error).details,
             );
           });
         }
@@ -641,7 +644,8 @@ export class SlackRuntime {
         const error = new Error(`Slack Socket Mode closed (${code || 'unknown'})`);
         this.#status.ready = false;
         this.#status.connectionState = 'connecting';
-        this.#status.lastError = error.message;
+        this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#config?.botId, automatic: true }).publicError;
+        this.#status.lastError = this.#status.error.message;
         if (!settled) {
           settled = true;
           reject(error);
@@ -649,9 +653,11 @@ export class SlackRuntime {
         this.#scheduleReconnect();
       });
 
-      addSocketListener(socket, 'error', () => {
+      addSocketListener(socket, 'error', (event) => {
+        const error = event?.error ?? new Error('WebSocket error');
         if (generation !== this.#generation || this.#stopped) return;
-        this.#status.lastError = 'Slack Socket Mode WebSocket error';
+        this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#config?.botId, automatic: true }).publicError;
+        this.#status.lastError = this.#status.error.message;
       });
     });
   }
@@ -664,7 +670,7 @@ export class SlackRuntime {
       this.#reconnectTimer = null;
       void this.#connect().catch((error) => {
         if (this.#stopped) return;
-        this.#logger.warn?.('[dsh-im:slack] Socket Mode reconnect failed:', error);
+        this.#logger.warn?.('[dsh-im:slack] Socket Mode reconnect failed:', extractConnectionEvidence(error).details);
         this.#scheduleReconnect();
       });
     }, delay);
@@ -687,7 +693,7 @@ export class SlackRuntime {
     try {
       if (socket && socket.readyState < 2) socket.close(1000, 'Plugin stopped');
     } catch (error) {
-      this.#logger.warn?.(`[dsh-im:slack] bot ${this.#config.botId} failed to close Socket Mode:`, error);
+      this.#logger.warn?.(`[dsh-im:slack] bot ${this.#config.botId} failed to close Socket Mode:`, extractConnectionEvidence(error).details);
     }
     await Promise.race([
       bridge?.waitForIdle() ?? Promise.resolve(),

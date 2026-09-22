@@ -65,7 +65,9 @@ function validDraftTarget(value) {
 function validPayload(endpoint, payload) {
   if (!ENDPOINTS.has(endpoint) || !isRecord(payload)) return false;
   if (endpoint === DELIVERY_ENDPOINTS.send) {
-    return exactKeys(payload, ['botId', 'targetId', 'text'])
+    return (exactKeys(payload, ['botId', 'targetId', 'text'])
+        || (exactKeys(payload, ['botId', 'targetId', 'text', 'format'])
+          && ['plain', 'markdown'].includes(payload.format)))
       && validBotId(payload.botId) && validTargetId(payload.targetId)
       && typeof payload.text === 'string' && Boolean(payload.text.trim());
   }
@@ -128,7 +130,10 @@ export function createDeliveryRpcHandler(service) {
     try {
       let value;
       if (endpoint === DELIVERY_ENDPOINTS.send) {
-        value = await service.send(payload.botId, payload.targetId, payload.text, { signal });
+        value = await service.send(payload.botId, payload.targetId, payload.text, {
+          signal,
+          ...(payload.format === undefined ? {} : { format: payload.format }),
+        });
       } else if (endpoint === DELIVERY_ENDPOINTS.listTargets) {
         value = await service.listTargets(payload.botId);
       } else if (endpoint === DELIVERY_ENDPOINTS.listSuggestions) {

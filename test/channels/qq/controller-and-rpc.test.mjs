@@ -1,3 +1,4 @@
+import { assertTestMessageFailure } from '../../fixtures/connection-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -230,7 +231,7 @@ test('QQ reconnect RPC reports test-message outcomes without discarding the snap
   sendError = new Error('QQ API rejected the message');
   const failed = await handler(QQ_ENDPOINTS.reconnectBot, { botId: 'qq_bot', sendTest: true });
   assert.equal(failed.ok, true);
-  assert.deepEqual(failed.value.testMessage, { sent: false, code: 'test-message-failed' });
+  assertTestMessageFailure(failed.value.testMessage);
 
   calls.length = 0;
   connected = false;

@@ -1,3 +1,5 @@
+import { imageInputLimits } from '../shared/image-input-policy.mjs';
+import { imageDownloadLimitMessage } from '../shared/image-prompt.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import { generateReqId } from '@wecom/aibot-node-sdk';
 import { randomUUID } from 'node:crypto';
@@ -216,7 +218,7 @@ function imageSource(client, image) {
         throw new ImagePromptError(
           'image-too-large',
           `Enterprise WeChat image exceeds ${maxBytes} bytes`,
-          t('图片超过 5 MB，请压缩后重试。'),
+          imageDownloadLimitMessage(maxBytes),
         );
       }
       return { data, name: result?.filename };
@@ -280,12 +282,17 @@ function prefetchInboundFiles(message, signal) {
   };
 }
 
-function prefetchInboundImages(message, signal) {
+function prefetchInboundImages(message, signal, limitsPromise) {
   if (!hasInboundImages(message)) return message;
   return {
     ...message,
     images: message.images.map((source) => {
-      const download = source.load({ signal, maxBytes: MAX_IMAGE_BYTES });
+      const download = Promise.resolve(limitsPromise).then((limits) => {
+        if (message.images.length > limits.maxImages) throw new ImagePromptError(
+          'too-many-images', 'Too many inbound images',
+          t('一次最多只能处理 {maxImages} 张图片。', { maxImages: limits.maxImages }));
+        return source.load({ signal, maxBytes: limits.maxDownloadBytes });
+      });
       // The conversation queue may not consume this promise immediately. Keep
       // an attached rejection handler while preserving the original outcome.
       download.catch(() => undefined);
@@ -301,7 +308,7 @@ function prefetchInboundImages(message, signal) {
             throw new ImagePromptError(
               'image-too-large',
               `Enterprise WeChat image exceeds ${maxBytes} bytes`,
-              t('图片超过 5 MB，请压缩后重试。'),
+              imageDownloadLimitMessage(maxBytes),
             );
           }
           return result;
@@ -1060,7 +1067,8 @@ export class WecomHarnessBridge {
       if (this.#prefetchedImageCount + imageCount <= MAX_PREFETCHED_IMAGES) {
         reservedImages = imageCount;
         this.#prefetchedImageCount += reservedImages;
-        preparedMessage = prefetchInboundImages(inboundMessage, this.#signal);
+        preparedMessage = prefetchInboundImages(inboundMessage, this.#signal,
+          this.#harness.getImageInputLimits?.() ?? imageInputLimits());
       } else {
         preparedMessage = imageQueueFullMessage(inboundMessage);
       }
@@ -1356,7 +1364,7 @@ export class WecomHarnessBridge {
       }
 
       let content = hasImages || hasReply
-        ? await promptContentForInboundMessage(message, { signal: this.#signal })
+        ? await promptContentForInboundMessage(message, { signal: this.#signal, deferImages: true })
         : undefined;
       const snapshot = this.#acceptedMessageIds.get(messageId);
       let contextEnhanced = false;
@@ -1408,6 +1416,7 @@ export class WecomHarnessBridge {
           }),
           onInteractionResolved: (resolution) => this.#handleInteractionResolved(resolution),
           files: message.files,
+          images: message.images,
         },
       });
       if (batchSubmission) {
