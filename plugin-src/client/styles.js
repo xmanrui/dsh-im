@@ -884,9 +884,9 @@ body {
 /* The per-account settings button the host's own account card carries. Its chevron
    shares the section affordance's class name, so the rotation is scoped to the
    button's own state and this block sits after the section rule above. */
-.dim-accountSettingsToggle { flex: none; width: 45px; height: 32px; display: inline-flex; gap: var(--dim-gap-5); align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--dim-radius-8); color: var(--dim-blue); background: color-mix(in srgb, var(--dim-blue) 8%, var(--dsw-alias-bg-layer-1, #fff)); cursor: pointer; }
+.dim-accountSettingsToggle { flex: none; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--dim-radius-8); color: var(--dsw-alias-label-tertiary, #81858c); background: transparent; cursor: pointer; transition: color .15s ease, background .15s ease; }
 .dim-accountSettingsToggle > svg { flex: none; display: block; }
-.dim-accountSettingsToggle:hover { background: color-mix(in srgb, var(--dim-blue) 14%, var(--dsw-alias-bg-layer-1, #fff)); }
+.dim-accountSettingsToggle:hover { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dim-hover); }
 .dim-accountSettingsToggle:focus-visible { outline: none; box-shadow: var(--dim-focus-shadow); }
 .dim-accountSettingsToggle .dim-collapsibleChevron { width: 12px; height: 16px; }
 .dim-accountSettingsToggle[aria-expanded="true"] .dim-collapsibleChevron { transform: rotate(180deg); }

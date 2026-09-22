@@ -17,7 +17,6 @@
  */
 import * as React from 'react';
 import { h } from '../../i18n.js';
-import { SettingsGlyph } from '../../channel-card-meta.js';
 import { ChevronRightGlyph } from '../../ui-glyphs.js';
 
 const AccountSectionContext = React.createContext(null);
@@ -37,7 +36,12 @@ function headerCarriesToggle(node) {
   return React.Children.toArray(node.props?.children).some(headerCarriesToggle);
 }
 
-/** Renders in the original settings-button slot, beside the status metadata. */
+/**
+ * The header's disclosure affordance, in the slot the settings button used to
+ * take. It is ONLY the arrow: the whole header already toggles the section, so a
+ * gear here was a second icon for a job the card does anyway, and the filled pill
+ * behind it read as a primary action rather than as "this row expands".
+ */
 export function AccountSettingsToggle() {
   const { open, toggle, contentId } = React.useContext(AccountSectionContext);
   return h('button', {
@@ -50,7 +54,7 @@ export function AccountSettingsToggle() {
       event.stopPropagation();
       toggle();
     },
-  }, h(SettingsGlyph),
+  },
   h('svg', {
     className: 'dim-collapsibleChevron',
     viewBox: '0 0 12 16',
