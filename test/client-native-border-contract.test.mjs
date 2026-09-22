@@ -141,6 +141,36 @@ test('no rule pairs an elevation shadow with a neutral border', () => {
   assert.deepEqual(paired, []);
 });
 
+/**
+ * The host splits the translucent menu material into a fill token and a blur token
+ * - design-platform.css:245 gives --dsw-specific-menu as rgba(248, 249, 250, 0.58)
+ * and gradient-shadow-text.css:20 gives --dsw-menu-backdrop-filter as
+ * blur(40px) saturate(150%) - and pairs them in one rule
+ * (ui-primitives/src/Menu.module.css:17-18). docs/web-styling.md:25 states the
+ * pairing as a rule; ui-theme/tests/elevation-styles.client.spec.ts enforces it over
+ * the host's own packages. A fill without the blur is simply see-through, which is
+ * what this plugin's portaled model list looked like. This is that predicate over
+ * the plugin's sheets.
+ *
+ * A surface holding fixed-position descendants is the one exception, and it moves
+ * the pair onto an isolated background pseudo-element instead of dropping the blur:
+ * backdrop-filter would otherwise become those descendants' containing block.
+ */
+test('a translucent menu fill always carries the shared backdrop filter', () => {
+  const MENU_FILL = /var\(--dsw-specific-menu[,)]/;
+  const MENU_FILTER = /var\(--dsw-menu-backdrop-filter[,)]/;
+  const missing = [];
+  for (const rule of rules) {
+    const filled = rule.declarations.some(([property, value]) =>
+      (property === 'background' || property === 'background-color') && MENU_FILL.test(value));
+    if (!filled) continue;
+    const blurred = rule.declarations.some(([property, value]) =>
+      property === 'backdrop-filter' && MENU_FILTER.test(value));
+    if (!blurred) missing.push(rule.file + ' ' + rule.selectors.join(', '));
+  }
+  assert.deepEqual(missing, []);
+});
+
 test('the shared account chevron renders the vendored native glyph', async () => {
   // A CSS-drawn chevron (borders + rotate) is the one place the page still
   // invented an icon shape the native set already provides.

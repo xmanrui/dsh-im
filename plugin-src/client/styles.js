@@ -604,7 +604,15 @@ body {
 /* Native's own list is a portal at fixed position, which is how it escapes the
    collapsed card and the settings scroll container. In flow it dropped below the
    sibling row instead of below its own trigger. */
-.dim-modelMenu { position: fixed; z-index: var(--dim-z-menu); max-height: calc(100vh - 24px); overflow-y: auto; margin: 0; padding: 4px; border: 0; border-radius: var(--dim-radius-20); background: var(--dsw-specific-menu, #fff); --dsw-elevation-stroke-color: var(--dsw-alias-border-l1, rgb(0 0 0 / 4%)); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); scrollbar-width: thin; }
+/* The menu material is a PAIR. --dsw-specific-menu became translucent in DSH
+   0.1.7 (rgba(248,249,250,.58) light / rgba(48,49,54,.5) dark) and the blur that
+   completes it lives in a second token, so a fill without
+   backdrop-filter: var(--dsw-menu-backdrop-filter) is simply see-through. The
+   host states the rule in docs/web-styling.md:25 and pairs them in
+   ui-primitives/src/Menu.module.css:17-18. The pair can sit on this container
+   because nothing inside the list is fixed-positioned: the blur would otherwise
+   become their containing block and move them off the viewport. */
+.dim-modelMenu { position: fixed; z-index: var(--dim-z-menu); max-height: calc(100vh - 24px); overflow-y: auto; margin: 0; padding: 4px; border: 0; border-radius: var(--dim-radius-20); background: var(--dsw-specific-menu, #fff); backdrop-filter: var(--dsw-menu-backdrop-filter); --dsw-elevation-stroke-color: var(--dsw-alias-border-l1, rgb(0 0 0 / 4%)); box-shadow: var(--dsw-elevation-prominent, 0 0 0 .5px rgb(0 0 0 / 16%), 0 3px 8px rgb(0 0 0 / 4%), 0 0 20px rgb(0 0 0 / 5%)); color: var(--dsw-alias-label-primary, #0f1115); font-size: var(--dim-font-14); line-height: var(--dim-line-14); scrollbar-width: thin; }
 .dim-modelGroupTitle { padding: 8px 10px; color: var(--dsw-alias-label-tertiary, #81858c); font-size: var(--dim-font-12); line-height: var(--dim-line-12); font-weight: var(--dim-weight-500); }
 .dim-modelOption { display: flex; align-items: center; gap: var(--dim-gap-8); width: 100%; min-height: 40px; padding: 8px 10px; border: none; border-radius: var(--dim-radius-10); background: transparent; color: inherit; text-align: left; font: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); cursor: pointer; }
 .dim-modelOptionCopy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--dim-gap-2); }
