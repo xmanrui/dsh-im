@@ -22,6 +22,21 @@ import { ChevronRightGlyph } from '../../ui-glyphs.js';
 
 const AccountSectionContext = React.createContext(null);
 
+/**
+ * Does the caller's header already render the settings toggle?
+ *
+ * That toggle carries its own chevron, so the section must not add a second one
+ * beside it: two affordances for one job is what the account card looked like
+ * when the toggle arrived from upstream and this branch still rendered the bare
+ * disclosure chevron. Read off the element tree the caller passed, because a
+ * React element is lazy - the section cannot observe a mount from up here.
+ */
+function headerCarriesToggle(node) {
+  if (!React.isValidElement(node)) return false;
+  if (node.type === AccountSettingsToggle) return true;
+  return React.Children.toArray(node.props?.children).some(headerCarriesToggle);
+}
+
 /** Renders in the original settings-button slot, beside the status metadata. */
 export function AccountSettingsToggle() {
   const { open, toggle, contentId } = React.useContext(AccountSectionContext);
@@ -120,7 +135,7 @@ export function CollapsibleAccountSection({
         : (toggleLabel || undefined),
     },
       h('div', { className: 'dim-collapsibleHeaderContent' }, header),
-      h(DisclosureChevron),
+      headerCarriesToggle(header) ? null : h(DisclosureChevron),
     ),
     h('div', {
       id: contentId,

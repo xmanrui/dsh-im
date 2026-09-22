@@ -296,7 +296,7 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   assert.match(markup, /dim-logoIMessage/);
   assert.match(markup, /dim-logoMatrix/);
   assert.match(markup, /dim-logoOffice/);
-  assert.match(styles, /\.dim-logoFeishu svg \{ width: 17px; height: 17px; \}/);
+  assert.match(styles, /\.dim-logoFeishu svg \{ width: 20px; height: 20px; \}/);
   // This render's `emailRpcCall` never reports the channel as
   // enabled, so the mailbox entry point is omitted: twelve IM channels plus the
   // AI Office connector. The email tab is covered separately below.
@@ -342,7 +342,7 @@ test('channel switching is a fixed-width rail beside the panel, not a wrapped st
 
   // Tabs read as native selector pills: no fill and no shadow at rest, and the cell
   // fills the rail's track. The host's .navCell measures: 40px tall, radius 12, that gap.
-  assert.match(styles, /\.dim-channel \{[^}]*width: 100%;[^}]*height: 40px;[^}]*gap: var\(--dim-gap-8\);[^}]*padding: 0 12px;[^}]*border-radius: var\(--dim-radius-12\);/);
+  assert.match(styles, /\.dim-channel \{[^}]*width: 100%;[^}]*height: 44px;[^}]*gap: var\(--dim-gap-8\);[^}]*padding: 0 12px;[^}]*border-radius: var\(--dim-radius-12\);/);
   // The label clips rather than pushing the cell wider, and the button keeps the whole
   // name in its title so nothing becomes unreachable when it is clipped.
   assert.match(styles, /\.dim-channelCopy \{[^}]*min-width: 0;[^}]*overflow: hidden;/);
@@ -352,7 +352,7 @@ test('channel switching is a fixed-width rail beside the panel, not a wrapped st
   assert.match(styles, /\.dim-channel:hover \{ color: var\(--dsw-alias-label-primary, #0f1115\); background: var\(--dsw-specific-sidebar-nav-item-hover, var\(--dim-hover\)\); \}/);
   assert.match(styles, /\.dim-channel:focus-visible \{ outline: 2px solid var\(--dsw-alias-brand-primary, #0f1115\); outline-offset: 2px; \}/);
   // The label takes the host's .navCell type: 14/22 at the inherited weight.
-  assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: var\(--dim-font-14\);[^}]*line-height: var\(--dim-line-14\);[^}]*font-weight: var\(--dim-weight-400\);/);
+  assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: var\(--dim-font-15\);[^}]*line-height: var\(--dim-line-15\);[^}]*font-weight: var\(--dim-weight-400\);/);
   assert.match(styles, /\.dim-channelBadge \{[^}]*align-self: center;[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);/);
   // Rest / hover / current read apart. Hover and current share the host's nav-cell
   // fill family, so the accent bar is what identifies the current channel while a

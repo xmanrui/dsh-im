@@ -6,7 +6,7 @@ import * as React from 'react';
 import TestRenderer from 'react-test-renderer';
 
 import { ContextEnhancementEditor } from '../plugin-src/client/context-enhancement.js';
-import { CollapsibleAccountSection } from '../plugin-src/client/channels/shared/collapsible-account.js';
+import { AccountSettingsToggle, CollapsibleAccountSection } from '../plugin-src/client/channels/shared/collapsible-account.js';
 import { WeixinConnectionError } from '../plugin-src/client/channels/weixin/connection-error.js';
 import { DEFAULT_CONTEXT_ENHANCEMENT_CONFIG } from '../src/channels/shared/context-enhancement.mjs';
 import { h } from '../plugin-src/client/i18n.js';
@@ -55,6 +55,23 @@ test('the three disclosures render one shared anatomy instead of three implement
     const toggles = root.findAll((node) => node.props['aria-expanded'] !== undefined);
     assert.equal(toggles.length, 1, `${name}: exactly one toggle announces its state`);
   }
+});
+
+test('a header that carries the settings toggle gets no second disclosure affordance', async () => {
+  // The account card's header ends in the settings toggle, which carries a chevron
+  // of its own. The section's bare chevron used to sit right beside it - two
+  // controls for one job, one of them a chevron floating outside the pill.
+  const withToggle = await mount(h(CollapsibleAccountSection, {
+    header: h('div', null, h(AccountSettingsToggle)),
+  }));
+  assert.equal(withToggle.root.findAllByProps({ className: 'dim-collapsibleChevron' }).length, 1,
+    'the toggle is the only affordance');
+
+  // The other two disclosures have no toggle in their header, so they keep the
+  // shared chevron: the anatomy is shared, not removed.
+  const bare = await mount(h(CollapsibleAccountSection, { header: h('span', null, '账号') }));
+  assert.equal(bare.root.findAllByProps({ className: 'dim-collapsibleChevron' }).length, 1);
+  assert.equal(disclosure(bare).chevron.props['aria-hidden'], 'true');
 });
 
 test('the diagnostic disclosure keeps every field, the fallback and the copy action', async () => {

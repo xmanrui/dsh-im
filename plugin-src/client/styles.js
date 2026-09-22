@@ -302,7 +302,7 @@ body {
    entry was hard to pick out. */
 .dim-layout { display: grid; grid-template-columns: var(--dim-rail-width) minmax(0, 1fr); gap: var(--dim-gap-16); align-items: start; }
 .dim-rail { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: var(--dim-gap-2); position: sticky; top: 0; align-self: start; width: var(--dim-rail-width); max-height: calc(100vh - 96px); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 0; }
-.dim-channel { position: relative; width: 100%; min-width: 0; flex: 0 0 auto; height: 40px; display: flex; align-items: center; gap: var(--dim-gap-8); padding: 0 12px; border: 1px solid transparent; border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.dim-channel { position: relative; width: 100%; min-width: 0; flex: 0 0 auto; height: 44px; display: flex; align-items: center; gap: var(--dim-gap-8); padding: 0 12px; border: 1px solid transparent; border-radius: var(--dim-radius-12); color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .dim-channel:hover { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-specific-sidebar-nav-item-hover, var(--dim-hover)); }
 .dim-channel[aria-selected="true"] { color: var(--dsw-alias-label-primary, #0f1115); background: var(--dsw-specific-sidebar-nav-item-active, #ebeef2); }
 /* Hover and current share one surface family, so the bar is what carries 'this is the
@@ -310,15 +310,15 @@ body {
 .dim-channel[aria-selected="true"]::before { content: ''; position: absolute; left: 0; top: 50%; width: 3px; height: 20px; transform: translateY(-50%); border-radius: 0 var(--dim-radius-3) var(--dim-radius-3) 0; background: var(--dsw-alias-brand-primary, #0f1115); }
 .dim-channel[aria-selected="true"] .dim-channelCopy strong { font-weight: var(--dim-weight-600); }
 .dim-channel:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #0f1115); outline-offset: 2px; }
-.dim-logo { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: var(--dim-radius-8); }
-.dim-logo svg { display: block; width: 14px; height: 14px; }
+.dim-logo { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: var(--dim-radius-10); }
+.dim-logo svg { display: block; width: 17px; height: 17px; }
 .dim-logoWeixin { color: white; background: #07c160; }
 .dim-logoFeishu { background: white; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
-.dim-logoFeishu svg { width: 17px; height: 17px; }
+.dim-logoFeishu svg { width: 20px; height: 20px; }
 .dim-logoDingtalk { color: white; background: #1677ff; }
 .dim-logoQq { color: white; background: #1677ff; }
 .dim-logoWecom { background: white; border: 0.5px solid var(--dsw-alias-border-l2, rgb(0 0 0 / 10%)); }
-.dim-logoWecom svg { width: 15px; height: 15px; }
+.dim-logoWecom svg { width: 18px; height: 18px; }
 .dim-logoTelegram { color: white; background: #229ed9; }
 .dim-logoOffice { color: white; background: linear-gradient(145deg, #12213f, #3964fe); }
 .dim-logoDiscord { color: white; background: #5865f2; }
@@ -326,7 +326,7 @@ body {
 .dim-logoWhatsapp { color: white; background: #25d366; }
 .dim-logoIMessage { color: white; background: linear-gradient(180deg, #5bf675 0%, #28d944 50%, #0fbd2c 100%); }
 .dim-channelCopy { flex: 1 1 auto; min-width: 0; overflow: hidden; display: inline-flex; align-items: baseline; gap: var(--dim-gap-5); }
-.dim-channelCopy strong { overflow: hidden; color: inherit; font-size: var(--dim-font-14); line-height: var(--dim-line-14); font-weight: var(--dim-weight-400); text-overflow: ellipsis; white-space: nowrap; }
+.dim-channelCopy strong { overflow: hidden; color: inherit; font-size: var(--dim-font-15); line-height: var(--dim-line-15); font-weight: var(--dim-weight-400); text-overflow: ellipsis; white-space: nowrap; }
 /* Sits in the same slot the note text did, one line high. align-self keeps the glyph on
    the label's centre line: the copy row is baseline-aligned for text, and an svg on a
    baseline hangs below it. */
