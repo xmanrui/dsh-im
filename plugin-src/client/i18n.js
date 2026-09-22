@@ -14,6 +14,7 @@ const EN = Object.freeze({
   '关闭修改别名': 'Close alias editor',
   '原名称': 'Original name',
   '别名': 'Alias',
+  '查看别名说明': 'View alias details',
   '恢复原名称': 'Restore original name',
   '例如：客服助手': 'e.g. Customer support',
   '仅更改显示名称，留空则显示原名称。': 'Only changes the display name. Leave blank to use the original name.',
@@ -107,6 +108,7 @@ const EN = Object.freeze({
   '让 DeepSeek Harness 触手可及': 'Connecting DeepSeek Harness',
   '当前版本': 'Current version',
   'DSH-IM 更新': 'DSH-IM update',
+  '查看 DSH-IM 更新说明': 'View DSH-IM update details',
   '检查更新': 'Check for updates',
   '重新检查': 'Check again',
   '刷新状态': 'Refresh status',
@@ -177,7 +179,7 @@ const EN = Object.freeze({
   '页面版本与运行版本不同，请手动刷新页面；若仍不一致，请手动重启 Harness 或 Desktop。': 'The page and running versions differ. Refresh the page manually; if they still differ, manually restart Harness or Desktop.',
   '请在机器人空闲时安装；安装会修改当前 profile 的依赖，完成后需手动重启。': 'Install while bots are idle. This changes the current profile’s dependencies and requires a manual restart afterward.',
   'AI Office': 'AI Office',
-  '（实验功能）': '(Experimental)',
+  '实验功能': 'Experimental',
   'AI Office 设置': 'AI Office settings',
   'AI Office 设置页缺少 RPC 连接': 'AI Office settings are missing an RPC connection',
   '正在读取 AI Office Connector…': 'Loading AI Office Connector…',
@@ -213,6 +215,7 @@ const EN = Object.freeze({
   '协议 Hook 预览': 'Protocol hook preview',
   '由 Base URL 自动派生，不单独填写': 'Derived from Base URL; no separate input',
   'Base URL 无效': 'Invalid Base URL',
+  '填写有效的 Office Base URL 后，这里会显示四个派生地址。': 'Enter a valid Office Base URL to preview the four derived addresses.',
   'Office Hook 尚未部署时，配置会安全保存并自动重试；出现 HTTP 404 代表协议端点待上线，不代表 Harness 故障。': 'Configuration is saved and retried while Office hooks are unavailable; HTTP 404 means the protocol endpoint is pending, not a Harness failure.',
   'Workspace 映射每行必须使用 alias=value': 'Each workspace mapping must use alias=value',
   'Instruction Preset 映射每行必须使用 alias=value': 'Each instruction preset mapping must use alias=value',
@@ -356,19 +359,18 @@ const EN = Object.freeze({
   '查看发送者昵称字段说明': 'View sender name field details',
   '查看群聊发送者昵称字段说明': 'View group sender name field details',
   '查看私聊发送者昵称字段说明': 'View direct sender name field details',
-  '该字段不是每个渠道都能提供。当前消息没有发送者昵称时，即使已选择该字段，<dsh_im_source> 中也会省略 senderName。': 'This field is not available on every channel. If the current message has no sender name, <dsh_im_source> omits senderName even when the field is selected.',
   '会话标题': 'Conversation title',
   '查看群聊会话标题字段说明': 'View group conversation title field details',
   '查看私聊会话标题字段说明': 'View direct conversation title field details',
-  '该字段不是每个渠道都能提供。钉钉群聊会带上群名。当前消息没有会话标题时，即使已选择该字段，<dsh_im_source> 中也会省略 conversationTitle。': 'This field is not available on every channel. DingTalk group chats include the group name. If the current message has no conversation title, <dsh_im_source> omits conversationTitle even when the field is selected.',
+  '钉钉群聊会带上群名。': 'DingTalk group chats include the group name.',
   '会话标识': 'Chat ID',
   '查看群聊会话标识字段说明': 'View group chat ID field details',
   '查看私聊会话标识字段说明': 'View direct chat ID field details',
-  '该字段不是每个渠道都能提供。会话标识用于区分不同的群组或私聊，飞书群聊会带上群 ID。当前消息没有会话标识时，即使已选择该字段，<dsh_im_source> 中也会省略 chatId。': 'This field is not available on every channel. The chat ID distinguishes different groups or direct chats, and Feishu group chats include the group ID. If the current message has no chat ID, <dsh_im_source> omits chatId even when the field is selected.',
+  '用于区分不同的群组或私聊；飞书群聊会带上群 ID。': 'It distinguishes different groups or direct chats; Feishu group chats include the group ID.',
   '话题标识': 'Topic ID',
   '查看群聊话题标识字段说明': 'View group topic ID field details',
   '查看私聊话题标识字段说明': 'View direct topic ID field details',
-  '该字段不是每个渠道都能提供。飞书话题群的消息会带上话题 ID，用于区分同一群组内的不同话题；当前消息不在话题中时，即使已选择该字段，<dsh_im_source> 中也会省略 threadId。': 'This field is not available on every channel. Messages in a Feishu topic chat carry the topic ID, which distinguishes different topics inside the same group. If the current message is not inside a topic, <dsh_im_source> omits threadId even when the field is selected.',
+  '飞书话题群的消息会带上话题 ID，用于区分同一群组内的不同话题。': 'Messages in a Feishu topic chat carry the topic ID, which distinguishes different topics inside the same group.',
   '机器人标识': 'Bot ID',
   '增强提示词': 'Guidance',
   '查看增强提示词使用说明': 'View guidance instructions',
@@ -386,7 +388,7 @@ const EN = Object.freeze({
   '清空': 'Clear',
   '选择在哪些会话中启用、提供哪些来源字段，以及如何使用这些信息。仅使用已有消息元数据，不查询平台 API。': 'Choose which conversations to enhance, which source fields to include, and how to use them. Only existing message metadata is used; no platform APIs are queried.',
   '增强提示词中请使用字段名（如 senderId、conversationType）引用这些信息。只发送勾选且当前消息中可用的字段，不会额外查询或补全。': 'Reference these values by field name (such as senderId or conversationType) in the guidance. Only selected fields available in the current message are sent; no extra lookups are made.',
-  '增强提示词中请使用字段名（如 senderId、conversationType）引用这些信息。只发送当前会话中勾选且可用的字段，不会额外查询或补全。': 'Reference these values by field name (such as senderId or conversationType) in the guidance. Only fields selected and available in the current conversation are sent; no extra lookups are made.',
+  '增强提示词中请使用字段名（如 senderId、conversationType）引用这些信息。只发送当前会话中勾选且可用的字段，不会额外查询或补全；某字段在当前渠道或当前消息中不存在时，即使已勾选，<dsh_im_source> 中也会省略。': 'Reference these values by field name (such as senderId or conversationType) in the guidance. Only fields selected and available in the current conversation are sent; no extra lookups are made. A field that does not exist on the current channel or in the current message is omitted from <dsh_im_source> even when it is selected.',
   '用于告诉模型如何使用当前群聊消息的 <dsh_im_source> 来源字段。只填写正文，插件会自动添加 <dsh_im_source_guidance> 成对标签。': 'Tell the model how to use <dsh_im_source> fields for the current group message. Enter only the body; the plugin adds paired <dsh_im_source_guidance> tags.',
   '用于告诉模型如何使用当前私聊消息的 <dsh_im_source> 来源字段。只填写正文，插件会自动添加 <dsh_im_source_guidance> 成对标签。': 'Tell the model how to use <dsh_im_source> fields for the current direct message. Enter only the body; the plugin adds paired <dsh_im_source_guidance> tags.',
   '仅在群聊开关开启时使用。清空并保存后不再附加群聊增强提示词；所选来源字段仍按当前场景设置发送。': 'Used only when group enhancement is enabled. Clear and save to omit group guidance; selected source fields still follow the group settings.',
@@ -405,13 +407,13 @@ const EN = Object.freeze({
   '工作区路径不存在。': 'The workspace path does not exist.',
   '工作区路径必须指向一个目录。': 'The workspace path must point to a directory.',
   '找不到要修改的机器人。': 'The bot could not be found.',
-  'Agent Preset': 'Agent Preset',
-  '查看 Agent Preset 说明': 'View Agent Preset help',
+  'Agent 预设': 'Agent Preset',
+  '查看 Agent 预设说明': 'View Agent Preset help',
   '跟随 Host 默认': 'Follow the Host default',
   '（已不可用）': ' (unavailable)',
   '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。': 'This affects only new sessions. If the current chat already has a session, send /new, then send a regular message to apply it.',
-  '当前 Agent Preset 已不可用，请选择其他 Preset 或跟随 Host 默认。': 'The current Agent Preset is unavailable. Choose another preset or follow the Host default.',
-  'Agent Preset 修改失败，请重试。': 'Could not update the Agent Preset. Try again.',
+  '当前 Agent 预设已不可用，请选择其他预设或跟随 Host 默认。': 'The current Agent Preset is unavailable. Choose another preset or follow the Host default.',
+  'Agent 预设修改失败，请重试。': 'Could not update the Agent Preset. Try again.',
   '请选择 Agent Preset。': 'Choose an Agent Preset.',
   'Agent Preset 无效。': 'The Agent Preset is invalid.',
   'Agent Preset 不存在或不可用。': 'The Agent Preset does not exist or is unavailable.',
@@ -949,7 +951,7 @@ const EN = Object.freeze({
   ' 会话同步设置也会一并删除。': ' Its Session sync setting will also be deleted.',
   '投递目标设置暂不可用。': 'Delivery target settings are unavailable.',
   '无法读取投递目标，请稍后重试。': 'Could not load delivery targets. Try again later.',
-  '← 返回机器人列表': '← Back to bots',
+  '返回机器人列表': 'Back to bots',
   '使用文档': 'User guide',
   '打开主动投递使用文档': 'Open the proactive delivery guide',
   '当前渠道暂不支持投递目标。': 'Delivery targets are not supported for this channel.',
@@ -974,6 +976,7 @@ const EN = Object.freeze({
   '请输入 -1、0 或 1~${INBOUND_TTL_MAX_HOURS} 之间的整数。': 'Enter -1, 0, or an integer from 1 to ${INBOUND_TTL_MAX_HOURS}.',
   '设置保存失败，请稍后重试。': 'Could not save the setting. Try again later.',
   '已保存': 'Saved',
+  '更改会自动保存': 'Changes save automatically',
   '通用设置暂不可用。': 'General settings are unavailable.',
   '正在读取通用设置…': 'Loading general settings…',
   '无法读取通用设置，请稍后重试。': 'Could not load general settings. Try again later.',
@@ -1005,10 +1008,12 @@ const EN = Object.freeze({
   '留空直连 qyapi.weixin.qq.com': 'leave empty to reach qyapi.weixin.qq.com directly',
   '公网回调基址（可选）': 'Public callback base URL (optional)',
   '例如 https://im.example.com': 'for example https://im.example.com',
+  '查看流式回复说明': 'View streaming reply details',
   '流式回复：开': 'Streaming replies: on',
   '流式回复：关': 'Streaming replies: off',
   '企业微信客户端实时出字；微信端不支持时自动改为整段发送': 'Streams replies in the WeCom client; falls back to segmented text messages when the WeChat side does not support it',
   '绑定企业微信自建应用': 'Bind a WeCom self-built app',
+  '查看回调地址说明': 'View callback URL details',
   '回调 URL（填入企业微信后台「接收消息 → 设置API接收」）': 'Callback URL (paste into the WeCom console under Receive messages → API receive)',
   '未配置公网回调基址：请在本页「设置」中填写回调基址，或手动拼接 回调基址 + 路径': 'No public callback base URL configured: fill it in under Settings on this page, or manually combine the base URL and the path',
   '重置密钥': 'Reset secret',
@@ -1102,6 +1107,14 @@ export const zh = Object.freeze(Object.fromEntries(
 ));
 
 let translate = (key) => key;
+
+/**
+ * The model and preset choices only take effect on sessions created after
+ * they are saved. Both surfaces used to repeat this sentence verbatim from
+ * two separate tooltips; it now has one source.
+ */
+export const NEW_SESSION_ONLY_NOTE =
+  '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。';
 
 export function setImTranslator(next) {
   translate = typeof next === 'function' ? next : (key) => key;

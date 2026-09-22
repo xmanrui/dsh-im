@@ -7,7 +7,7 @@ const CSS = String.raw`
 .dim-logoMatrix { color: white; background: #0dbd8b; }
 .dim-logoMatrix svg { width: 22px; height: 22px; }
 .dmt-setup { display: grid; gap: 18px; }
-.dmt-guide { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 18px; padding: 16px; border: 1px solid color-mix(in srgb, #1a8f6f 18%, var(--dsw-alias-border-l2, #e5e6eb)); border-radius: 11px; background: color-mix(in srgb, #1a8f6f 4%, var(--dsw-alias-bg-layer-1, #fff)); }
+.dmt-guide { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 18px; padding: 16px; border: 0.5px solid color-mix(in srgb, #1a8f6f 18%, var(--dsw-alias-border-l2, #e5e6eb)); border-radius: 11px; background: color-mix(in srgb, #1a8f6f 4%, var(--dsw-alias-bg-layer-1, #fff)); }
 .dmt-guideCopy { min-width: 0; }
 .dmt-guideCopy strong { display: block; margin-bottom: 5px; color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; }
 .dmt-guideCopy p { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 1.6; }

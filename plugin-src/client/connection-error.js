@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { h, localizeText } from './i18n.js';
+import { CollapsibleAccountSection } from './channels/shared/collapsible-account.js';
 import { normalizeDiagnosticDetails } from '../../src/channels/shared/diagnostic-details.mjs';
 import { CONFIG_ISSUE_LABELS } from '../../src/channels/shared/diagnostic-details.mjs';
 
@@ -59,18 +60,24 @@ export function ConnectionError({ error: value, warning = false, showMessage = t
   return h('div', { className: 'dim-connectionDiagnostic', 'data-connection-diagnostic': true, 'data-weixin-diagnostic': details.channel === 'weixin' || /^WX-CONN/.test(details.referenceId ?? '') || undefined, role: isWarning ? 'status' : undefined, 'data-warning': isWarning || undefined },
     showMessage ? h('p', null, error.message) : null,
     details.hint ? h('p', null, details.hint) : null,
-    h('details', { style: { marginTop: 8 } },
-      h('summary', { style: { cursor: 'pointer' } }, '诊断详情'),
-      h('dl', { style: { display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '4px 12px', margin: '10px 0' } },
+    // The host's own block-level disclosure is a details/summary; this one goes
+    // through the plugin's single shared primitive so every disclosure in the
+    // client carries one anatomy, and the chrome is the sheet's, never inline.
+    h(CollapsibleAccountSection, {
+      className: 'dim-diagnosticDisclosure',
+      toggleLabel: null,
+      header: h('span', { className: 'dim-diagnosticSummary' }, '诊断详情'),
+    },
+      h('dl', { className: 'dim-diagnosticFields' },
         ...fields.flatMap(([label, text]) => [h('dt', { key: `${label}-label` }, label),
-          React.createElement('dd', { key: label, style: { margin: 0, overflowWrap: 'anywhere' } }, String(text))])),
-      !details.referenceId ? h('p', null, '未取得 Host 诊断参考号。') : null,
+          React.createElement('dd', { key: label, className: 'dim-diagnosticValue' }, String(text))])),
+      !details.referenceId ? h('p', { className: 'dim-diagnosticNotice' }, '未取得 Host 诊断参考号。') : null,
       h('div', { className: 'dim-viewActions' },
         h('button', { type: 'button', className: 'dxw-button', onClick: copy }, copyState === 'copied' ? '诊断信息已复制' : '复制诊断信息')),
       copyState === 'manual' ? h('div', null,
-        h('p', null, '无法访问剪贴板，请选择并复制以下诊断信息。'),
+        h('p', { className: 'dim-diagnosticHint' }, '无法访问剪贴板，请选择并复制以下诊断信息。'),
         React.createElement('textarea', { readOnly: true, value: formatConnectionDiagnostic(error), rows: 7,
-          'aria-label': localizeText('诊断信息'), style: { width: '100%', boxSizing: 'border-box', marginTop: 8 } })) : null));
+          'aria-label': localizeText('诊断信息'), className: 'dim-diagnosticTextarea' })) : null));
 }
 
 export function normalizeConnectionError(value, fallbackCode = 'operation-failed', fallbackMessage = '操作失败，请查看原因和诊断详情。') {

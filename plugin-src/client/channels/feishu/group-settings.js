@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { h } from '../../i18n.js';
+import { RowSelect } from '../../row-selector.js';
 import {
   FEISHU_ENDPOINTS,
   FEISHU_REGISTRATION_OPERATIONS,
@@ -92,8 +93,8 @@ export function GroupResponseModeEditor({
   const [authorizing, setAuthorizing] = React.useState(false);
   const [error, setError] = React.useState(null);
 
-  const change = async (event) => {
-    const next = normalizeGroupResponseMode(event.target.value);
+  const change = async (nextValue) => {
+    const next = normalizeGroupResponseMode(nextValue);
     if (next === current || saving || disabled) return;
     setSaving(true);
     setError(null);
@@ -120,45 +121,48 @@ export function GroupResponseModeEditor({
   };
 
   return h('section', {
-    className: 'dim-feishuGroupControl',
+    className: 'dim-feishuGroupControl dim-modelRow',
     'aria-labelledby': 'dim-feishu-group-response-title',
   },
-  h('div', { className: 'dim-feishuGroupControlHeader' },
-    h('h3', { id: 'dim-feishu-group-response-title' }, '群聊响应方式'),
-    saving || authorizing
-      ? h('span', { className: 'dim-feishuGroupControlStatus', role: 'status' },
-          saving ? '保存中…' : '正在准备授权…')
-      : null),
-  h('select', {
-    className: 'dim-feishuGroupSelect',
+  h('div', { className: 'dim-rowText' },
+    h('div', { className: 'dim-feishuGroupControlHeader' },
+      h('h3', { id: 'dim-feishu-group-response-title' }, '群聊响应方式'),
+      saving || authorizing
+        ? h('span', { className: 'dim-feishuGroupControlStatus', role: 'status' },
+            saving ? '保存中…' : '正在准备授权…')
+        : null),
+    h('p', { className: 'dim-feishuGroupHelp' },
+      current === 'mention'
+        ? permissionGranted
+          ? '私聊始终响应；群聊仅处理明确 @当前机器人的消息。群消息权限已开通，再次切换无需授权。'
+          : '私聊始终响应；群聊仅处理明确 @当前机器人的消息。选择全部消息后会打开飞书官方授权流程。'
+        : permissionGranted
+          ? '已开通“获取群组中所有消息”权限（im:message.group_msg）；机器人会处理群聊中的所有可见消息。'
+          : '尚未确认“获取群组中所有消息”权限，请完成飞书授权。'),
+    current === 'all'
+      ? h('div', { className: 'dim-feishuGroupPermissionAction' },
+          h(SettingsButton, {
+            disabled: disabled || authorizationDisabled || saving || authorizing,
+            'aria-busy': authorizing ? 'true' : undefined,
+            'aria-label': permissionGranted ? '重新授权群消息权限' : '授权群消息权限',
+            onClick: () => { void authorize(); },
+          }, authorizing ? '正在准备…' : permissionGranted ? '重新授权' : '去授权'))
+      : null,
+    error ? h('p', {
+      className: 'dim-feishuGroupError',
+      role: 'alert',
+    }, error) : null),
+  h(RowSelect, {
+    className: 'dim-feishuGroupSelect dim-rowControl',
     value: current,
     disabled: disabled || saving,
-    'aria-label': '群聊响应方式',
-    onChange: (event) => { void change(event); },
-  },
-  h('option', { value: 'mention' }, '仅在 @机器人时响应（推荐）'),
-  h('option', { value: 'all' }, '响应所有群消息')),
-  h('p', { className: 'dim-feishuGroupHelp' },
-    current === 'mention'
-      ? permissionGranted
-        ? '私聊始终响应；群聊仅处理明确 @当前机器人的消息。群消息权限已开通，再次切换无需授权。'
-        : '私聊始终响应；群聊仅处理明确 @当前机器人的消息。选择全部消息后会打开飞书官方授权流程。'
-      : permissionGranted
-        ? '已开通“获取群组中所有消息”权限（im:message.group_msg）；机器人会处理群聊中的所有可见消息。'
-        : '尚未确认“获取群组中所有消息”权限，请完成飞书授权。'),
-  current === 'all'
-    ? h('div', { className: 'dim-feishuGroupPermissionAction' },
-        h(SettingsButton, {
-          disabled: disabled || authorizationDisabled || saving || authorizing,
-          'aria-busy': authorizing ? 'true' : undefined,
-          'aria-label': permissionGranted ? '重新授权群消息权限' : '授权群消息权限',
-          onClick: () => { void authorize(); },
-        }, authorizing ? '正在准备…' : permissionGranted ? '重新授权' : '去授权'))
-    : null,
-  error ? h('p', {
-    className: 'dim-feishuGroupError',
-    role: 'alert',
-  }, error) : null);
+    label: '群聊响应方式',
+    onChange: change,
+    options: [
+      { value: 'mention', label: '仅在 @机器人时响应（推荐）' },
+      { value: 'all', label: '响应所有群消息' },
+    ],
+  }));
 }
 
 export function GroupTopicReplyEditor({ value = false, disabled = false, onSave }) {
@@ -166,8 +170,8 @@ export function GroupTopicReplyEditor({ value = false, disabled = false, onSave 
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
 
-  const change = async (event) => {
-    const next = event.target.value === 'on';
+  const change = async (nextValue) => {
+    const next = nextValue === 'on';
     if ((next ? 'on' : 'off') === current || saving || disabled) return;
     setSaving(true);
     setError(null);
@@ -181,29 +185,32 @@ export function GroupTopicReplyEditor({ value = false, disabled = false, onSave 
   };
 
   return h('section', {
-    className: 'dim-feishuGroupControl',
+    className: 'dim-feishuGroupControl dim-modelRow',
     'aria-labelledby': 'dim-feishu-group-topic-title',
   },
-  h('div', { className: 'dim-feishuGroupControlHeader' },
-    h('h3', { id: 'dim-feishu-group-topic-title' }, '群聊以话题方式回复'),
-    saving
-      ? h('span', { className: 'dim-feishuGroupControlStatus', role: 'status' }, '保存中…')
-      : null),
-  h('select', {
-    className: 'dim-feishuGroupSelect',
+  h('div', { className: 'dim-rowText' },
+    h('div', { className: 'dim-feishuGroupControlHeader' },
+      h('h3', { id: 'dim-feishu-group-topic-title' }, '群聊以话题方式回复'),
+      saving
+        ? h('span', { className: 'dim-feishuGroupControlStatus', role: 'status' }, '保存中…')
+        : null),
+    h('p', { className: 'dim-feishuGroupHelp' },
+      '开启后，群聊中向机器人提问会自动开启独立飞书话题，回复落在话题内；每个话题是 dsh 会话列表里一条独立会话，上下文互不串。私聊不受影响。'),
+    error ? h('p', {
+      className: 'dim-feishuGroupError',
+      role: 'alert',
+    }, error) : null),
+  h(RowSelect, {
+    className: 'dim-feishuGroupSelect dim-rowControl',
     value: current,
     disabled: disabled || saving,
-    'aria-label': '群聊以话题方式回复',
-    onChange: (event) => { void change(event); },
-  },
-  h('option', { value: 'off' }, '关闭（群内直接回复）'),
-  h('option', { value: 'on' }, '开启（自动开启独立飞书话题）')),
-  h('p', { className: 'dim-feishuGroupHelp' },
-    '开启后，群聊中向机器人提问会自动开启独立飞书话题，回复落在话题内；每个话题是 dsh 会话列表里一条独立会话，上下文互不串。私聊不受影响。'),
-  error ? h('p', {
-    className: 'dim-feishuGroupError',
-    role: 'alert',
-  }, error) : null);
+    label: '群聊以话题方式回复',
+    onChange: change,
+    options: [
+      { value: 'off', label: '关闭（群内直接回复）' },
+      { value: 'on', label: '开启（自动开启独立飞书话题）' },
+    ],
+  }));
 }
 
 function PermissionFlow({ provision, now, busy, botName, onRetry, onCancel, onClose }) {

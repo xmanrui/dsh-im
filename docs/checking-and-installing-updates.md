@@ -1,6 +1,6 @@
 # Checking and installing updates
 
-In **Settings → IM Bot**, click **Check for updates** immediately to the left of GitHub. The official npm registry is contacted only on request; confirm the target version and current profile before installing. Only `@xmanrui/dsh-im` is updated, without fetching GitHub or updating Harness / Desktop itself.
+In the **Plugins → Installed → `@xmanrui/dsh-im`** configuration area, click **Check for updates** immediately to the left of GitHub. The official npm registry is contacted only on request; confirm the target version and current profile before installing. Only `@xmanrui/dsh-im` is updated, without fetching GitHub or updating Harness / Desktop itself.
 
 After installation, the backend still requires a manual restart, and the panel reports **Installed; restart manually** based on the Host's status. The updater does not request a restart, hot reload, or page refresh. The host's existing module watcher may refresh the plugin interface, but an interface change does not mean the new backend version is running; the Host-reported running version is authoritative. Update when bots are idle, then restart the current Harness / Desktop yourself. Closing the settings page does not cancel a submitted installation.
 

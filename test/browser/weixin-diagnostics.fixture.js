@@ -76,7 +76,7 @@ async function run() {
   }
   await until(() => document.querySelector('[data-weixin-diagnostic]'), 'Diagnostic did not mount');
   const diagnostic = document.querySelector('[data-weixin-diagnostic]');
-  diagnostic.querySelector('summary').click();
+  diagnostic.querySelector('.dim-collapsibleHead').click();
   await tick();
   button('复制诊断信息').click();
   await until(() => copied || document.querySelector('textarea[readonly]'), 'Copy did not complete');

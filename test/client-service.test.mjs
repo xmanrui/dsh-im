@@ -59,7 +59,7 @@ function harness({ ready = true, provide = true, onProvide } = {}) {
     },
     slots: {
       inject(name, install) {
-        assert.equal(name, 'settings.section');
+        assert.equal(name, 'plugins.bundle.config');
         const item = { cleanup: null, install };
         subscriptions.add(item);
         if (declared) item.cleanup = install();
@@ -119,12 +119,14 @@ test('web keeps its one bilingual settings entry, including hosts without provid
     const host = start(t, { provide });
     assert.equal(host.entries.size, 1);
     const { options, component } = [...host.entries][0];
-    assert.equal(options.id, 'xmanrui-dsh-im');
-    assert.equal(options.order, 21);
-    assert.equal(options.label(), 'IM机器人');
+    // The Plugins page identifies a bundle's configuration by its package key and
+    // draws the title, icon and crumb itself, so the entry carries no id/order/label.
+    assert.equal(options.key, '@xmanrui/dsh-im');
     assert.equal(options.locale, 'dsh-im');
     const markup = renderToStaticMarkup(React.createElement(component));
-    assert.match(markup, /DSH-IM/);
+    // The Plugins page draws the bundle title, so the entry keeps only its own
+    // version chip; the panel id below is what proves the page view rendered.
+    assert.match(markup, /dim-brandVersion/);
     assert.match(markup, /id="dim-panel-weixin"/);
     assert.equal(Boolean(host.service), provide);
     if (provide) {

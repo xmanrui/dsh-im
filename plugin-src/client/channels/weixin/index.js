@@ -54,7 +54,6 @@ function Heading({ totals, adding, busy, onAdd, addButtonRef }) {
   return h('div', { className: 'dxw-heading' },
     h('div', { className: 'dxw-tools' },
       h(Button, {
-        kind: 'primary',
         className: 'dim-scanButton',
         onClick: onAdd,
         disabled: adding || busy,

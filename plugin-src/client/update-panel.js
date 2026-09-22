@@ -4,6 +4,7 @@ import validSemver from 'semver/functions/valid.js';
 import compareVersionsDescending from 'semver/functions/rcompare.js';
 
 import { h, localizeText } from './i18n.js';
+import { HelpTip } from './help-tip.js';
 import { createPollScheduler } from './lifecycle.js';
 
 export const UPDATE_RPC_CHANNEL = '/dsh-im';
@@ -230,9 +231,10 @@ function UpdateDialog({ children, onClose }) {
       }
     },
   },
-  h('h3', { id: titleId }, 'DSH-IM 更新'),
-  h('p', { id: descriptionId, className: 'dim-updateDescription' },
-    '仅更新 DSH-IM。安装完成后需手动重启后台；本功能不会自动重启或主动刷新页面。'),
+  h('div', { className: 'dim-helpRow' },
+    h('h3', { id: titleId }, 'DSH-IM 更新'),
+    h(HelpTip, { id: descriptionId, label: '查看 DSH-IM 更新说明' },
+      '仅更新 DSH-IM。安装完成后需手动重启后台；本功能不会自动重启或主动刷新页面。')),
   children));
   return typeof document !== 'undefined' && document.body
     ? createPortal(content, document.body)

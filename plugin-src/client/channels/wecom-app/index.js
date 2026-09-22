@@ -5,6 +5,7 @@ import * as React from 'react';
 import { WecomLogoGlyph } from '../../channel-logos.js';
 import { AccountSettingsToggle, CollapsibleAccountSection } from '../shared/collapsible-account.js';
 import { h } from '../../i18n.js';
+import { HelpTip } from '../../help-tip.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
 import {
@@ -59,7 +60,6 @@ function Heading({ totals, adding, busy, onAdd, addButtonRef }) {
     h('div', { className: 'ddt-tools' },
       h('div', { className: 'dim-bindActions' },
         h(Button, {
-          kind: 'primary',
           className: 'dim-scanButton',
           onClick: onAdd,
           disabled: adding || busy,
@@ -119,6 +119,7 @@ function BindForm({ busy, error, onSubmit, onCancel }) {
   const [callbackBaseUrl, setCallbackBaseUrl] = React.useState('');
   const [streamEnabled, setStreamEnabled] = React.useState(true);
   const headingId = React.useId();
+  const switchHelpId = React.useId();
   const formRef = React.useRef(null);
 
   const submit = (event) => {
@@ -152,14 +153,19 @@ function BindForm({ busy, error, onSubmit, onCancel }) {
     h('div', { className: 'dim-appFieldGrid' },
       h(Field, { label: '公网回调基址（可选）', value: callbackBaseUrl, onChange: setCallbackBaseUrl, placeholder: '例如 https://im.example.com', busy }),
       h('div', { className: 'dim-appSwitchRow' },
-        h('button', {
-          type: 'button',
-          className: 'ddt-button dim-streamToggle',
-          'aria-pressed': streamEnabled ? 'true' : 'false',
-          onClick: () => setStreamEnabled((value) => !value),
-          disabled: busy,
-        }, streamEnabled ? '流式回复：开' : '流式回复：关'),
-        h('span', { className: 'dim-switchHint' }, '企业微信客户端实时出字；微信端不支持时自动改为整段发送'))),
+        h('div', { className: 'dim-helpRow' },
+          h('button', {
+            type: 'button',
+            className: 'ddt-button dim-streamToggle',
+            'aria-pressed': streamEnabled ? 'true' : 'false',
+            onClick: () => setStreamEnabled((value) => !value),
+            disabled: busy,
+          }, streamEnabled ? '流式回复：开' : '流式回复：关'),
+          h(HelpTip, {
+            id: switchHelpId,
+            label: '查看流式回复说明',
+            disabled: busy,
+          }, '企业微信客户端实时出字；微信端不支持时自动改为整段发送')))),
     error ? h('div', { className: 'ddt-inlineError dim-inlineError', role: 'alert' }, h(ConnectionError, { error: error })) : null,
     h('div', { className: 'ddt-actions dim-viewActions' },
       h(Button, { kind: 'primary', onClick: () => formRef.current?.requestSubmit(), disabled: busy }, busy ? '正在绑定…' : '保存并连接'),
@@ -168,6 +174,7 @@ function BindForm({ busy, error, onSubmit, onCancel }) {
 
 function CallbackUrlBox({ url, busy, resetBusy, onCopy, onReset }) {
   const [copied, setCopied] = React.useState(false);
+  const callbackHelpId = React.useId();
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(url);
@@ -179,7 +186,13 @@ function CallbackUrlBox({ url, busy, resetBusy, onCopy, onReset }) {
     onCopy?.();
   };
   return h('div', { className: 'dim-callbackBox' },
-    h('strong', null, '回调 URL（填入企业微信后台「接收消息 → 设置API接收」）'),
+    h('div', { className: 'dim-helpRow' },
+      h('strong', null, '回调 URL（填入企业微信后台「接收消息 → 设置API接收」）'),
+      h(HelpTip, {
+        id: callbackHelpId,
+        label: '查看回调地址说明',
+        disabled: busy || resetBusy,
+      }, '重置密钥后回调 URL 会变化，需要同步更新企业微信后台。若公网反代未就绪，可临时使用 http://服务器IP:端口 形式的回调地址。')),
     h('div', { className: 'dim-callbackRow' },
       h('input', {
         value: url || '未配置公网回调基址：请在本页「设置」中填写回调基址，或手动拼接 回调基址 + 路径',
@@ -187,9 +200,7 @@ function CallbackUrlBox({ url, busy, resetBusy, onCopy, onReset }) {
         onFocus: (event) => event.target.select?.(),
       }),
       url ? h(Button, { onClick: copy, disabled: busy, small: true }, copied ? '已复制' : '复制') : null,
-      h(Button, { kind: 'danger', onClick: onReset, disabled: busy || resetBusy }, resetBusy ? '重置中…' : '重置密钥')),
-    h('span', { className: 'dim-callbackHint' },
-      '重置密钥后回调 URL 会变化，需要同步更新企业微信后台。若公网反代未就绪，可临时使用 http://服务器IP:端口 形式的回调地址。'));
+      h(Button, { kind: 'danger', onClick: onReset, disabled: busy || resetBusy }, resetBusy ? '重置中…' : '重置密钥')));
 }
 
 function AppSettingsEditor({ bot, busy, onSave }) {

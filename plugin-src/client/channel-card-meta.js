@@ -65,24 +65,12 @@ function messageErrorTime(value) {
 }
 
 export function ChannelListHeading({ className = '', id, title, connectionLabel }) {
-  const helpId = React.useId();
   return h('div', { className: `${className} dim-listHeading`.trim() },
     h('div', { className: 'dim-listTitle' },
       h('h3', id ? { id } : null, title),
-      h('span', { className: 'dim-channelHelp' },
-        h('button', {
-          type: 'button',
-          className: 'dim-channelHelpButton',
-          'aria-label': '查看消息通道说明',
-          'aria-describedby': helpId,
-        }, h('span', { 'aria-hidden': 'true' }, '?')),
-        h('span', {
-          id: helpId,
-          className: 'dim-channelTooltip',
-          role: 'tooltip',
-        },
-        h('span', null, '消息通道'),
-        h('strong', null, connectionLabel)))));
+      // Stated in place rather than hidden in a tooltip: the connection label is
+      // two words, and hover-only help for two words costs more than it explains.
+      h('span', { className: 'dim-listConnection' }, connectionLabel)));
 }
 
 export function BotStatusMeta({
@@ -104,9 +92,12 @@ export function BotStatusMeta({
       'data-tone': tone,
     }),
     h('span', null, stateLabel)),
-    h('div', { className: 'dim-lastChecked' },
+    // Without a timestamp the value is the placeholder 尚未检查, which reads as one
+    // run-on line against its own label (最近检查 尚未检查) and says nothing the status
+    // chip above does not already say. The row returns as soon as a real check runs.
+    lastCheckedAt ? h('div', { className: 'dim-lastChecked' },
       h('span', null, '最近检查'),
-      h('span', null, formatCheckedTime(lastCheckedAt))));
+      h('span', null, formatCheckedTime(lastCheckedAt))) : null);
 }
 
 export function LastMessageErrorSummary({ className = '', error }) {

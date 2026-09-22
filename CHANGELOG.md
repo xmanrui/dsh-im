@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Changed / 变更
+
+- 配置面随宿主迁到侧边栏插件页：宿主把插件配置改到 `plugins.bundle.config` 槽，本插件的配置区因此渲染在 **Plugins → Installed → `@xmanrui/dsh-im`** 的详情页内（描述与行列表之间），一级设置菜单里的「IM机器人」入口随之移除。该槽由 DSH `0.1.6-alpha.2` 引入，`dsh.compatibility` 增加这一版本；更早的宿主上机器人功能照常工作，但不再有配置界面（[#216](https://github.com/xmanrui/dsh-im/pull/216)）。
+  The configuration surface moved with the host onto the Plugins page: the host now takes plugin configuration through the `plugins.bundle.config` slot, so the page renders inside **Plugins → Installed → `@xmanrui/dsh-im`** between the bundle's description and its rows, and the top-level settings entry is gone. That slot arrives with DSH `0.1.6-alpha.2`, which `dsh.compatibility` now lists; older hosts keep working but no longer offer a configuration UI ([#216](https://github.com/xmanrui/dsh-im/pull/216)).
+
 ## [4.25.0] - 2026-09-22
 
 ### Added / 新增

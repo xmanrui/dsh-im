@@ -6,6 +6,7 @@ import {
   DingtalkLogoGlyph,
   DiscordLogoGlyph,
   FeishuLogoGlyph,
+  GithubMarkGlyph,
   OfficeLogoGlyph,
   QqLogoGlyph,
   SlackLogoGlyph,
@@ -17,6 +18,7 @@ import {
   EmailLogoGlyph,
   MatrixLogoGlyph,
 } from './channel-logos.js';
+import { FlaskGlyph } from './ui-glyphs.js';
 import { DINGTALK_RPC_CHANNEL } from './channels/dingtalk/api.js';
 import { DingtalkSettingsTab } from './channels/dingtalk/index.js';
 import { DISCORD_RPC_CHANNEL } from './channels/discord/api.js';
@@ -108,11 +110,11 @@ const CHANNELS = Object.freeze([
   { id: 'telegram', label: 'Telegram' },
   { id: 'discord', label: 'Discord' },
   { id: 'whatsapp', label: 'WhatsApp' },
-  { id: 'wecomApp', label: '企业微信应用', note: '（实验功能）' },
-  { id: 'imessage', label: 'iMessage', note: '（实验功能）' },
-  { id: 'email', label: '邮箱', note: '（实验功能）' },
-  { id: 'matrix', label: 'Matrix', note: '（实验功能）' },
-  { id: 'office', label: 'AI Office', note: '（实验功能）' },
+  { id: 'wecomApp', label: '企业微信应用', experimental: true },
+  { id: 'imessage', label: 'iMessage', experimental: true },
+  { id: 'email', label: '邮箱', experimental: true },
+  { id: 'matrix', label: 'Matrix', experimental: true },
+  { id: 'office', label: 'AI Office', experimental: true },
 ]);
 
 function WeixinLogo() {
@@ -246,6 +248,7 @@ export function IMSettingsTab({
   const [loopbackRecovery, setLoopbackRecovery] = React.useState(null);
   const [runningVersion, setRunningVersion] = React.useState(IM_PLUGIN_VERSION);
   const [deliverySettings, setDeliverySettings] = React.useState(null);
+  const railTabRefs = React.useRef([]);
   // The Host owns email availability and reports it over RPC. The
   // mailbox entry point is omitted entirely while it is closed, and the visible
   // channel list is what every later lookup (active tab, rail) reads from.
@@ -264,6 +267,22 @@ export function IMSettingsTab({
   const activePanelId = globalSettingsSelected
     ? `dim-panel-${GLOBAL_SETTINGS_TAB_ID}`
     : `dim-panel-${active.id}`;
+  // WAI-ARIA tabs pattern: one Tab stop for the strip, the arrow keys move
+  // within it, Home/End jump to the ends. Selection follows focus, which is the
+  // behaviour the pattern prescribes for a strip whose panels are cheap to show.
+  const onRailKeyDown = (event) => {
+    const { key } = event;
+    if (key !== 'ArrowRight' && key !== 'ArrowLeft' && key !== 'Home' && key !== 'End') return;
+    const count = visibleChannels.length;
+    const from = Math.max(0, visibleChannels.findIndex((channel) => channel.id === selected));
+    const next = key === 'Home' ? 0
+      : key === 'End' ? count - 1
+        : (from + (key === 'ArrowRight' ? 1 : -1) + count) % count;
+    event.preventDefault();
+    setSelected(visibleChannels[next].id);
+    setDeliverySettings(null);
+    railTabRefs.current[next]?.focus?.();
+  };
   const reportLoopbackRecovery = React.useCallback((recovery) => {
     setLoopbackRecovery((current) => current?.url === recovery.url ? current : recovery);
   }, []);
@@ -318,11 +337,12 @@ export function IMSettingsTab({
   return h(WorkspaceDirectoryPickerContext.Provider, { value: workspaceDirectoryPicker },
     h('section', { className: 'dim-page', 'aria-label': 'IM机器人设置' },
     h('header', { className: 'dim-title' },
+      // The Plugins page draws this bundle's title, version tag, package name and
+      // one-liner directly above the section, so the header keeps only what the
+      // page cannot draw: the version the Host reports it is running, and the
+      // plugin's own tools.
       h('div', { className: 'dim-brand' },
-        h('div', { className: 'dim-brandHeading' },
-          h('strong', { className: 'dim-brandName' }, 'DSH-IM'),
-          h('span', { className: 'dim-brandVersion' }, `v${runningVersion}`)),
-        h('p', null, '让 DeepSeek Harness 触手可及')),
+        h('span', { className: 'dim-brandVersion' }, `v${runningVersion}`)),
       h('div', { className: 'dim-titleActions' },
         h(UpdatePanel, {
           rpcCall: rpcCalls.updateRpcCall,
@@ -338,16 +358,7 @@ export function IMSettingsTab({
           'aria-label': 'dsh-im GitHub',
           'aria-describedby': githubTooltipId,
         },
-        h('svg', {
-          width: 18,
-          height: 18,
-          viewBox: '0 0 16 16',
-          fill: 'currentColor',
-          focusable: 'false',
-          'aria-hidden': 'true',
-        }, h('path', {
-          d: 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.65 7.65 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z',
-        }))),
+        h(GithubMarkGlyph, { size: 16 })),
         h('span', {
           id: githubTooltipId,
           className: 'dim-githubTooltip',
@@ -374,14 +385,28 @@ export function IMSettingsTab({
         }, '通用设置'))),
     ),
     h('div', { className: 'dim-layout' },
-      h('nav', { className: 'dim-rail', role: 'tablist', 'aria-label': 'IM 设置导航' },
-        visibleChannels.map((channel) => h('button', {
+      h('nav', {
+        className: 'dim-rail',
+        role: 'tablist',
+        'aria-label': 'IM 设置导航',
+        onKeyDown: onRailKeyDown,
+      },
+        visibleChannels.map((channel, index) => h('button', {
+          ref: (node) => { railTabRefs.current[index] = node; },
           key: channel.id,
           type: 'button',
           role: 'tab',
           id: `dim-tab-${channel.id}`,
           className: 'dim-channel',
+          // The rail is a fixed-width column, so a long name is clipped with an
+          // ellipsis; the title keeps the whole name reachable on hover.
+          title: channel.label,
           'aria-selected': !globalSettingsSelected && channel.id === active.id,
+          // Roving tabindex: one Tab stop for the whole strip; the arrow keys
+          // move within it. With nothing selected (the general settings page is
+          // showing) the first tab holds the stop so the strip stays reachable.
+          tabIndex: (!globalSettingsSelected && channel.id === active.id)
+            || (globalSettingsSelected && channel.id === visibleChannels[0].id) ? 0 : -1,
           'aria-controls': `dim-panel-${channel.id}`,
           onClick: () => {
             setSelected(channel.id);
@@ -391,9 +416,14 @@ export function IMSettingsTab({
         h(ChannelLogo, { channel: channel.id }),
         h('span', { className: 'dim-channelCopy' },
           h('strong', null, channel.label),
-          channel.note ? h('small', { className: 'dim-channelNote' }, channel.note) : null,
+          /* The badge is an icon, not a word: "(Experimental)" written out took a second
+             line's width on every card that carries it and said the same thing three times.
+             role=img + aria-label keeps the name for anyone not reading the picture. */
+          channel.experimental ? h('span', {
+            className: 'dim-channelBadge', role: 'img',
+            'aria-label': '实验功能', title: '实验功能',
+          }, h(FlaskGlyph, { size: 14 })) : null,
         )))),
-      h('div', { className: 'dim-divider', 'aria-hidden': 'true' }),
       h('main', {
         className: 'dim-panel',
         role: 'tabpanel',
@@ -446,6 +476,16 @@ export function IMSettingsTab({
                           : h(OfficeSettingsTab, { rpcCall: rpcCalls.officeRpcCall }))),
     ),
   ));
+}
+
+/**
+ * The bundle's configuration as the Plugins page asks for it. The page draws
+ * the title, the icon, the crumb and the one-liner itself and only asks for the
+ * page view, so the summary view renders nothing here.
+ */
+export function IMPluginConfigSection({ view, ...seat }) {
+  if (view !== 'page') return null;
+  return h(IMSettingsTab, seat);
 }
 
 export function apply(ctx) {
@@ -557,12 +597,22 @@ export function apply(ctx) {
 
   // Stable for this plugin lifetime: creating an element must not create a
   // new component type and reset the reader's selected tab or unsaved input.
-  function IMPanel({ preferredSectionId }) {
+  // One element type serves both the client service's render path and the
+  // Plugins page's slot, so a host asking for one never resets the other. A
+  // page view that throws stays local inside the boundary that wraps both.
+  //
+  // `view` is threaded through rather than gated here: the exported section
+  // renders the page view and nothing for the summary, while a host that does
+  // not pass `view` at all - an older one, or the service's own render - still
+  // gets the page. Only the declared dependencies reach the panel, so a caller
+  // cannot substitute its own RPC call.
+  function IMPanel({ view = 'page', preferredSectionId }) {
     React.useSyncExternalStore(subscribeLocale, localeSnapshot, localeSnapshot);
     return h(IMPanelErrorBoundary, null,
-      h(IMSettingsTab, { ...panelDependencies, preferredSectionId }));
+      h(IMPluginConfigSection, { ...panelDependencies, view, preferredSectionId }));
   }
   const buildPanelElement = (props = {}) => h(IMPanel, {
+    view: props.view,
     preferredSectionId: props.preferredSectionId,
   });
 
@@ -582,12 +632,10 @@ export function apply(ctx) {
       }
       // The existing slot controller owns late declarations, withdrawal and
       // re-declaration. Cancelling it also cancels a pending registration.
-      stopSettings = ctx.slots.inject('settings.section', () => {
+      stopSettings = ctx.slots.inject('plugins.bundle.config', () => {
         const unregister = ctx.slots.register({
-          name: 'settings.section',
-          id: 'xmanrui-dsh-im',
-          order: 21,
-          label: () => t('IM机器人'),
+          name: 'plugins.bundle.config',
+          key: '@xmanrui/dsh-im',
           locale: IM_LOCALE_NAMESPACE,
           inject: () => panelDependencies,
         }, buildPanelElement);

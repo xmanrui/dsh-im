@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { RowSelect } from '../plugin-src/client/row-selector.js';
 import test from 'node:test';
 import * as React from 'react';
 import TestRenderer from 'react-test-renderer';
@@ -858,22 +859,23 @@ test('AgentPresetEditor lists Host presets and moves its session guidance into a
       onSave() {},
     }),
   ));
-  const select = renderer.root.findByProps({ className: 'dim-presetSelect' });
-  assert.equal(select.props.value, 'coding');
-  assert.deepEqual(optionValues(select), ['', 'coding', 'default']);
-  assert.equal(textOf(select.children[0]), '跟随 Host 默认');
-  assert.equal(textOf(select.children[1]), 'Coding（coding）');
-  const helpButton = renderer.root.findByProps({
-    'aria-label': '查看 Agent Preset 说明',
-  });
-  const tooltip = renderer.root.findByProps({ role: 'tooltip' });
-  assert.equal(helpButton.props.type, 'button');
-  assert.ok(tooltip.props.id);
-  assert.equal(helpButton.props['aria-describedby'], tooltip.props.id);
+  // The row selector is a button + menu now, so its contract is value/options/onChange
+  // rather than a select's option children.
+  const picker = renderer.root.findByType(RowSelect);
+  assert.equal(picker.props.value, 'coding');
+  assert.deepEqual(picker.props.options.map((option) => option.value), ['', 'coding', 'default']);
+  assert.equal(picker.props.options[0].label, '跟随 Host 默认');
+  assert.equal(picker.props.options[1].label, 'Coding（coding）');
+  // The new-session note is stated once, on the model block that sits directly
+  // above this one in every channel, so carrying a second copy here put the same
+  // sentence on screen twice. Native settings surfaces carry no help trigger at
+  // all, so this block keeps no hint of its own.
   assert.equal(
-    textOf(tooltip),
-    '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。',
+    renderer.root.findAllByProps({ className: 'dim-helpHint' }).length,
+    0,
+    'the Agent Preset block does not restate the note the block above it carries',
   );
+  assert.equal(renderer.root.findAll(node => node.props?.['aria-label'] === '查看 Agent 预设说明').length, 0);
   assert.equal(renderer.root.findAllByType('small').length, 0);
   renderer.unmount();
 });
@@ -888,17 +890,17 @@ test('AgentPresetEditor marks a removed current preset and still allows clearing
       onSave(value) { saved.push(value); },
     }),
   ));
-  const select = renderer.root.findByProps({ className: 'dim-presetSelect' });
-  assert.equal(select.props.value, 'removed-preset');
-  assert.deepEqual(optionValues(select), ['', 'coding', 'default', 'removed-preset']);
-  assert.equal(textOf(select.children[3]), 'removed-preset（已不可用）');
+  const picker = renderer.root.findByType(RowSelect);
+  assert.equal(picker.props.value, 'removed-preset');
+  assert.deepEqual(picker.props.options.map((option) => option.value), ['', 'coding', 'default', 'removed-preset']);
+  assert.equal(picker.props.options[3].label, 'removed-preset（已不可用）');
   assert.equal(
     textOf(renderer.root.findByProps({ role: 'status' })),
-    '当前 Agent Preset 已不可用，请选择其他 Preset 或跟随 Host 默认。',
+    '当前 Agent 预设已不可用，请选择其他预设或跟随 Host 默认。',
   );
 
   await act(async () => {
-    select.props.onChange({ target: { value: '' } });
+    picker.props.onChange('');
     await flushMicrotasks();
   });
   assert.deepEqual(saved, [null]);
@@ -922,14 +924,13 @@ test('AgentPresetEditor saves a selected preset and can follow the Host default'
     { value: PRESET_CATALOG },
     React.createElement(Harness),
   ));
-  const select = renderer.root.findByProps({ className: 'dim-presetSelect' });
+  const picker = renderer.root.findByType(RowSelect);
   await act(async () => {
-    select.props.onChange({ target: { value: 'coding' } });
+    picker.props.onChange('coding');
     await flushMicrotasks();
   });
   await act(async () => {
-    renderer.root.findByProps({ className: 'dim-presetSelect' })
-      .props.onChange({ target: { value: '' } });
+    picker.props.onChange('');
     await flushMicrotasks();
   });
   assert.deepEqual(saved, ['coding', null]);
@@ -970,8 +971,7 @@ test('Discord settings save an Agent Preset through bot.preset.set', async (t) =
   });
   const card = renderer.root.findByProps({ 'data-bot-id': 'discord_test' });
   await act(async () => {
-    card.findByProps({ className: 'dim-presetSelect' })
-      .props.onChange({ target: { value: 'coding' } });
+    card.findByType(RowSelect).props.onChange('coding');
     await flushMicrotasks();
   });
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { RowSelect } from '../plugin-src/client/row-selector.js';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 
@@ -10,6 +11,7 @@ import TestRenderer from 'react-test-renderer';
 import {
   apply as applyClient,
   IM_PLUGIN_VERSION,
+  IMPluginConfigSection,
   IMSettingsTab,
   inject as clientInject,
 } from '../plugin-src/client/index.js';
@@ -161,7 +163,7 @@ test('removing the first account preserves collapse styles and toggling for rema
       },
     })));
   const collapseStyles = () => [...styles].find((style) =>
-    style.textContent.includes('.dim-collapsibleAccount:not(.is-open)'));
+    style.textContent.includes('.dim-collapsible:not(.is-open)'));
   let renderer;
   let disposeStyles;
   try {
@@ -214,11 +216,14 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   }));
 
   assert.match(markup, /IM机器人/);
-  assert.match(markup, /让 DeepSeek Harness 触手可及/);
+  // The Plugins page draws the bundle's title and one-liner itself; the section
+  // keeps only the version the Host reports it is running.
+  assert.doesNotMatch(markup, /让 DeepSeek Harness 触手可及/);
+  assert.doesNotMatch(markup, /dim-brandName/);
   assert.match(markup, /class="dim-brand"/);
   assert.equal(IM_PLUGIN_VERSION, packageVersion);
   assert.match(markup, new RegExp(
-    `<div class="dim-brandHeading"><strong class="dim-brandName">DSH-IM<\\/strong><span class="dim-brandVersion">v${packageVersion.replaceAll('.', '\\.')}<\\/span><\\/div>`,
+    `<div class="dim-brand"><span class="dim-brandVersion">v${packageVersion.replaceAll('.', '\\.')}<\\/span><\\/div>`,
   ));
   assert.doesNotMatch(markup, /dim-versionTooltip|当前版本/);
   assert.doesNotMatch(markup, /dim-brandLogo|<img/);
@@ -241,25 +246,26 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   )?.[1] ?? '';
   assert.match(settingsButtonMarkup, /data-im-icon="global-settings"/);
   assert.doesNotMatch(settingsButtonMarkup, /通用设置/);
-  assert.match(styles, /\.dim-title \{[^}]*margin: 0 0 18px;/);
-  assert.match(styles, /\.dim-title p \{[^}]*color: var\(--dsw-alias-label-secondary, #646a73\);[^}]*font-size: 12px;[^}]*font-weight: 500;/);
-  assert.match(styles, /\.dim-brand \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*align-items: flex-start;[^}]*gap: 1px;/);
-  assert.match(styles, /\.dim-brandHeading \{[^}]*display: flex;[^}]*align-items: baseline;[^}]*gap: 8px;[^}]*white-space: nowrap;/);
-  assert.match(styles, /\.dim-brandName \{[^}]*font-size: 20px;[^}]*font-weight: 800;[^}]*letter-spacing: \.04em;/);
-  assert.match(styles, /\.dim-brandVersion \{[^}]*color: var\(--dsw-alias-label-tertiary, #8f959e\);[^}]*font: 500 10px\/16px[^}]*letter-spacing: 0;/);
+  assert.match(styles, /\.dim-title \{[^}]*margin: 0 0 12px;/);
+  assert.match(styles, /\.dim-brand \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*align-items: flex-start;[^}]*gap: var\(--dim-gap-1\);/);
+  // The section owns no title role: the Plugins page draws the bundle title.
+  assert.doesNotMatch(styles, /\.dim-brandHeading|\.dim-brandName|\.dim-title p \{/);
+  // The version renders as a native Tag: r999 capsule, 0.5px l4 outline, 11/17/500.
+  assert.match(styles, /\.dim-brandVersion \{[^}]*padding: 1px 8px;[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-full\);[^}]*corner-shape: round;[^}]*font: 500 11px\/17px/);
   assert.doesNotMatch(styles, /dim-versionTooltip|\.dim-brand:focus-visible/);
   assert.doesNotMatch(styles, /\.dim-brandLogo/);
-  assert.match(styles, /\.dim-githubLink \{[^}]*border: 1px solid var\(--dsw-alias-border-l2, #dfe1e5\);[^}]*text-decoration: none;/);
+  // Header actions are native icon buttons: 28px, no border, transparent at rest.
+  assert.match(styles, /\.dim-githubLink \{[^}]*width: 28px;[^}]*height: 28px;[^}]*border: none;[^}]*background: transparent;[^}]*text-decoration: none;/);
   assert.match(styles, /\.dim-githubTooltip \{[^}]*top: calc\(100% \+ 8px\);[^}]*transform: translateY\(-3px\);/);
   assert.match(styles, /\.dim-githubAction:hover \.dim-githubTooltip, \.dim-githubAction:focus-within \.dim-githubTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.match(styles, /\.dim-generalSettingsButton \{[^}]*width: 30px;[^}]*height: 30px;[^}]*display: grid;[^}]*border: 1px solid var\(--dsw-alias-border-l2, #dfe1e5\);/);
+  assert.match(styles, /\.dim-generalSettingsButton \{[^}]*width: 28px;[^}]*height: 28px;[^}]*display: grid;[^}]*border: none;[^}]*background: transparent;/);
   assert.match(styles, /\.dim-generalSettingsTooltip \{[^}]*top: calc\(100% \+ 8px\);[^}]*transform: translateY\(-3px\);/);
   assert.match(styles, /\.dim-generalSettingsAction:hover \.dim-generalSettingsTooltip, \.dim-generalSettingsButton:focus-visible \+ \.dim-generalSettingsTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
   assert.match(styles, /\.dim-generalSettingsButton\[aria-current="page"\] \+ \.dim-generalSettingsTooltip \{[^}]*opacity: 0;[^}]*visibility: hidden;/);
   assert.doesNotMatch(styles, /\.dim-generalSettingsAction:focus-within \.dim-generalSettingsTooltip/);
-  assert.match(styles, /\.dim-globalTtlTooltip \{[^}]*position: absolute;[^}]*opacity: 0;[^}]*visibility: hidden;/);
-  assert.match(styles, /\.dim-globalTtlHelp:hover \.dim-globalTtlTooltip, \.dim-globalTtlHelpButton:focus-visible \+ \.dim-globalTtlTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.doesNotMatch(styles, /\.dim-globalTtlHelp:focus-within \.dim-globalTtlTooltip/);
+  // The retention hover layer is gone: its rule family had no render point left, so
+  // the sheet must not carry the skin for a tooltip nothing can mount.
+  assert.doesNotMatch(styles, /dim-globalTtlTooltip|dim-globalTtlHelp/);
   assert.match(styles, /\.dim-globalSweepAction \{[^}]*position: relative;[^}]*margin-left: auto;/);
   assert.match(styles, /\.dim-globalSweepConfirm \{[^}]*position: absolute;[^}]*top: calc\(100% \+ 8px\);[^}]*right: 0;/);
   assert.doesNotMatch(markup, /\d+ 个渠道|dim-channelCount/);
@@ -275,7 +281,9 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   assert.match(markup, />WhatsApp</);
   assert.match(markup, />iMessage</);
   assert.match(markup, />Matrix</);
-  assert.match(markup, />AI Office<\/strong><small class="dim-channelNote">（实验功能）<\/small>/);
+  // The marker is an icon with a name, not a word in the label row.
+  assert.match(markup, />AI Office<\/strong><span class="dim-channelBadge" role="img" aria-label="实验功能"/);
+  assert.match(markup, /data-im-icon="flask"/);
   assert.match(markup, /dim-logoWeixin/);
   assert.match(markup, /dim-logoFeishu/);
   assert.match(markup, /dim-logoDingtalk/);
@@ -288,7 +296,7 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   assert.match(markup, /dim-logoIMessage/);
   assert.match(markup, /dim-logoMatrix/);
   assert.match(markup, /dim-logoOffice/);
-  assert.match(styles, /\.dim-logoFeishu svg \{ width: 28px; height: 28px; \}/);
+  assert.match(styles, /\.dim-logoFeishu svg \{ width: 20px; height: 20px; \}/);
   // This render's `emailRpcCall` never reports the channel as
   // enabled, so the mailbox entry point is omitted: twelve IM channels plus the
   // AI Office connector. The email tab is covered separately below.
@@ -297,6 +305,62 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   assert.doesNotMatch(markup, /role="switch"|type="checkbox"/);
   assert.doesNotMatch(markup, /dim-chevron|扫码绑定<\/small>|扫码接入<\/small>/);
   assert.doesNotMatch(markup, />INSTANT MESSAGING<|>Channel<|>微信设置</);
+});
+
+test('channel switching is a fixed-width rail beside the panel, not a wrapped strip', async () => {
+  const styles = await readFile(STYLES_URL, 'utf8');
+  const markup = renderToStaticMarkup(React.createElement(IMSettingsTab, {
+    weixinRpcCall: async () => ({ ok: true, value: {} }),
+  }));
+
+  assert.match(markup, /<nav class="dim-rail" role="tablist" aria-label="IM 设置导航">/);
+  // Matrix joined upstream while this branch was open; the mail entry point is
+  // still omitted here because this render passes no emailRpcCall.
+  assert.equal((markup.match(/role="tab"/g) ?? []).length, 13);
+  assert.match(markup, /aria-selected="true"/);
+  assert.doesNotMatch(markup, /dim-divider/);
+
+  // The rail is a fixed-width column beside the panel. It was a wrapped strip while
+  // the page lived in the settings shell's 564px column, where a second column left
+  // the text at 341px and forced every hint to wrap. The host has since moved plugin
+  // configuration onto the Plugins page, so the same page has room for both columns —
+  // and wrapping had turned the channel list into ragged rows whose current entry was
+  // hard to pick out. The width is fixed and never derived from the height.
+  assert.match(styles, /\.dim-layout \{ display: grid; grid-template-columns: var\(--dim-rail-width\) minmax\(0, 1fr\);/);
+  assert.match(styles, /\.dim-rail \{[^}]*flex-direction: column;[^}]*flex-wrap: nowrap;/);
+  assert.match(styles, /\.dim-rail \{[^}]*width: var\(--dim-rail-width\);[^}]*overflow-y: auto;/);
+  // The base rule must not wrap; the only wrap left is the narrow-screen fallback,
+  // which the media-query assertions below pin.
+  const baseRail = /\.dim-rail \{([^}]*)\}/.exec(styles)[1];
+  assert.match(baseRail, /flex-wrap: nowrap/);
+  assert.doesNotMatch(baseRail, /flex-wrap: wrap/);
+  assert.doesNotMatch(baseRail, /width: [^;]*vh/);
+  // Below the breakpoint the rail folds back into the wrapped strip, so a narrow
+  // window keeps every channel reachable without a second scroll container.
+  assert.match(styles, /@media \(max-width: 840px\) \{[\s\S]*?\.dim-layout \{ display: block; \}/);
+  assert.match(styles, /@media \(max-width: 840px\) \{[\s\S]*?\.dim-rail \{[^}]*flex-wrap: wrap;/);
+
+  // Tabs read as native selector pills: no fill and no shadow at rest, and the cell
+  // fills the rail's track. The host's .navCell measures: 40px tall, radius 12, that gap.
+  assert.match(styles, /\.dim-channel \{[^}]*width: 100%;[^}]*height: 44px;[^}]*gap: var\(--dim-gap-8\);[^}]*padding: 0 12px;[^}]*border-radius: var\(--dim-radius-12\);/);
+  // The label clips rather than pushing the cell wider, and the button keeps the whole
+  // name in its title so nothing becomes unreachable when it is clipped.
+  assert.match(styles, /\.dim-channelCopy \{[^}]*min-width: 0;[^}]*overflow: hidden;/);
+  assert.match(markup, /title="AI Office"/);
+  assert.doesNotMatch(styles, /\.dim-channel \{[^}]*box-shadow:/);
+  // The hover fill is the host's own nav-cell token, not the generic hover.
+  assert.match(styles, /\.dim-channel:hover \{ color: var\(--dsw-alias-label-primary, #0f1115\); background: var\(--dsw-specific-sidebar-nav-item-hover, var\(--dim-hover\)\); \}/);
+  assert.match(styles, /\.dim-channel:focus-visible \{ outline: 2px solid var\(--dsw-alias-brand-primary, #0f1115\); outline-offset: 2px; \}/);
+  // The label takes the host's .navCell type: 14/22 at the inherited weight.
+  assert.match(styles, /\.dim-channelCopy strong \{[^}]*font-size: var\(--dim-font-15\);[^}]*line-height: var\(--dim-line-15\);[^}]*font-weight: var\(--dim-weight-400\);/);
+  assert.match(styles, /\.dim-channelBadge \{[^}]*align-self: center;[^}]*color: var\(--dsw-alias-label-tertiary, #81858c\);/);
+  // Rest / hover / current read apart. Hover and current share the host's nav-cell
+  // fill family, so the accent bar is what identifies the current channel while a
+  // pointer is also on the rail; the rest state keeps a transparent boundary instead
+  // of an invisible one.
+  assert.match(styles, /\.dim-channel \{[^}]*border: 1px solid transparent;/);
+  assert.match(styles, /\.dim-channel\[aria-selected="true"\]::before \{[^}]*background: var\(--dsw-alias-brand-primary, #0f1115\);/);
+  assert.match(styles, /\.dim-channel\[aria-selected="true"\] \.dim-channelCopy strong \{ font-weight: var\(--dim-weight-600\); \}/);
 });
 
 test('the general settings gear sits to the right of GitHub and outside the channel rail', () => {
@@ -333,9 +397,18 @@ test('the general settings page uses an Attachments tab with contextual help and
   // No label wrapper: the input takes its accessible name from the heading.
   assert.doesNotMatch(markup, /<label[^>]*>[^<]*<input[^>]*id="dim-globalTtlInput"/);
   assert.match(markup, /<input[^>]*aria-labelledby="dim-globalTtlTitle"/);
+  // The retention legend is help now: the heading carries the one "?" trigger and the
+  // value table lives inside the shared panel.
   assert.match(markup, /aria-label="查看附件保留时长说明"/);
-  assert.match(markup, /class="dim-globalTtlTooltip" role="tooltip"/);
+  assert.match(markup, /class="dim-helpList"/);
+  assert.doesNotMatch(markup, /dim-globalTtlTooltip|dim-globalTtlHints/);
   assert.match(markup, /<code>1~8760<\/code>/);
+  // The field is described by the panel itself, so the reference is not dangling.
+  const ttlDescribedBy = markup.match(/<input[^>]*aria-describedby="([^"]+)"/)?.[1];
+  assert.ok(ttlDescribedBy, 'the TTL field points at its value legend');
+  const ttlPanelAt = markup.indexOf(`id="${ttlDescribedBy}"`);
+  assert.notEqual(ttlPanelAt, -1, 'the described-by id resolves to a rendered element');
+  assert.match(markup.slice(ttlPanelAt, ttlPanelAt + 80), /^id="[^"]+" role="tooltip" class="dim-helpPanel"/);
   assert.match(markup, /正在读取通用设置…/);
   // Field actions share one row; the heading stays dedicated to its label and help.
   const ttlFormMarkup = markup.match(/<form class="dim-globalTtlRow"[^]*?<\/form>/)?.[0] ?? '';
@@ -524,10 +597,15 @@ test('all channel styles use the current Harness theme tokens', async () => {
   assert.match(styles, /--dsw-alias-interactive-bg-hover/);
   assert.match(styles, /--dsw-alias-border-l1/);
   assert.match(styles, /--dsw-alias-border-l2/);
-  assert.match(styles, /--dim-blue: var\(--dsw-alias-state-business-primary, #3370ff\)/);
+  // The fallback now carries the token's real light-mode value. DSH defines
+  // --dsw-alias-state-business-primary in both themes, so the fallback never
+  // paints; normalising it only removed the illusion that the values differed.
+  assert.match(styles, /--dim-blue: var\(--dsw-alias-state-business-primary, #4176e6\)/);
+  // The selected chip uses the nav-active fill, not the module fill: at
+  // #F5F6F7 on a white panel a selected tab was indistinguishable from an idle one.
   assert.match(
     styles,
-    /\.dim-channel\[aria-selected="true"\][^}]*var\(--dsw-alias-bg-layer-3/,
+    /\.dim-channel\[aria-selected="true"\][^}]*var\(--dsw-specific-sidebar-nav-item-active/,
   );
   assert.match(
     styles,
@@ -539,10 +617,20 @@ test('shared QR cards stay square and stack within the narrow combined-channel p
   const styles = await readFile(STYLES_URL, 'utf8');
   assert.match(styles, /\.dim-panel \{ min-width: 0; container-type: inline-size; \}/);
   assert.match(styles, /\.dim-panel \.dim-qrFrame \{[^}]*width: min\(270px, 100%\);[^}]*height: auto;[^}]*aspect-ratio: 1;/);
+  // The panel is a fixed 564px overlay, so this query was true at every window
+  // size and the rule it guarded was never a narrow-width adaptation - it was the
+  // layout. The wrapper is gone and the rule is unconditional, which is what this
+  // now pins: the stacking holds, and no layout is left behind a container query.
   assert.match(
     styles,
-    /@container \(max-width: 680px\)[\s\S]*\.dim-panel \.ddt-qrLayout \{ grid-template-columns: minmax\(0, 1fr\); justify-items: center;/,
+    /\.dim-panel \.ddt-qrLayout \{ grid-template-columns: minmax\(0, 1fr\); justify-items: center;/,
   );
+  // No layout hides behind a container query: the two that used to guard this
+  // stacking were true at every window size. The one query left belongs to the
+  // image-settings field grid, which really does change with its container.
+  assert.equal((styles.match(/@container/g) ?? []).length, 1,
+    'only the image-settings field grid is container-relative');
+  assert.match(styles, /@container \(max-width: 380px\) \{\s*\.dim-imageSettingsField \{ grid-template-columns: minmax\(0, 1fr\); \}/);
   assert.match(styles, /\.dim-panel \.ddt-qrFrame, \.dim-panel \.ddt-countdown \{ width: min\(270px, 100%\); \}/);
   assert.match(styles, /\.dim-panel \.ddt-qrColumn \{ width: 100%; min-width: 0; \}/);
   assert.match(styles, /\.dim-panel \.ddt-qrCopy \{ width: 100%; min-width: 0; overflow-wrap: anywhere; \}/);
@@ -586,14 +674,19 @@ test('Feishu bot cards place the application identifier under the bot name', asy
   assert.doesNotMatch(markup, /custom-bot-avatar/);
   assert.match(markup, /class="dim-botHealthGroup"[^]*class="dim-lastChecked"><span>最近检查<\/span>/);
   assert.doesNotMatch(markup, /消息通道|dim-botMetric/);
-  assert.match(markup, /class="dim-presetSelect"/);
+  // The preset select is a control in the row's right slot now, not a full-width
+  // stacked field - so it carries the slot class alongside its own.
+  assert.match(markup, /class="dim-presetSelect dim-rowControl"/);
   assert.doesNotMatch(markup, />应用标识<|>飞书机器人</);
   assert.doesNotMatch(styles, /\.bxf-statusGrid|\.bxf-metric/);
   assert.match(styles, /\.bxf-repairAction:hover \.bxf-repairTooltip,[^]*\.bxf-repairAction:focus-within \.bxf-repairTooltip \{[^}]*visibility: visible;/);
 });
 
 test('Feishu keeps its heading controls on one row without a plus icon', async () => {
-  const styles = await readFile(FEISHU_STYLES_URL, 'utf8');
+  const [styles, shared] = await Promise.all([
+    readFile(FEISHU_STYLES_URL, 'utf8'),
+    readFile(STYLES_URL, 'utf8'),
+  ]);
   const markup = renderToStaticMarkup(React.createElement(FeishuSettingsTab, {
     rpcCall: async () => ({ ok: true, value: {} }),
   }));
@@ -602,7 +695,11 @@ test('Feishu keeps its heading controls on one row without a plus icon', async (
   assert.match(markup, /class="dim-actionIcon"[^]*<span>扫码接入机器人<\/span>/);
   assert.doesNotMatch(markup, />添加机器人</);
   assert.match(styles, /\.bxf-headingTools \{[^}]*justify-content: space-between;[^}]*flex-wrap: nowrap;/);
-  assert.match(styles, /@container \(max-width: 620px\)[^]*\.bxf-headingTools \{ gap: 6px; \}/);
+  // The narrow-container gap is not this sheet's to state: .dim-panel .bxf-headingTools owns
+  // it at (0,2,0) against this sheet's (0,1,0), and it states it unconditionally, so the 6px
+  // copy never rendered (dead-rule-audit, first bucket). The row keeps one gap at every width.
+  assert.doesNotMatch(styles, /\.bxf-headingTools \{ gap: var\(--dim-gap-6\); \}/);
+  assert.match(shared, /\.dim-panel \.bxf-headingTools, \.dim-panel \.dxw-tools, \.dim-panel \.ddt-tools \{ gap: var\(--dim-gap-8\); \}/);
   assert.doesNotMatch(styles, /\.bxf-headingTools \.bxf-button \{ margin-left: auto; \}/);
 });
 
@@ -672,16 +769,40 @@ test('Feishu bot settings render one step-push select with four presentations', 
     await flushTasks();
   });
 
-  // Rendering: one select with the three presentations, defaulting to off.
-  const stepPushSelect = () => renderer.root.findByProps({ 'aria-label': '任务过程展示' });
-  assert.equal(stepPushSelect().type, 'select');
-  assert.equal(stepPushSelect().props.value, 'off');
+  // Rendering: one selector with the four presentations, defaulting to off. It is a
+  // button + menu now, like the host's own row selectors, so it is driven the way a
+  // user drives it: press the trigger, then press the presentation you want.
+  const PRESENTATIONS = [
+    ['off', '不显示过程（只发送最终答案）'],
+    ['live_cot', '实时直播（飞书原生思考过程）'],
+    ['streaming_card', '实时过程卡（全程一张卡片动态更新）'],
+    ['post', '逐步直播（每一步单独发一条消息）'],
+  ];
+  // Both the trigger and its menu carry this label, so name the element we mean.
+  const stepPushButton = () => renderer.root.findAll((node) => node.type === 'button'
+    && node.props['aria-label'] === '任务过程展示')[0];
+  const shownPresentation = () => PRESENTATIONS
+    .find(([, copy]) => nodeText(stepPushButton()).includes(copy))[0];
+  const choosePresentation = async (value) => {
+    await act(async () => { stepPushButton().props.onClick(); });
+    const copy = PRESENTATIONS.find(([id]) => id === value)[1];
+    const option = renderer.root.findAllByProps({ role: 'menuitemradio' })
+      .find((node) => nodeText(node).includes(copy));
+    assert.ok(option, value + ' is offered');
+    await act(async () => { option.props.onClick(); });
+  };
+  assert.equal(stepPushButton().type, 'button', 'the trigger is a button, not a select');
+  assert.equal(stepPushButton().props['aria-haspopup'], 'menu');
+  assert.equal(stepPushButton().props['aria-expanded'], false);
+  assert.equal(shownPresentation(), 'off');
   assert.ok(renderer.root.findAllByType('h3')
     .some((heading) => nodeText(heading) === '任务过程展示'));
+  await act(async () => { stepPushButton().props.onClick(); });
   assert.deepEqual(
-    stepPushSelect().findAllByType('option').map((option) => option.props.value),
-    ['off', 'live_cot', 'streaming_card', 'post'],
+    renderer.root.findAllByProps({ role: 'menuitemradio' }).map((node) => nodeText(node)),
+    PRESENTATIONS.map(([, copy]) => copy),
   );
+  await act(async () => { stepPushButton().props.onClick(); });
   const helpNodes = renderer.root.findAll(
     (node) => node.props?.className === 'dim-feishuGroupHelp',
   );
@@ -691,7 +812,7 @@ test('Feishu bot settings render one step-push select with four presentations', 
   // off -> streaming_card: the flag write must land before the mode write so
   // the runtime never sees a mode without step push enabled.
   await act(async () => {
-    stepPushSelect().props.onChange({ target: { value: 'streaming_card' } });
+    await choosePresentation('streaming_card');
     await flushTasks();
   });
   const flagIndex = calls.findIndex(({ endpoint, payload }) => (
@@ -707,12 +828,12 @@ test('Feishu bot settings render one step-push select with four presentations', 
   assert.ok(flagIndex >= 0, 'the enable flag is saved');
   assert.ok(modeIndex >= 0, 'the presentation mode is saved');
   assert.ok(flagIndex < modeIndex, 'the flag must be saved before the mode');
-  assert.equal(stepPushSelect().props.value, 'streaming_card');
+  assert.equal(shownPresentation(), 'streaming_card');
 
   // streaming_card -> live_cot: only the mode endpoint is called.
   const afterEnable = calls.length;
   await act(async () => {
-    stepPushSelect().props.onChange({ target: { value: 'live_cot' } });
+    await choosePresentation('live_cot');
     await flushTasks();
   });
   const liveCalls = calls.slice(afterEnable);
@@ -720,23 +841,23 @@ test('Feishu bot settings render one step-push select with four presentations', 
     endpoint === FEISHU_ENDPOINTS.setStepPushMode && payload.stepPushMode === 'live_cot'
   )).length, 1);
   assert.equal(liveCalls.filter(({ endpoint }) => endpoint === FEISHU_ENDPOINTS.setStepPush).length, 0);
-  assert.equal(stepPushSelect().props.value, 'live_cot');
+  assert.equal(shownPresentation(), 'live_cot');
 
   // live_cot -> post: only the mode endpoint is called.
   const afterLive = calls.length;
   await act(async () => {
-    stepPushSelect().props.onChange({ target: { value: 'post' } });
+    await choosePresentation('post');
     await flushTasks();
   });
   const postCalls = calls.slice(afterLive);
   assert.equal(postCalls.filter(({ endpoint }) => endpoint === FEISHU_ENDPOINTS.setStepPushMode).length, 1);
   assert.equal(postCalls.filter(({ endpoint }) => endpoint === FEISHU_ENDPOINTS.setStepPush).length, 0);
-  assert.equal(stepPushSelect().props.value, 'post');
+  assert.equal(shownPresentation(), 'post');
 
   // post -> off: only the flag endpoint is called, with false.
   const afterPost = calls.length;
   await act(async () => {
-    stepPushSelect().props.onChange({ target: { value: 'off' } });
+    await choosePresentation('off');
     await flushTasks();
   });
   const offCalls = calls.slice(afterPost);
@@ -744,7 +865,7 @@ test('Feishu bot settings render one step-push select with four presentations', 
     endpoint === FEISHU_ENDPOINTS.setStepPush && payload.stepPush === false
   )).length, 1);
   assert.equal(offCalls.filter(({ endpoint }) => endpoint === FEISHU_ENDPOINTS.setStepPushMode).length, 0);
-  assert.equal(stepPushSelect().props.value, 'off');
+  assert.equal(shownPresentation(), 'off');
   await act(async () => renderer.unmount());
 });
 
@@ -770,9 +891,14 @@ test('credential binding is a distinct secondary action beside QR binding in fou
   }
 
   const styles = await readFile(STYLES_URL, 'utf8');
-  assert.match(styles, /\.dim-panel \.dim-bindActions \{[^}]*flex-wrap: nowrap;/);
-  assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*border: 1px solid #86909c;[^}]*background: var\(--dsw-alias-bg-layer-1, #fff\)/);
-  assert.match(styles, /\.dim-panel \.dim-actionIcon \{[^}]*flex: 0 0 15px;/);
+  // The action row wraps now: at narrow widths the secondary button slid under
+  // the online badge (measured 9.2px overlap at vw 560).
+  assert.match(styles, /\.dim-panel \.dim-bindActions \{[^}]*flex-wrap: wrap;/);
+  assert.match(styles, /\.dim-panel \.dim-credentialButton \{[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: var\(--dim-radius-14\);[^}]*background: transparent;/);
+  // 13px, not 15px: the panel is a fixed 564px overlay, so the rule that used to
+  // narrow this icon behind @container (max-width: 680px) was never conditional. The
+  // wide 15px declaration it overrode is gone, and this pins what actually applies.
+  assert.match(styles, /\.dim-panel \.dim-actionIcon \{[^}]*width: 13px;[^}]*flex-basis: 13px;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-credentialPanel \{[^}]*border-left:/);
 });
 
@@ -902,8 +1028,10 @@ test('scan actions align left while online totals align right in every channel',
   }
   assert.doesNotMatch(weixinHeading, /dxw-dot/);
   assert.doesNotMatch(dingtalkHeading, /ddt-dot/);
-  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-scanButton,[^}]*border: 1px solid #1677ff;[^}]*border-radius: 8px;[^}]*background: #1677ff;[^}]*box-shadow: none;/);
-  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-onlineBadge,[^}]*border-radius: 999px;[^}]*background: var\(--dsw-alias-bg-module-platform, #f2f3f5\);[^}]*font-size: 12px;/);
+  // The channel CTA is a theme-following capsule so its QR glyph rides currentColor.
+  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-scanButton,[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: var\(--dim-radius-14\);[^}]*color: var\(--dsw-alias-label-primary, #0f1115\);[^}]*background: transparent;[^}]*box-shadow: none;/);
+  // Native Pill: h24 r12, bg-layer-2 fill, 12/18.
+  assert.match(imStyles, /\.dim-panel \.bxf-headingTools \.dim-onlineBadge,[^}]*height: 24px;[^}]*border-radius: var\(--dim-radius-12\);[^}]*background: var\(--dsw-alias-bg-layer-2, #fff\);[^}]*font-size: var\(--dim-font-12\);/);
 });
 
 test('channel headings omit the redundant local credential badge', () => {
@@ -932,8 +1060,7 @@ test('bot list headings omit the total already shown by the online badge', async
   }
 });
 
-test('channel connection details live in an accessible heading tooltip', async () => {
-  const styles = await readFile(STYLES_URL, 'utf8');
+test('channel connection details are stated inline instead of behind a tooltip', async () => {
   const markup = renderToStaticMarkup(React.createElement(ChannelListHeading, {
     className: 'dxw-listHeading',
     title: '已接入的微信账号',
@@ -941,9 +1068,9 @@ test('channel connection details live in an accessible heading tooltip', async (
   }));
 
   assert.match(markup, /<h3>已接入的微信账号<\/h3>/);
-  assert.match(markup, /aria-label="查看消息通道说明"/);
-  assert.match(markup, /role="tooltip"><span>消息通道<\/span><strong>iLink 长轮询<\/strong>/);
-  assert.match(styles, /\.dim-panel \.dim-channelHelp:hover \.dim-channelTooltip, \.dim-panel \.dim-channelHelp:focus-within \.dim-channelTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
+  assert.match(markup, /<span class="dim-listConnection">iLink 长轮询<\/span>/);
+  // Two words of help do not justify a hover-only layer.
+  assert.doesNotMatch(markup, /dim-channelHelpButton|role="tooltip"|查看消息通道说明/);
 });
 
 test('all channel settings states use the DingTalk page treatment', async () => {
@@ -978,16 +1105,20 @@ test('all channel settings states use the DingTalk page treatment', async () => 
     }
   }
 
-  assert.match(styles, /\.dim-panel \.dim-channelPage \{[^}]*flex-direction: column;[^}]*gap: 12px;/);
-  assert.match(styles, /\.dim-panel \.dim-listHeading \{[^}]*margin: 0 0 6px;/);
-  assert.match(styles, /\.dim-panel \.dim-botList \{[^}]*gap: 8px;/);
-  assert.match(styles, /\.dim-panel \.dim-surfaceCard \{[^}]*border-radius: 14px;[^}]*box-shadow: 0 1px 2px/);
+  assert.match(styles, /\.dim-panel \.dim-channelPage \{[^}]*flex-direction: column;[^}]*gap: var\(--dim-gap-12\);/);
+  assert.match(styles, /\.dim-panel \.dim-listHeading \{[^}]*margin: 0;/);
+  assert.match(styles, /\.dim-panel \.dim-botList \{[^}]*gap: var\(--dim-gap-10\);/);
+  assert.match(styles, /\.dim-panel \.dim-surfaceCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-16\);[^}]*background: none;/);
   assert.match(styles, /\.dim-panel \.dim-loadingView \{[^}]*padding: 38px;[^}]*text-align: center;/);
-  assert.match(styles, /\.dim-panel \.dim-emptyView \{[^}]*grid-template-columns: minmax\(0, 1fr\) 180px;[^}]*gap: 30px;/);
-  assert.match(styles, /\.dim-panel \.dim-qrLayout \{[^}]*grid-template-columns: 300px minmax\(0, 1fr\);[^}]*gap: 34px;[^}]*align-items: start;/);
-  assert.match(styles, /\.dim-panel \.dim-viewActions \.bxf-button,[^}]*min-height: 34px;[^}]*border-radius: 8px;[^}]*font-size: 13px;/);
+  // Single column, always: the two-column value lived outside the query and was
+  // overridden by it at every window size, so it was dead. See the sibling test
+  // above on the same always-true query.
+  assert.match(styles, /\.dim-panel \.dim-emptyView \{[^}]*display: grid;[^}]*gap: var\(--dim-gap-30\);/);
+  assert.match(styles, /\.dim-panel \.dim-emptyView \{[^}]*min-height: 0;[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(styles, /\.dim-panel \.dim-qrLayout \{[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*justify-items: center;[^}]*gap: var\(--dim-gap-24\);/);
+  assert.match(styles, /\.dim-panel \.dim-viewActions \.bxf-button,[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: var\(--dim-radius-14\);[^}]*font-size: var\(--dim-font-12\);/);
   assert.match(styles, /\.dim-panel \.dim-inlineError \{[^}]*padding: 22px;[^}]*background:/);
-  assert.match(styles, /\.dim-panel \.dim-confirm \{[^}]*padding: 18px 24px;[^}]*border-top: 1px solid/);
+  assert.match(styles, /\.dim-panel \.dim-confirm \{[^}]*padding: 18px 24px;[^}]*border-top: 0\.5px solid/);
 });
 
 test('bot cards reuse the same channel brand logos as the channel rail', () => {
@@ -1019,7 +1150,7 @@ test('bot cards reuse the same channel brand logos as the channel rail', () => {
   assert.match(accountMarkup, /class="dxw-avatar dim-botAvatar"[^]*data-im-channel-logo="weixin"/);
   assert.match(accountMarkup, /class="dxw-health dim-botHealth"/);
   assert.match(accountMarkup, /class="dxw-accountFooter dim-cardFooter"/);
-  assert.match(accountMarkup, /class="dim-presetSelect"/);
+  assert.match(accountMarkup, /class="dim-presetSelect dim-rowControl"/);
   assert.doesNotMatch(accountMarkup, /dim-cardSummary|微信消息长轮询运行正常/);
   assert.equal((accountMarkup.match(/dim-cardAction(?: |")/g) ?? []).length, 2);
   assert.match(accountMarkup, /class="dim-botHealthGroup"[^]*class="dim-lastChecked"><span>最近检查<\/span>/);
@@ -1107,13 +1238,13 @@ test('all IM channel cards keep localized actions visible above full-width feedb
   assert.match(feishuStyles, /\.bxf-botActions \{[^}]*width: 100%;[^}]*flex-wrap: wrap;/);
   assert.match(weixinStyles, /\.dxw-accountFooter \.dxw-actions \{[^}]*flex-wrap: nowrap;/);
   assert.match(dingtalkStyles, /\.ddt-accountFooter \.ddt-actions \{[^}]*flex-wrap: nowrap;/);
-  assert.match(imStyles, /\.dim-panel \.dim-cardFooter \{[^}]*gap: 12px;[^}]*padding-top: 6px;[^}]*border-top: 1px solid/);
+  assert.match(imStyles, /\.dim-panel \.dim-cardFooter \{[^}]*gap: var\(--dim-gap-12\);[^}]*padding: 12px 0 16px;[^}]*border-top: 0\.5px solid/);
   assert.match(imStyles, /\.dim-panel \.dim-cardFooterLayout \{[^}]*width: 100%;[^}]*flex-direction: column;[^}]*align-items: stretch;/);
   assert.match(imStyles, /\.dim-panel \.dim-cardFooterLayout > \.dim-cardActions \{[^}]*align-self: stretch;/);
   assert.match(imStyles, /\.dim-panel \.dim-cardActions \{[^}]*width: 100%;[^}]*justify-content: flex-end;[^}]*flex-wrap: wrap;/);
   assert.match(imStyles, /\.dim-panel \.dim-cardFeedback \{[^}]*width: 100%;[^}]*overflow-wrap: anywhere;[^}]*white-space: normal;/);
-  assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction \{[^}]*min-height: 32px;[^}]*border-radius: 8px;[^}]*font-size: 13px;/);
-  assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction\[data-kind="danger"\] \{[^}]*#d54941/);
+  assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction \{[^}]*height: 28px;[^}]*border: var\(--dim-control-border\);[^}]*border-radius: var\(--dim-radius-14\);[^}]*font-size: var\(--dim-font-12\);/);
+  assert.match(imStyles, /\.dim-panel \.dim-cardActions \.dim-cardAction\[data-kind="danger"\] \{[^}]*var\(--dim-danger\)/);
 
   const account = {
     botId: 'footer-layout-bot',
@@ -1161,21 +1292,31 @@ test('all IM channel cards keep localized actions visible above full-width feedb
 test('all channel bot cards use the DingTalk card treatment', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
 
-  assert.match(styles, /\.dim-panel \.dim-botCard \{[^}]*border-radius: 14px;[^}]*background: var\(--dsw-alias-bg-layer-1, #fff\);[^}]*box-shadow: 0 1px 2px/);
-  assert.match(styles, /\.dim-panel \.dim-botCardBody \{[^}]*padding: 12px 8px;/);
-  assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*align-items: flex-start;[^}]*gap: 6px;/);
-  assert.match(styles, /\.dim-panel \.dim-botAvatar \{[^}]*width: 38px;[^}]*height: 38px;[^}]*border-radius: 11px;/);
-  assert.match(styles, /\.dim-panel \.dim-botName h3 \{[^}]*font-size: 15px;/);
-  assert.match(styles, /\.dim-panel \.dim-botHealthGroup \{[^}]*display: grid;[^}]*justify-items: end;[^}]*gap: 5px;/);
-  assert.match(styles, /\.dim-panel \.dim-botCard \.dim-botHealth \{[^}]*background: transparent;[^}]*font-size: 12px;[^}]*font-weight: 400;/);
-  assert.match(styles, /\.dim-panel \.dim-lastChecked \{[^}]*display: inline-flex;[^}]*font-size: 11px;[^}]*white-space: nowrap;/);
+  // One outline level per card: a 0.5px l4 hairline on the panel fill, exactly
+  // like the native plugin card. A fill or a shadow here would be a second
+  // chrome level and would break in light mode, where every layer token is white.
+  assert.match(styles, /\.dim-panel \.dim-botCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4,[^}]*border-radius: var\(--dim-radius-16\);[^}]*background: none;/);
+  assert.doesNotMatch(styles, /\.dim-panel \.dim-botCard \{[^}]*box-shadow:/);
+  assert.match(styles, /\.dim-panel \.dim-botCard:hover \{ border-color: var\(--dsw-alias-label-dimmed,/);
+  // 24px, matching SettingsRoot.module.css:224 - the host's settings content inset.
+  // 16px read cramped next to native.
+  assert.match(styles, /\.dim-panel \.dim-botCardBody \{[^}]*padding: 0 24px;/);
+  assert.match(styles, /\.dim-collapsibleBodyInner > \* \+ \* \{ border-top: 0\.5px solid var\(--dsw-alias-border-l2,/);
+  // Centred, not flex-start: with flex-start the tool cluster sat against the top edge of a
+  // two-line header. The host's own .rowHead is align-items: center.
+  assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*align-items: center;[^}]*gap: var\(--dim-gap-6\);/);
+  assert.match(styles, /\.dim-panel \.dim-botAvatar \{[^}]*width: 38px;[^}]*height: 38px;[^}]*border-radius: var\(--dim-radius-12\);/);
+  assert.match(styles, /\.dim-panel \.dim-botName h3 \{[^}]*font-size: var\(--dim-font-15\);/);
+  assert.match(styles, /\.dim-panel \.dim-botHealthGroup \{[^}]*display: grid;[^}]*justify-items: end;[^}]*gap: var\(--dim-gap-2\);/);
+  assert.match(styles, /\.dim-panel \.dim-botCard \.dim-botHealth \{[^}]*background: transparent;[^}]*font-size: var\(--dim-font-12\);[^}]*font-weight: var\(--dim-weight-400\);/);
+  assert.match(styles, /\.dim-panel \.dim-lastChecked \{[^}]*display: inline-flex;[^}]*font-size: var\(--dim-font-12\);[^}]*white-space: nowrap;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-botMetrics|\.dim-panel \.dim-botMetric/);
 });
 
 test('bot card status stays in the top-right corner at every responsive breakpoint', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
 
-  assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*display: flex;[^}]*align-items: flex-start;[^}]*justify-content: space-between;/);
+  assert.match(styles, /\.dim-panel \.dim-botCardTop \{[^}]*display: flex;[^}]*align-items: center;[^}]*justify-content: space-between;/);
   assert.match(styles, /\.dim-panel \.dim-botIdentity \{[^}]*min-width: 0;[^}]*flex: 1 1 0;/);
   assert.match(styles, /\.dim-panel \.dim-botHealthGroup \{[^}]*flex: none;[^}]*justify-items: end;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-botCardTop \{ flex-direction: column;/);
@@ -1185,7 +1326,7 @@ test('bot card status stays in the top-right corner at every responsive breakpoi
 test('bot cards wrap full workspace paths without horizontal scrolling', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
 
-  assert.match(styles, /\.dim-panel \.dim-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\) max-content;[^}]*row-gap: 4px;[^}]*margin-top: 6px;[^}]*padding: 6px 10px;/);
+  assert.match(styles, /\.dim-panel \.dim-workspace \{[^}]*grid-template-columns: minmax\(0, 1fr\) max-content;[^}]*row-gap: var\(--dim-gap-4\);[^}]*margin: 0;[^}]*padding: 16px 0;[^}]*border: 0;[^}]*background: none;/);
   assert.match(styles, /\.dim-panel \.dim-workspaceHeader \{[^}]*display: contents;/);
   assert.match(styles, /\.dim-panel \.dim-workspacePath \{[^}]*grid-column: 1 \/ -1;[^}]*grid-row: 2;[^}]*overflow: hidden;[^}]*overflow-wrap: anywhere;[^}]*white-space: normal;/);
   assert.doesNotMatch(styles, /\.dim-panel \.dim-workspacePath \{[^}]*overflow-x: auto;/);
@@ -1195,15 +1336,27 @@ test('bot cards wrap full workspace paths without horizontal scrolling', async (
 test('bot cards keep Agent Preset guidance in a keyboard-accessible help tooltip', async () => {
   const styles = await readFile(STYLES_URL, 'utf8');
 
-  assert.match(styles, /\.dim-panel \.dim-preset \{[^}]*grid-template-columns: minmax\(0, 1fr\) max-content;[^}]*margin-top: 6px;[^}]*padding: 6px 10px;/);
-  assert.match(styles, /\.dim-panel \.dim-presetHeader \{[^}]*position: relative;[^}]*grid-column: 1 \/ -1;[^}]*display: flex;[^}]*justify-content: space-between;/);
-  assert.match(styles, /\.dim-panel \.dim-presetTitle \{[^}]*display: inline-flex;[^}]*gap: 5px;[^}]*white-space: nowrap;/);
-  assert.match(styles, /\.dim-panel \.dim-presetHelpButton:focus-visible \{[^}]*box-shadow:/);
-  assert.match(styles, /\.dim-panel \.dim-presetTooltip \{[^}]*position: absolute;[^}]*width: min\(320px, 100%\);[^}]*white-space: normal;[^}]*opacity: 0;[^}]*visibility: hidden;[^}]*pointer-events: none;/);
-  assert.match(styles, /\.dim-panel \.dim-presetHelp:hover \.dim-presetTooltip, \.dim-panel \.dim-presetHelp:focus-within \.dim-presetTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.match(styles, /\.dim-panel \.dim-presetSelect \{[^}]*grid-column: 1 \/ -1;[^}]*grid-row: 2;/);
-  assert.match(styles, /\.dim-panel \.dim-presetError \{[^}]*grid-column: 1 \/ -1;[^}]*grid-row: 3;/);
-  assert.doesNotMatch(styles, /\.dim-panel \.dim-presetHelp \{[^}]*grid-row: 3;/);
+  // Stacked field, not a Setting-Cell: the label sits above the control and the select
+  // spans the column. The label is the wide one, so the value keeps its full label instead
+  // of being clipped by a fixed-width pill.
+  assert.match(styles, /\.dim-panel \.dim-preset \{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*gap: var\(--dim-gap-6\);[^}]*padding: 16px 0;[^}]*border: 0;[^}]*background: none;/);
+  assert.doesNotMatch(styles, /\.dim-panel \.dim-preset \{[^}]*display: flex;/);
+  assert.match(styles, /\.dim-panel \.dim-presetHeader \{[^}]*position: relative;[^}]*display: flex;[^}]*align-items: center;/);
+  assert.doesNotMatch(styles, /\.dim-panel \.dim-presetHeader \{[^}]*flex: 1;/);
+  assert.match(styles, /\.dim-panel \.dim-presetTitle \{[^}]*display: inline-flex;[^}]*gap: var\(--dim-gap-8\);[^}]*white-space: nowrap;/);
+  // The preset header's "?" is the one shared help role, so its skin is asserted where
+  // that role is declared rather than per site.
+  assert.match(styles, /\.dim-helpButton:focus-visible \{[^}]*box-shadow:/);
+  // Portaled to document.body and fixed, so the card it was rendered in can neither clip
+  // it nor paint over it. The open state is the component's, not a hover rule's.
+  assert.match(styles, /\.dim-helpPanel \{[^}]*position: fixed;[^}]*z-index: var\(--dim-z-menu\);[^}]*width: min\(330px,[^}]*white-space: normal;[^}]*opacity: 0;[^}]*visibility: hidden;[^}]*pointer-events: none;/);
+  assert.match(styles, /\.dim-helpPanel\[data-open="true"\] \{[^}]*opacity: 1;[^}]*visibility: visible;/);
+  // The preset selector owns a whole row, so it is the module pill (36px, radius 18,
+  // module fill) and declares no rule of its own - it is a .dim-rowControl button now.
+  assert.ok(!styles.includes('.dim-panel .dim-presetSelect'), 'the row trigger declares nothing of its own');
+  assert.match(styles, /\.dim-panel \.dim-rowControl \{[^}]*height: 36px;[^}]*border-radius: var\(--dim-radius-18\);[^}]*background-color: var\(--dim-module-fill\);/);
+  assert.match(styles, /\.dim-panel \.dim-presetError \{[^}]*margin: 6px 0 0;/);
+  assert.doesNotMatch(styles, /\.dim-help \{[^}]*grid-row: 3;/);
 });
 
 test('the bundled DingTalk channel has no local sender approval workflow', async () => {
@@ -1264,7 +1417,8 @@ test('client source contains no legacy Plugins-tab settings registrations', asyn
   assert.deepEqual(legacy, []);
 });
 
-test('client registers one top-level bilingual IM settings section with a directory picker', async () => {
+test('client registers one bilingual IM bundle configuration for the Plugins page with a directory picker', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   const effects = [];
   const registrations = [];
   const dictionaries = [];
@@ -1311,7 +1465,7 @@ test('client registers one top-level bilingual IM settings section with a direct
     },
     slots: {
       inject(name, install) {
-        assert.equal(name, 'settings.section');
+        assert.equal(name, 'plugins.bundle.config');
         return install();
       },
       register(options, component) {
@@ -1331,11 +1485,12 @@ test('client registers one top-level bilingual IM settings section with a direct
     assert.equal(dictionaries[0].namespace, IM_LOCALE_NAMESPACE);
     assert.deepEqual(Object.keys(dictionaries[0].value.en).sort(), Object.keys(dictionaries[0].value.zh).sort());
     assert.equal(registrations.length, 1);
-    assert.equal(registrations[0].options.name, 'settings.section');
-    assert.equal(registrations[0].options.id, 'xmanrui-dsh-im');
-    assert.equal(registrations[0].options.order, 21);
+    assert.equal(registrations[0].options.name, 'plugins.bundle.config');
+    // The page renders this entry only on the detail page of the bundle whose
+    // package name is the key, so the key must be the manifest name verbatim.
+    assert.equal(registrations[0].options.key, '@xmanrui/dsh-im');
+    assert.equal(registrations[0].options.key, manifest.name);
     assert.equal(registrations[0].options.locale, IM_LOCALE_NAMESPACE);
-    assert.equal(registrations[0].options.label(), 'IM bots');
     assert.equal(typeof registrations[0].component, 'function');
 
     const injected = registrations[0].options.inject();
@@ -1360,8 +1515,14 @@ test('client registers one top-level bilingual IM settings section with a direct
 
     const markup = renderToStaticMarkup(React.createElement(
       registrations[0].component,
-      injected,
+      { ...injected, view: 'page' },
     ));
+    // The page asks a bundle's configuration for its page view only; the
+    // summary view renders nothing rather than failing.
+    assert.equal(renderToStaticMarkup(React.createElement(
+      registrations[0].component,
+      { ...injected, view: 'summary' },
+    )), '');
     // A browser-derived interface locale reaches the Host only through this
     // mirror, so the settings section must report it while it is mounted.
     const mirrorEffect = effects.find((entry) =>
@@ -1378,7 +1539,6 @@ test('client registers one top-level bilingual IM settings section with a direct
     disposeMirror();
     assert.equal(localeListeners.size, 0);
 
-    assert.match(markup, /Connecting DeepSeek Harness/);
     assert.match(markup, new RegExp(
       `class="dim-brandVersion">v${IM_PLUGIN_VERSION.replaceAll('.', '\\.')}<\\/span>`,
     ));
@@ -1386,11 +1546,16 @@ test('client registers one top-level bilingual IM settings section with a direct
     assert.match(markup, /General settings/);
     assert.match(markup, />WeChat<|>Feishu<|>DingTalk<|>WeCom</);
     assert.match(markup, />QQ<[^]*>Slack<[^]*>Telegram<[^]*>Discord<[^]*>WhatsApp</);
-    assert.match(markup, />AI Office<\/strong><small class="dim-channelNote">\(Experimental\)<\/small>/);
+    assert.match(markup, />AI Office<\/strong><span class="dim-channelBadge" role="img" aria-label="Experimental"/);
     assert.doesNotMatch(markup, /[\p{Script=Han}]/u);
   } finally {
     setImTranslator(null);
   }
+});
+
+test('the IM bundle configuration renders only the page view', () => {
+  assert.equal(renderToStaticMarkup(React.createElement(IMPluginConfigSection, {})), '');
+  assert.equal(renderToStaticMarkup(React.createElement(IMPluginConfigSection, { view: 'summary' })), '');
 });
 
 test('client directory picker uses the current DSH uiWorkspace service', async () => {
@@ -1418,7 +1583,7 @@ test('client directory picker uses the current DSH uiWorkspace service', async (
     },
     slots: {
       inject(name, install) {
-        assert.equal(name, 'settings.section');
+        assert.equal(name, 'plugins.bundle.config');
         return install();
       },
       register(options, component) {
@@ -1576,15 +1741,14 @@ test('every channel tab receives its RPC call from the settings render site', as
   assert.ok(tabIds.length >= 12, `expected the channel tab list, found ${tabIds.length}`);
 
   // Parse the dependency block that feeds IMSettingsTab. Upstream (#231)
-  // refactored the render site into a reusable panel, so the props now come
-  // from `panelDependencies` rather than an inline `inject` block; this guard
-  // is about the props reaching the tab, not how they are assembled.
-  const renderSite = source.indexOf('h(IMSettingsTab, {');
-  assert.ok(renderSite > 0, 'the IMSettingsTab render site must exist');
-  const blockStart = source.lastIndexOf('const panelDependencies = {', renderSite);
-  const injectStart = blockStart >= 0
-    ? blockStart
-    : source.lastIndexOf('inject: () => ({', renderSite);
+  // refactored the render site into a reusable panel, and this branch moved the
+  // default surface to the Plugins page, so both entry points now render through
+  // `IMPanel`, which spreads `panelDependencies` into the exported config
+  // section; that section forwards the same props to `IMSettingsTab`. This guard
+  // is about the props reaching the tab, not about which layer assembles them.
+  const renderSite = source.indexOf('h(IMPluginConfigSection, {');
+  assert.ok(renderSite > 0, 'the settings panel render site must exist');
+  const injectStart = source.lastIndexOf('const panelDependencies = {', renderSite);
   assert.ok(injectStart > 0, 'the settings tab dependency block must exist');
   const injectBlock = source.slice(injectStart, source.indexOf('};', injectStart));
   const providedProps = new Set(

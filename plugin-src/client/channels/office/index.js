@@ -92,17 +92,23 @@ export function OfficeSettingsTab({ rpcCall, initialStatus }) {
   const hooks = React.useMemo(() => {
     try { return officeHookUrls(form.baseUrl); } catch { return {}; }
   }, [form.baseUrl]);
+  // A missing or unparsable Base URL has exactly one cause; state it once instead of
+  // repeating the same error in all four derived-address rows.
+  const hooksUnavailable = Object.keys(hooks).length === 0;
   const health = model.health ?? {};
 
-  if (phase === 'loading') return h('div', { className: 'ddt-card ddt-loading', 'aria-busy': 'true' }, '正在读取 AI Office Connector…');
+  if (phase === 'loading') return h('div', { className: 'ddt-card ddt-loading dim-surfaceCard dim-loadingView', 'aria-busy': 'true' }, '正在读取 AI Office Connector…');
 
-  return h('section', { className: 'dof-page', 'aria-label': 'AI Office 设置' },
+  // The convergence layer reaches a channel through these two classes; without
+  // them the whole page kept its local skin (h34/r8/13px buttons) instead of the
+  // native ladder every other channel is snapped to.
+  return h('section', { className: 'dof-page dim-channelPage', 'aria-label': 'AI Office 设置' },
     h('div', { className: 'dof-hero' },
       h('div', { className: 'dof-heroCopy' },
         h('h3', null, 'AI Office Connector'),
         h('p', null, '本机主动连接公网 Office；Harness 不开放端口。协议 Hook 固定为 ', OFFICE_PROTOCOL_VERSION, '。')),
       h('span', { className: 'dof-status', 'data-connected': String(model.connected) },
-        h('span', { className: 'dof-dot' }), stateLabel(model))),
+        h('span', { className: 'dof-dot dim-stateDot' }), stateLabel(model))),
     model.configured ? h('div', { className: 'dof-metrics' },
       h('div', { className: 'dof-metric' }, h('span', null, '最近心跳'), h('strong', null, health.lastHeartbeatAt ?? '尚无')),
       h('div', { className: 'dof-metric' }, h('span', null, '最近事件'), h('strong', null, health.lastEventType ?? '尚无')),
@@ -132,7 +138,7 @@ export function OfficeSettingsTab({ rpcCall, initialStatus }) {
       error ? h(ConnectionError, { error }) : null,
       notice ? h('p', { className: 'dof-notice', role: 'status' }, notice) : null,
       health.error?.message ? h(ConnectionError, { error: health.error }) : null,
-      h('div', { className: 'dof-actions' },
+      h('div', { className: 'dof-actions dim-viewActions' },
         h(Button, { kind: 'primary', disabled: Boolean(busy), onClick: () => void run('save', () => invoke(OFFICE_RPC_ENDPOINTS.configure, {
           baseUrl: form.baseUrl,
           deviceId: form.deviceId,
@@ -147,7 +153,12 @@ export function OfficeSettingsTab({ rpcCall, initialStatus }) {
         h(Button, { kind: 'danger', disabled: !model.configured || Boolean(busy), onClick: () => void run('remove', () => invoke(OFFICE_RPC_ENDPOINTS.remove, { confirm: true })) }, '移除连接'))),
     h('div', { className: 'dof-card' },
       h('div', { className: 'dof-cardTitle' }, h('h4', null, '协议 Hook 预览'), h('span', null, '由 Base URL 自动派生，不单独填写')),
-      h('div', { className: 'dof-hooks' },
-        [['SSE', hooks.stream], ['Heartbeat', hooks.heartbeat], ['Job', hooks.job], ['Result', hooks.result]].map(([label, url]) => h('div', { className: 'dof-hook', key: label }, h('strong', null, label), h('code', null, url ?? 'Base URL 无效'))))),
+      hooksUnavailable
+        ? h('p', { className: 'dof-hooksEmpty' }, '填写有效的 Office Base URL 后，这里会显示四个派生地址。')
+        : h('div', { className: 'dof-hooks' },
+          [['SSE', hooks.stream], ['Heartbeat', hooks.heartbeat], ['Job', hooks.job], ['Result', hooks.result]]
+            .map(([label, url]) => h('div', { className: 'dof-hook', key: label },
+              h('strong', null, label), h('code', { title: url ?? '' }, url ?? '—'))))
+        ),
     h('p', { className: 'dof-notice' }, 'Office Hook 尚未部署时，配置会安全保存并自动重试；出现 HTTP 404 代表协议端点待上线，不代表 Harness 故障。'));
 }
