@@ -1,0 +1,10 @@
+# Generated bundles; scan source files under plugin-src/ and src/ instead.
+lib/client.js
+
+# Test fixtures use dynamic assertions and host-specific path regexes; SAST gates
+# cover runtime source under src/, plugin-src/, bin/, and scripts/.
+test/
+
+# Local browser preview harness writes an esbuild bundle into a temporary HTML
+# file; production runtime code is covered under src/, plugin-src/, and bin/.
+scripts/verify-model-setting.mjs

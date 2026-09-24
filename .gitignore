@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+coverage/
+.env
+.env.*
+!.env.example
+*.tgz
+.DS_Store
+.idea/
+e2e/

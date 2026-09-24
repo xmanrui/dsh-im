@@ -1,0 +1,766 @@
+{
+  "projectName": "dsh-im",
+  "projectOwner": "xmanrui",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md",
+    "README.en.md"
+  ],
+  "imageSize": 80,
+  "contributorsPerLine": 7,
+  "commit": false,
+  "skipCi": false,
+  "linkToUsage": false,
+  "contributorTemplate": "<a href=\"<%- contributor.profile %>\" title=\"<%- contributor.login %>\"><% if (contributor.avatar_url) { %><img src=\"<%- contributor.avatar_url %>?s=<%= options.imageSize %>\" width=\"<%= options.imageSize %>\" alt=\"<%- contributor.name %>\"/><br /><% } %><sub><b><%- contributor.name %></b></sub></a><br /><%= contributions %>",
+  "contributors": [
+    {
+      "login": "alpacachen",
+      "name": "alpacachen",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21093036",
+      "profile": "https://github.com/alpacachen",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/9d7ff2db1e44e2a7fdc5c344a662fbedcbad97d4"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/9d7ff2db1e44e2a7fdc5c344a662fbedcbad97d4"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/9d7ff2db1e44e2a7fdc5c344a662fbedcbad97d4"
+        }
+      ]
+    },
+    {
+      "login": "baijian",
+      "name": "baijian",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1487653",
+      "profile": "https://github.com/baijian",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/195"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/195"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/pull/195"
+        }
+      ]
+    },
+    {
+      "login": "bitxeno",
+      "name": "bitxeno",
+      "avatar_url": "https://avatars.githubusercontent.com/u/137328844",
+      "profile": "https://github.com/bitxeno",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/60e00bbca9f43a9a7dc5947d5146036e9916a84a"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/60e00bbca9f43a9a7dc5947d5146036e9916a84a"
+        }
+      ]
+    },
+    {
+      "login": "bulingbuling688",
+      "name": "wang shi zhuo",
+      "avatar_url": "https://avatars.githubusercontent.com/u/147490150",
+      "profile": "https://github.com/bulingbuling688",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/a3d36784f30a3e88934b2afda846f86a492346de"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/a3d36784f30a3e88934b2afda846f86a492346de"
+        }
+      ]
+    },
+    {
+      "login": "BuvkB",
+      "name": "BuvkB",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19549719",
+      "profile": "https://github.com/BuvkB",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/171"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/80589c1c6578ccf79124348417b8013487fb3093"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/f929ab54702920e96b4187a3071329dd9eb469cd"
+        }
+      ]
+    },
+    {
+      "login": "C3H3-AI",
+      "name": "C3H3-AI",
+      "avatar_url": "https://avatars.githubusercontent.com/u/256468226",
+      "profile": "https://github.com/C3H3-AI",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/3bc642bb82125c0ce438e153b1b830e50c90f23b"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/64ba1463a847f83f087bea2d5d6db454f791e596"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/7d2c93da8681c86ea0eee7d6ca8baa00b3063577"
+        },
+        {
+          "type": "infra",
+          "url": "https://github.com/xmanrui/dsh-im/commit/65b9cdbe3d39352c656937233276df2a86e9ed05"
+        }
+      ]
+    },
+    {
+      "login": "Chan-0312",
+      "name": "Chan",
+      "avatar_url": "https://avatars.githubusercontent.com/u/50688173",
+      "profile": "https://github.com/Chan-0312",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/3562b9244e4201421113678292a5e4682b6eea75"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/3562b9244e4201421113678292a5e4682b6eea75"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/3562b9244e4201421113678292a5e4682b6eea75"
+        }
+      ]
+    },
+    {
+      "login": "cherryFloris",
+      "name": "cherryFloris",
+      "avatar_url": "https://avatars.githubusercontent.com/u/79453414",
+      "profile": "https://github.com/cherryFloris",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/ff865f9c7942c8b9275efa014306d5c208d9063e"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/ff865f9c7942c8b9275efa014306d5c208d9063e"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/ff865f9c7942c8b9275efa014306d5c208d9063e"
+        }
+      ]
+    },
+    {
+      "login": "claude",
+      "name": "Claude",
+      "avatar_url": "https://avatars.githubusercontent.com/u/81847",
+      "profile": "https://github.com/claude",
+      "contributions": [
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/5da749be757c602c83e465482f5e2b75e3c1e679"
+        }
+      ]
+    },
+    {
+      "login": "CodeBuddy-Official-Account",
+      "name": "CodeBuddy-Official-Account",
+      "avatar_url": "https://avatars.githubusercontent.com/u/214620440",
+      "profile": "https://github.com/CodeBuddy-Official-Account",
+      "contributions": [
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/c51e8591016886e7ff2102351fc360bf4f16d5fb"
+        }
+      ]
+    },
+    {
+      "login": "codex",
+      "name": "Codex",
+      "avatar_url": "https://avatars.githubusercontent.com/u/267193182",
+      "profile": "https://github.com/codex",
+      "contributions": [
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/cfd90a41053e66c0f917ae03dd8fac765c2c3fd1"
+        }
+      ]
+    },
+    {
+      "login": "Diluka",
+      "name": "Diluka",
+      "avatar_url": "https://avatars.githubusercontent.com/u/3766084",
+      "profile": "https://github.com/Diluka",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/5efcfa67251582c401872b7a9166301a3b525d13"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/5efcfa67251582c401872b7a9166301a3b525d13"
+        }
+      ]
+    },
+    {
+      "login": "divingleee",
+      "name": "divingleee",
+      "avatar_url": "https://avatars.githubusercontent.com/u/39144947",
+      "profile": "https://github.com/divingleee",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/7d5bc94f64e223c610b01d4da3bd16682d99011a"
+        }
+      ]
+    },
+    {
+      "login": "Dong09",
+      "name": "Dong09",
+      "avatar_url": "https://avatars.githubusercontent.com/u/45942487",
+      "profile": "https://github.com/Dong09",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/210"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/210"
+        }
+      ]
+    },
+    {
+      "login": "evanfang0054",
+      "name": "Evan Fang",
+      "avatar_url": "https://avatars.githubusercontent.com/u/34673339",
+      "profile": "https://github.com/evanfang0054",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/da4114dfe3240f614aa573b366668db517f45d8d"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/45ef019a1f2fa7233b6331313804f864ff1dfda5"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/da4114dfe3240f614aa573b366668db517f45d8d"
+        }
+      ]
+    },
+    {
+      "login": "evilh2019",
+      "name": "Evilh2019",
+      "avatar_url": "https://avatars.githubusercontent.com/u/261342086",
+      "profile": "https://github.com/evilh2019",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/adeab2dec870d646426056feee16cad0956e7b3e"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/adeab2dec870d646426056feee16cad0956e7b3e"
+        }
+      ]
+    },
+    {
+      "login": "ferocknew",
+      "name": "ferocknew",
+      "avatar_url": "https://avatars.githubusercontent.com/u/2178683",
+      "profile": "https://github.com/ferocknew",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/81884173df4479c82dc4c44fdf4a3d9769c3431c"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/81884173df4479c82dc4c44fdf4a3d9769c3431c"
+        }
+      ]
+    },
+    {
+      "login": "geekyfoxlab",
+      "name": "geekyfox",
+      "avatar_url": "https://avatars.githubusercontent.com/u/124858191",
+      "profile": "https://github.com/geekyfoxlab",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/583bfc9160f06893f60309b5603f481efa166d48"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/583bfc9160f06893f60309b5603f481efa166d48"
+        }
+      ]
+    },
+    {
+      "login": "gemini-code-assist",
+      "name": "Gemini",
+      "avatar_url": "https://avatars.githubusercontent.com/u/200291788",
+      "profile": "https://github.com/gemini-code-assist",
+      "contributions": [
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/63aced1fce292b6f9ff633d0dd1ee11ad322efc2"
+        }
+      ]
+    },
+    {
+      "login": "GoldJohnKing",
+      "name": "Gold John King",
+      "avatar_url": "https://avatars.githubusercontent.com/u/26923626",
+      "profile": "https://github.com/GoldJohnKing",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/0851e8cf30f639bb3599d5e58dfcfe499bacd0da"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/0851e8cf30f639bb3599d5e58dfcfe499bacd0da"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/0851e8cf30f639bb3599d5e58dfcfe499bacd0da"
+        }
+      ]
+    },
+    {
+      "login": "grloper",
+      "name": "grloper",
+      "avatar_url": "https://avatars.githubusercontent.com/u/72247422",
+      "profile": "https://github.com/grloper",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/badeef25f1feff2238e1c47880734bf28cbdcba0"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/af27a23299583d51360bd97e0ce02d1753135b14"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/a42c5704e1e0387fb6a9956f1c100b572bec4ed4"
+        }
+      ]
+    },
+    {
+      "login": "iamyaojie",
+      "name": "iamyaojie",
+      "avatar_url": "https://avatars.githubusercontent.com/u/15206127",
+      "profile": "https://github.com/iamyaojie",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/3161816cc441220196f310ab4944eef07fc7b05b"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/3161816cc441220196f310ab4944eef07fc7b05b"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/3161816cc441220196f310ab4944eef07fc7b05b"
+        }
+      ]
+    },
+    {
+      "login": "iJetLi",
+      "name": "iJetLi",
+      "avatar_url": "https://avatars.githubusercontent.com/u/33075485",
+      "profile": "https://github.com/iJetLi",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/9a2956ce0a4ef1be45d13e07a64e14d7e9c347c5"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/9a2956ce0a4ef1be45d13e07a64e14d7e9c347c5"
+        }
+      ]
+    },
+    {
+      "login": "johnslee1207-commits",
+      "name": "Johnslee1207",
+      "avatar_url": "https://avatars.githubusercontent.com/u/243954471",
+      "profile": "https://github.com/johnslee1207-commits",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/214"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/214"
+        },
+        {
+          "type": "infra",
+          "url": "https://github.com/xmanrui/dsh-im/pull/214"
+        }
+      ]
+    },
+    {
+      "login": "kimi-agent-bot",
+      "name": "Kimi Agent",
+      "avatar_url": "https://avatars.githubusercontent.com/u/317908118",
+      "profile": "https://github.com/kimi-agent-bot",
+      "contributions": [
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/b64e78d1138b0b5100cd47526bc57f5a6f3e26c8"
+        }
+      ]
+    },
+    {
+      "login": "LAN-SHH",
+      "name": "LAN-SHH",
+      "avatar_url": "https://avatars.githubusercontent.com/u/273559466",
+      "profile": "https://github.com/LAN-SHH",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/9d3700b1cd89a811bceeb69bedfac2715c9a1df1"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/9d3700b1cd89a811bceeb69bedfac2715c9a1df1"
+        }
+      ]
+    },
+    {
+      "login": "Librazy",
+      "name": "Liqueur Librazy",
+      "avatar_url": "https://avatars.githubusercontent.com/u/2211542",
+      "profile": "https://github.com/Librazy",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/205"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/pull/205"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/205"
+        }
+      ]
+    },
+    {
+      "login": "lKolabrodl",
+      "name": "Kolabrod",
+      "avatar_url": "https://avatars.githubusercontent.com/u/36865467",
+      "profile": "https://github.com/lKolabrodl",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/98c1e482719d38e0cd0b8d7c76fd20e5a1915f0a"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/98c1e482719d38e0cd0b8d7c76fd20e5a1915f0a"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/98c1e482719d38e0cd0b8d7c76fd20e5a1915f0a"
+        }
+      ]
+    },
+    {
+      "login": "luochen211",
+      "name": "落尘",
+      "avatar_url": "https://avatars.githubusercontent.com/u/188724350",
+      "profile": "https://github.com/luochen211",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/860faad380696b5533e98672686ed00953f6a87d"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/860faad380696b5533e98672686ed00953f6a87d"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/860faad380696b5533e98672686ed00953f6a87d"
+        }
+      ]
+    },
+    {
+      "login": "lyzhu86",
+      "name": "lyzhu86",
+      "avatar_url": "https://avatars.githubusercontent.com/u/276197423",
+      "profile": "https://github.com/lyzhu86",
+      "contributions": [
+        {
+          "type": "ideas",
+          "url": "https://github.com/xmanrui/dsh-im/pull/195"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/pull/195"
+        }
+      ]
+    },
+    {
+      "login": "masucc",
+      "name": "masucc",
+      "avatar_url": "https://avatars.githubusercontent.com/u/143188027",
+      "profile": "https://github.com/masucc",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/34bae7c4ee5ea04b28ef7f3108479651b56c78b8"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/34bae7c4ee5ea04b28ef7f3108479651b56c78b8"
+        }
+      ]
+    },
+    {
+      "login": "NIU-001-LIU",
+      "name": "WENBO LIU",
+      "avatar_url": "https://avatars.githubusercontent.com/u/133982393",
+      "profile": "https://github.com/NIU-001-LIU",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/6366404c42f7163712bbc44c5011dbdafa63e9bd"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/6366404c42f7163712bbc44c5011dbdafa63e9bd"
+        }
+      ]
+    },
+    {
+      "login": "penggaolai",
+      "name": "penggaolai",
+      "avatar_url": "https://avatars.githubusercontent.com/u/44097312",
+      "profile": "https://github.com/penggaolai",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/03565e5a69bfd03dc246990c3376fbd794caea6e"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/03565e5a69bfd03dc246990c3376fbd794caea6e"
+        }
+      ]
+    },
+    {
+      "login": "qwencoder",
+      "name": "Qwen-Coder",
+      "avatar_url": "https://avatars.githubusercontent.com/u/224605497",
+      "profile": "https://github.com/qwencoder",
+      "contributions": [
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/64b9ac8b6e4ba760bc0e182f700cc5be7fffb94f"
+        }
+      ]
+    },
+    {
+      "login": "ShawnKung",
+      "name": "ShawnKung",
+      "avatar_url": "https://avatars.githubusercontent.com/u/42027195",
+      "profile": "https://github.com/ShawnKung",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/224"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/pull/224"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/224"
+        }
+      ]
+    },
+    {
+      "login": "trae-agent",
+      "name": "Trae",
+      "avatar_url": "https://avatars.githubusercontent.com/u/220387035",
+      "profile": "https://github.com/trae-agent",
+      "contributions": [
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/ed47ae7db87d08a12fc6412083ece05669372929"
+        }
+      ]
+    },
+    {
+      "login": "WE-Technology",
+      "name": "WE-Technology",
+      "avatar_url": "https://avatars.githubusercontent.com/u/109900108",
+      "profile": "https://github.com/WE-Technology",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/b0606159e01bbb0a171323e52578324b5faea97a"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/b0606159e01bbb0a171323e52578324b5faea97a"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/b0606159e01bbb0a171323e52578324b5faea97a"
+        }
+      ]
+    },
+    {
+      "login": "wings1848",
+      "name": "Wings Butterfly",
+      "avatar_url": "https://avatars.githubusercontent.com/u/120104016",
+      "profile": "https://github.com/wings1848",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/206"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/pull/206"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/206"
+        }
+      ]
+    },
+    {
+      "login": "xmanrui",
+      "name": "xiemanR",
+      "avatar_url": "https://avatars.githubusercontent.com/u/4094054",
+      "profile": "https://github.com/xmanrui",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/b8bd681a793a87ff2a7b8d282cb4944a0ce769c3"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/b8bd681a793a87ff2a7b8d282cb4944a0ce769c3"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/b8bd681a793a87ff2a7b8d282cb4944a0ce769c3"
+        }
+      ]
+    },
+    {
+      "login": "yangzhe1991",
+      "name": "Zhe (Phil) Yang",
+      "avatar_url": "https://avatars.githubusercontent.com/u/860739",
+      "profile": "https://github.com/yangzhe1991",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/222"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/222"
+        }
+      ]
+    },
+    {
+      "login": "yhay81",
+      "name": "Yusuke Hayashi",
+      "avatar_url": "https://avatars.githubusercontent.com/u/11132792",
+      "profile": "https://github.com/yhay81",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/91f49a603b504762fc0c5daf50d4385bf604ce93"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/91f49a603b504762fc0c5daf50d4385bf604ce93"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/91f49a603b504762fc0c5daf50d4385bf604ce93"
+        }
+      ]
+    },
+    {
+      "login": "yzxxy010",
+      "name": "星曜",
+      "avatar_url": "https://avatars.githubusercontent.com/u/98270201",
+      "profile": "https://github.com/yzxxy010",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/7a68e94f547a2412e602772dfef82af779750b5f"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/f27c0c3018a4c26c6d29885ba0cf2b44be947a4f"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/7a68e94f547a2412e602772dfef82af779750b5f"
+        }
+      ]
+    },
+    {
+      "login": "zaakirio",
+      "name": "zaakir",
+      "avatar_url": "https://avatars.githubusercontent.com/u/90780598",
+      "profile": "https://github.com/zaakirio",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05"
+        },
+        {
+          "type": "translation",
+          "url": "https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05"
+        }
+      ]
+    }
+  ]
+}

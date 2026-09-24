@@ -1,0 +1,12 @@
+{
+  "name": "dsh-im-client-smoke",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./host.js",
+  "exports": { ".": "./host.js", "./client": "./client.js", "./package.json": "./package.json" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web", "inject": ["@xmanrui/dsh-im", "dsh-tauri"] }
+  }
+}
