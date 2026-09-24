@@ -2,21 +2,19 @@ import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { MAX_BOT_ALIAS_LENGTH, validateBotAlias } from '../../src/channels/shared/bot-alias.mjs';
 import { h } from './i18n.js';
+import { Button } from './ui/button.js';
+import { Input, Modal } from './ui/official.js';
 
 function AliasDialog({ bot, onSave, onClose }) {
   const id = React.useId();
-  const dialogRef = React.useRef(null);
   const inputRef = React.useRef(null);
   const savingRef = React.useRef(false);
   const [draft, setDraft] = React.useState(bot.alias ?? '');
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
   React.useEffect(() => {
-    const previous = globalThis.document?.activeElement;
-    dialogRef.current?.showModal?.();
     inputRef.current?.focus?.();
     inputRef.current?.select?.();
-    return () => { if (previous?.isConnected) previous.focus?.(); };
   }, []);
   const close = () => { if (!savingRef.current) onClose(); };
   const save = async (value) => {
@@ -36,21 +34,31 @@ function AliasDialog({ bot, onSave, onClose }) {
       setSaving(false);
     }
   };
-  const content = h('dialog', {
-    ref: dialogRef, className: 'dim-aliasDialog', 'aria-labelledby': `${id}-title`,
-    'aria-busy': saving,
-    onCancel: (event) => { event.preventDefault(); close(); },
-    onClick: (event) => event.stopPropagation(),
-    onKeyDown: (event) => event.stopPropagation(),
+  // The official shell owns the mask, the card, Escape/mask dismissal and the
+  // dialog semantics; only the field and the action row stay local.
+  return h(Modal, {
+    open: true,
+    onClose: close,
+    title: '修改别名',
+    closeLabel: '关闭修改别名',
+    footer: h('div', { className: 'dim-aliasActions' },
+      h(Button, {
+        variant: 'ghost',
+        className: 'dim-aliasRestore',
+        disabled: saving || !bot.alias,
+        onClick: () => void save(''),
+      }, '恢复原名称'),
+      h(Button, { variant: 'ghost', disabled: saving, onClick: close }, '取消'),
+      h(Button, {
+        variant: 'primary',
+        disabled: saving,
+        onClick: () => void save(draft),
+      }, saving ? '保存中…' : '保存')),
   },
-  h('div', { className: 'dim-aliasHeader' },
-    h('h3', { id: `${id}-title` }, '修改别名'),
-    h('button', { type: 'button', className: 'dim-aliasClose', disabled: saving,
-      'aria-label': '关闭修改别名', onClick: close }, '×')),
   h('div', { className: 'dim-aliasOriginal' }, h('span', null, '原名称'),
     h('span', null, bot.originalName ?? bot.name)),
   h('label', { htmlFor: `${id}-input` }, '别名'),
-  h('input', { id: `${id}-input`, ref: inputRef, value: draft, disabled: saving,
+  h(Input, { id: `${id}-input`, ref: inputRef, value: draft, disabled: saving,
     maxLength: MAX_BOT_ALIAS_LENGTH, placeholder: '例如：客服助手',
     'aria-describedby': `${id}-help`,
     onChange: (event) => setDraft(event.target.value),
@@ -61,15 +69,7 @@ function AliasDialog({ bot, onSave, onClose }) {
     },
   }),
   h('p', { id: `${id}-help`, className: 'dim-aliasHelp' }, '仅更改显示名称，留空则显示原名称。'),
-  error ? h('p', { className: 'dim-aliasError', role: 'alert' }, error) : null,
-  h('div', { className: 'dim-aliasFooter' },
-    h('button', { type: 'button', className: 'dim-aliasRestore',
-      disabled: saving || !bot.alias, onClick: () => void save('') }, '恢复原名称'),
-    h('div', { className: 'dim-aliasActions' },
-      h('button', { type: 'button', disabled: saving, onClick: close }, '取消'),
-      h('button', { type: 'button', className: 'dim-aliasSave', disabled: saving,
-        onClick: () => void save(draft) }, saving ? '保存中…' : '保存'))));
-  return globalThis.document?.body ? createPortal(content, document.body) : content;
+  error ? h('p', { className: 'dim-aliasError', role: 'alert' }, error) : null);
 }
 
 function BotNameTooltip({ anchorRef, id, name, onDismiss }) {

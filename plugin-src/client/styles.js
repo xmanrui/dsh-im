@@ -18,27 +18,15 @@ const CSS = String.raw`
 .dim-aliasEdit svg { opacity: .55; transition: opacity .15s ease; }
 .dim-aliasName:hover .dim-aliasEdit:not(:disabled) svg, .dim-aliasEdit:focus-visible svg { opacity: 1; }
 .dim-aliasEdit:hover:not(:disabled), .dim-aliasEdit:focus-visible { color: var(--dsw-alias-state-business-primary, #3370ff); background: var(--dsw-alias-interactive-bg-hover, #f7f8fa); }
-.dim-aliasDialog { box-sizing: border-box; width: min(380px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 22px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 12px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-3, #fff); box-shadow: 0 12px 36px rgb(0 0 0 / 18%); font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-.dim-aliasDialog * { box-sizing: border-box; }
-.dim-aliasDialog::backdrop { background: rgb(15 17 21 / 30%); }
-.dim-aliasHeader { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
-.dim-aliasHeader h3 { margin: 0; font-size: 16px; }
-.dim-aliasDialog button { font: inherit; cursor: pointer; }
-.dim-aliasDialog .dim-aliasClose { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); font-size: 20px; }
+/* The alias editor is the official Modal + Input + Button now, so only the two
+   pieces the official shell does not own are left: the original-name strip and
+   the inline help/error copy. */
 .dim-aliasOriginal { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 12px; margin-bottom: 18px; border-radius: 6px; background: var(--dsw-alias-bg-layer-2, #f5f6f7); overflow-wrap: anywhere; }
 .dim-aliasOriginal > span:first-child { flex: none; color: var(--dsw-alias-label-secondary, #646a73); }
-.dim-aliasDialog label { display: block; margin-bottom: 7px; }
-.dim-aliasDialog input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 6px; color: inherit; background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; }
 .dim-aliasHelp { margin: 8px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; }
 .dim-aliasError { color: var(--dsw-alias-state-danger-primary, #c53030); overflow-wrap: anywhere; }
-.dim-aliasFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-top: 24px; }
-.dim-aliasRestore { padding: 4px 0; border: 0; color: var(--dsw-alias-state-business-primary, #3370ff); background: transparent; }
 .dim-aliasActions { display: flex; gap: 8px; margin-left: auto; }
-.dim-aliasActions button { padding: 7px 14px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 6px; color: inherit; background: var(--dsw-alias-bg-layer-1, #fff); }
-.dim-aliasActions .dim-aliasSave { color: #fff; border-color: var(--dsw-alias-state-business-primary, #3370ff); background: var(--dsw-alias-state-business-primary, #3370ff); }
-.dim-aliasEdit:disabled, .dim-aliasDialog button:disabled, .dim-aliasDialog input:disabled { opacity: .55; cursor: not-allowed; }
-.dim-aliasEdit:focus-visible, .dim-aliasDialog button:focus-visible, .dim-aliasDialog input:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: 2px; }
-@media (pointer: coarse) { .dim-aliasEdit, .dim-aliasDialog button { min-width: 44px; min-height: 44px; } .dim-aliasDialog input { font-size: 16px; } }
+.dim-aliasRestore { margin-right: auto; }
 .dim-page {
   --dim-blue: var(--dsw-alias-state-business-primary, #3370ff);
   --dim-blue-soft: color-mix(in srgb, var(--dim-blue) 9%, transparent);
@@ -49,13 +37,6 @@ const CSS = String.raw`
   box-sizing: border-box;
 }
 .dim-page *, .dim-page *::before, .dim-page *::after { box-sizing: border-box; }
-.dim-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 18px; }
-.dim-brand { min-width: 0; width: max-content; max-width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; margin: -2px -6px; padding: 2px 6px; border-radius: 8px; }
-.dim-brandHeading { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
-.dim-brandName { color: var(--dsw-alias-label-primary, #1f2329); font-size: 20px; line-height: 24px; font-weight: 800; letter-spacing: .04em; }
-.dim-brandVersion { color: var(--dsw-alias-label-tertiary, #8f959e); font: 500 10px/16px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0; }
-.dim-title p { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap; }
-.dim-titleActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .dim-updateButton { min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 3px; padding: 5px 10px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 12px; line-height: 18px; font-weight: 560; cursor: pointer; }
 .dim-updateButton:hover:not(:disabled) { border-color: #aeb3bb; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-interactive-bg-hover, #f7f8fa); }
 .dim-updateButton:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: 2px; }
@@ -63,12 +44,11 @@ const CSS = String.raw`
 .dim-updateAction { position: relative; display: inline-flex; flex: none; }
 .dim-updateTrigger { width: 30px; height: 30px; flex: none; padding: 0; }
 .dim-updateTrigger svg { display: block; }
-.dim-updateBackdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 24px; background: rgb(15 17 21 / 42%); }
-.dim-updateBackdrop, .dim-updateBackdrop * { box-sizing: border-box; }
-.dim-updateDialog { width: min(480px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 16px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-3, #fff); box-shadow: 0 20px 70px rgb(0 0 0 / 20%); text-align: left; }
-.dim-updateDialog:focus { outline: none; }
-.dim-updateDialog h3 { margin: 22px 24px 8px; font-size: 18px; line-height: 25px; font-weight: 680; }
-.dim-updateDescription { margin: 0 24px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 13px; line-height: 20px; }
+/* The update confirmation is the official Modal: mask, card, Escape and the
+   title/description chrome come from the kernel, so only this panel's own body
+   and its inner focus trap keep a rule. */
+.dim-updateDialog { text-align: left; }
+.dim-updateDialogBody:focus { outline: none; }
 .dim-updateBody { padding: 18px 24px 20px; }
 .dim-updateVersions { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 0 0 18px; font-size: 12px; line-height: 18px; }
 .dim-updateVersions dt { color: var(--dsw-alias-label-secondary, #646a73); }
@@ -94,28 +74,21 @@ const CSS = String.raw`
 .dim-updateFooter { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 14px 24px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
 .dim-updateFooter .dim-updateButton:first-child { margin-right: auto; }
 .dim-updatePrimary, .dim-updatePrimary:hover:not(:disabled) { border-color: var(--dsw-alias-state-business-primary, #3370ff); color: #fff; background: var(--dsw-alias-state-business-primary, #3370ff); }
-.dim-githubAction { position: relative; display: inline-flex; flex: none; }
 .dim-githubLink { width: 30px; height: 30px; display: grid; place-items: center; flex: none; padding: 0; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-1, #fff); text-decoration: none; transition: border-color .15s ease, color .15s ease, background .15s ease; }
 .dim-githubLink svg { display: block; }
 .dim-githubLink:hover { border-color: #aeb3bb; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-interactive-bg-hover, #f7f8fa); }
 .dim-githubLink:focus-visible { outline: 2px solid color-mix(in srgb, var(--dim-blue) 70%, white); outline-offset: 2px; }
-.dim-updateTooltip, .dim-githubTooltip { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; width: max-content; max-width: min(220px, 80vw); padding: 6px 9px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 7px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-3, #fff); box-shadow: 0 8px 24px rgb(31 35 41 / 14%); font-size: 11px; line-height: 16px; font-weight: 500; white-space: nowrap; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
-.dim-updateAction:hover .dim-updateTooltip, .dim-updateTrigger:focus-visible + .dim-updateTooltip, .dim-githubAction:hover .dim-githubTooltip, .dim-githubAction:focus-within .dim-githubTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
-.dim-generalSettingsAction { position: relative; display: inline-flex; flex: none; }
+/* The update panel keeps its own hand-rolled tooltip; the GitHub and general
+   settings anchors moved to the official Tooltip component. */
+.dim-updateTooltip { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; width: max-content; max-width: min(220px, 80vw); padding: 6px 9px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 7px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-3, #fff); box-shadow: 0 8px 24px rgb(31 35 41 / 14%); font-size: 11px; line-height: 16px; font-weight: 500; white-space: nowrap; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
+.dim-updateAction:hover .dim-updateTooltip, .dim-updateTrigger:focus-visible + .dim-updateTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .dim-generalSettingsButton { width: 30px; height: 30px; display: grid; place-items: center; flex: none; padding: 0; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-1, #fff); cursor: pointer; transition: border-color .15s ease, color .15s ease, background .15s ease, box-shadow .15s ease; }
 .dim-generalSettingsButton svg { display: block; }
 .dim-generalSettingsButton:hover { border-color: #aeb3bb; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-interactive-bg-hover, #f7f8fa); }
 .dim-generalSettingsButton[aria-current="page"] { border-color: color-mix(in srgb, var(--dim-blue) 42%, var(--dsw-alias-border-l2, #dfe1e5)); color: var(--dim-blue); background: var(--dim-blue-soft); }
 .dim-generalSettingsButton:focus-visible { outline: 2px solid color-mix(in srgb, var(--dim-blue) 70%, white); outline-offset: 2px; }
-.dim-generalSettingsTooltip { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; width: max-content; padding: 6px 9px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 7px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-3, #fff); box-shadow: 0 8px 24px rgb(31 35 41 / 14%); font-size: 11px; line-height: 16px; font-weight: 500; white-space: nowrap; opacity: 0; visibility: hidden; transform: translateY(-3px); pointer-events: none; transition: opacity .15s ease, transform .15s ease, visibility .15s ease; }
-.dim-generalSettingsAction:hover .dim-generalSettingsTooltip, .dim-generalSettingsButton:focus-visible + .dim-generalSettingsTooltip { opacity: 1; visibility: visible; transform: translateY(0); }
-.dim-generalSettingsButton[aria-current="page"] + .dim-generalSettingsTooltip { opacity: 0; visibility: hidden; transform: translateY(-3px); }
-.dim-layout { display: grid; grid-template-columns: 174px 1px minmax(0, 1fr); gap: 24px; align-items: start; }
-.dim-rail { display: grid; align-content: start; gap: 8px; padding: 0 4px 1px 1px; }
-.dim-channel { width: 100%; min-height: 48px; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--dsw-alias-border-l2, #eef0f3); border-radius: 14px; color: inherit; background: var(--dsw-alias-bg-layer-3, #fff); box-shadow: 0 2px 8px rgb(31 35 41 / 3%); font: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
-.dim-channel:hover { border-color: color-mix(in srgb, var(--dim-blue) 25%, var(--dsw-alias-border-l2, #eef0f3)); background: color-mix(in srgb, var(--dim-blue) 2%, var(--dsw-alias-bg-layer-3, #fff)); box-shadow: 0 5px 16px rgb(31 35 41 / 5%); }
-.dim-channel[aria-selected="true"] { border-color: color-mix(in srgb, var(--dim-blue) 43%, var(--dsw-alias-border-l2, #dfe1e5)); color: var(--dim-blue); background: color-mix(in srgb, var(--dim-blue) 12%, var(--dsw-alias-bg-layer-3, #fff)); box-shadow: 0 3px 12px rgb(51 112 255 / 7%); }
-.dim-channel:focus-visible { outline: none; border-color: color-mix(in srgb, var(--dim-blue) 72%, var(--dsw-alias-border-l2, #dfe1e5)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--dim-blue) 24%, transparent) inset, 0 3px 12px rgb(51 112 255 / 7%); }
+/* Logo marks stay here: the catalog renders the same .dim-logo<Name> hooks for
+   both the provider grid and the per-bot cards. */
 .dim-logo { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; box-shadow: 0 1px 3px rgb(31 35 41 / 7%); }
 .dim-logo svg { display: block; width: 20px; height: 20px; }
 .dim-logoWeixin { color: white; background: #07c160; }
@@ -140,10 +113,6 @@ const CSS = String.raw`
 .dim-logoIMessage { color: white; background: linear-gradient(180deg, #5bf675 0%, #28d944 50%, #0fbd2c 100%); box-shadow: inset 0 1px 1px rgb(255 255 255 / 45%), 0 1px 3px rgb(31 35 41 / 12%); }
 .dim-logoIMessage svg { width: 23px; height: 23px; }
 .dim-logoWhatsapp svg { width: 21px; height: 21px; }
-.dim-channelCopy { min-width: 0; display: grid; }
-.dim-channelCopy strong { overflow: hidden; color: inherit; font-size: 14px; line-height: 20px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
-.dim-channelNote { overflow: hidden; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 10px; line-height: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.dim-divider { width: 1px; align-self: stretch; background: var(--dsw-alias-border-l1, #eef0f3); }
 .dim-panel { min-width: 0; container-type: inline-size; }
 .dim-loopbackRecovery { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 30%, var(--dsw-alias-border-l2, #dfe1e5)); border-radius: 12px; color: var(--dsw-alias-label-primary, #1f2329); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #d97706) 8%, var(--dsw-alias-bg-layer-1, #fff)); }
 .dim-loopbackRecoveryCopy { min-width: 0; }
@@ -284,10 +253,12 @@ const CSS = String.raw`
 .dim-contextLabel { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
 .dim-contextStatus { padding: 2px 7px; border-radius: 5px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-1, #fff); font-size: 11px; line-height: 16px; font-weight: 400; white-space: nowrap; }
 .dim-contextStatus[data-active="true"] { color: var(--dsw-alias-state-business-primary, #3370ff); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #3370ff) 10%, var(--dsw-alias-bg-layer-1, #fff)); }
-.dim-contextBackdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 12px; background: rgb(15 17 21 / 42%); }
-.dim-contextBackdrop, .dim-contextBackdrop *, .dim-contextBackdrop *::before, .dim-contextBackdrop *::after { box-sizing: border-box; }
-.dim-contextDialog { width: min(450px, 100%); min-width: 0; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 16px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 12px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-3, #fff); box-shadow: 0 20px 70px rgb(0 0 0 / 20%); font-size: 13px; line-height: 1.5; text-align: left; }
-.dim-contextDialog:focus { outline: none; }
+/* The context editor rides the official Modal shell, which owns the mask, the
+   card width and the escape/mask dismissal. Only the editor's own body keeps a
+   rule here. */
+.dim-contextDialog { font-size: 13px; line-height: 1.5; text-align: left; }
+.dim-contextDialogBody { min-width: 0; max-height: calc(100dvh - 96px); overflow-y: auto; }
+.dim-contextDialogBody:focus { outline: none; }
 .dim-contextHeader, .dim-contextEditorHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dim-contextHeader { position: relative; }
 .dim-contextHeaderTitle { min-width: 0; display: inline-flex; align-items: center; gap: 6px; }
@@ -687,22 +658,13 @@ const CSS = String.raw`
 @media (max-width: 840px) {
   .dim-title { align-items: flex-start; }
   .dim-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-  .dim-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-right: 1px; }
-  .dim-divider { display: none; }
-  .dim-channel { min-height: 48px; }
 }
 @media (max-width: 560px) {
   .dim-title { flex-direction: column; gap: 10px; }
   .dim-title p { white-space: normal; }
   .dim-titleActions { justify-content: flex-start; }
-  .dim-updateBackdrop { padding: 12px; }
-  .dim-updateDialog { max-height: calc(100vh - 24px); }
-  .dim-updateDialog h3 { margin: 18px 18px 8px; }
-  .dim-updateDescription { margin: 0 18px; }
   .dim-updateBody { padding: 16px 18px; }
   .dim-updateFooter { padding: 12px 18px; }
-  .dim-githubTooltip { right: auto; left: 0; }
-  .dim-rail { grid-template-columns: minmax(0, 1fr); }
   .dim-loopbackRecovery { align-items: stretch; flex-direction: column; gap: 12px; }
   .dim-loopbackRecoveryAction { width: 100%; }
   .dim-deliverySectionHeading { align-items: stretch; flex-direction: column; }

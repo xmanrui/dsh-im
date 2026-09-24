@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { createPortal } from 'react-dom';
 
 import {
   CONTEXT_DIRECT_GUIDANCE_EXAMPLE,
@@ -10,6 +9,7 @@ import {
   validateContextEnhancementConfig,
 } from '../../src/channels/shared/context-enhancement.mjs';
 import { h, localizeText } from './i18n.js';
+import { Modal } from './ui/official.js';
 
 const FIELD_LABELS = Object.freeze({
   channel: '渠道',
@@ -280,15 +280,22 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
     }
   };
 
-  const content = h('div', {
-    className: 'dim-contextBackdrop',
-    onMouseDown: (event) => { if (event.target === event.currentTarget) cancel(); },
-  }, h('section', {
+  // The official Modal shell owns the mask, the card, Escape/mask dismissal and
+  // the dialog semantics (issue #247 (f)). This editor keeps its own header
+  // (title + inline help tooltip), tablist and focus trap, so it renders
+  // `headless` and supplies the accessibility wiring itself.
+  const content = h(Modal, {
+    open: true,
+    onClose: cancel,
+    title: '上下文增强',
+    closeLabel: '关闭弹窗',
+    className: 'dim-contextDialog',
+    headless: true,
+  },
+  h('section', {
     id,
     ref: dialogRef,
-    className: 'dim-contextDialog',
-    role: 'dialog',
-    'aria-modal': 'true',
+    className: 'dim-contextDialogBody',
     'aria-labelledby': titleId,
     'aria-describedby': descriptionId,
     'aria-busy': saving,
@@ -378,7 +385,7 @@ function ContextEnhancementDialog({ config, groupSupported, disabled, onSave, on
       onClick: () => { void save(); },
     }, saving ? '保存中…' : '保存'))));
 
-  return globalThis.document?.body ? createPortal(content, document.body) : content;
+  return content;
 }
 
 export function ContextEnhancementEditor({ config, groupSupported = true, disabled = false, onSave }) {

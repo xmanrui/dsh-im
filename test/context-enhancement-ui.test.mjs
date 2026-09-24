@@ -47,6 +47,19 @@ function scope(root, kind) {
   return root.findAllByType('fieldset').find((node) => node.props['data-context-kind'] === kind);
 }
 
+/**
+ * The dialog is the official Modal shell, which owns `role="dialog"` and the
+ * mask. This editor supplies its own labelled body inside it, and that body is
+ * where the editor's a11y attributes and focus-trap key handling live.
+ */
+function dialogBody(root) {
+  return root.findByProps({ className: 'dim-contextDialogBody' });
+}
+
+function dialogCount(root) {
+  return root.findAllByProps({ role: 'dialog' }).length;
+}
+
 function fields(root, kind) {
   const parent = kind ? scope(root, kind) : root;
   return parent.findAllByType('input').filter((node) => (
@@ -165,7 +178,8 @@ test('context settings default to off with sender ID and empty guidance, and exp
   await open(renderer.root);
   const contextHelp = renderer.root.findByProps({ 'aria-label': '查看上下文增强说明' });
   const contextTooltip = renderer.root.findByProps({ id: contextHelp.props['aria-describedby'] });
-  assert.equal(renderer.root.findByProps({ role: 'dialog' }).props['aria-describedby'], contextTooltip.props.id);
+  assert.equal(dialogBody(renderer.root).props['aria-describedby'], contextTooltip.props.id);
+  assert.equal(renderer.root.findByProps({ role: 'dialog' }).props['aria-label'], '上下文增强');
   assert.match(textOf(contextTooltip), /选择在哪些会话中启用.*不查询平台 API/);
   assert.equal(renderer.root.findAllByType('p').some((node) => textOf(node).startsWith('选择在哪些会话中启用')), false);
   assert.deepEqual(tabs(renderer.root).map(textOf), ['私聊', '群聊']);
@@ -245,12 +259,12 @@ test('switches, fields, and guidance are local drafts until Save; Cancel and clo
     assert.deepEqual(saved, []);
     await act(async () => {
       if (dismiss === 'close') renderer.root.findByProps({ 'aria-label': '关闭弹窗' }).props.onClick();
-      else if (dismiss === 'escape') renderer.root.findByProps({ role: 'dialog' }).props.onKeyDown({
+      else if (dismiss === 'escape') dialogBody(renderer.root).props.onKeyDown({
         key: 'Escape', preventDefault() {}, stopPropagation() {},
       });
       else if (dismiss === 'backdrop') {
-        const target = {};
-        renderer.root.findByProps({ className: 'dim-contextBackdrop' }).props.onMouseDown({ target, currentTarget: target });
+        // The official Modal owns the mask; clicking it must dismiss.
+        renderer.root.findByProps({ className: 'dshp-modal-mask' }).props.onClick();
       } else button(renderer.root, dismiss).props.onClick();
       await flush();
     });
@@ -328,12 +342,12 @@ test('failed atomic saves retain the draft, lock edits and duplicate submits, an
   const saveButton = button(renderer.root, '保存');
   await act(async () => { saveButton.props.onClick(); saveButton.props.onClick(); await flush(); });
   assert.equal(calls.length, 1);
-  assert.equal(renderer.root.findByProps({ role: 'dialog' }).props['aria-busy'], true);
+  assert.equal(dialogBody(renderer.root).props['aria-busy'], true);
   assert.ok(renderer.root.findAllByType('input').every((node) => node.props.disabled));
   assert.ok(renderer.root.findAllByType('button').every((node) => node.props.disabled || node.props.className === 'dim-contextEntry'));
   await act(async () => {
     guidance(renderer.root, 'direct').props.onChange({ target: { value: 'do not commit' } });
-    renderer.root.findByProps({ role: 'dialog' }).props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    dialogBody(renderer.root).props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
     button(renderer.root, '取消').props.onClick();
   });
   assert.equal(renderer.root.findAllByProps({ role: 'dialog' }).length, 1);
@@ -404,7 +418,7 @@ test('dialog traps Tab and external focus, cancels with Escape, and restores ent
   const renderer = await mount(t, ContextEnhancementEditor, {}, {
     createNodeMock(element) {
       if (element.props.className === 'dim-contextEntry') return entry;
-      if (element.props.role === 'dialog') return dialog;
+      if (element.props.className === 'dim-contextDialogBody') return dialog;
       return {};
     },
   });
@@ -412,7 +426,7 @@ test('dialog traps Tab and external focus, cancels with Escape, and restores ent
   assert.equal(document.activeElement, dialog);
   const keydown = (shiftKey) => {
     let prevented = false;
-    renderer.root.findByProps({ role: 'dialog' }).props.onKeyDown({ key: 'Tab', shiftKey, preventDefault() { prevented = true; } });
+    dialogBody(renderer.root).props.onKeyDown({ key: 'Tab', shiftKey, preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
   };
   keydown(false);
@@ -424,7 +438,7 @@ test('dialog traps Tab and external focus, cancels with Escape, and restores ent
   listeners.get('focusin')({ target: {} });
   assert.equal(document.activeElement, dialog);
   await act(async () => {
-    renderer.root.findByProps({ role: 'dialog' }).props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    dialogBody(renderer.root).props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
     await flush();
   });
   assert.equal(document.activeElement, entry);
@@ -636,7 +650,9 @@ test('the approved neutral entry and theme-aware modal keep responsive labels an
   const styles = await readFile(new URL('../plugin-src/client/styles.js', import.meta.url), 'utf8');
   assert.match(styles, /\.dim-contextEntry \{[^}]*min-height: 40px;[^}]*minmax\(0, 1fr\)[^}]*border-radius: 8px;[^}]*font-size: 13px;/);
   assert.match(styles, /\.dim-contextStatus\[data-active="true"\] \{[^}]*--dsw-alias-state-business-primary/);
-  assert.match(styles, /\.dim-contextDialog \{[^}]*width: min\(450px, 100%\);[^}]*overflow-y: auto;[^}]*border-radius: 12px;[^}]*--dsw-alias-bg-layer-3/);
+  // The dialog's mask, width and card chrome come from the official Modal now;
+  // this plugin only styles the body it renders inside that shell.
+  assert.match(styles, /\.dim-contextDialogBody \{[^}]*min-width: 0;[^}]*overflow-y: auto;/);
   assert.match(styles, /\.dim-contextTabs \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*border-radius: 8px;/);
   assert.match(styles, /\.dim-contextTab\[aria-selected="true"\] \{[^}]*--dsw-alias-state-business-primary[^}]*box-shadow:/);
   assert.match(styles, /\.dim-contextTabPanel\[hidden\] \{[^}]*display: none;/);

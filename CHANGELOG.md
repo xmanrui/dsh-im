@@ -6,6 +6,13 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Changed / 变更
+
+- 设置页 UI 改为优先使用官方组件，未导出组件参考 `deepseek-harness-desktop` 的 refork 实现，按 **0.1.5 基线**（两代内核都导出）取用，避免版本漂移；客户端新增 `plugin-src/client/ui/` 组件层与组件来源登记表。别名、上下文增强与更新确认三个弹层改用官方 `Modal`，别名输入改用官方 `Input`，品牌区按钮与图标按钮改用官方 `Button`/`IconButton`/`Tooltip`（[#247](https://github.com/xmanrui/dsh-im/issues/247)）。
+  The settings UI now prefers official components, reforks those the kernel does not export from `deepseek-harness-desktop`, and selects them against the **0.1.5 baseline** (exported by both kernel generations) so no version drift is introduced; the client gains a `plugin-src/client/ui/` component layer plus a component-provenance registry. The alias, context-enhancement, and update-confirmation popups use the official `Modal`, the alias field uses the official `Input`, and the brand-row controls use the official `Button`/`IconButton`/`Tooltip` ([#247](https://github.com/xmanrui/dsh-im/issues/247)).
+- 渠道配置改为 Lobe 式「列表 → 详情」两层结构：入口页按真实 Host 状态分组的服务商卡片网格，点击卡片进入该渠道既有配置页，顶部提供返回入口；卡片右侧只展示真实状态徽标，不引入连接开关（[#247](https://github.com/xmanrui/dsh-im/issues/247)）。
+  Channel configuration now follows the Lobe list-then-detail layout: the entry page is a provider card grid grouped by real Host status, and picking a card drills into that channel's existing configuration page with a back affordance; cards show a real status badge only and add no connection toggle ([#247](https://github.com/xmanrui/dsh-im/issues/247)).
+
 ### Fixed / 修复
 
 - 修复飞书状态文件一次写入失败后，后续消息持续失败的问题；本次写入仍正常报错，文件恢复可写后，后续消息无需重启机器人即可继续处理（[#250](https://github.com/xmanrui/dsh-im/issues/250)）。

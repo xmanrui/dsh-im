@@ -141,7 +141,8 @@
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ],
       "platform": "web"
     },
@@ -157,7 +158,7 @@
   },
   "scripts": {
     "build": "node plugin-src/client/build.mjs && node plugin-src/host/build.mjs",
-    "test": "node --test test/*.test.mjs test/channels/*/*.test.mjs",
+    "test": "node --import ./test/support/ui-primitives-loader.mjs --test test/*.test.mjs test/channels/*/*.test.mjs",
     "check": "npm run build && npm test && node scripts/verify-package.mjs"
   },
   "engines": {

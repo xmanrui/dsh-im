@@ -257,6 +257,12 @@ test('expanded card more settings opens a bot-scoped page and returns in place',
     else globalThis.window = previousWindow;
   });
 
+  // The entry page is the Lobe provider grid, so reach the channel's own page
+  // the same way a user does before touching any account card.
+  await act(async () => {
+    renderer.root.findByProps({ 'data-im-provider': 'weixin' }).props.onClick();
+    await flush();
+  });
   const card = renderer.root.findByProps({ 'data-bot-id': 'wx_stable_bot' });
   act(() => card.findByProps({ 'aria-label': '展开该账号的设置' }).props.onClick({ stopPropagation() {} }));
   await act(async () => {
@@ -306,7 +312,9 @@ test('expanded card more settings opens a bot-scoped page and returns in place',
     await flush();
   });
   assert.ok(renderer.root.findByProps({ 'data-bot-id': 'wx_stable_bot' }));
-  assert.equal(renderer.root.findByProps({ id: 'dim-tab-weixin' }).props['aria-selected'], true);
+  // The back action returns to the WeChat configuration page in place; the old
+  // always-visible rail is gone, so the drill-down heading is what proves it.
+  assert.ok(renderer.root.findByProps({ id: 'dim-channel-heading-weixin' }));
 });
 
 test('only Feishu adds a group tab and it contains only the two migrated controls', async (t) => {
@@ -358,7 +366,7 @@ test('only Feishu adds a group tab and it contains only the two migrated control
   });
 
   await act(async () => {
-    renderer.root.findByProps({ id: 'dim-tab-feishu' }).props.onClick();
+    renderer.root.findByProps({ 'data-im-provider': 'feishu' }).props.onClick();
     await flush();
     await flush();
   });

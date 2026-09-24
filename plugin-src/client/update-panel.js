@@ -1,10 +1,10 @@
 import * as React from 'react';
-import { createPortal } from 'react-dom';
 import validSemver from 'semver/functions/valid.js';
 import compareVersionsDescending from 'semver/functions/rcompare.js';
 
 import { h, localizeText } from './i18n.js';
 import { createPollScheduler } from './lifecycle.js';
+import { Modal } from './ui/official.js';
 
 export const UPDATE_RPC_CHANNEL = '/dsh-im';
 
@@ -186,10 +186,15 @@ function ManualUpdateCommand({ command, disabled, sourceInstall, desktop }) {
         : '无法安全生成当前 profile 的命令，请在终端中手动确认 profile 后更新。'));
 }
 
+/**
+ * The confirmation is the official Modal shell (issue #247 (f)). The official
+ * shell owns the mask, the card, `role=dialog`/`aria-modal`, Escape and mask
+ * dismissal, so only the focus behaviour this panel promises on top of it stays
+ * here: focus the dialog when it opens, trap Tab inside it, and give focus back
+ * to the trigger when it closes.
+ */
 function UpdateDialog({ children, onClose }) {
   const dialogRef = React.useRef(null);
-  const titleId = React.useId();
-  const descriptionId = React.useId();
 
   React.useEffect(() => {
     const previous = globalThis.document?.activeElement;
@@ -197,46 +202,39 @@ function UpdateDialog({ children, onClose }) {
     return () => { if (previous?.isConnected) previous.focus?.(); };
   }, []);
 
-  const content = h('div', {
-    className: 'dim-updateBackdrop',
-    onMouseDown: (event) => { if (event.target === event.currentTarget) onClose(); },
-  },
-  h('section', {
-    ref: dialogRef,
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const buttons = dialogRef.current?.querySelectorAll?.('button:not(:disabled), textarea:not(:disabled)');
+    if (!buttons?.length) return;
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+    const active = globalThis.document?.activeElement;
+    if (event.shiftKey && (active === first || active === dialogRef.current)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || active === dialogRef.current)) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return h(Modal, {
+    open: true,
+    onClose,
+    title: 'DSH-IM 更新',
+    closeLabel: '关闭更新面板',
     className: 'dim-updateDialog',
-    role: 'dialog',
-    'aria-modal': 'true',
-    'aria-labelledby': titleId,
-    'aria-describedby': descriptionId,
-    tabIndex: -1,
-    onKeyDown: (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      }
-      if (event.key !== 'Tab') return;
-      const buttons = dialogRef.current?.querySelectorAll?.('button:not(:disabled), textarea:not(:disabled)');
-      if (!buttons?.length) return;
-      const first = buttons[0];
-      const last = buttons[buttons.length - 1];
-      const active = globalThis.document?.activeElement;
-      if (event.shiftKey && (active === first || active === dialogRef.current)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (active === last || active === dialogRef.current)) {
-        event.preventDefault();
-        first.focus();
-      }
-    },
+    // `h()` localizes the aria/title props; the official `description` slot is
+    // rendered as body copy, so it is projected explicitly.
+    description: localizeText('仅更新 DSH-IM。安装完成后需手动重启后台；本功能不会自动重启或主动刷新页面。'),
   },
-  h('h3', { id: titleId }, 'DSH-IM 更新'),
-  h('p', { id: descriptionId, className: 'dim-updateDescription' },
-    '仅更新 DSH-IM。安装完成后需手动重启后台；本功能不会自动重启或主动刷新页面。'),
-  children));
-  return typeof document !== 'undefined' && document.body
-    ? createPortal(content, document.body)
-    : content;
+  h('div', { ref: dialogRef, tabIndex: -1, className: 'dim-updateDialogBody', onKeyDown }, children));
 }
 
 export function UpdatePanel({ rpcCall, clientVersion, onStatus }) {

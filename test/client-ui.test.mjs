@@ -76,6 +76,7 @@ import {
 } from '../plugin-src/client/interface-language.js';
 
 const STYLES_URL = new URL('../plugin-src/client/styles.js', import.meta.url);
+const UI_STYLES_URL = new URL('../plugin-src/client/ui/styles.js', import.meta.url);
 const FEISHU_STYLES_URL = new URL(
   '../plugin-src/client/channels/feishu/styles.js',
   import.meta.url,
@@ -191,12 +192,12 @@ test('removing the first account preserves collapse styles and toggling for rema
   }
 });
 
-test('IM settings renders twelve IM channels plus the AI Office connector', async () => {
+test('IM settings renders the Lobe provider grid with twelve IM channels plus the AI Office connector', async () => {
   const { default: packageMetadata } = await import('../package.json', {
     with: { type: 'json' },
   });
   const { version: packageVersion } = packageMetadata;
-  const styles = await readFile(STYLES_URL, 'utf8');
+  const uiStyles = await readFile(UI_STYLES_URL, 'utf8');
   const markup = renderToStaticMarkup(React.createElement(IMSettingsTab, {
     feishuRpcCall: async () => ({ ok: true, value: {} }),
     weixinRpcCall: async () => ({ ok: true, value: {} }),
@@ -222,15 +223,17 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   ));
   assert.doesNotMatch(markup, /dim-versionTooltip|当前版本/);
   assert.doesNotMatch(markup, /dim-brandLogo|<img/);
+
+  // Header actions: GitHub link and the general-settings icon button both go
+  // through the official Tooltip wrapper instead of a hand-rolled bubble.
   assert.match(markup, /href="https:\/\/github\.com\/xmanrui\/dsh-im"/);
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
   assert.match(markup, /aria-label="dsh-im GitHub"/);
   assert.match(markup, /dim-updateTrigger[^>]*aria-label="检查更新"[^>]*aria-haspopup="dialog"[^>]*><svg/);
   assert.match(markup, /class="dim-updateTooltip" role="tooltip">检查更新<\/span>/);
-  assert.ok(markup.indexOf('dim-updateTrigger') < markup.indexOf('dim-githubAction'));
-  assert.ok(markup.indexOf('dim-githubAction') < markup.indexOf('dim-generalSettingsAction'));
-  assert.match(markup, /aria-describedby="[^"]+"/);
+  assert.ok(markup.indexOf('dim-updateTrigger') < markup.indexOf('dim-githubLink'));
+  assert.ok(markup.indexOf('dim-githubLink') < markup.indexOf('dim-general-settings-trigger'));
   assert.match(markup, /role="tooltip"[^>]*>帮助与反馈 · 前往 GitHub</);
   assert.match(markup, /id="dim-general-settings-trigger"/);
   assert.match(markup, /aria-label="通用设置"/);
@@ -241,28 +244,27 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   )?.[1] ?? '';
   assert.match(settingsButtonMarkup, /data-im-icon="global-settings"/);
   assert.doesNotMatch(settingsButtonMarkup, /通用设置/);
-  assert.match(styles, /\.dim-title \{[^}]*margin: 0 0 18px;/);
-  assert.match(styles, /\.dim-title p \{[^}]*color: var\(--dsw-alias-label-secondary, #646a73\);[^}]*font-size: 12px;[^}]*font-weight: 500;/);
-  assert.match(styles, /\.dim-brand \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*align-items: flex-start;[^}]*gap: 1px;/);
-  assert.match(styles, /\.dim-brandHeading \{[^}]*display: flex;[^}]*align-items: baseline;[^}]*gap: 8px;[^}]*white-space: nowrap;/);
-  assert.match(styles, /\.dim-brandName \{[^}]*font-size: 20px;[^}]*font-weight: 800;[^}]*letter-spacing: \.04em;/);
-  assert.match(styles, /\.dim-brandVersion \{[^}]*color: var\(--dsw-alias-label-tertiary, #8f959e\);[^}]*font: 500 10px\/16px[^}]*letter-spacing: 0;/);
-  assert.doesNotMatch(styles, /dim-versionTooltip|\.dim-brand:focus-visible/);
-  assert.doesNotMatch(styles, /\.dim-brandLogo/);
-  assert.match(styles, /\.dim-githubLink \{[^}]*border: 1px solid var\(--dsw-alias-border-l2, #dfe1e5\);[^}]*text-decoration: none;/);
-  assert.match(styles, /\.dim-githubTooltip \{[^}]*top: calc\(100% \+ 8px\);[^}]*transform: translateY\(-3px\);/);
-  assert.match(styles, /\.dim-githubAction:hover \.dim-githubTooltip, \.dim-githubAction:focus-within \.dim-githubTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.match(styles, /\.dim-generalSettingsButton \{[^}]*width: 30px;[^}]*height: 30px;[^}]*display: grid;[^}]*border: 1px solid var\(--dsw-alias-border-l2, #dfe1e5\);/);
-  assert.match(styles, /\.dim-generalSettingsTooltip \{[^}]*top: calc\(100% \+ 8px\);[^}]*transform: translateY\(-3px\);/);
-  assert.match(styles, /\.dim-generalSettingsAction:hover \.dim-generalSettingsTooltip, \.dim-generalSettingsButton:focus-visible \+ \.dim-generalSettingsTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.match(styles, /\.dim-generalSettingsButton\[aria-current="page"\] \+ \.dim-generalSettingsTooltip \{[^}]*opacity: 0;[^}]*visibility: hidden;/);
-  assert.doesNotMatch(styles, /\.dim-generalSettingsAction:focus-within \.dim-generalSettingsTooltip/);
-  assert.match(styles, /\.dim-globalTtlTooltip \{[^}]*position: absolute;[^}]*opacity: 0;[^}]*visibility: hidden;/);
-  assert.match(styles, /\.dim-globalTtlHelp:hover \.dim-globalTtlTooltip, \.dim-globalTtlHelpButton:focus-visible \+ \.dim-globalTtlTooltip \{[^}]*opacity: 1;[^}]*visibility: visible;/);
-  assert.doesNotMatch(styles, /\.dim-globalTtlHelp:focus-within \.dim-globalTtlTooltip/);
-  assert.match(styles, /\.dim-globalSweepAction \{[^}]*position: relative;[^}]*margin-left: auto;/);
-  assert.match(styles, /\.dim-globalSweepConfirm \{[^}]*position: absolute;[^}]*top: calc\(100% \+ 8px\);[^}]*right: 0;/);
-  assert.doesNotMatch(markup, /\d+ 个渠道|dim-channelCount/);
+  // issue #247 (d): the icon button is 28px, borderless, transparent, tertiary.
+  assert.match(uiStyles, /\.dim-ui-icon-button \{[^}]*width: 28px;[^}]*height: 28px;[^}]*border: none;[^}]*background: transparent;[^}]*color: var\(--dsw-alias-label-tertiary\);/);
+  assert.match(uiStyles, /\.dim-brandName \{ font-size: 16px; font-weight: 600; line-height: 24px; \}/);
+  assert.match(uiStyles, /\.dim-page \{[^}]*font-size: 13px; line-height: 20px; \}/);
+
+  assert.match(uiStyles, /\.dim-providerGrid \{ display: grid; grid-template-columns: repeat\(auto-fill, minmax\(240px, 1fr\)\); gap: 10px;/);
+  assert.match(uiStyles, /\.dim-providerCard \{[^}]*display: grid;[^}]*grid-template-columns: 28px minmax\(0, 1fr\) max-content;/);
+  assert.match(uiStyles, /\.dim-providerGroupTitle \{[^}]*color: var\(--dsw-alias-label-secondary\);[^}]*font-size: 12px;[^}]*font-weight: 500;/);
+  // The grid is the entry page; no level tabs remain (issue #247 (h)).
+  assert.doesNotMatch(uiStyles, /\.dim-tab \{/);
+  assert.doesNotMatch(markup, /role="tab"|role="tablist"/);
+  assert.match(markup, /id="dim-panel-providers"/);
+
+  // Grouped card grid: group headings and one card per channel. Static markup
+  // cannot resolve the async status probes, so every card lands in the
+  // not-yet-enabled group here; the enabled group is covered in the drill-down
+  // test below, which resolves the effects.
+  assert.match(markup, /未启用服务商/);
+  assert.doesNotMatch(markup, /已启用服务商/);
+  assert.equal((markup.match(/class="dim-providerCard"/g) ?? []).length, 13);
+  assert.match(markup, /data-im-provider="weixin"/);
   assert.match(markup, />微信</);
   assert.match(markup, />飞书</);
   assert.match(markup, />钉钉</);
@@ -275,7 +277,7 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   assert.match(markup, />WhatsApp</);
   assert.match(markup, />iMessage</);
   assert.match(markup, />Matrix</);
-  assert.match(markup, />AI Office<\/strong><small class="dim-channelNote">（实验功能）<\/small>/);
+  assert.match(markup, /AI Office<\/strong><small class="dim-providerCardNote">（实验功能）<\/small>/);
   assert.match(markup, /dim-logoWeixin/);
   assert.match(markup, /dim-logoFeishu/);
   assert.match(markup, /dim-logoDingtalk/);
@@ -288,18 +290,110 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   assert.match(markup, /dim-logoIMessage/);
   assert.match(markup, /dim-logoMatrix/);
   assert.match(markup, /dim-logoOffice/);
+  const styles = await readFile(STYLES_URL, 'utf8');
   assert.match(styles, /\.dim-logoFeishu svg \{ width: 28px; height: 28px; \}/);
-  // This render's `emailRpcCall` never reports the channel as
-  // enabled, so the mailbox entry point is omitted: twelve IM channels plus the
-  // AI Office connector. The email tab is covered separately below.
-  assert.equal((markup.match(/role="tab"/g) ?? []).length, 13);
-  assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1);
+  // This render's `emailRpcCall` never reports the channel as enabled, so the
+  // mailbox entry point is omitted: twelve IM channels plus the AI Office
+  // connector. The email card is covered separately below.
+  // No channel-enable switch exists (the Host has no such RPC), so the grid
+  // shows status badges only.
   assert.doesNotMatch(markup, /role="switch"|type="checkbox"/);
   assert.doesNotMatch(markup, /dim-chevron|扫码绑定<\/small>|扫码接入<\/small>/);
   assert.doesNotMatch(markup, />INSTANT MESSAGING<|>Channel<|>微信设置</);
 });
 
-test('the general settings gear sits to the right of GitHub and outside the channel rail', () => {
+test('a provider card drills into its channel page and the back action returns to the grid', async (t) => {
+  // The Feishu settings page reads window for its provisioning poller, so the
+  // drill-down needs the same browser stub the channel tests install.
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    setInterval() { return 1; },
+    clearInterval() {},
+    setTimeout() { return 1; },
+    clearTimeout() {},
+    requestAnimationFrame(callback) { callback(); return 1; },
+    cancelAnimationFrame() {},
+  };
+  t.after(() => {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  });
+  const rpcCalls = Object.fromEntries(
+    ['feishu', 'weixin', 'dingtalk', 'wecom', 'wecomApp', 'qq', 'slack', 'telegram',
+      'discord', 'whatsapp', 'imessage', 'email', 'matrix', 'office']
+      .map((channel) => [`${channel}RpcCall`, async () => ({ ok: true, value: {} })]),
+  );
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(IMSettingsTab, { ...rpcCalls }));
+  });
+  // Entry page: grouped grid, no configuration page mounted yet.
+  assert.ok(renderer.root.findByProps({ id: 'dim-panel-providers' }));
+  assert.equal(renderer.root.findAllByProps({ 'data-im-provider': 'feishu' }).length, 1);
+
+  await TestRenderer.act(async () => {
+    renderer.root.findByProps({ 'data-im-provider': 'feishu' }).props.onClick();
+  });
+  // Drill-down: the channel page replaces the grid and names itself.
+  assert.equal(renderer.root.findAllByProps({ id: 'dim-panel-providers' }).length, 0);
+  assert.ok(renderer.root.findByProps({ id: 'dim-channel-heading-feishu' }));
+
+  await TestRenderer.act(async () => {
+    findButton(renderer, '返回服务商列表').props.onClick();
+  });
+  assert.ok(renderer.root.findByProps({ id: 'dim-panel-providers' }));
+  await TestRenderer.act(async () => { renderer.unmount(); });
+});
+
+test('the provider grid groups cards by real Host status, not by a client toggle', async () => {
+  // A channel that reports configured bots is grouped under 已启用服务商 and
+  // carries a real badge; the rest stay under 未启用服务商. There is no
+  // enable/disable RPC, so the grid must never render a switch.
+  const status = (configured, connected) => ({
+    ok: true,
+    value: { revision: 1, bots: Array.from({ length: configured }, (_, index) => ({
+      botId: `bot-${index}`,
+      state: index < connected ? 'connected' : 'offline',
+      connected: index < connected,
+      bot: { name: `Bot ${index}` },
+    })) },
+  });
+  const rpcCalls = Object.fromEntries(
+    ['feishu', 'weixin', 'dingtalk', 'wecom', 'wecomApp', 'qq', 'slack', 'telegram',
+      'discord', 'whatsapp', 'imessage', 'email', 'matrix', 'office']
+      .map((channel) => [`${channel}RpcCall`, async () => ({ ok: true, value: {} })]),
+  );
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(React.createElement(IMSettingsTab, {
+      ...rpcCalls,
+      weixinRpcCall: async () => status(2, 1),
+      feishuRpcCall: async () => status(1, 1),
+    }));
+  });
+  await TestRenderer.act(async () => { await flushMicrotasks(); });
+
+  const groups = renderer.root
+    .findAll((node) => node.props?.className === 'dim-providerGroup');
+  const titles = groups.map((group) => nodeText(group.findAll(
+    (node) => node.props?.className === 'dim-providerGroupTitle')[0]));
+  assert.ok(titles.some((title) => title.startsWith('已启用服务商')),
+    `expected an enabled group, saw ${JSON.stringify(titles)}`);
+  assert.ok(titles.some((title) => title.startsWith('未启用服务商')),
+    `expected a not-yet-enabled group, saw ${JSON.stringify(titles)}`);
+
+  const weixinCard = renderer.root.findByProps({ 'data-im-provider': 'weixin' });
+  assert.equal(nodeText(weixinCard).includes('1/2'), true,
+    'the card must show the real connected/configured figure');
+  assert.equal(renderer.root.findAllByProps({ role: 'switch' }).length, 0,
+    'the grid must not pretend a channel enable switch exists');
+  const offlineCard = renderer.root.findByProps({ 'data-im-provider': 'dingtalk' });
+  assert.equal(nodeText(offlineCard).includes('未接入'), true,
+    'an unreported channel shows the not-connected badge');
+  await TestRenderer.act(async () => { renderer.unmount(); });
+});
+
+test('the general settings gear sits to the right of GitHub and outside the provider grid', () => {
   const markup = renderToStaticMarkup(React.createElement(IMSettingsTab, {
     globalSettingsRpcCall: async () => ({ ok: true, value: { ttlHours: 0 } }),
     weixinRpcCall: async () => ({ ok: true, value: {} }),
@@ -307,16 +401,15 @@ test('the general settings gear sits to the right of GitHub and outside the chan
 
   assert.match(markup, /id="dim-general-settings-trigger"/);
   assert.match(markup, /aria-controls="dim-panel-global-settings"/);
-  assert.match(markup, /class="dim-generalSettingsAction"/);
   assert.match(markup, /data-im-icon="global-settings"/);
-  assert.ok(markup.indexOf('dim-githubAction') < markup.indexOf('dim-generalSettingsAction'));
-  assert.ok(markup.indexOf('dim-generalSettingsAction') < markup.indexOf('dim-layout'));
+  assert.ok(markup.indexOf('dim-githubLink') < markup.indexOf('dim-general-settings-trigger'));
+  assert.ok(markup.indexOf('dim-general-settings-trigger') < markup.indexOf('dim-layout'));
   assert.doesNotMatch(markup, /id="dim-tab-global-settings"/);
   assert.doesNotMatch(markup, /dim-channelGlobal|dim-logoGlobal/);
-  assert.match(markup, /aria-label="IM 设置导航"/);
   // The general panel only mounts once its header action is selected; the
-  // action must not steal the initial selection from the first channel.
+  // action must not steal the initial selection from the provider grid.
   assert.doesNotMatch(markup, /id="dim-panel-global-settings"/);
+  assert.match(markup, /id="dim-panel-providers"/);
 });
 
 test('the general settings page uses an Attachments tab with contextual help and an explicit save button', () => {
@@ -525,9 +618,16 @@ test('all channel styles use the current Harness theme tokens', async () => {
   assert.match(styles, /--dsw-alias-border-l1/);
   assert.match(styles, /--dsw-alias-border-l2/);
   assert.match(styles, /--dim-blue: var\(--dsw-alias-state-business-primary, #3370ff\)/);
+  // The provider card grid is the new entry surface; its rest/hover/active
+  // tokens come from the current theme.
+  const uiStyles = await readFile(UI_STYLES_URL, 'utf8');
   assert.match(
-    styles,
-    /\.dim-channel\[aria-selected="true"\][^}]*var\(--dsw-alias-bg-layer-3/,
+    uiStyles,
+    /\.dim-providerCard \{[^}]*border: 0\.5px solid var\(--dsw-alias-border-l4\);[^}]*background: var\(--dsw-alias-bg-layer-2\);/,
+  );
+  assert.match(
+    uiStyles,
+    /\.dim-providerCard:hover \{[^}]*background: var\(--dsw-alias-interactive-bg-hover\);/,
   );
   assert.match(
     styles,
@@ -1386,7 +1486,7 @@ test('client registers one top-level bilingual IM settings section with a direct
     assert.match(markup, /General settings/);
     assert.match(markup, />WeChat<|>Feishu<|>DingTalk<|>WeCom</);
     assert.match(markup, />QQ<[^]*>Slack<[^]*>Telegram<[^]*>Discord<[^]*>WhatsApp</);
-    assert.match(markup, />AI Office<\/strong><small class="dim-channelNote">\(Experimental\)<\/small>/);
+    assert.match(markup, />AI Office<\/strong><small class="dim-providerCardNote">\(Experimental\)<\/small>/);
     assert.doesNotMatch(markup, /[\p{Script=Han}]/u);
   } finally {
     setImTranslator(null);
@@ -1567,18 +1667,21 @@ test('all nine channel settings and connected cards render English copy', () => 
   }
 });
 
-test('every channel tab receives its RPC call from the settings render site', async () => {
+test('every channel card receives its RPC call from the settings render site', async () => {
   // Regression guard: the render site lists one prop per channel by hand. When
-  // a new channel was added to the tab list but not to that list, its settings
-  // page mounted without an RPC call and rendered "missing RPC connection".
-  const source = await readFile(new URL('index.js', CLIENT_SOURCE_DIRECTORY_URL), 'utf8');
-  const tabIds = [...source.matchAll(/\{\s*id:\s*'([a-zA-Z]+)',\s*label:/g)].map(m => m[1]);
-  assert.ok(tabIds.length >= 12, `expected the channel tab list, found ${tabIds.length}`);
+  // a new channel was added to the channel catalog but not to that list, its
+  // settings page mounted without an RPC call and rendered "missing RPC
+  // connection". The catalog moved to its own module when the Lobe provider
+  // grid was introduced, so the channel list is read from there.
+  const { CHANNELS } = await import('../plugin-src/client/channel-catalog.js');
+  const tabIds = CHANNELS.map((channel) => channel.id);
+  assert.ok(tabIds.length >= 12, `expected the channel catalog, found ${tabIds.length}`);
 
   // Parse the dependency block that feeds IMSettingsTab. Upstream (#231)
   // refactored the render site into a reusable panel, so the props now come
   // from `panelDependencies` rather than an inline `inject` block; this guard
   // is about the props reaching the tab, not how they are assembled.
+  const source = await readFile(new URL('index.js', CLIENT_SOURCE_DIRECTORY_URL), 'utf8');
   const renderSite = source.indexOf('h(IMSettingsTab, {');
   assert.ok(renderSite > 0, 'the IMSettingsTab render site must exist');
   const blockStart = source.lastIndexOf('const panelDependencies = {', renderSite);
