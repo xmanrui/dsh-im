@@ -21,6 +21,7 @@ import {
   isFeishuStepPushMode,
   normalizeFeishuStepPushMode,
 } from './step-push-mode.mjs';
+import { normalizeFeishuVoiceConfig } from './voice-config.mjs';
 
 const ACTIVE_REGISTRATION_STATES = new Set([
   'starting', 'qr_ready', 'polling', 'slow_down', 'domain_switched',
@@ -99,6 +100,7 @@ function configuredBotFingerprint(config) {
     groupTopicReply: config.groupTopicReply === true,
     stepPush: config.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(config.stepPushMode),
+    voice: config.voice,
     groupMessagePermissionGranted: config.groupMessagePermissionGranted === true,
     deletionPending: config.deletionPending === true,
     connectedAt: config.connectedAt ?? null,
@@ -640,6 +642,25 @@ export class MultiBotDshFeishuController {
       const config = this.#requireBot(botId);
       const saved = await this.#configStore.saveBot({ ...config, stepPushMode });
       this.#runtimes.get(botId)?.setStepPushMode?.(saved.stepPushMode);
+      this.#touch();
+      return this.status(botId);
+    }));
+  }
+
+  async updateVoice(botId, voice) {
+    this.#assertOpen();
+    if (voice !== null && (typeof voice !== 'object' || Array.isArray(voice))) {
+      throw new TypeError('Invalid Feishu voice configuration');
+    }
+    const normalized = normalizeFeishuVoiceConfig(voice);
+    return this.#serializeConfig(() => this.#withBotTransition(botId, async () => {
+      const config = this.#requireBot(botId);
+      const saved = await this.#configStore.saveBot({ ...config, voice: normalized });
+      // 语音是可选的渠道能力:凭据缺失时静默降级为禁用,不打断配置保存。
+      const secret = normalized
+        ? await atConnectionStage('credential.read', () => this.#credentials.resolve(normalized.secretRef), 'credential-store').catch(() => null)
+        : null;
+      this.#runtimes.get(botId)?.setVoice?.({ config: normalized, secret: secret?.value ?? null });
       this.#touch();
       return this.status(botId);
     }));

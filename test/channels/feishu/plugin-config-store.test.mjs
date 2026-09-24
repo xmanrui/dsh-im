@@ -200,3 +200,42 @@ test('PluginConfigStore preserves old step-push settings when loading missing mo
   assert.deepEqual(reloaded.list(), store.list());
   await store.clear();
 });
+
+test('PluginConfigStore normalizes per-bot voice config and stores only the credential reference', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-feishu-config-voice-'));
+  const path = join(dir, 'config.json');
+  const store = await new PluginConfigStore(path).load();
+
+  // 未配置的机器人语音为 null(与历史行为一致)
+  await store.save({
+    appId: 'cli_voice_off',
+    ownerOpenId: 'ou_owner',
+    domain: 'feishu',
+  });
+  assert.equal(store.get().voice, null);
+
+  await store.save({
+    ...store.get(),
+    voice: { enabled: true, secretRef: 'DASHSCOPE_API_KEY', ttsVoice: 'Cherry' },
+  });
+  const voice = store.get().voice;
+  assert.deepEqual(Object.keys(voice).sort(), [
+    'asrBaseUrl', 'asrModel', 'enabled', 'ffmpeg', 'secretRef', 'ttsModel', 'ttsVoice',
+  ]);
+  assert.equal(voice.enabled, true);
+  assert.equal(voice.secretRef, 'DASHSCOPE_API_KEY');
+  assert.equal(voice.asrModel, 'qwen3-asr-flash');
+  assert.equal(voice.ttsModel, 'qwen3-tts-flash');
+  assert.equal(voice.ttsVoice, 'Cherry');
+  assert.equal(voice.ffmpeg, null);
+  assert.equal((await new PluginConfigStore(path).load()).get().voice.ttsVoice, 'Cherry');
+
+  // 关闭或残缺的语音配置归一化为 null,行为与未配置完全一致
+  await store.save({ ...store.get(), voice: { enabled: false, secretRef: 'DASHSCOPE_API_KEY' } });
+  assert.equal((await new PluginConfigStore(path).load()).get().voice, null);
+
+  await store.save({ ...store.get(), voice: { enabled: true, secretRef: 'BAD-KEY' } });
+  assert.equal((await new PluginConfigStore(path).load()).get().voice, null);
+
+  await store.clear();
+});

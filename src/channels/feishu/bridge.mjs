@@ -602,6 +602,10 @@ export class FeishuHarnessBridge {
   #logger;
   #signal;
   #botId;
+  /** Optional voice capability (语音输入/语音回复); null disables all voice paths. */
+  #voice = null;
+  /** Pending voice turns: chat_id → { replyTo }, consumed when the full answer lands. */
+  #voiceTurns = new Map();
   #appId;
   #botOpenId;
   #groupResponseMode;
@@ -684,6 +688,7 @@ export class FeishuHarnessBridge {
     interactionCards = true,
     sessionSyncTargetsFor = null,
     logger = console,
+    voice = null,
     signal,
   }) {
     if (!client || !harness || !state || !status) {
@@ -710,6 +715,13 @@ export class FeishuHarnessBridge {
         || typeof stepPushClock.delay !== 'function')) {
       throw new TypeError('Feishu step push clock requires now and delay functions');
     }
+    if (voice !== null && voice !== undefined
+      && (typeof voice !== 'object' || Array.isArray(voice)
+        || (voice.enabled !== false
+          && (typeof voice.transcribeIncoming !== 'function'
+            || typeof voice.synthesize !== 'function')))) {
+      throw new TypeError('Feishu voice capability requires transcribeIncoming and synthesize functions');
+    }
     this.#client = client;
     this.#channel = channel;
     this.#harness = harness;
@@ -726,6 +738,7 @@ export class FeishuHarnessBridge {
     this.#stepPush = stepPush === true;
     this.#stepPushMode = normalizeFeishuStepPushMode(stepPushMode);
     this.#stepPushClock = stepPushClock ?? DEFAULT_STEP_PUSH_CLOCK;
+    this.#voice = voice ?? null;
     this.#repair = repair ?? null;
     this.#repairPollIntervalMs = repairPollIntervalMs;
     this.#repairLinkWaitMs = repairLinkWaitMs;
@@ -817,6 +830,10 @@ export class FeishuHarnessBridge {
 
   setStepPushMode(value) {
     this.#stepPushMode = normalizeFeishuStepPushMode(value);
+  }
+
+  setVoice(voice) {
+    this.#voice = voice ?? null;
   }
 
   get stepPushMode() {
@@ -1459,7 +1476,23 @@ export class FeishuHarnessBridge {
     }
 
     const message = extractInboundMessage(event, this.#client);
-    const text = message.content;
+    let text = message.content;
+    let voiceTurnReplyTo = null;
+    // 语音输入(渠道能力):音频消息先转写成文字并写回 message.content——
+    // 下方命令识别与 #answerWithStream 都从 content 取文本。转写失败(或返回
+    // 空文本)时保持原语义,走"仅支持文字、图片和文件"的明确降级提示。
+    if (event.message.message_type === 'audio' && this.#voice?.enabled) {
+      try {
+        const transcript = await this.#voice.transcribeIncoming(event, this.#client);
+        if (transcript) {
+          text = transcript;
+          message.content = transcript;
+          voiceTurnReplyTo = event.message.message_id;
+        }
+      } catch (error) {
+        this.#logger.warn?.('[dsh-feishu-voice] 语音转写失败:', error?.message ?? String(error));
+      }
+    }
     const hasImages = hasInboundImages(message);
     const hasFiles = hasInboundFiles(message);
     const hasReply = hasReplyReference(message);
@@ -1470,6 +1503,9 @@ export class FeishuHarnessBridge {
     if (!text && !hasImages && !hasFiles && !hasReply) {
       await this.#send(event.message.chat_id, t('目前支持文字、图片和文件消息。'), { replyTo: event.message.message_id });
       return;
+    }
+    if (voiceTurnReplyTo) {
+      this.#voiceTurns.set(event.message.chat_id, { replyTo: voiceTurnReplyTo });
     }
 
     if (commandText !== null && REPAIR_COMMAND_PREFIX.test(commandText)) {
@@ -1639,6 +1675,7 @@ export class FeishuHarnessBridge {
     } finally {
       await this.#cancelPendingInteraction(key);
       await this.#approvals.closeRoute(key);
+      this.#voiceTurns.delete(event.message.chat_id);
     }
   }
 
@@ -4098,6 +4135,52 @@ export class FeishuHarnessBridge {
     });
   }
 
+  // 语音回复(渠道能力):同回合转写过语音消息的会话,在完整答案投递后追加
+  // 音频回复。回合登记随消息处理结束(finally)清除,命令类回复(菜单、会话
+  // 列表等)与延迟交付不触发语音;此处失败只告警,不影响文字投递。
+  async #maybeSendVoiceReply(chatId, answer, replyTo = null) {
+    const voiceTurn = this.#voiceTurns.get(chatId);
+    if (!voiceTurn) return;
+    this.#voiceTurns.delete(chatId);
+    try {
+      await this.#sendVoiceAnswer(chatId, answer, voiceTurn.replyTo ?? replyTo);
+    } catch (error) {
+      this.#logger.warn?.('[dsh-feishu-voice] 语音回复失败:', error?.message ?? String(error));
+    }
+  }
+
+  // 文本 → qwen TTS → opus 上传 → 音频消息;优先回复原语音消息,
+  // reply 不可用时明确降级为普通音频消息。
+  async #sendVoiceAnswer(chatId, text, replyTo = null) {
+    const opus = await this.#voice.synthesize(text);
+    if (!opus) return null;
+    const upload = await this.#client.im.v1.file.create({
+      data: { file_type: 'opus', file_name: 'dsh-im-voice-reply.opus', file: opus },
+    });
+    const fileKey = upload?.file_key ?? upload?.data?.file_key;
+    if (!fileKey) throw new Error('音频上传无 file_key');
+    const content = JSON.stringify({ file_key: fileKey });
+    if (replyTo) {
+      try {
+        const response = await this.#client.im.v1.message.reply({
+          path: { message_id: replyTo },
+          data: { msg_type: 'audio', content },
+        });
+        if (!response?.code || response.code === 0) return response?.data?.message_id ?? null;
+      } catch (error) {
+        this.#logger.warn?.('[dsh-feishu-voice] 音频回复失败,改发普通消息:', error?.message ?? String(error));
+      }
+    }
+    const response = await this.#client.im.v1.message.create({
+      params: { receive_id_type: 'chat_id' },
+      data: { receive_id: chatId, msg_type: 'audio', content },
+    });
+    if (response?.code && response.code !== 0) {
+      throw new Error(`Feishu audio send failed: ${response.msg || response.code}`);
+    }
+    return nonEmptyString(response?.data?.message_id);
+  }
+
   async #deliverArtifacts(chatId, replyTo, artifacts = [], baseReceipt) {
     const delivery = await deliverOutboundArtifacts({
       artifacts,
@@ -5219,6 +5302,7 @@ export class FeishuHarnessBridge {
         providerMessageIds,
       });
       this.#status.streamResponses = (this.#status.streamResponses ?? 0) + 1;
+      await this.#maybeSendVoiceReply(chatId, deliveryText, messageId);
     } catch (error) {
       this.#status.streamErrors = (this.#status.streamErrors ?? 0) + 1;
       this.#logger.warn?.('[dsh-feishu] step push post failed; sending final text:', error.message);
@@ -5269,8 +5353,10 @@ export class FeishuHarnessBridge {
         setLastMessageFailure(this.#status, textSendError);
       }
       this.#status.streamFallbacks = (this.#status.streamFallbacks ?? 0) + 1;
+      await this.#maybeSendVoiceReply(chatId, deliveryText, messageId);
       return { ...delivery, textDeliveryErrors: textSendError ? 1 : 0 };
     }
+    await this.#maybeSendVoiceReply(chatId, deliveryText, messageId);
     const delivery = await this.#deliverArtifacts(
       chatId,
       messageId,
@@ -5338,6 +5424,7 @@ export class FeishuHarnessBridge {
           error,
         );
       }
+      await this.#maybeSendVoiceReply(chatId, answerTextForDelivery(answer, artifacts), messageId);
       const delivery = await this.#deliverArtifacts(chatId, messageId, artifacts, textReceipt);
       const artifactDispatched = delivery.receipt.artifacts.some(
         ({ outcome }) => outcome === 'sent' || outcome === 'unknown',
@@ -5404,6 +5491,7 @@ export class FeishuHarnessBridge {
           completedAnswer = completed.answer;
           completedArtifacts = completed.artifacts ?? [];
           await controller.setContent(answerTextForDelivery(completedAnswer, completedArtifacts));
+          await this.#maybeSendVoiceReply(chatId, answerTextForDelivery(completedAnswer, completedArtifacts), messageId);
         },
       }, {
         replyTo: messageId,
@@ -5437,6 +5525,7 @@ export class FeishuHarnessBridge {
             fallbackError,
           );
         }
+        await this.#maybeSendVoiceReply(chatId, answerTextForDelivery(completedAnswer, completedArtifacts), messageId);
         const delivery = await this.#deliverArtifacts(
           chatId,
           messageId,
@@ -5493,6 +5582,7 @@ export class FeishuHarnessBridge {
           fallbackError,
         );
       }
+      await this.#maybeSendVoiceReply(chatId, answerTextForDelivery(answer, artifacts), messageId);
       const delivery = await this.#deliverArtifacts(chatId, messageId, artifacts, textReceipt);
       const artifactDispatched = delivery.receipt.artifacts.some(
         ({ outcome }) => outcome === 'sent' || outcome === 'unknown',

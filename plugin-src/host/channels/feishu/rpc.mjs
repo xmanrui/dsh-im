@@ -30,6 +30,7 @@ import {
   isFeishuStepPushMode,
   normalizeFeishuStepPushMode,
 } from '../../../../src/channels/feishu/step-push-mode.mjs';
+import { normalizeFeishuVoiceConfig } from '../../../../src/channels/feishu/voice-config.mjs';
 import {
   FEISHU_ENDPOINTS as FEISHU_CLIENT_ENDPOINTS,
   FEISHU_RPC_CHANNEL,
@@ -307,6 +308,7 @@ function publicBotEntry(entry) {
     groupTopicReply: source.groupTopicReply === true,
     stepPush: source.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(source.stepPushMode),
+    voice: normalizeFeishuVoiceConfig(source.voice),
     groupMessagePermissionGranted: source.groupMessagePermissionGranted === true,
     bot: publicBot(source.bot),
     health: publicHealth(source, connected),
@@ -489,6 +491,17 @@ function validPayload(endpoint, payload) {
       && isFeishuStepPushMode(payload.stepPushMode)
       ? null
       : '请选择分步直推的呈现方式。';
+  }
+  if (endpoint === FEISHU_ENDPOINTS.setVoice) {
+    const voice = payload?.voice;
+    const validVoice = voice === null
+      || (typeof voice === 'object' && !Array.isArray(voice)
+        && (voice.enabled === false || normalizeFeishuVoiceConfig(voice) !== null));
+    return hasOnlyKeys(payload, new Set(['botId', 'voice']))
+      && safeOpaqueId(payload.botId)
+      && validVoice
+      ? null
+      : '语音配置无效。';
   }
   return 'Unknown Feishu endpoint.';
 }
@@ -795,6 +808,14 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
         }
         value = await toPublicFeishuStatus(
           await controller.updateStepPushMode(payload.botId, payload.stepPushMode),
+          { encodeQr: cachedEncodeQr },
+        );
+      } else if (endpoint === FEISHU_ENDPOINTS.setVoice) {
+        if (typeof controller.updateVoice !== 'function') {
+          throw new Error('Voice update is unavailable');
+        }
+        value = await toPublicFeishuStatus(
+          await controller.updateVoice(payload.botId, payload.voice),
           { encodeQr: cachedEncodeQr },
         );
       } else {

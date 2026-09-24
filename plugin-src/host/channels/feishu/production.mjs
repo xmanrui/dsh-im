@@ -234,6 +234,16 @@ export async function createProductionController(ctx, config = {}, internals = {
       const workspaceScope = createBotWorkspaceScope(harness, {
         botId: id, workspaces, state, agentPresetCatalog,
       });
+      // 语音是可选渠道能力:凭据读取失败时静默禁用,不阻断机器人连接。
+      let voiceSource = null;
+      if (botConfig.voice) {
+        try {
+          const resolved = await ctx.credentials.resolve(botConfig.voice.secretRef);
+          if (resolved?.value) voiceSource = { config: botConfig.voice, secret: resolved.value };
+        } catch (error) {
+          logger.warn?.('[dsh-feishu-voice] 语音凭据读取失败,语音已禁用:', error?.message ?? String(error));
+        }
+      }
       return new Runtime({
         lark,
         botId: id,
@@ -246,6 +256,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         groupTopicReply: botConfig.groupTopicReply,
         stepPush: botConfig.stepPush,
         stepPushMode: botConfig.stepPushMode,
+        voice: voiceSource,
         sessionSyncTargetsFor: sessionSyncTargetsFor,
         ownerOpenIds: botConfig.ownerOpenIds ?? [botConfig.ownerOpenId],
         harness: workspaceScope.harness,
