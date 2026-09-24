@@ -198,4 +198,8 @@ export default {
     'Batch submission failed; {count} messages were retained.\nSend /send to retry or /cancel to cancel.',
   '你可以发送普通消息，但没有执行命令的权限。':
     'You can send regular messages, but you do not have permission to run commands.',
+
+  // session-timeout default notify text
+  '会话超时，已开启新会话；如需继续上一段，请使用 /history':
+    'Session timed out; a new conversation has started. Use /history to continue the previous one.',
 };

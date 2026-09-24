@@ -29,6 +29,11 @@ import {
   registerInboundTtlWorkspaces,
 } from '../../inbound-ttl-runtime.mjs';
 import {
+  getSessionTimeoutRuntime,
+  registerSessionTimeoutStateSource,
+  registerSessionTimeoutWorkspaceProvider,
+} from '../../session-timeout-runtime.mjs';
+import {
   accessPolicyProvider,
   initialAccessPolicyFor,
 } from '../shared/access-policy-production.mjs';
@@ -96,11 +101,26 @@ export async function createProductionController(ctx, config = {}, internals = {
     configStore: observedConfigStore,
     defaultWorkspace,
   });
+  const sessionTimeout = internals.sessionTimeout ?? getSessionTimeoutRuntime(ctx, config);
+  const sessionTimeoutService = sessionTimeout?.service ?? null;
+  if (sessionTimeoutService) {
+    registerSessionTimeoutStateSource(ctx, sessionTimeoutService, {
+      channel: 'whatsapp',
+      stateFor,
+    });
+    registerSessionTimeoutWorkspaceProvider(ctx, sessionTimeoutService, {
+      channel: 'whatsapp',
+      workspaces,
+      defaultWorkspace,
+      stateFor,
+    });
+  }
   const { controlExecutor, sessionMaintenanceExecutor, fileIngressExecutor } = createHarnessSessionExecutors(ctx, {
     controlExecutor: internals.controlExecutor,
     sessionMaintenanceExecutor: internals.sessionMaintenanceExecutor,
     fileIngressExecutor: internals.fileIngressExecutor,
     inboundTtlService,
+    ...(sessionTimeoutService ? { sessionTimeoutService } : {}),
   });
   const harness = new Harness({
     ...connection,

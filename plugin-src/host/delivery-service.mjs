@@ -322,6 +322,28 @@ export class DeliveryService {
     }
   }
 
+  async sendToConversation(botId, conversationKey, text, { signal } = {}) {
+    const id = botIdOf(botId);
+    if (typeof conversationKey !== 'string' || !conversationKey
+      || typeof text !== 'string' || !text.trim()) {
+      throw deliveryError('bad-request', 'Invalid conversation delivery');
+    }
+    cancellation(signal);
+    const adapter = await this.#adapterFor(id);
+    if (typeof adapter.sendToConversation !== 'function') {
+      throw deliveryError('session-sync-unavailable', 'Conversation delivery is unavailable');
+    }
+    try {
+      await adapter.sendToConversation(id, conversationKey, text, { signal });
+      return { sent: true };
+    } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
+        throw deliveryError('cancelled', 'Request cancelled', { cause: error });
+      }
+      throw publicOperationError(error);
+    }
+  }
+
   async #adapterFor(botId) {
     for (const { adapter } of this.#adapters.values()) {
       let ownsBot;

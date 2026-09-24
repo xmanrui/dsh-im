@@ -7,6 +7,7 @@ import { h } from '../../i18n.js';
 import { installDingtalkStyles } from '../dingtalk/styles.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
+import { ConversationDirectoryEditor } from '../../conversation-directory.js';
 import {
   AgentPresetCatalogContext,
   AgentPresetEditor,
@@ -82,7 +83,7 @@ export function createTokenChannelSettings(definition) {
     accountSettingsEndpoint = null,
   } = definition;
 
-  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onAliasSave, onModelSave, onAgentPresetSave, onContextEnhancementSave, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove }) {
+  function AccountCard({ account, busy, testNotice, removing, onReconnect, onWorkspaceSave, onAliasSave, onModelSave, onAgentPresetSave, onContextEnhancementSave, onConversationDirectorySave, onAccountSettingsSave, onRequestRemove, onConfirmRemove, onCancelRemove }) {
     const state = busy === 'reconnect' ? 'connecting' : account.state;
     const tone = account.connected ? 'success' : state === 'error' ? 'error' : 'warning';
     const stateLabel = account.connected ? '运行正常' : state === 'connecting' ? '正在连接' : '连接未就绪';
@@ -123,6 +124,7 @@ export function createTokenChannelSettings(definition) {
           h(WorkspaceEditor, {
             workspace: account.workspace,
             disabled: Boolean(busy),
+            directoryIsolation: account.conversationDirectory?.enabled === true,
             onSave: onWorkspaceSave,
           }),
         h(ModelEditor, {
@@ -139,6 +141,11 @@ export function createTokenChannelSettings(definition) {
           config: account.contextEnhancement,
           disabled: Boolean(busy),
           onSave: onContextEnhancementSave,
+        }),
+        h(ConversationDirectoryEditor, {
+          config: account.conversationDirectory,
+          disabled: Boolean(busy),
+          onSave: onConversationDirectorySave,
         }),
         AccountSettings ? h(AccountSettings, {
           account,
@@ -370,6 +377,14 @@ export function createTokenChannelSettings(definition) {
                 endpoints.setContextEnhancement,
                 { botId: account.botId, config },
               ),
+              onConversationDirectorySave: endpoints.setConversationDirectory
+                ? (config) => botAction(
+                    account,
+                    'conversation-directory',
+                    endpoints.setConversationDirectory,
+                    { botId: account.botId, config },
+                  )
+                : undefined,
               onAccountSettingsSave: AccountSettings && accountSettingsEndpoint
                 ? (payload) => botAction(
                     account,

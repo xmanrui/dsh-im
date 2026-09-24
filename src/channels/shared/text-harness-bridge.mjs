@@ -7,6 +7,7 @@ import {
 } from './inbound-access.mjs';
 import { captureContextEnhancement, enhanceContextContent } from './context-enhancement.mjs';
 import { runWorkspaceCommand } from './workspace-command.mjs';
+import { resetConversationSession } from './new-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from './history-command.mjs';
 import {
@@ -637,8 +638,11 @@ export class TextHarnessBridge {
         return;
       }
       if (!hasImages && !hasFiles && command === '/new') {
-        await this.#state.clearSession(conversationKey);
-        await this.#bot.sendText(target, t('已开启新会话。请发送你的问题。'));
+        const reset = await resetConversationSession({
+          harness: this.#harness, state: this.#state, key: conversationKey, logger: this.#logger,
+          message: t('已开启新会话。请发送你的问题。'),
+        });
+        await this.#bot.sendText(target, reset.message);
         return;
       }
       const compactCommand = !hasImages && !hasFiles

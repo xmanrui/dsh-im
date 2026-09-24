@@ -76,6 +76,6 @@ export function installInboundTtlRpc(ctx, options = {}) {
   return registerManagementRpc(ctx,
     INBOUND_TTL_RPC_CHANNEL,
     createInboundTtlRpcHandler({ ...runtime, logger }),
-    { authority: 'loopback' },
+    { authority: 'loopback', methodPrefix: 'settings.inbound-ttl.' },
   );
 }

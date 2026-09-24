@@ -299,6 +299,37 @@ test('delivery adapter delegates target CRUD to the existing workspace store', a
   ]);
 });
 
+test('delivery adapter sends a Feishu p2p conversation without a configured target', async () => {
+  const calls = [];
+  const adapter = createDeliveryAdapter({
+    channel: 'feishu',
+    workspaces: {
+      has: () => true,
+      listDeliveryTargets: () => [],
+      createDeliveryTarget() {},
+      updateDeliveryTarget() {},
+      deleteDeliveryTarget() {},
+    },
+    coreController: {
+      async sendProactiveText(botId, target, text) {
+        calls.push({ botId, target, text });
+      },
+    },
+    stateFor: async () => ({ snapshot: () => ({ sessions: {} }) }),
+  });
+
+  await adapter.sendToConversation(
+    'bot-feishu',
+    'p2p:ou_bff3d605d1c1bc684db78c01d59e36dd',
+    'Session timed out',
+  );
+  assert.deepEqual(calls, [{
+    botId: 'bot-feishu',
+    target: { kind: 'user', route: { openId: 'ou_bff3d605d1c1bc684db78c01d59e36dd' } },
+    text: 'Session timed out',
+  }]);
+});
+
 test('suggestion parser strictly filters malformed keys, de-duplicates routes, and never leaks state values', () => {
   const sessions = {
     'direct:88': 'secret-session-one',

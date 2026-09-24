@@ -114,6 +114,7 @@ test('message failures use verified turn-end provider codes without exposing pro
     ['RATE_LIMIT', 'MODEL_RATE_LIMIT'],
     ['CONTEXT_WINDOW_EXCEEDED', 'MODEL_CONTEXT_LIMIT'],
     ['UNKNOWN_MODEL', 'MODEL_UNAVAILABLE'],
+    ['INVALID_REQUEST', 'MODEL_CONFIG'],
     ['TIMEOUT', 'MODEL_TIMEOUT'],
     ['TRANSPORT', 'MODEL_TRANSPORT'],
     ['SERVER', 'MODEL_SERVICE'],

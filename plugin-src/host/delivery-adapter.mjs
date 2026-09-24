@@ -34,6 +34,19 @@ function sessionSyncUnavailable(message = 'Session sync is unavailable for this 
   return error;
 }
 
+function targetFromConversationKey(channel, conversationKey) {
+  if (channel === 'feishu' && conversationKey.startsWith('p2p:')) {
+    const openId = conversationKey.slice('p2p:'.length);
+    if (openId) return { kind: 'user', route: { openId } };
+  }
+  if (channel === 'feishu' && conversationKey.startsWith('group:')) {
+    const rest = conversationKey.slice('group:'.length);
+    const chatId = rest.split(':thread:', 1)[0];
+    if (chatId) return { kind: 'group', route: { chatId } };
+  }
+  return null;
+}
+
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -250,6 +263,27 @@ export function createDeliveryAdapter({ channel, workspaces, coreController, sta
         throw new TypeError('delivery controller cannot send proactive text');
       }
       await coreController.sendProactiveText(botId, normalized, text, options);
+      return { sent: true };
+    },
+    async sendToConversation(botId, conversationKey, text, options = {}) {
+      if (typeof conversationKey !== 'string' || !conversationKey) {
+        throw new TypeError('conversationKey is required');
+      }
+      const configuredTarget = workspaces.listDeliveryTargets(botId)
+        .find((candidate) => privateConversationKeyMatchesTarget(
+          channel,
+          conversationKey,
+          candidate,
+        ));
+      const target = configuredTarget ?? targetFromConversationKey(channel, conversationKey);
+      if (!target) throw sessionSyncUnavailable('No delivery target matches the conversation');
+      if (typeof coreController.sendProactiveText !== 'function') {
+        throw new TypeError('delivery controller cannot send proactive text');
+      }
+      const normalizedTarget = configuredTarget
+        ? normalizeDeliveryTarget(channel, targetWithoutSessionSync(target))
+        : normalizeDeliveryTarget(channel, target, { targetIdRequired: false });
+      await coreController.sendProactiveText(botId, normalizedTarget, text, options);
       return { sent: true };
     },
     async setSessionSync(botId, targetId, enabled) {

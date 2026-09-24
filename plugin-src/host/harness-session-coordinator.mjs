@@ -116,18 +116,35 @@ function createSessionMaintenanceExecutor(agents) {
   };
 }
 
-function createFileIngressExecutor(agents, { inboundTtlService } = {}) {
+function createFileIngressExecutor(agents, {
+  inboundTtlService,
+  sessionTimeoutService,
+  logger = console,
+} = {}) {
   return ({ sessionId, workspace, files, signal }) => {
     const agent = agents.get(sessionId);
     const attachedWorkspace = agent?.session?.header?.cwd;
     const exactWorkspace = typeof attachedWorkspace === 'string' && attachedWorkspace
       ? attachedWorkspace
       : workspace;
+    logger.debug?.('[dsh-im] inbound file staging requested', {
+      sessionId,
+      workspace: exactWorkspace,
+      sourceWorkspace: workspace,
+      attachedWorkspace,
+      fileCount: Array.isArray(files) ? files.length : 0,
+    });
     if (typeof exactWorkspace !== 'string' || !exactWorkspace) {
       throw new InboundFileError(
         'inbound-file-workspace-unavailable',
         'The Harness Session workspace is unavailable for inbound files.',
       );
+    }
+    // Touch the session-timeout tracker so an inbound message re-arms the
+    // idle window before the agent picks it up. Fire-and-forget: a failure
+    // here must never block the file staging path or raise to the caller.
+    if (sessionTimeoutService && typeof sessionTimeoutService.touchBySessionId === 'function') {
+      void sessionTimeoutService.touchBySessionId(sessionId).catch(() => {});
     }
     const staged = stageInboundFiles({ files }, {
       workspace: exactWorkspace,
@@ -139,9 +156,26 @@ function createFileIngressExecutor(agents, { inboundTtlService } = {}) {
         ? { onStagedDirectory: (directory) => inboundTtlService.trackDirectory(directory) }
         : {}),
     });
-    return inboundTtlService
+    const tracked = inboundTtlService
       ? staged.then((result) => (result ? inboundTtlService.trackStaged(result) : result))
       : staged;
+    return tracked.then((result) => {
+      logger.debug?.('[dsh-im] inbound file staging completed', {
+        sessionId,
+        workspace: exactWorkspace,
+        directory: result?.directory,
+        fileCount: result?.files?.length ?? 0,
+      });
+      return result;
+    }).catch((error) => {
+      logger.warn?.('[dsh-im] inbound file staging failed', {
+        sessionId,
+        workspace: exactWorkspace,
+        code: error?.code ?? error?.name ?? 'unknown-error',
+        message: error?.message,
+      });
+      throw error;
+    });
   };
 }
 
@@ -153,6 +187,7 @@ function createFileIngressExecutor(agents, { inboundTtlService } = {}) {
 export function createHarnessSessionExecutors(ctx, provided = {}) {
   const {
     controlExecutor, sessionMaintenanceExecutor, fileIngressExecutor, inboundTtlService,
+    sessionTimeoutService,
   } = provided;
   if (controlExecutor !== undefined && typeof controlExecutor !== 'function') {
     throw new TypeError('controlExecutor must be a function');
@@ -169,15 +204,28 @@ export function createHarnessSessionExecutors(ctx, provided = {}) {
       || typeof inboundTtlService?.trackStaged !== 'function')) {
     throw new TypeError('inboundTtlService must expose stagingRetention() and trackStaged()');
   }
+  if (sessionTimeoutService !== undefined
+    && (typeof sessionTimeoutService?.touchBySessionId !== 'function'
+      || typeof sessionTimeoutService?.touch !== 'function')) {
+    throw new TypeError(
+      'sessionTimeoutService must expose touch() and touchBySessionId()',
+    );
+  }
 
   const agents = controlExecutor && sessionMaintenanceExecutor && fileIngressExecutor
     ? undefined
     : agentsFromContext(ctx);
+  const logger = typeof ctx?.logger === 'function'
+    ? ctx.logger('dsh-im:file-ingress') : (ctx?.logger ?? console);
   return {
     controlExecutor: controlExecutor ?? (agents ? createControlExecutor(agents) : undefined),
     sessionMaintenanceExecutor: sessionMaintenanceExecutor
       ?? (agents ? createSessionMaintenanceExecutor(agents) : undefined),
     fileIngressExecutor: fileIngressExecutor
-      ?? createFileIngressExecutor(agents ?? { get: () => undefined }, { inboundTtlService }),
+      ?? createFileIngressExecutor(agents ?? { get: () => undefined }, {
+        inboundTtlService,
+        ...(sessionTimeoutService ? { sessionTimeoutService } : {}),
+        logger,
+      }),
   };
 }

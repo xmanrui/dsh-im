@@ -1,6 +1,7 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
+import { isConversationDirectoryPath } from './conversation-directory.mjs';
 import { t } from './i18n.mjs';
 import { WORKSPACE_SESSION_STALE } from './workspace-session.mjs';
 
@@ -27,6 +28,24 @@ const SESSION_LIST_USAGE = [
 
 function commandResult(message, messages = [message]) {
   return { handled: true, message, messages };
+}
+
+/**
+ * True when conversation-directory isolation owns this bot's cwd. Read failures
+ * fail closed so a broken settings read cannot reopen manual workspace edits.
+ */
+function conversationDirectoryIsolationEnabled(harness) {
+  if (typeof harness?.conversationDirectorySettings !== 'function') return false;
+  try {
+    return harness.conversationDirectorySettings()?.enabled === true;
+  } catch {
+    return true;
+  }
+}
+
+/** Handled but silent: the command does not exist in isolation mode. */
+function isolationLockedCommandResult() {
+  return { handled: true, message: '', messages: [] };
 }
 
 function normalizedWorkspacePath(value) {
@@ -110,7 +129,8 @@ async function selectedWorkspacePath(value) {
 }
 
 export async function workspacePathSnapshot(harness, options = {}) {
-  const listed = await harness.listWorkspaces(options);
+  const { includeSessionDirectories = false, ...listOptions } = options;
+  const listed = await harness.listWorkspaces(listOptions);
   const currentValue = typeof harness?.currentWorkspace === 'function'
     ? harness.currentWorkspace()
     : null;
@@ -118,7 +138,22 @@ export async function workspacePathSnapshot(harness, options = {}) {
   const registered = await existingWorkspacePaths(Array.isArray(listed) ? listed : []);
   const paths = [...new Set([...(current ? [current] : []), ...registered])];
   harness.assertWorkspaceScope?.();
-  return { current: current ?? null, paths };
+  // Isolated conversation directories register as workspaces too, so an
+  // unfiltered list grows one row per conversation and buries the operator's
+  // real workspaces. The bot's own workspace always survives; a caller that
+  // needs the raw set (`/workspacelist all`) opts back in.
+  let directoryPrefix;
+  try {
+    directoryPrefix = options.sessionDirectoryPrefix
+      ?? harness?.conversationDirectorySettings?.()?.prefix;
+  } catch {
+    directoryPrefix = options.sessionDirectoryPrefix;
+  }
+  const visible = includeSessionDirectories
+    ? paths
+    : paths.filter((path) => path === current
+      || !isConversationDirectoryPath(path, directoryPrefix ? { prefix: directoryPrefix } : undefined));
+  return { current: current ?? null, paths: visible };
 }
 
 export function splitWorkspaceCommandMessage(message) {
@@ -144,12 +179,16 @@ export function splitWorkspaceCommandMessage(message) {
 }
 
 async function runWorkspaceListCommand(match, harness) {
-  if (match[1]?.trim()) return commandResult(t('用法：/workspacelist'));
+  const argument = match[1]?.trim() ?? '';
+  // `all` opts back into the isolated conversation directories, which the
+  // default listing hides so one conversation does not add one row.
+  const includeSessionDirectories = /^all$/iu.test(argument);
+  if (argument && !includeSessionDirectories) return commandResult(t('用法：/workspacelist 或 /workspacelist all'));
   if (typeof harness?.listWorkspaces !== 'function') {
     return commandResult(t('当前机器人暂不支持列出工作区。'));
   }
   try {
-    const { current, paths } = await workspacePathSnapshot(harness);
+    const { current, paths } = await workspacePathSnapshot(harness, { includeSessionDirectories });
     if (paths.length === 0) {
       return commandResult(t('当前 Harness Host 上没有仍然存在的已登记工作区。'));
     }
@@ -163,6 +202,7 @@ async function runWorkspaceListCommand(match, harness) {
       t('对话专属：/conv 工作区序号或绝对路径（仅影响当前对话）'),
       t('查看会话：/sessionlist 工作区序号或绝对路径'),
       t('不带工作区参数时，/sessionlist 默认列出当前对话的有效工作区。'),
+      t('会话目录默认隐藏；需查看时使用 /workspacelist all。'),
     ];
     const message = lines.join('\n');
     return commandResult(message, splitWorkspaceCommandMessage(message));
@@ -320,6 +360,14 @@ function sessionBindErrorMessage(error) {
   if (error?.code === 'workspace-bot-not-found') {
     return t('机器人正在移除或已重新接入，无法绑定原对话的会话。');
   }
+  if (error?.code === 'session-workspace-mismatch') {
+    // Isolation mode: silent, matching /conv and /workspace. The mismatch path
+    // is only reachable for an explicit Session ID outside the conversation directory.
+    return null;
+  }
+  if (error?.code === 'workspace-manual-edit-disabled') {
+    return null;
+  }
   if ([WORKSPACE_SESSION_STALE, 'agent-busy', 'session-conflict', 'workspace-conflict']
     .includes(error?.code)) {
     return t('工作区或会话状态已发生变化，请重试。');
@@ -389,11 +437,15 @@ async function runSessionBindCommand(command, harness, conversationKey) {
     ].join('\n');
     return commandResult(message, splitWorkspaceCommandMessage(message));
   } catch (error) {
-    return commandResult(sessionBindErrorMessage(error));
+    const message = sessionBindErrorMessage(error);
+    return message === null ? isolationLockedCommandResult() : commandResult(message);
   }
 }
 
 async function runConversationWorkspaceCommand(command, harness, conversationKey) {
+  if (conversationDirectoryIsolationEnabled(harness)) {
+    return isolationLockedCommandResult();
+  }
   if (typeof harness?.currentConversationWorkspace !== 'function') {
     return commandResult(t('当前机器人暂不支持按对话设置专属工作区。'));
   }
@@ -412,6 +464,17 @@ async function runConversationWorkspaceCommand(command, harness, conversationKey
       lines.push(bound
         ? t('状态：已为该对话显式绑定，之后修改 bot 默认工作区不会影响本对话。')
         : t('状态：未显式绑定，当前跟随 bot 默认工作区。'));
+      // 自动隔离的会话目录是这次绑定的产物，单独说明它和基工作区的关系，
+      // 否则用户看到工作区指向一个自动生成的目录会无法判断能否手动切换。
+      const directory = typeof harness?.sessionDirectory === 'function'
+        ? harness.sessionDirectory(conversationKey)
+        : null;
+      if (directory?.directory) {
+        lines.push(
+          t('会话目录：{directory}（自动创建）', { directory: directory.directory }),
+          t('基工作区：{base}；切换基工作区请使用 /conv。', { base: directory.base }),
+        );
+      }
       // 顺带列出可切换的工作区，省得先跑一次 /workspacelist 再回来切。
       try {
         const { paths } = await workspacePathSnapshot(harness);
@@ -487,6 +550,9 @@ export async function runWorkspaceCommand(text, harness, conversationKey) {
   if (listMatch) return runWorkspaceListCommand(listMatch, harness);
   const match = WORKSPACE_COMMAND.exec(command);
   if (!match) return null;
+  if (conversationDirectoryIsolationEnabled(harness)) {
+    return isolationLockedCommandResult();
+  }
   const workspace = match[1]?.trim();
   if (!workspace) {
     return commandResult(t('用法：/workspace 工作区序号或绝对路径'));

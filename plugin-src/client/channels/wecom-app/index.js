@@ -304,6 +304,7 @@ export function AccountCard({
       h(WorkspaceEditor, {
         workspace: account.workspace,
         disabled: Boolean(busy),
+        directoryIsolation: account.conversationDirectory?.enabled === true,
         onSave: onWorkspaceSave,
       }),
       h(ModelEditor, {

@@ -1,4 +1,5 @@
 import { withSessionBindingLock } from './session-binding-lock.mjs';
+import { ensureConversationDirectory } from './conversation-directory-ensure.mjs';
 import { initialSessionTitle } from './session-title.mjs';
 
 export const WORKSPACE_SESSION_STALE = 'workspace-session-stale';
@@ -89,6 +90,9 @@ export async function askInWorkspaceSession({
   existsOptions,
   askOptions,
   deferredDelivery,
+  logger = console,
+  onConversationDirectory,
+  onSessionResolved,
 }) {
   const initialTitle = contextEnhanced
     ? initialSessionTitle({
@@ -107,6 +111,16 @@ export async function askInWorkspaceSession({
         let sessionId = state.sessionFor(key);
         let session = sessionId ? workspaceSession(harness, sessionId, key) : null;
         if (!session || !(await sessionExists(session, existsOptions))) {
+          // Conversation directory isolation runs here, inside the binding lock
+          // (two concurrent first messages must not both mint one) and after
+          // any pending workspace switch (the base must be the committed one).
+          // It must also precede createSession: the scope resolves the
+          // conversation's workspace at creation time, and passing a workspace
+          // through createOptions cannot override it.
+          const conversationDirectory = await ensureConversationDirectory({
+            harness, key, logger,
+          });
+          onConversationDirectory?.(conversationDirectory);
           sessionId = await createSession(harness, {
             conversationKey: key,
             ...(createOptions ?? {}),
@@ -137,6 +151,23 @@ export async function askInWorkspaceSession({
         return { sessionId, session };
       });
       if (!binding) continue;
+      // Notify the host that a session is live for this conversation. The
+      // session-timeout service uses this hook to reset the idle window for
+      // every message, including pure-text messages that never reach the
+      // file-ingress path. Fire-and-forget: a tracking failure must never
+      // block the prompt.
+      if (typeof onSessionResolved === 'function') {
+        try {
+          const result = onSessionResolved(key, binding.sessionId);
+          if (result && typeof result.then === 'function') {
+            void result.catch((error) => {
+              logger?.warn?.('[dsh-im] session-timeout touch failed:', error?.message ?? error);
+            });
+          }
+        } catch (error) {
+          logger?.warn?.('[dsh-im] session-timeout touch failed:', error?.message ?? error);
+        }
+      }
       const artifacts = [];
       const originalOnArtifact = typeof askOptions === 'object'
         && typeof askOptions?.onArtifact === 'function'

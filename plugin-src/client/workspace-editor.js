@@ -5,7 +5,14 @@ import { WorkspaceDirectoryPicker } from './workspace-directory-picker.js';
 
 export const WorkspaceDirectoryPickerContext = React.createContext(null);
 
-export function WorkspaceEditor({ workspace, directoryPicker, disabled = false, onSave }) {
+export function WorkspaceEditor({
+  workspace,
+  directoryPicker,
+  disabled = false,
+  directoryIsolation = false,
+  onSave,
+}) {
+  const locked = disabled || directoryIsolation;
   const sharedDirectoryPicker = React.useContext(WorkspaceDirectoryPickerContext);
   const activeDirectoryPicker = directoryPicker ?? sharedDirectoryPicker;
   const [open, setOpen] = React.useState(false);
@@ -21,7 +28,7 @@ export function WorkspaceEditor({ workspace, directoryPicker, disabled = false, 
   }, []);
 
   const pick = React.useCallback(async (value) => {
-    if (!value || savingRef.current || disabled) return;
+    if (!value || savingRef.current || locked) return;
     if (value === workspace) {
       close();
       return;
@@ -38,17 +45,30 @@ export function WorkspaceEditor({ workspace, directoryPicker, disabled = false, 
       savingRef.current = false;
       setSaving(false);
     }
-  }, [close, disabled, onSave, workspace]);
+  }, [close, locked, onSave, workspace]);
+
+  const helpId = React.useId();
 
   return h('div', { className: 'dim-workspace' },
     h('div', { className: 'dim-workspaceHeader' },
-      h('span', null, '当前工作区'),
+      h('span', { className: 'dim-workspaceTitle' },
+        h('span', null, '当前工作区'),
+        directoryIsolation
+          ? h('span', { className: 'dim-workspaceHelp' },
+              h('button', {
+                type: 'button',
+                className: 'dim-workspaceHelpButton',
+                'aria-label': '查看工作区隔离说明',
+                'aria-describedby': helpId,
+              }, h('span', { 'aria-hidden': 'true' }, '?')),
+              h('span', { id: helpId, className: 'dim-workspaceTooltip', role: 'tooltip' }, '已开启会话目录隔离，工作区由对话自动派生，无法手动修改。'))
+          : null),
       h('button', {
         type: 'button',
         ref: editButtonRef,
         className: 'dim-workspaceEdit',
         onClick: () => { setOpen(true); setError(null); },
-        disabled: disabled || !activeDirectoryPicker,
+        disabled: locked || !activeDirectoryPicker,
       }, '选择目录')),
     workspace
       ? React.createElement('code', {
@@ -60,7 +80,7 @@ export function WorkspaceEditor({ workspace, directoryPicker, disabled = false, 
       open,
       startPath: workspace,
       picker: activeDirectoryPicker,
-      busy: saving || disabled,
+      busy: saving || locked,
       saveError: error,
       onPicked: pick,
       onCancel: close,

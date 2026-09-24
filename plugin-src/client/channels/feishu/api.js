@@ -12,6 +12,7 @@ import { normalizeModelCatalog, normalizeModelSelection, SET_MODEL_ENDPOINT } fr
 import { normalizeLastMessageError } from "../../last-message-error.js";
 import { normalizeAccessPolicy } from "../../../../src/channels/shared/access-policy.mjs";
 import { normalizeContextEnhancementConfig } from "../../../../src/channels/shared/context-enhancement.mjs";
+import { normalizeConversationDirectorySettings } from "../../../../src/channels/shared/conversation-directory.mjs";
 import { normalizeFeishuStepPushMode } from "../../../../src/channels/feishu/step-push-mode.mjs";
 
 export const FEISHU_RPC_CHANNEL = "/feishu";
@@ -31,6 +32,8 @@ export const FEISHU_ENDPOINTS = Object.freeze({
   setModel: SET_MODEL_ENDPOINT,
   setAgentPreset: "bot.preset.set",
   setContextEnhancement: "bot.context-enhancement.set",
+  setConversationDirectory: "bot.conversation-directory.set",
+  setConversationDirectoryDefault: "bot.conversation-directory.default.set",
   setAccessPolicy: "bot.access-policy.set",
   setAlias: 'bot.alias.set',
   setGroupResponseMode: "bot.group-response-mode.set",
@@ -218,6 +221,9 @@ export function normalizeBotConnection(value, fallbackBotId) {
     model: normalizeModelSelection(value.model),
     agentPreset: normalizeAgentPresetId(value.agentPreset),
     contextEnhancement: normalizeContextEnhancementConfig(value.contextEnhancement),
+    ...(Object.hasOwn(value, "conversationDirectory")
+      ? { conversationDirectory: normalizeConversationDirectorySettings(value.conversationDirectory) }
+      : {}),
     ...(Object.hasOwn(value, "accessPolicy")
       ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }
       : {}),
@@ -284,6 +290,13 @@ export function normalizeBotsSnapshot(value) {
     error: normalizeError(value.error),
     agentPresetCatalog: normalizeAgentPresetCatalog(value.agentPresetCatalog),
     modelCatalog: normalizeModelCatalog(value.modelCatalog),
+    ...(Object.hasOwn(value, "conversationDirectoryDefault")
+      ? {
+        conversationDirectoryDefault: normalizeConversationDirectorySettings(
+          value.conversationDirectoryDefault,
+        ),
+      }
+      : {}),
   };
 }
 

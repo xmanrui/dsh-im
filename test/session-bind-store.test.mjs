@@ -18,6 +18,7 @@ import {
   createBotWorkspaceScope,
 } from '../src/channels/shared/bot-workspace-store.mjs';
 import { runModelCommand } from '../src/channels/shared/model-command.mjs';
+import { runWorkspaceCommand } from '../src/channels/shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../src/channels/shared/workspace-session.mjs';
 
 async function fixture(t) {
@@ -780,4 +781,91 @@ test('session persistence failure keeps the new workspace and does not restore o
     version: 1,
     workspaces: { bot_state_failure: alternateWorkspace },
   });
+});
+
+// ── Isolation mode: /session only adopts a Session already in the directory ───
+
+function isolatedState(initial = {}) {
+  let sessions = { ...initial };
+  let clears = 0;
+  return {
+    sessionFor(key) { return sessions[key] ?? null; },
+    async setSession(key, sessionId) { sessions[key] = sessionId; },
+    async clearSession(key) { delete sessions[key]; },
+    async clearSessions() {
+      clears += 1;
+      sessions = {};
+    },
+    snapshot() { return { ...sessions }; },
+    get clears() { return clears; },
+  };
+}
+
+async function isolatedBotFixture(t) {
+  const { path, defaultWorkspace, alternateWorkspace } = await fixture(t);
+  await writeFile(path, `${JSON.stringify({
+    version: 3,
+    workspaces: { bot_iso: defaultWorkspace },
+    conversationDirectories: { bot_iso: { enabled: true } },
+  }, null, 2)}\n`);
+  const workspaces = await new BotWorkspaceStore(path, { defaultWorkspace }).load();
+  return { path, workspaces, defaultWorkspace, alternateWorkspace };
+}
+
+test('isolation lets /session adopt a Session already in the conversation directory', async (t) => {
+  const { workspaces, defaultWorkspace } = await isolatedBotFixture(t);
+  const directory = join(defaultWorkspace, 'conv-p2p-ou_abc-1a2b3c4d');
+  await mkdir(directory, { recursive: true });
+  await workspaces.applyConversationSessionDirectory('bot_iso', 'p2p:ou_abc', {
+    base: defaultWorkspace,
+    directory,
+    strategy: 'per-conversation',
+  }, { token: workspaces.publishConversationWorkspaceSwitch('bot_iso', 'p2p:ou_abc') });
+
+  const state = isolatedState();
+  const scope = createBotWorkspaceScope({
+    async adoptWorkspaceSession(sessionId) {
+      return { sessionId, workspace: directory };
+    },
+  }, { botId: 'bot_iso', workspaces, state });
+
+  const bound = await scope.harness.bindWorkspaceSession('p2p:ou_abc', 'session-in-dir');
+  assert.equal(bound.sessionId, 'session-in-dir');
+  assert.equal(bound.workspace, directory);
+  assert.equal(state.sessionFor('p2p:ou_abc'), 'session-in-dir');
+  assert.equal(state.clears, 0, 'no mass session clear');
+  assert.equal(workspaces.workspaceFor('bot_iso'), defaultWorkspace, 'bot default untouched');
+  assert.equal(workspaces.conversationWorkspaceFor('bot_iso', 'p2p:ou_abc'), directory);
+  assert.equal(workspaces.sessionDirectoryFor('bot_iso', 'p2p:ou_abc').directory, directory);
+});
+
+test('isolation rejects /session when the Session lives in another workspace', async (t) => {
+  const { workspaces, defaultWorkspace, alternateWorkspace } = await isolatedBotFixture(t);
+  const directory = join(defaultWorkspace, 'conv-p2p-ou_abc-1a2b3c4d');
+  await mkdir(directory, { recursive: true });
+  await workspaces.applyConversationSessionDirectory('bot_iso', 'p2p:ou_abc', {
+    base: defaultWorkspace,
+    directory,
+    strategy: 'per-conversation',
+  }, { token: workspaces.publishConversationWorkspaceSwitch('bot_iso', 'p2p:ou_abc') });
+
+  const state = isolatedState({ 'p2p:ou_abc': 'session-old' });
+  const scope = createBotWorkspaceScope({
+    async adoptWorkspaceSession(sessionId) {
+      return { sessionId, workspace: alternateWorkspace };
+    },
+  }, { botId: 'bot_iso', workspaces, state });
+
+  await assert.rejects(
+    scope.harness.bindWorkspaceSession('p2p:ou_abc', 'session-elsewhere'),
+    (error) => error?.code === 'session-workspace-mismatch',
+  );
+  assert.equal(state.sessionFor('p2p:ou_abc'), 'session-old');
+  assert.equal(workspaces.workspaceFor('bot_iso'), defaultWorkspace);
+  assert.equal(workspaces.conversationWorkspaceFor('bot_iso', 'p2p:ou_abc'), directory);
+  assert.equal(workspaces.sessionDirectoryFor('bot_iso', 'p2p:ou_abc').directory, directory);
+
+  const silent = await runWorkspaceCommand('/session session-elsewhere', scope.harness, 'p2p:ou_abc');
+  assert.equal(silent?.message, '');
+  assert.equal(state.sessionFor('p2p:ou_abc'), 'session-old');
 });

@@ -135,6 +135,7 @@ export class FeishuRuntime {
   #pendingCardActionProbes = new Map();
   #status;
   #slashCommands = true;
+  #touchSession = null;
 
   constructor({
     lark,
@@ -160,6 +161,7 @@ export class FeishuRuntime {
     requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
     slashCommands = true,
     wsAgent,
+    touchSession = null,
     logger = console,
   }) {
     if (!lark) throw new Error('FeishuRuntime requires the Feishu SDK');
@@ -200,6 +202,7 @@ export class FeishuRuntime {
     this.#requestTimeoutMs = requestTimeoutMs;
     this.#slashCommands = Boolean(slashCommands);
     this.#wsAgent = wsAgent;
+    this.#touchSession = typeof touchSession === 'function' ? touchSession : null;
     this.#logger = logger;
     this.#status = createBridgeStatus({ allowedSenderCount: normalizedOwners.length });
   }
@@ -327,6 +330,7 @@ export class FeishuRuntime {
         interactionCards: !['0', 'false', 'no', 'off'].includes(
           String(process.env.DSH_IM_INTERACTION_CARDS ?? '').trim().toLowerCase(),
         ),
+        touchSession: this.#touchSession,
         signal,
         logger: this.#logger,
       });

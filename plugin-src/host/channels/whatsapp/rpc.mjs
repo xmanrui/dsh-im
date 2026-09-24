@@ -5,6 +5,12 @@ import QRCode from 'qrcode';
 import { publicConnectionTestResult } from '../../../../src/channels/shared/connection-test.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
+import {
+  SET_CONVERSATION_DIRECTORY_ENDPOINT,
+  SET_CONVERSATION_DIRECTORY_DEFAULT_ENDPOINT,
+  validConversationDirectoryPayload,
+  validConversationDirectoryDefaultPayload,
+} from '../shared/conversation-directory-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { publicWorkspaceError, SET_WORKSPACE_ENDPOINT, validWorkspacePayload } from '../shared/workspace-rpc.mjs';
 import { SET_AGENT_PRESET_ENDPOINT, validAgentPresetPayload } from '../shared/agent-preset-rpc.mjs';
@@ -24,6 +30,8 @@ export const WHATSAPP_ENDPOINTS = Object.freeze({
   setModel: SET_MODEL_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
+  setConversationDirectory: SET_CONVERSATION_DIRECTORY_ENDPOINT,
+  setConversationDirectoryDefault: SET_CONVERSATION_DIRECTORY_DEFAULT_ENDPOINT,
 });
 export const WHATSAPP_RPC_ENDPOINTS = Object.freeze(Object.values(WHATSAPP_ENDPOINTS));
 
@@ -59,6 +67,14 @@ function payloadFailure(endpoint, payload) {
     return exactKeys(payload, ['botId', 'confirm']) && validId(payload.botId)
       && payload.confirm === true ? null : 'bot.delete requires a botId and confirm=true.';
   }
+    if (endpoint === WHATSAPP_ENDPOINTS.setConversationDirectory) {
+    return validConversationDirectoryPayload(payload)
+      ? null : '请输入有效的会话目录设置。';
+  }
+  if (endpoint === WHATSAPP_ENDPOINTS.setConversationDirectoryDefault) {
+    return validConversationDirectoryDefaultPayload(payload)
+      ? null : '请输入有效的渠道默认会话目录设置。';
+  }
   if (endpoint === WHATSAPP_ENDPOINTS.setAccessPolicy) {
     return validAccessPolicyPayload(payload)
       ? null : '请提交有效的访问设置。';
@@ -82,6 +98,7 @@ function payloadFailure(endpoint, payload) {
     return validContextEnhancementPayload(payload)
       ? null : '请提交有效的上下文增强设置。';
   }
+
   return 'Unknown WhatsApp endpoint.';
 }
 
@@ -200,6 +217,19 @@ export function createWhatsappRpcHandler(controller, { encodeQr = qrDataUrl } = 
         value = await publicStatus(
           await controller.updateAgentPreset(payload.botId, payload.agentPreset),
           cachedEncode,
+        );
+      } else if (endpoint === WHATSAPP_ENDPOINTS.setConversationDirectory) {
+        if (typeof controller.updateConversationDirectory !== 'function') throw new Error('Conversation directory update is unavailable');
+        value = await controller.updateConversationDirectory(
+          payload.botId, payload.config, (status) => publicStatus(status, cachedEncode),
+        );
+      } else if (endpoint === WHATSAPP_ENDPOINTS.setConversationDirectoryDefault) {
+        if (typeof controller.updateConversationDirectoryDefault !== 'function') {
+          throw new Error('Conversation directory default update is unavailable');
+        }
+        value = await controller.updateConversationDirectoryDefault(
+          payload.config,
+          (status) => publicStatus(status, cachedEncode),
         );
       } else if (endpoint === WHATSAPP_ENDPOINTS.setAlias) {
         if (typeof controller.updateAlias !== 'function') throw new Error('Alias update is unavailable');

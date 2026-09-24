@@ -11,6 +11,10 @@ const PROVIDER_FAILURES = Object.freeze({
   CONTEXT_WINDOW_EXCEEDED: 'MODEL_CONTEXT_LIMIT',
   UNKNOWN_MODEL: 'MODEL_UNAVAILABLE',
   NO_ADAPTER: 'MODEL_UNAVAILABLE',
+  // The unattributed 400: the provider rejected the request itself because it
+  // does not accept one of its parameters. The user can change that, so it must
+  // not read as an unknown failure.
+  INVALID_REQUEST: 'MODEL_CONFIG',
   UNSUPPORTED_OPTION: 'MODEL_CONFIG',
   UNSUPPORTED_REASONING_EFFORT: 'MODEL_CONFIG',
   TIMEOUT: 'MODEL_TIMEOUT',

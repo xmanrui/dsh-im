@@ -30,6 +30,7 @@ import {
 } from '../shared/preset-command.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import { resetConversationSession } from '../shared/new-command.mjs';
 import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
 import {
   BatchInputManager,
@@ -862,8 +863,11 @@ export class DingtalkHarnessBridge {
       && !['/stop', '/help', '/status', '/history'].includes(command)) {
       result = { message: t('当前任务尚未结束，请先停止任务或等待完成后再操作。') };
     } else if (command === '/new') {
-      await this.#state.clearSession(key);
-      result = { message: t('已开启新会话。请发送你的问题。') };
+      const reset = await resetConversationSession({
+        harness: this.#harness, state: this.#state, key, logger: this.#logger,
+        message: t('已开启新会话。请发送你的问题。'),
+      });
+      result = { message: reset.message };
     } else if (command === '/status') {
       await this.#harness.ensureRunning({ signal: this.#signal });
       result = { message: t('钉钉机器人与 DeepSeek Harness 连接正常。') };

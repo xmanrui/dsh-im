@@ -26,6 +26,9 @@ export function publicWorkspaceError(error) {
     'model-selection-unavailable',
     'model-reasoning-unavailable',
     'context-enhancement-invalid',
+    'workspace-manual-edit-disabled',
+    'session-workspace-mismatch',
+    'conversation-directory-invalid',
   ].includes(error?.code)) return null;
   return { code: error.code, message: error.message };
 }

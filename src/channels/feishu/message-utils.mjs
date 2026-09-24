@@ -400,22 +400,42 @@ function feishuImageSource(event, client, key) {
   };
 }
 
-function feishuFileSource(event, client, file) {
+function feishuFileSource(event, client, file, logger = null) {
   const key = nonEmptyString(file?.file_key);
   if (!key) return null;
   return {
     name: nonEmptyString(file?.file_name) ?? 'file',
     async load({ signal } = {}) {
       signal?.throwIfAborted();
-      const resource = await client?.im?.v1?.messageResource?.get?.({
-        path: {
-          message_id: event.message.message_id,
-          file_key: key,
-        },
-        params: { type: 'file' },
+      logger?.debug?.('[dsh-feishu] inbound file download started', {
+        messageId: event.message.message_id,
+        fileKey: key,
+        name: nonEmptyString(file?.file_name) ?? 'file',
       });
-      signal?.throwIfAborted();
-      return readStream(resource?.getReadableStream?.(), { signal });
+      try {
+        const resource = await client?.im?.v1?.messageResource?.get?.({
+          path: {
+            message_id: event.message.message_id,
+            file_key: key,
+          },
+          params: { type: 'file' },
+        });
+        signal?.throwIfAborted();
+        const stream = readStream(resource?.getReadableStream?.(), { signal });
+        logger?.debug?.('[dsh-feishu] inbound file download stream ready', {
+          messageId: event.message.message_id,
+          fileKey: key,
+        });
+        return stream;
+      } catch (error) {
+        logger?.warn?.('[dsh-feishu] inbound file download failed', {
+          messageId: event.message.message_id,
+          fileKey: key,
+          code: error?.code ?? error?.name ?? 'unknown-error',
+          message: error?.message,
+        });
+        throw error;
+      }
     },
   };
 }
@@ -523,7 +543,7 @@ function feishuReplyReference(event, client) {
   };
 }
 
-export function extractInboundMessage(event, client) {
+export function extractInboundMessage(event, client, logger = null) {
   const messageType = event?.message?.message_type;
   const parsed = parsedMessageContent(event);
   const post = postContent(event, parsed);
@@ -531,7 +551,9 @@ export function extractInboundMessage(event, client) {
     ? nonEmptyString(parsed?.image_key)
     : null;
   const imageKeys = standaloneImageKey ? [standaloneImageKey] : post?.imageKeys ?? [];
-  const file = messageType === 'file' ? feishuFileSource(event, client, parsed) : null;
+  const file = messageType === 'file'
+    ? feishuFileSource(event, client, parsed, logger)
+    : null;
   const replyTo = feishuReplyReference(event, client);
   return {
     content: messageType === 'text' ? extractText(event) ?? '' : post?.text ?? '',

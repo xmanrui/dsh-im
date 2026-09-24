@@ -22,6 +22,7 @@ import {
   runPresetCommand,
 } from '../shared/preset-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import { resetConversationSession } from '../shared/new-command.mjs';
 import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
 import {
   BatchInputManager,
@@ -775,8 +776,11 @@ export class QqHarnessBridge {
           || locked.sessionId !== choice.context.sessionId) {
           return { message: t('会话或工作区已变化，请重新发送 /m。') };
         }
-        await this.#state.clearSession(key);
-        return { message: t('已开启新会话。请发送你的问题。') };
+        const reset = await resetConversationSession({
+          harness: this.#harness, state: this.#state, key, logger: this.#logger,
+          message: t('已开启新会话。请发送你的问题。'),
+        });
+        return { message: reset.message };
       });
       if (command === '/compact') return runCompactCommand(command, this.#harness, this.#state, key, options);
       return runWorkspaceCommand(command, this.#harness, key);

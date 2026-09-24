@@ -36,6 +36,7 @@ import {
 } from '../shared/preset-command.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import { resetConversationSession } from '../shared/new-command.mjs';
 import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
 import {
   hasInboundImages,
@@ -768,8 +769,11 @@ export class WeixinHarnessBridge {
         return;
       }
       if (!hasImages && !hasFiles && command === '/new') {
-        await this.#state.clearSession(key);
-        await this.#send(sender, t('已开启新会话。请发送你的问题。'), contextToken, runId);
+        const reset = await resetConversationSession({
+          harness: this.#harness, state: this.#state, key, logger: this.#logger,
+          message: t('已开启新会话。请发送你的问题。'),
+        });
+        await this.#send(sender, reset.message, contextToken, runId);
         await this.#state.markSeen(messageId);
         return;
       }

@@ -18,6 +18,7 @@ import {
 import { useAnimationFrameScheduler } from "../../lifecycle.js";
 import { WorkspaceEditor } from "../../workspace-editor.js";
 import { ContextEnhancementEditor } from "../../context-enhancement.js";
+import { ConversationDirectoryEditor } from "../../conversation-directory.js";
 import {
   AgentPresetCatalogContext,
   AgentPresetEditor,
@@ -565,6 +566,7 @@ export function BotCard({
   onModelSave,
   onAgentPresetSave,
   onContextEnhancementSave,
+  onConversationDirectorySave,
   onStepPushSave,
   onStepPushModeSave,
   onRequestRemove,
@@ -636,6 +638,7 @@ export function BotCard({
         h(WorkspaceEditor, {
           workspace: connection.workspace,
           disabled: Boolean(busy),
+          directoryIsolation: connection.conversationDirectory?.enabled === true,
           onSave: onWorkspaceSave,
         }),
       h(ModelEditor, {
@@ -652,6 +655,13 @@ export function BotCard({
         config: connection.contextEnhancement,
         disabled: Boolean(busy),
         onSave: onContextEnhancementSave,
+      }),
+      h(ConversationDirectoryEditor, {
+        config: connection.conversationDirectory,
+        scope: "bot",
+        hasOverride: Object.hasOwn(connection, "conversationDirectory"),
+        disabled: Boolean(busy),
+        onSave: onConversationDirectorySave,
       }),
       h(StepPushEditor, {
         value: connection.stepPush,
@@ -753,6 +763,7 @@ function BotList(props) {
           onModelSave: (model) => props.onModelSave(bot, model),
           onAgentPresetSave: (agentPreset) => props.onAgentPresetSave(bot, agentPreset),
           onContextEnhancementSave: (config) => props.onContextEnhancementSave(bot, config),
+          onConversationDirectorySave: (config) => props.onConversationDirectorySave(bot, config),
           onStepPushSave: (stepPush) => props.onStepPushSave(bot, stepPush),
           onStepPushModeSave: (stepPushMode) => props.onStepPushModeSave(bot, stepPushMode),
           onRequestRemove: () => props.onRequestRemove(bot),
@@ -808,6 +819,9 @@ export function mergeFeishuSnapshotState(
     statusError: null,
     agentPresetCatalog: snapshot.agentPresetCatalog ?? current.agentPresetCatalog,
     modelCatalog: snapshot.modelCatalog ?? current.modelCatalog,
+    ...(Object.hasOwn(snapshot, "conversationDirectoryDefault")
+      ? { conversationDirectoryDefault: snapshot.conversationDirectoryDefault }
+      : { conversationDirectoryDefault: undefined }),
   };
 }
 
@@ -1363,6 +1377,25 @@ export function FeishuSettingsTab({ rpcCall }) {
     }
   }, [invoke, loadStatus, mergeSnapshot, setBotBusy, setBotError, workspaceFence]);
 
+  const [channelDirectoryBusy, setChannelDirectoryBusy] = React.useState(false);
+  const saveChannelConversationDirectory = React.useCallback(async (config) => {
+    const snapshotVersion = workspaceFence.beginMutation();
+    setChannelDirectoryBusy(true);
+    try {
+      const snapshot = normalizeBotsSnapshot(await invoke(
+        FEISHU_ENDPOINTS.setConversationDirectoryDefault,
+        { config },
+      ));
+      if (mountedRef.current && workspaceFence.canCommitMutation(snapshotVersion)) {
+        mergeSnapshot(snapshot);
+      }
+    } finally {
+      const shouldRefresh = workspaceFence.endMutation();
+      if (shouldRefresh && mountedRef.current) void loadStatus({ silent: true });
+      if (mountedRef.current) setChannelDirectoryBusy(false);
+    }
+  }, [invoke, loadStatus, mergeSnapshot, workspaceFence]);
+
   const requestRemove = React.useCallback((connection) => {
     setRemoveTargetId(connection.botId);
   }, []);
@@ -1508,15 +1541,27 @@ export function FeishuSettingsTab({ rpcCall }) {
               ? h(EmptyView, { onStart: () => void startProvisioning(), busy: provisionBusy })
               : null,
             model.bots.length > 0
-              ? h(BotList, {
-                  bots: model.bots,
-                  busyByBot,
-                  errorsByBot,
-                  testNoticesByBot,
-                  removeTargetId,
-                  provisioning: provision,
-                  provisionContent,
-                  provisionRef: targetedProvisionRef,
+              ? h(React.Fragment, null,
+                  h("section", {
+                    className: "bxf-channelDefaults dim-channelDefaults",
+                    "aria-label": "飞书渠道默认设置",
+                  },
+                    h(ConversationDirectoryEditor, {
+                      config: model.conversationDirectoryDefault,
+                      scope: "channel",
+                      disabled: pageBusy || channelDirectoryBusy || Boolean(provision),
+                      onSave: (config) => saveChannelConversationDirectory(config),
+                      onClear: () => saveChannelConversationDirectory(null),
+                    })),
+                  h(BotList, {
+                    bots: model.bots,
+                    busyByBot,
+                    errorsByBot,
+                    testNoticesByBot,
+                    removeTargetId,
+                    provisioning: provision,
+                    provisionContent,
+                    provisionRef: targetedProvisionRef,
                   onReconnect: (bot) => void reconnectOneBot(bot),
                   onRepairCallback: repairCallback,
                   onWorkspaceSave: saveWorkspace,
@@ -1532,6 +1577,9 @@ export function FeishuSettingsTab({ rpcCall }) {
                   onContextEnhancementSave: (connection, config) => saveBotSetting(
                     connection, "context-enhancement", FEISHU_ENDPOINTS.setContextEnhancement, { config },
                   ),
+                  onConversationDirectorySave: (connection, config) => saveBotSetting(
+                    connection, "conversation-directory", FEISHU_ENDPOINTS.setConversationDirectory, { config },
+                  ),
                   onStepPushSave: (connection, stepPush) => saveBotSetting(
                     connection, "step-push", FEISHU_ENDPOINTS.setStepPush, { stepPush },
                   ),
@@ -1543,7 +1591,7 @@ export function FeishuSettingsTab({ rpcCall }) {
                   onCancelRemove: cancelRemove,
                   setCardRef,
                   setRemoveButtonRef,
-                })
+                }))
               : null,
           ),
   )));

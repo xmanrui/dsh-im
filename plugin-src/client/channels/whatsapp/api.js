@@ -4,6 +4,7 @@ import { normalizeModelCatalog, normalizeModelSelection, SET_MODEL_ENDPOINT } fr
 import { normalizeLastMessageError } from '../../last-message-error.js';
 import { normalizeAccessPolicy } from '../../../../src/channels/shared/access-policy.mjs';
 import { normalizeContextEnhancementConfig } from '../../../../src/channels/shared/context-enhancement.mjs';
+import { normalizeConversationDirectorySettings } from '../../../../src/channels/shared/conversation-directory.mjs';
 
 export const WHATSAPP_RPC_CHANNEL = '/whatsapp';
 
@@ -20,6 +21,8 @@ export const WHATSAPP_ENDPOINTS = Object.freeze({
   setModel: SET_MODEL_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: 'bot.context-enhancement.set',
+  setConversationDirectory: 'bot.conversation-directory.set',
+  setConversationDirectoryDefault: 'bot.conversation-directory.default.set',
 });
 
 const PROVISION_STATES = new Set(['starting', 'pending', 'connecting', 'connected', 'failed', 'cancelled']);
@@ -97,6 +100,9 @@ function normalizeBot(value) {
     model: normalizeModelSelection(value.model),
     agentPreset: normalizeAgentPresetId(value.agentPreset),
     contextEnhancement: normalizeContextEnhancementConfig(value.contextEnhancement),
+    ...(Object.hasOwn(value, 'conversationDirectory')
+      ? { conversationDirectory: normalizeConversationDirectorySettings(value.conversationDirectory) }
+      : {}),
     ...(Object.hasOwn(value, 'accessPolicy')
       ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }
       : {}),

@@ -11,6 +11,11 @@ import {
   registerInboundTtlWorkspaces,
 } from '../../inbound-ttl-runtime.mjs';
 import {
+  getSessionTimeoutRuntime,
+  registerSessionTimeoutStateSource,
+  registerSessionTimeoutWorkspaceProvider,
+} from '../../session-timeout-runtime.mjs';
+import {
   BotWorkspaceStore,
   createBotWorkspaceScope,
   createWorkspaceAwareController,
@@ -96,11 +101,26 @@ export async function createTokenProductionController(ctx, config, internals, de
     configStore: observedConfigStore,
     defaultWorkspace,
   });
+  const sessionTimeout = internals.sessionTimeout ?? getSessionTimeoutRuntime(ctx, config);
+  const sessionTimeoutService = sessionTimeout?.service ?? null;
+  if (sessionTimeoutService) {
+    registerSessionTimeoutStateSource(ctx, sessionTimeoutService, {
+      channel,
+      stateFor: async (botId) => stateFor(botId),
+    });
+    registerSessionTimeoutWorkspaceProvider(ctx, sessionTimeoutService, {
+      channel,
+      workspaces,
+      defaultWorkspace,
+      stateFor: async (botId) => stateFor(botId),
+    });
+  }
   const { controlExecutor, sessionMaintenanceExecutor, fileIngressExecutor } = createHarnessSessionExecutors(ctx, {
     controlExecutor: internals.controlExecutor,
     sessionMaintenanceExecutor: internals.sessionMaintenanceExecutor,
     fileIngressExecutor: internals.fileIngressExecutor,
     inboundTtlService,
+    ...(sessionTimeoutService ? { sessionTimeoutService } : {}),
   });
   const harness = new ResolvedHarness({
     ...connection,

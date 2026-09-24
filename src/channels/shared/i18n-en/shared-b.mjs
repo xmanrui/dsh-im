@@ -11,6 +11,12 @@ export default {
   '工作区路径不存在。\n{usage}': 'The Workspace path does not exist.\n{usage}',
   '工作区路径必须指向一个目录。\n{usage}': 'The Workspace path must point to a directory.\n{usage}',
   '用法：/workspacelist': 'Usage: /workspacelist',
+  '用法：/workspacelist 或 /workspacelist all': 'Usage: /workspacelist or /workspacelist all',
+  '会话目录默认隐藏；需查看时使用 /workspacelist all。':
+    'Conversation directories are hidden by default; use /workspacelist all to show them.',
+  '会话目录：{directory}（自动创建）': 'Conversation directory: {directory} (created automatically)',
+  '基工作区：{base}；切换基工作区请使用 /conv。':
+    'Base Workspace: {base}; use /conv to change the base Workspace.',
   '当前机器人暂不支持列出工作区。': 'This bot does not support listing Workspaces yet.',
   '当前 Harness Host 上没有仍然存在的已登记工作区。':
     'No registered Workspaces still exist on the current Harness Host.',

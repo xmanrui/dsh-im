@@ -33,6 +33,7 @@ import {
 } from '../shared/preset-command.mjs';
 import { runWorkspaceCommand, workspacePathSnapshot } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import { resetConversationSession } from '../shared/new-command.mjs';
 import { captureContextEnhancement, enhanceContextContent } from '../shared/context-enhancement.mjs';
 import {
   hasInboundImages,
@@ -859,8 +860,11 @@ export class WecomHarnessBridge {
       return { message: t('当前任务仍在运行，请先停止任务或等待任务完成后再开启新会话。') };
     }
     if (command === '/new') {
-      await this.#state.clearSession(key);
-      return { message: t('已开启新会话。请发送你的问题。') };
+      const reset = await resetConversationSession({
+        harness: this.#harness, state: this.#state, key, logger: this.#logger,
+        message: t('已开启新会话。请发送你的问题。'),
+      });
+      return { message: reset.message };
     }
     return await runWorkspaceCommand(text, this.#harness, key)
       ?? await runCompactCommand(text, this.#harness, this.#state, key, options);

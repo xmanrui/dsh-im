@@ -1,6 +1,12 @@
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
+import {
+  SET_CONVERSATION_DIRECTORY_ENDPOINT,
+  SET_CONVERSATION_DIRECTORY_DEFAULT_ENDPOINT,
+  validConversationDirectoryPayload,
+  validConversationDirectoryDefaultPayload,
+} from '../shared/conversation-directory-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { publicConnectionTestResult } from '../../../../src/channels/shared/connection-test.mjs';
@@ -25,6 +31,8 @@ export const SLACK_ENDPOINTS = Object.freeze({
   setModel: SET_MODEL_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
+  setConversationDirectory: SET_CONVERSATION_DIRECTORY_ENDPOINT,
+  setConversationDirectoryDefault: SET_CONVERSATION_DIRECTORY_DEFAULT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
 });
@@ -90,6 +98,15 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === SLACK_ENDPOINTS.setContextEnhancement) {
     return validContextEnhancementPayload(payload)
       ? null : '请提交有效的上下文增强设置。';
+  }
+
+    if (endpoint === SLACK_ENDPOINTS.setConversationDirectory) {
+    return validConversationDirectoryPayload(payload)
+      ? null : '请输入有效的会话目录设置。';
+  }
+  if (endpoint === SLACK_ENDPOINTS.setConversationDirectoryDefault) {
+    return validConversationDirectoryDefaultPayload(payload)
+      ? null : '请输入有效的渠道默认会话目录设置。';
   }
   if (endpoint === SLACK_ENDPOINTS.setAccessPolicy) {
     return validAccessPolicyPayload(payload)
@@ -185,6 +202,16 @@ export function createSlackRpcHandler(controller) {
       else if (endpoint === SLACK_ENDPOINTS.setContextEnhancement) {
         if (typeof controller.updateContextEnhancement !== 'function') throw new Error('Context enhancement update is unavailable');
         value = await controller.updateContextEnhancement(payload.botId, payload.config);
+      }
+      else if (endpoint === SLACK_ENDPOINTS.setConversationDirectory) {
+        if (typeof controller.updateConversationDirectory !== 'function') throw new Error('Conversation directory update is unavailable');
+        value = await controller.updateConversationDirectory(payload.botId, payload.config);
+      }
+      else if (endpoint === SLACK_ENDPOINTS.setConversationDirectoryDefault) {
+        if (typeof controller.updateConversationDirectoryDefault !== 'function') {
+          throw new Error('Conversation directory default update is unavailable');
+        }
+        value = await controller.updateConversationDirectoryDefault(payload.config);
       }
       else if (endpoint === SLACK_ENDPOINTS.setAlias) {
         if (typeof controller.updateAlias !== 'function') throw new Error('Alias update is unavailable');

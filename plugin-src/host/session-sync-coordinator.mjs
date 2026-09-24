@@ -36,7 +36,7 @@ function validRecipient(target) {
     && typeof target.targetId === 'string' && target.targetId;
 }
 
-export function createSessionSyncCoordinator({ deliveryService, logger = console }) {
+export function createSessionSyncCoordinator({ deliveryService, sessionTimeoutService = null, logger = console }) {
   if (typeof deliveryService?.listSessionSyncTargets !== 'function'
     || typeof deliveryService?.sendSessionSyncText !== 'function') {
     throw new TypeError('Session sync requires a complete delivery service');
@@ -154,6 +154,13 @@ export function createSessionSyncCoordinator({ deliveryService, logger = console
 
     if (event.type !== 'turn/end' || event.data?.turn !== state.turn) return;
     turns.delete(sessionId);
+    // The agent turn finished: reset the session-timeout idle window so the
+    // next idle interval counts from the reply, not from the user's prompt.
+    // Fire-and-forget: a tracking failure must never strand the turn-end
+    // delivery path.
+    if (sessionTimeoutService && typeof sessionTimeoutService.touchBySessionId === 'function') {
+      void sessionTimeoutService.touchBySessionId(sessionId, { runningSince: undefined }).catch(() => {});
+    }
     if (state.origin !== 'dsh' || !completedTurn(event.data?.reason)
       || !state.recipients?.size || !state.assistant.text) return;
     // A pending card is not proof of delivery. Only suppress this target's
@@ -207,11 +214,16 @@ export function createSessionSyncCoordinator({ deliveryService, logger = console
 export function installSessionSyncCoordinator(ctx, deliveryService, {
   logger = console,
   inputScope = ctx?.root ?? ctx,
+  sessionTimeoutService = null,
 } = {}) {
   if (typeof ctx?.on !== 'function') {
     throw new TypeError('Session sync requires Host session events');
   }
-  const coordinator = createSessionSyncCoordinator({ deliveryService, logger });
+  const coordinator = createSessionSyncCoordinator({
+    deliveryService,
+    ...(sessionTimeoutService ? { sessionTimeoutService } : {}),
+    logger,
+  });
   const disposeEvent = ctx.on('session/event', (session, event) => {
     const sessionId = sessionIdOf(session);
     if (!sessionId) return;
