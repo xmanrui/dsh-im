@@ -156,11 +156,24 @@ const contextEditorSource = await readFile(resolve(root, 'plugin-src/client/cont
 const deliverySettingsSource = await readFile(resolve(root, 'plugin-src/client/delivery-settings.js'), 'utf8');
 const emailSettingsSource = await readFile(resolve(root, 'plugin-src/client/channels/email/index.js'), 'utf8');
 const thinkingTracesSource = await readFile(resolve(root, 'plugin-src/client/channels/telegram/thinking-traces.js'), 'utf8');
-const otherClientSources = clientSources
+// The shared client component layer owns this plugin's own primitives, including
+// the reforked Checkbox that the 0.1.5 kernel does not export at all. Like the
+// context editor it is not a connection surface, so it is exempt from the
+// "connections have no enable toggle" scan; the bundle-level counts below still
+// prove exactly which checkable inputs actually ship.
+const uiLayerSources = await Promise.all(
+  (await readdir(resolve(root, 'plugin-src/client/ui')))
+    .filter((name) => /\.m?js$/u.test(name))
+    .map((name) => readFile(resolve(root, 'plugin-src/client/ui', name), 'utf8')),
+);
+let otherClientSources = clientSources
   .replace(contextEditorSource, '')
   .replace(deliverySettingsSource, '')
   .replace(emailSettingsSource, '')
   .replace(thinkingTracesSource, '');
+for (const uiLayerSource of uiLayerSources) {
+  otherClientSources = otherClientSources.replace(uiLayerSource, '');
+}
 if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || (deliverySettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySettingsSource)

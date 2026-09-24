@@ -48,16 +48,23 @@ for (const [channel, component] of channels) {
     await act(async () => { renderer = create(React.createElement(Settings, { rpcCall })); await flush(); });
     t.after(async () => { await act(async () => { renderer.unmount(); await flush(); }); restoreWindow(); });
     const root = renderer.root;
+    // The alias editor is the official Modal: a portaled `role="dialog"` card
+    // with an `aria-modal` flag and a labelled close button (issue #247 (f)).
+    const aliasDialog = () => root.findByProps({ role: 'dialog' });
     await act(async () => { button(root, '修改别名').props.onClick(); });
-    assert.equal(root.findAllByType('dialog').length, 1);
-    assert.match(text(root.findByType('dialog')), /Original 0/);
-    await act(async () => { root.findByType('dialog').findByType('input').props.onChange({ target: { value: '客服助手' } }); });
+    assert.equal(root.findAllByProps({ role: 'dialog' }).length, 1);
+    assert.equal(aliasDialog().props['aria-modal'], 'true');
+    assert.equal(aliasDialog().props['aria-label'], '修改别名');
+    assert.ok(root.findByProps({ 'aria-label': '关闭修改别名' }));
+    assert.equal(text(aliasDialog().findAllByType('h2')[0]), '修改别名');
+    assert.match(text(aliasDialog()), /Original 0/);
+    await act(async () => { aliasDialog().findByType('input').props.onChange({ target: { value: '客服助手' } }); });
     await act(async () => { button(root, '保存').props.onClick(); await flush(); });
-    assert.equal(root.findAllByType('dialog').length, 0);
+    assert.equal(root.findAllByProps({ role: 'dialog' }).length, 0);
     assert.equal(root.findAllByType(BotName)[0].props.bot.name, '客服助手');
     assert.equal(root.findAllByType(BotName)[1].props.bot.name, 'Original 1');
     await act(async () => { button(root, '修改别名').props.onClick(); });
-    assert.match(text(root.findByType('dialog')), /Original 0/);
+    assert.match(text(aliasDialog()), /Original 0/);
     await act(async () => { button(root, '恢复原名称').props.onClick(); await flush(); });
     assert.equal(root.findAllByType(BotName)[0].props.bot.name, 'Original 0');
     assert.deepEqual(calls, [
@@ -79,9 +86,10 @@ test('alias dialog keeps the draft on failure and cancellation never saves', asy
   await act(async () => { button(root, '保存').props.onClick(); await flush(); });
   assert.equal(root.findByType('input').props.value, '新别名');
   assert.equal(text(root.findByProps({ role: 'alert' })), '磁盘写入失败');
+  assert.equal(text(root.findByProps({ role: 'dialog' }).findAllByType('h2')[0]), '修改别名');
   assert.equal(text(root.findAllByType('h3')[0]), 'Original');
   await act(async () => { button(root, '取消').props.onClick(); });
   assert.equal(calls, 1);
-  assert.equal(root.findAllByType('dialog').length, 0);
+  assert.equal(root.findAllByProps({ role: 'dialog' }).length, 0);
   await act(async () => renderer.unmount());
 });

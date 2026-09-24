@@ -762,12 +762,14 @@ test('the confirmation supports keyboard focus, tab wrapping, Escape and focus r
   });
   const renderer = await mount(t, async () => ok(available()), {}, {
     createNodeMock(element) {
-      return element.props?.className === 'dim-updateDialog' ? dialogNode : null;
+      return element.props?.className === 'dim-updateDialogBody' ? dialogNode : null;
     },
   });
   await click(renderer, '更新至 v3.0.9');
   assert.equal(document.activeElement, dialogNode);
-  const dialog = renderer.root.findByProps({ role: 'dialog' });
+  // The official Modal owns the card; this panel's own focus trap lives on the
+  // body it renders inside, so the Tab walk is asserted there.
+  const dialog = renderer.root.findByProps({ className: 'dim-updateDialogBody' });
   let prevented = 0;
   await act(async () => {
     dialog.props.onKeyDown({ key: 'Tab', shiftKey: false, preventDefault() { prevented += 1; } });

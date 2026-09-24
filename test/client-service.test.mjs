@@ -125,7 +125,8 @@ test('web keeps its one bilingual settings entry, including hosts without provid
     assert.equal(options.locale, 'dsh-im');
     const markup = renderToStaticMarkup(React.createElement(component));
     assert.match(markup, /DSH-IM/);
-    assert.match(markup, /id="dim-panel-weixin"/);
+    // No preferred section: the panel opens on the provider grid.
+    assert.match(markup, /id="dim-panel-providers"/);
     assert.equal(Boolean(host.service), provide);
     if (provide) {
       assert.equal(host.service.version, 1);
@@ -238,18 +239,25 @@ test('render returns fresh elements of a stable type without changing settings o
 
 test('preferred section is initial-only, invalid sections retain the web default', (t) => {
   const host = start(t);
+  // A named section deep-links straight past the provider grid and is labelled
+  // by its own drill-down heading; an unnamed one lands on the grid.
   for (const id of ['weixin', 'feishu', 'dingtalk', 'wecom', 'wecomApp', 'qq', 'slack',
     'telegram', 'discord', 'whatsapp', 'imessage', 'matrix', 'office', 'global-settings', 'unknown', undefined]) {
     const markup = renderToStaticMarkup(host.service.render({ preferredSectionId: id }));
     const expected = !id || id === 'unknown' ? 'weixin' : id;
-    assert.ok(markup.includes(`id="dim-panel-${expected}"`), String(id));
+    if (!id || id === 'unknown') {
+      assert.match(markup, /id="dim-panel-providers"/, String(id));
+    } else {
+      assert.ok(markup.includes(`id="dim-panel-${expected}"`), String(id));
+    }
   }
   let renderer;
   act(() => { renderer = create(host.service.render({ preferredSectionId: 'feishu' })); });
   t.after(() => act(() => renderer.unmount()));
-  act(() => renderer.root.findByProps({ id: 'dim-tab-qq' }).props.onClick());
+  act(() => renderer.root.findByProps({ className: 'dim-channelBack' }).props.onClick());
+  act(() => renderer.root.findByProps({ 'data-im-provider': 'qq' }).props.onClick());
   act(() => renderer.update(host.service.render({ preferredSectionId: 'telegram' })));
-  assert.equal(renderer.root.findByProps({ role: 'tabpanel' }).props.id, 'dim-panel-qq');
+  assert.equal(renderer.root.findByProps({ className: 'dim-panel' }).props.id, 'dim-panel-qq');
 });
 
 test('embedded panel receives the same management calls and picker, ignoring injected overrides', async (t) => {
@@ -285,11 +293,11 @@ test('embedded panel changes language without remounting and unsubscribes on unm
   const host = start(t);
   let renderer;
   act(() => { renderer = create(host.service.render()); });
-  act(() => renderer.root.findByProps({ id: 'dim-tab-qq' }).props.onClick());
+  act(() => { renderer.root.findByProps({ 'data-im-provider': 'qq' }).props.onClick(); });
   assert.equal(host.listeners.size, 2);
   act(() => host.locale('en'));
   assert.match(JSON.stringify(renderer.toJSON()), /General settings/);
-  assert.equal(renderer.root.findByProps({ role: 'tabpanel' }).props.id, 'dim-panel-qq');
+  assert.equal(renderer.root.findByProps({ className: 'dim-panel' }).props.id, 'dim-panel-qq');
   act(() => host.locale('zh'));
   assert.match(JSON.stringify(renderer.toJSON()), /通用设置/);
   act(() => renderer.unmount());
