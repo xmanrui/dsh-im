@@ -1,5 +1,6 @@
 // English translations (feishu area). Keys are exact Chinese literals passed to t().
 export default {
+  '内容已合并至后续消息。': 'Content has been consolidated into the following messages.',
   // feishu/bridge.mjs — welcome / help
   '北汇星河 AIOS 已连接 DeepSeek Harness。':
     'BeiHui XingHe AIOS is connected to DeepSeek Harness.',

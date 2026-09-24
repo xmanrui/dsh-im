@@ -137,7 +137,7 @@ test('silence checks history without finishing a live tool; true stopped boundar
   assert.equal(f.mirrors.size, 0);
 });
 
-test('restart preserves latest snapshot and never patches sealed overflow chunks', async t => {
+test('restart resynchronizes every overflow chunk from the latest snapshot', async t => {
   const f = await fixture(t, { sync: false });
   f.emit(start()); f.emit(user()); await f.drain();
   f.emit(answer('prefix '.repeat(5000) + 'last answer')); await f.drain();
@@ -147,9 +147,15 @@ test('restart preserves latest snapshot and never patches sealed overflow chunks
   f.close();
   const recovered = await fixture(t, { sync: false, state: f.state, history: [start(), answer('prefix '.repeat(5000) + 'last answer'), end()] });
   await recovered.drain();
-  assert.equal(recovered.patches.length, 1);
-  assert.equal(recovered.patches[0].path.message_id, entry.cardIds.at(-1));
-  assert.ok(recovered.patches[0].data.content.includes('last answer'));
+  assert.deepEqual(recovered.patches.map(patch => patch.path.message_id), entry.cardIds);
+  assert.ok(recovered.patches.at(-1).data.content.includes('last answer'));
+  const delivered = recovered.patches.map(patch => patch.data.content).join('\n');
+  const bodyText = content => JSON.parse(content).body.elements
+    .filter(element => element.tag === 'markdown' && !/^_(运行中|已完成)_$/.test(element.content))
+    .map(element => element.content).join('\n');
+  assert.deepEqual(recovered.patches.map(patch => bodyText(patch.data.content)),
+    entry.cardIds.map(id => bodyText(f.visible.get(id))));
+  assert.equal(delivered.split('last answer').length - 1, 1);
   assert.equal(f.mirrors.has(key), false);
 });
 
