@@ -534,8 +534,17 @@ export function extractInboundMessage(event, client) {
   const imageKeys = standaloneImageKey ? [standaloneImageKey] : post?.imageKeys ?? [];
   const file = messageType === 'file' ? feishuFileSource(event, client, parsed) : null;
   const replyTo = feishuReplyReference(event, client);
+  // A forwarded card arrives as `interactive`. Without this branch its text was
+  // dropped entirely, so the message looked empty and the reader got the
+  // "text, image and file only" notice — even though the same extraction is
+  // already trusted for quoted cards (`feishuReplyReference`).
+  const cardText = messageType === 'interactive' ? interactiveCardText(parsed) : '';
   return {
-    content: messageType === 'text' ? extractText(event) ?? '' : post?.text ?? '',
+    content: messageType === 'text'
+      ? extractText(event) ?? ''
+      : messageType === 'interactive'
+        ? cardText
+        : post?.text ?? '',
     images: imageKeys.map((key) => feishuImageSource(event, client, key)),
     files: file ? [file] : [],
     ...(replyTo ? { replyTo } : {}),

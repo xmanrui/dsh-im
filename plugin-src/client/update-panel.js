@@ -469,6 +469,7 @@ export function UpdatePanel({ rpcCall, clientVersion, onStatus }) {
           h('strong', null, 'DSH 版本兼容说明'),
           h('p', { className: 'dim-updateManualHint' }, 'dsh-im 4.25.0 支持到 DSH v0.1.6-alpha.2。'),
           h('p', { className: 'dim-updateManualHint' }, 'dsh-im 4.26.0 仅支持 DSH v0.1.7-alpha.1。'),
+          h('p', { className: 'dim-updateManualHint' }, 'dsh-im 4.27.0 仅支持 DSH v0.1.7-alpha.1 及更新版本。'),
           h('p', { className: 'dim-updateManualHint' },
             '升级到 dsh-im 4.26.0 前，请先将 DSH 升级到 v0.1.7-alpha.1；使用旧版 DSH 请保留 dsh-im 4.25.0。')),
         h(ManualUpdateCommand, {

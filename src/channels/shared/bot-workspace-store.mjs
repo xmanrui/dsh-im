@@ -1,7 +1,7 @@
 import { t } from './i18n.mjs';
 import { atConnectionStage, connectionStageError, extractConnectionEvidence } from './connection-error.mjs';
 import { validateBotAlias, withBotAlias } from './bot-alias.mjs';
-import { defaultImWorkspace, sameWorkspacePath } from './default-workspace.mjs';
+import { defaultImWorkspace, ensureImWorkspaceDirectory, sameWorkspacePath } from './default-workspace.mjs';
 import {
   mkdir,
   readFile,
@@ -367,13 +367,14 @@ async function writeStoredDocument(path, document) {
   await rename(temporary, path);
 }
 
-export async function validateWorkspacePath(value) {
+export async function validateWorkspacePath(value, { ungroupedWorkspace } = {}) {
   if (typeof value !== 'string' || !value.trim() || !isAbsolute(value.trim())) {
     const error = new Error('工作区必须是绝对路径。');
     error.code = 'workspace-not-absolute';
     throw error;
   }
   const workspace = resolve(value.trim());
+  await ensureImWorkspaceDirectory(workspace, ungroupedWorkspace);
   let info;
   try {
     info = await stat(workspace);
@@ -393,6 +394,7 @@ export async function validateWorkspacePath(value) {
 export class BotWorkspaceStore {
   #path;
   #defaultWorkspace;
+  #ungroupedWorkspace;
   #version = 1;
   #workspaces = {};
   #agentPresets = {};
@@ -414,10 +416,11 @@ export class BotWorkspaceStore {
   #writeQueue = Promise.resolve();
   #botQueues = new Map();
 
-  constructor(path, { defaultWorkspace = defaultImWorkspace() } = {}) {
+  constructor(path, { defaultWorkspace = defaultImWorkspace(), ungroupedWorkspace } = {}) {
     if (typeof path !== 'string' || !path) throw new TypeError('workspace store path is required');
     this.#path = path;
     this.#defaultWorkspace = resolve(defaultWorkspace);
+    this.#ungroupedWorkspace = ungroupedWorkspace;
   }
 
   async load() {
@@ -691,11 +694,20 @@ export class BotWorkspaceStore {
       const createsBot = !this.#workspaces[id];
       const initializesAccessPolicy = initialAccessPolicy !== undefined
         && !Object.hasOwn(this.#accessPolicies, id);
+      const accessPolicy = initializesAccessPolicy
+        ? validateAccessPolicy(initialAccessPolicy)
+        : undefined;
+      const agentPreset = createsBot ? validateAgentPresetId(defaultAgentPreset) : null;
+      // Resolve saved bot/conversation choices before preparing the shared IM
+      // directory. Merely loading a channel must not create an unused fallback.
+      const selectedWorkspaces = new Set([
+        this.#workspaces[id] ?? initialWorkspace,
+        ...Object.values(this.#conversationWorkspaces[id] ?? {}),
+      ]);
+      for (const selected of selectedWorkspaces) {
+        await ensureImWorkspaceDirectory(selected, this.#ungroupedWorkspace);
+      }
       if (createsBot || initializesAccessPolicy) {
-        const accessPolicy = initializesAccessPolicy
-          ? validateAccessPolicy(initialAccessPolicy)
-          : undefined;
-        const agentPreset = createsBot ? validateAgentPresetId(defaultAgentPreset) : null;
         const hadAgentPreset = Object.hasOwn(this.#agentPresets, id);
         const previousAgentPreset = this.#agentPresets[id];
         const nextAccessPolicies = initializesAccessPolicy
@@ -744,7 +756,7 @@ export class BotWorkspaceStore {
       error.code = 'workspace-bot-not-found';
       throw error;
     }
-    const workspace = await validateWorkspacePath(value);
+    const workspace = await validateWorkspacePath(value, { ungroupedWorkspace: this.#ungroupedWorkspace });
     return this.#enqueue(id, async () => {
       if (!this.has(id)
         || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
@@ -965,7 +977,9 @@ export class BotWorkspaceStore {
     }
     // Validate before queueing so an invalid path fails without disturbing the
     // conversation's current workspace or its session.
-    const workspace = value === null ? null : await validateWorkspacePath(value);
+    const workspace = value === null ? null : await validateWorkspacePath(value, {
+      ungroupedWorkspace: this.#ungroupedWorkspace,
+    });
     return this.#enqueue(id, async () => {
       const assertCurrentSwitch = () => {
         if (!this.has(id)
@@ -981,6 +995,10 @@ export class BotWorkspaceStore {
         }
       };
       assertCurrentSwitch();
+      if (workspace === null) {
+        await ensureImWorkspaceDirectory(this.workspaceFor(id), this.#ungroupedWorkspace);
+        assertCurrentSwitch();
+      }
       const previousOverrides = this.#conversationWorkspaces[id];
       const previous = previousOverrides?.[key];
       const hadOverride = Boolean(previousOverrides)
@@ -1065,7 +1083,9 @@ export class BotWorkspaceStore {
         );
       }
     };
-    const workspace = await canonicalWorkspacePath(await validateWorkspacePath(value));
+    const workspace = await canonicalWorkspacePath(await validateWorkspacePath(value, {
+      ungroupedWorkspace: this.#ungroupedWorkspace,
+    }));
     return this.#enqueue(id, async () => {
       if (!this.has(id)
         || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {

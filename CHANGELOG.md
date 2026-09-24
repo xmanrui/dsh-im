@@ -13,10 +13,51 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 渠道配置改为 Lobe 式「列表 → 详情」两层结构：入口页按真实 Host 状态分组的服务商卡片网格，点击卡片进入该渠道既有配置页，顶部提供返回入口；卡片右侧只展示真实状态徽标，不引入连接开关（[#247](https://github.com/xmanrui/dsh-im/issues/247)）。
   Channel configuration now follows the Lobe list-then-detail layout: the entry page is a provider card grid grouped by real Host status, and picking a card drills into that channel's existing configuration page with a back affordance; cards show a real status badge only and add no connection toggle ([#247](https://github.com/xmanrui/dsh-im/issues/247)).
 
+## [4.28.0] - 2026-09-24
+
+### Fixed / 修复
+
+- 飞书分步流式卡片按实际表格数量拆分正文与折叠面板，保留完整表格；重新分片时同步已有卡片，并隔离审批前后的卡片，避免超限、内容缺失或覆盖历史过程。感谢 [@C3H3-AI](https://github.com/C3H3-AI)（[#255](https://github.com/xmanrui/dsh-im/pull/255)）。
+  Feishu step-streaming cards split answers and folded panels by their actual table count while preserving complete tables. Existing chunks are synchronized after redistribution, and cards before an interaction remain isolated from later updates. Thanks to [@C3H3-AI](https://github.com/C3H3-AI) ([#255](https://github.com/xmanrui/dsh-im/pull/255)).
+- 飞书支持读取转发卡片中的可见文字，私聊仅提及机器人时可打开菜单，并沿用命令权限检查；语音、视频、表情和无可读文字的卡片保留不支持类型提示。感谢 [@C3H3-AI](https://github.com/C3H3-AI)（[#254](https://github.com/xmanrui/dsh-im/pull/254)）。
+  Feishu now reads visible text from forwarded cards and opens the menu for a bare private mention with command permissions enforced. Unsupported audio, video, stickers, and unreadable cards retain their existing notice. Thanks to [@C3H3-AI](https://github.com/C3H3-AI) ([#254](https://github.com/xmanrui/dsh-im/pull/254)).
+- 修复私聊引用消息后仅提及机器人时，被误判为菜单命令的问题；允许聊天但禁止命令的用户仍可正常提交引用内容。
+  Fixed quoted private mentions being classified as menu commands, so users who may chat but cannot run commands can still submit quoted content.
+
+### Notes / 使用说明
+
+- 多表格修复覆盖分步流式卡片及复用该流程的会话镜像。表格数量拆分保持表头、分隔行和数据完整；原有过程摘要和字节预算仍生效，不新增单个超大表格的分页能力，也不将该路径的表格上限推广到所有飞书接口。
+  The multi-table fixes cover step-streaming cards and Session mirrors using the same rendering path. Table-count splitting preserves headers, separators, and rows; existing process summaries and byte budgets still apply. This does not add pagination for a single oversized table or generalize this path's table limit to every Feishu API.
+- 宿主兼容性声明保持 DSH 0.1.7-alpha.1，未扩展未经验证的版本范围。升级后请重启 Host 并刷新设置页；旧版 DSH 请继续使用对应的历史插件版本。
+  Host compatibility remains declared for DSH 0.1.7-alpha.1 without expanding to unverified versions. Restart the Host and refresh settings after upgrading; older DSH installations should use the corresponding historical plugin version.
+
+## [4.27.0] - 2026-09-23
+
+### Added / 新增
+
+- Matrix 新增按机器人、房间隔离的本机群聊记录。在需要提及的群聊中，未点名机器人的发言不会单独触发回复，但后续提及或引用提问可附带当天尚未注入的背景；背景带时间、发言者和明确边界，机器人自己的发言不作为其他成员的背景。感谢 [@Dong09](https://github.com/Dong09)（[#256](https://github.com/xmanrui/dsh-im/pull/256)）。
+  Added local Matrix room records isolated by bot and room. In mention-gated groups, unaddressed chatter does not trigger replies by itself, but a later mention or quoted question can include pending same-day background with timestamps, speakers, and explicit delimiters. The bot's own messages are excluded from other-member background. Thanks to [@Dong09](https://github.com/Dong09) ([#256](https://github.com/xmanrui/dsh-im/pull/256)).
+- 记录按事件 ID 去重并保存已注入标记，重启后可继续使用；默认每房间保留最近 2000 条，每次背景选择默认最多 50 条、目标字符预算 8000，优先保留较新的发言。新增 `roomContextEnabled`、`roomContextLimit`、`roomContextMaxChars` 和 `roomContextTzOffsetMinutes` 配置字段，并提供记录层的文本、发言者及时间范围查询能力。
+  Room records deduplicate event IDs and persist consumed markers across restarts. Defaults retain the latest 2000 entries per room and select up to 50 background entries with a target 8000-character budget, preferring newer messages. Added `roomContextEnabled`, `roomContextLimit`, `roomContextMaxChars`, and `roomContextTzOffsetMinutes` configuration fields, plus record-layer queries by text, speaker, and time range.
+
 ### Fixed / 修复
 
 - 修复飞书状态文件一次写入失败后，后续消息持续失败的问题；本次写入仍正常报错，文件恢复可写后，后续消息无需重启机器人即可继续处理（[#250](https://github.com/xmanrui/dsh-im/issues/250)）。
   Fixed a Feishu state-file write failure permanently blocking subsequent messages. The failed write still reports its error, while later messages recover once the file becomes writable, without restarting the bot ([#250](https://github.com/xmanrui/dsh-im/issues/250)).
+- Matrix 不再仅凭房间只有两名成员就将其视为私聊，避免普通小群绕过提及要求；启动时清理缺少账号直接会话信息或路由依据的旧分类，邀请处理区分直接会话标记。
+  Matrix no longer treats a two-member room as a direct chat solely by member count, preserving mention requirements for ordinary small groups. Startup discards stale classifications without account direct-chat data or routing evidence, and invitation handling distinguishes direct-chat flags.
+
+### Compatibility / 兼容性
+
+- 更新面板补充 4.27.0 的宿主版本提示：最低基线为 DSH 0.1.7-alpha.1；当前实际验证并在插件元数据中声明的版本仍为 0.1.7-alpha.1，更新宿主版本需另行验证。旧版 DSH 请继续使用 dsh-im 4.25.0；升级后重启 Host 并刷新设置页。
+  Added the 4.27.0 Host-version notice to the update panel. The minimum baseline is DSH 0.1.7-alpha.1; this remains the version actually verified and declared in plugin metadata, while newer Host releases require separate validation. Older DSH users should stay on dsh-im 4.25.0. Restart the Host and refresh settings after upgrading.
+
+### Notes / 使用说明
+
+- Matrix 群聊背景记录默认开启，会在机器人目录的 `matrix-history.json` 中保存本机明文记录，并可能随后发送给模型；请按群成员的隐私预期使用。可通过 `roomContextEnabled: false` 停止新增记录与背景注入，但不会自动删除已有记录。背景按房间共享，不按发言者或 Session 单独分隔，也不是群聊全量历史归档。
+  Matrix room context is enabled by default. Plaintext records are stored locally in the bot's `matrix-history.json` and may later be sent to the model; use according to participants' privacy expectations. `roomContextEnabled: false` stops new recording and background injection without deleting existing records. Background is shared per room rather than isolated by speaker or Session, and is not a complete room-history archive.
+- Matrix 仍为实验性渠道，本次未进行真实 homeserver／Element 互通测试；4.25.0 所述设备验证、密钥备份、SSSS 和附件加密限制仍然适用。
+  Matrix remains experimental, with no live homeserver/Element interoperability test in this release. The device-verification, key-backup, SSSS, and attachment-encryption limitations documented for 4.25.0 still apply.
 
 ## [4.26.0] - 2026-09-23
 
@@ -1249,7 +1290,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.26.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.28.0...HEAD
+[4.28.0]: https://github.com/xmanrui/dsh-im/compare/v4.27.0...v4.28.0
+[4.27.0]: https://github.com/xmanrui/dsh-im/compare/v4.26.0...v4.27.0
 [4.26.0]: https://github.com/xmanrui/dsh-im/compare/v4.25.0...v4.26.0
 [4.25.0]: https://github.com/xmanrui/dsh-im/compare/v4.24.1...v4.25.0
 [4.24.1]: https://github.com/xmanrui/dsh-im/compare/v4.24.0...v4.24.1
