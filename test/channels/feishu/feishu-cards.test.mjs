@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   answeredQuestionCard,
+  countMarkdownTables,
+  splitStepStreamCardBlocks,
+  stepStreamCard,
+  STEP_STREAM_CARD_MAX_TABLES,
   cardActionProbeCard,
   completionCard,
   customSteerCard,
@@ -287,4 +291,188 @@ test('issue #162: answeredQuestionCard 无任何按钮且标注已选项', () =>
   assert.ok(!json.includes('"tag":"button"'), '已答状态卡不得含可点按钮');
   assert.ok(json.includes('已回答') && json.includes('✅ 已选择：B'));
   assert.ok(json.includes('A') && json.includes('B'), '选项列表保留');
+});
+
+test('a card is split once it would carry more tables than Feishu accepts', () => {
+  // Feishu rejects the whole card write with `230099 / ErrCode 11310 card table
+  // number over limit` when one card holds too many tables, and the card then
+  // stays on its previous content — so the reply never appears. Splitting was
+  // budgeted by encoded bytes only, which a card full of short tables passes
+  // easily.
+  const table = (n) => ({ text: `| T${n} |\n| --- |\n| v |` });
+  const chunks = splitStepStreamCardBlocks(Array.from({ length: 6 }, (_, i) => table(i)));
+  assert.ok(chunks.length > 1, 'six tables must not stay on one card');
+  for (const chunk of chunks) {
+    const tables = chunk.reduce((sum, block) => sum + countMarkdownTables(block.text), 0);
+    assert.ok(
+      tables <= STEP_STREAM_CARD_MAX_TABLES,
+      `a card carried ${tables} tables, above the limit`,
+    );
+  }
+  // Nothing is dropped while splitting.
+  const total = chunks.flat().length;
+  assert.equal(total, 6, 'every block survives the split');
+});
+
+test('tables inside a folded process panel count toward the limit', () => {
+  // The maintainer's boundary test: 3 folded + 2 in the body succeeded, while
+  // 3 folded + 3 failed — the panel's tables are part of the same card.
+  const table = (n) => `| T${n} |\n| --- |\n| v |\n`;
+  const blocks = [
+    { kind: 'notes', lines: [table(1), table(2), table(3)] },
+    { text: table(4) },
+    { text: table(5) },
+    { text: table(6) },
+  ];
+  const chunks = splitStepStreamCardBlocks(blocks);
+  assert.ok(chunks.length > 1, 'folded tables must count, so this cannot fit on one card');
+  const countIn = (chunk) => chunk.reduce((sum, block) => (
+    sum
+    + (typeof block.text === 'string' ? countMarkdownTables(block.text) : 0)
+    + (Array.isArray(block.lines)
+      ? block.lines.reduce((n, line) => n + countMarkdownTables(line), 0) : 0)
+  ), 0);
+  for (const chunk of chunks) {
+    assert.ok(countIn(chunk) <= STEP_STREAM_CARD_MAX_TABLES, 'no chunk exceeds the table limit');
+  }
+});
+
+test('countMarkdownTables reads GFM tables and ignores pipe-shaped prose', () => {
+  assert.equal(countMarkdownTables(''), 0);
+  assert.equal(countMarkdownTables('普通文本，没有表格'), 0);
+  assert.equal(countMarkdownTables('a | b 只是文字\n下一行'), 0);
+  assert.equal(countMarkdownTables('| A | B |\n| --- | --- |\n| 1 | 2 |'), 1);
+  assert.equal(countMarkdownTables('| A |\n| --- |\n| 1 |'), 1, 'a single-column table still counts');
+  assert.equal(countMarkdownTables('| A | B |\n|:---|---:|\n| 1 | 2 |'), 1, 'alignment markers are fine');
+  assert.equal(
+    countMarkdownTables('| A |\n| --- |\n| 1 |\n\n| B |\n| --- |\n| 2 |'),
+    2,
+    'two tables separated by a blank line',
+  );
+});
+
+test('a single block holding too many tables is split from the inside', () => {
+  // Splitting only between blocks left a short answer with six small tables on
+  // one card: it is a single block, so there was no boundary to cut at.
+  const table = (n) => `| T${n} |\n| --- |\n| v |\n`;
+  const one = { text: Array.from({ length: 6 }, (_, i) => table(i)).join('\n\n') };
+  assert.ok(countMarkdownTables(one.text) > STEP_STREAM_CARD_MAX_TABLES);
+
+  const chunks = splitStepStreamCardBlocks([one]);
+  assert.ok(chunks.length > 1, 'one over-full block must still become several cards');
+  for (const chunk of chunks) {
+    const tables = chunk.reduce((n, b) => n + countMarkdownTables(b.text), 0);
+    assert.ok(tables <= STEP_STREAM_CARD_MAX_TABLES, `a card carried ${tables} tables`);
+  }
+  // No table is severed or dropped.
+  const rebuilt = chunks.flat().map((b) => b.text).join('\n');
+  for (let i = 0; i < 6; i += 1) assert.match(rebuilt, new RegExp(`T${i}`));
+});
+
+test('a folded panel with too many tables is split too', () => {
+  // A panel's lines render into the same card, so its tables count as well.
+  const table = (n) => `| T${n} |\n| --- |\n| v |\n`;
+  const panel = { kind: 'notes', lines: Array.from({ length: 6 }, (_, i) => table(i)) };
+  const chunks = splitStepStreamCardBlocks([panel]);
+  assert.ok(chunks.length > 1, 'an over-full panel must be split');
+  const countIn = (chunk) => chunk.reduce((n, b) => n
+    + (typeof b.text === 'string' ? countMarkdownTables(b.text) : 0)
+    + (Array.isArray(b.lines) ? b.lines.reduce((m, l) => m + countMarkdownTables(l), 0) : 0), 0);
+  for (const chunk of chunks) {
+    assert.ok(countIn(chunk) <= STEP_STREAM_CARD_MAX_TABLES, 'no chunk exceeds the table limit');
+  }
+  const total = chunks.flat().reduce((n, b) => n + (b.lines?.length ?? 0), 0);
+  assert.equal(total, 6, 'every panel line survives the split');
+});
+
+test('table headers and delimiter rows stay in the same markdown element', t => {
+  const tables = Array.from({length:6}, (_,i)=>`| H${i} |\n| --- |\n| V${i} |`);
+  const chunks = splitStepStreamCardBlocks([{kind:'message',text:tables.join('\n\n')}]);
+  const fragments = chunks.flat().map(b=>b.text);
+  const broken = tables.filter(table=>!fragments.some(fragment=>fragment.includes(table)));
+  t.diagnostic(JSON.stringify({cardCount:chunks.length, brokenTables:broken, fragments}));
+  assert.deepEqual(broken, [], 'A complete table must stay in one markdown element');
+});
+test('tables with optional outer pipes omitted still respect the table budget', t => {
+  const source = Array.from({length:6}, (_,i)=>`H${i} | B\n--- | ---\nV${i} | 1`).join('\n\n');
+  const chunks = splitStepStreamCardBlocks([{kind:'message',text:source}]);
+  const counts = chunks.map(chunk=>chunk.reduce((n,b)=>n+countMarkdownTables(b.text),0));
+  t.diagnostic(JSON.stringify({counts}));
+  assert.ok(counts.every(n=>n<=5));
+});
+
+function renderedMarkdown(card) {
+  if (!card || typeof card !== 'object') return [];
+  return [
+    ...(card.tag === 'markdown' ? [card.content] : []),
+    ...Object.values(card).flatMap(value => Array.isArray(value)
+      ? value.flatMap(renderedMarkdown)
+      : renderedMarkdown(value)),
+  ];
+}
+const completeTable = n => `| Item${n} | Value |\n| --- | --- |\n| row${n} | ok |`;
+for (const size of [5, 6, 11]) {
+  test(`table budget preserves all ${size} complete tables in order`, () => {
+    const tables = Array.from({ length: size }, (_, index) => completeTable(index));
+    const source = tables.join('\n\n');
+    const chunks = splitStepStreamCardBlocks([{ kind: 'message', text: source }]);
+    assert.equal(chunks.length, Math.ceil(size / 5));
+    const markdown = chunks.flatMap(chunk => renderedMarkdown(JSON.parse(stepStreamCard(chunk))));
+    for (const table of tables) assert.equal(markdown.filter(text => text.includes(table)).length, 1);
+    const ordered = markdown.join('\n').match(/row\d+/g);
+    assert.deepEqual(ordered, tables.map((_, index) => `row${index}`));
+    for (const chunk of chunks) {
+      const rows = renderedMarkdown(JSON.parse(stepStreamCard(chunk))).join('\n').match(/row\d+/g) ?? [];
+      assert.ok(rows.length <= 5);
+    }
+  });
+}
+
+test('Markdown table recognition skips code and keeps GFM variants', () => {
+  const base = completeTable(0);
+  for (const code of [
+    `\x60\x60\x60markdown\n${base}\n\x60\x60\x60`,
+    `~~~~\n${base}\n~~~~`,
+    base.split('\n').map(line => `    ${line}`).join('\n'),
+    base.split('\n').map(line => `\t${line}`).join('\n'),
+    '| --- | --- |',
+  ]) assert.equal(countMarkdownTables(code), 0, code);
+  for (const source of [
+    '| A |\n| --- |\n| 1 |',
+    'A | B\r\n:--- | ---:\r\n1 | 2',
+    '| A\\|B | C |\n| --- | --- |\n| 1 | 2 |',
+    '| `A|B` | C |\n| --- | --- |\n| 1 | 2 |',
+    '| A | B |\n| --- | --- |\n| --- | --- |\n| 1 | 2 |',
+  ]) assert.equal(countMarkdownTables(source), 1, source);
+});
+
+for (const sizes of [[6], [3, 3], [1, 1, 1, 1, 1, 1]]) {
+  test(`notes with table groups ${sizes.join('+')} split without mutating the source`, () => {
+    let index = 0;
+    const lines = sizes.map(size => Array.from({ length: size }, () => completeTable(index++)).join('\n\n') + '\n');
+    const block = { kind: 'notes', lines: ['opening text', ...lines, 'closing text'], omitted: 4 };
+    const snapshot = structuredClone(block);
+    const chunks = splitStepStreamCardBlocks([block]);
+    assert.ok(chunks.length > 1);
+    const markdown = chunks.flatMap(chunk => renderedMarkdown(JSON.parse(stepStreamCard(chunk))));
+    for (let n = 0; n < index; n++) assert.equal(markdown.filter(text => text.includes(completeTable(n))).length, 1);
+    for (const chunk of chunks) {
+      const rows = renderedMarkdown(JSON.parse(stepStreamCard(chunk))).join('\n').match(/row\d+/g) ?? [];
+      assert.ok(rows.length <= 5);
+    }
+    assert.deepEqual(block, snapshot);
+    assert.equal(chunks.flat().reduce((sum, b) => sum + (b.omitted ?? 0), 0), 4);
+    assert.ok(markdown.join('\n').indexOf('opening text') < markdown.join('\n').indexOf('closing text'));
+  });
+}
+
+test('table and encoded-byte budgets both constrain cards', () => {
+  const blocks = Array.from({ length: 11 }, (_, index) => ({ text: completeTable(index) }));
+  const chunks = splitStepStreamCardBlocks(blocks, 450);
+  assert.ok(chunks.length > 3);
+  assert.equal(chunks.flat().length, 11);
+  for (const chunk of chunks) {
+    assert.ok(Buffer.byteLength(stepStreamCard(chunk)) <= 450);
+    assert.ok(chunk.length <= 5);
+  }
 });

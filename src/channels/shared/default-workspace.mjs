@@ -21,8 +21,11 @@ export async function sameWorkspacePath(left, right) {
 export async function prepareBotWorkspace(config = {}) {
   const ungroupedWorkspace = defaultImWorkspace(config);
   const defaultWorkspace = resolve(config.workspace ?? ungroupedWorkspace);
-  if (await sameWorkspacePath(defaultWorkspace, ungroupedWorkspace)) {
-    await mkdir(defaultWorkspace, { recursive: true });
-  }
   return { defaultWorkspace, ungroupedWorkspace };
+}
+
+export async function ensureImWorkspaceDirectory(workspace, ungroupedWorkspace) {
+  if (await sameWorkspacePath(workspace, ungroupedWorkspace)) {
+    await mkdir(workspace, { recursive: true });
+  }
 }

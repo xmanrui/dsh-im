@@ -11,7 +11,7 @@
   <p>
     <img src="https://dsh-im-random-badge.xmanrui-dsh-im.workers.dev" alt="滑动变祖器：今天是梁子或今天是梁圣（随机）">
     <a href="LICENSE"><img src="https://img.shields.io/github/license/xmanrui/dsh-im" alt="MIT license"></a>
-    <a href="#recognition"><img src="https://img.shields.io/badge/DeepSeek%20Harness-Official%20Recognition-4176E6?style=flat" alt="DeepSeek Harness Official Recognition"></a>
+    <a href="#recognition"><img src="https://img.shields.io/badge/DeepSeek%20Harness-Official%20Sponsorship-4176E6?style=flat" alt="DeepSeek Harness Official Sponsorship"></a>
     <a href="https://deepseek1024.com/"><img src="https://img.shields.io/badge/deepseek1024-Top%2010%20Downloads-D97706?style=flat" alt="deepseek1024 Top 10 Downloads"></a>
     <a href="https://dshfind.com/zh/plugins/xmanrui/dsh-im"><img src="https://img.shields.io/badge/dshfind-%E5%88%86%E7%B1%BB%E7%AC%AC%E4%B8%80-d97706" alt="dshfind: 分类第一"></a>
     <a href="https://dshfind.com/zh/plugins/xmanrui/dsh-im?ref=badge"><img src="https://dshfind.com/api/badge/xmanrui/dsh-im?metric=downloads&amp;lang=zh" alt="dshfind downloads"></a>
@@ -38,7 +38,7 @@
 <a id="recognition"></a>
 
 > [!NOTE]
-> **DSH-IM has received official recognition from DeepSeek Harness**, along with an award of **RMB 1,000 in token credits**. Thank you to the DeepSeek Harness team for recognizing and supporting this project!
+> **DSH-IM has received official sponsorship from DeepSeek Harness** in the form of **RMB 1,000 in token credits**. Thank you to the DeepSeek Harness team for supporting this project!
 
 ## Introduction
 
@@ -145,12 +145,12 @@ Use the proxy URL required by your network and restart the Host after changing i
 | Default behavior | Description |
 | --- | --- |
 | Bot alias | Click the pencil beside a bot name to set an alias. Saving updates the display immediately, without restarting or reconnecting. The original name is retained; choose “Restore original name” or save an empty alias to restore it. Aliases only affect names shown in the local settings page. |
-| Bot workspace | Each bot stores its workspace independently. New bots use `$DSH_HOME/im` (`~/.dsh/im` when unset); the directory is created automatically and new sessions appear under Ungrouped. Change it later from the bot card. An explicit `workspace` takes precedence, and `dshHome` overrides the `DSH_HOME` environment variable. |
+| Bot workspace | Each bot stores its workspace independently. New bots use `$DSH_HOME/im` (`~/.dsh/im` when unset); the directory is created when a bot or conversation selects it. Starting the plugin does not create it when all bots and conversations use other workspaces. New sessions appear under Ungrouped. Change it later from the bot card. An explicit `workspace` takes precedence, and `dshHome` overrides the `DSH_HOME` environment variable. |
 | Model | Every bot in each IM channel can choose a model directly below its workspace, or follow the Host default. A change applies only to later new Sessions; send `/new` and then an ordinary message in the current chat to use it. |
 | Reasoning effort | Explicitly choose an effort supported by the selected model, or follow the model default. Levels, descriptions, and defaults come from DSH. Switching models restores the new model's default effort. Each bot saves its own choice, which applies only to later new Sessions. |
 | Agent Preset | Each bot can choose an Agent Preset on its settings card. When none is chosen, new Sessions follow the Host's `agent-presets.default`. A channel-level `config.agentPreset` is only the default for later new bots on that channel. Changing the preset never modifies or clears existing Sessions; if the current chat already has a Session, send `/new` and then a regular message to create one with the new selection. |
 | Context enhancement | Open settings from a bot card to enable groups and DMs independently. Both switches default to off, including for existing bots after an upgrade. |
-| Feishu task progress display | Each Feishu bot can hide progress or use Live process, Live process card, or step-by-step messages. Live process uses Feishu's native thinking-process surface for reasoning, tool calls, and results, then sends the final answer separately. It requires Feishu desktop 7.70, mobile 7.74, or newer. |
+| Feishu task progress display | Each Feishu bot can hide progress or use Live process, Live process card, or step-by-step messages. Live process uses Feishu's native thinking-process surface for reasoning, tool calls, and results, then sends the final answer separately. It requires Feishu desktop 7.70, mobile 7.74, or newer. Feishu's native thinking process currently cannot be posted inside a topic, so turns in a topic use the Live process card instead and keep the process and the answer in the topic. |
 | Session channel identity | Sessions from the local Host's IM channels and AI Office are marked with their source. The Web Session list and search results display channel logos in place of prefixes such as “WeChat ·”, preserving DSH's automatic title generation and updates. Existing Sessions receive the prefix when next loaded. |
 
 Channel prefixes are appended after DSH produces a title, preserving its complete text and automatic/manual source without pinning automatic titles or making additional model calls. Regeneration, refresh, and restarts do not stack prefixes; actual manual renames retain DSH's normal pinning behavior. This feature uses the current Host's Session events; an explicit remote `harnessBaseUrl` requires the plugin on the destination Host.

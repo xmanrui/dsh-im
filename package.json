@@ -1,6 +1,6 @@
 {
   "name": "@xmanrui/dsh-im",
-  "version": "4.27.0",
+  "version": "4.28.0",
   "description": "把十二种 IM 渠道和公网 AI Office 接入本机 DeepSeek Harness。 Connect twelve IM channels and a public AI Office to a local DeepSeek Harness.",
   "keywords": [
     "deepseek-harness",

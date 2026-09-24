@@ -9040,6 +9040,78 @@ test('step push live_cot mode uses Feishu native process and sends the final ans
   assert.ok(!sent.at(-1).includes('PROCESS_MARKER_9f3a'));
 });
 
+test('step push live_cot mode keeps a topic turn inside the topic with the process card', async () => {
+  const fixture = stateFixture();
+  const cotCreates = [];
+  const replies = [];
+  const creates = [];
+  const patches = [];
+  const progressModes = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const channel = {
+    ...stepPushChannel(),
+    createCot: async (chatId, options) => {
+      cotCreates.push({ chatId, options });
+      return { cotId: 'cot-topic', messageId: 'om-cot-topic' };
+    },
+    writeCotEvents: async () => {},
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: { im: { v1: { message: {
+      reply: async (request) => {
+        replies.push({
+          msgType: request.data.msg_type,
+          replyInThread: request.data.reply_in_thread === true,
+          messageId: request.path.message_id,
+        });
+        return { code: 0, data: { message_id: `om_topic_r_${replies.length}` } };
+      },
+      create: async (request) => {
+        creates.push(request.data.msg_type);
+        return { code: 0, data: { message_id: `om_topic_c_${creates.length}` } };
+      },
+      patch: async (request) => {
+        patches.push(JSON.parse(request.data.content));
+        return { code: 0, data: {} };
+      },
+    } } } },
+    channel,
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      progressModes.push(options.progressMode);
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      return '话题内的最终答案';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    groupTopicReply: true,
+    stepPush: true,
+    stepPushMode: 'live_cot',
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_live_topic', '处理话题任务', {
+    chat_type: 'group',
+    thread_id: 'omt_topic',
+    mentions: [{ id: { open_id: 'ou_bot' }, key: '@_user_1' }],
+  }));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(cotCreates, [], 'the native process cannot target a topic, so it is not opened');
+  assert.deepEqual(progressModes, ['all']);
+  assert.ok(replies.length >= 1, 'the process card is delivered as a reply');
+  for (const reply of replies) {
+    assert.equal(reply.msgType, 'interactive', 'the topic turn uses the process card');
+    assert.equal(reply.replyInThread, true, 'the process card stays inside the topic');
+    assert.equal(reply.messageId, 'om_live_topic');
+  }
+  assert.deepEqual(creates, [], 'nothing is posted to the main group feed');
+  assert.ok(
+    JSON.stringify(patches.at(-1) ?? {}).includes('话题内的最终答案'),
+    'the final answer is sealed inside the topic card',
+  );
+});
+
 test('step push: tools and assistant notes push as discrete messages, final answer only in card', async () => {
   const fixture = stateFixture();
   const sent = [];
@@ -11781,3 +11853,414 @@ test('reference-only topic messages retain their content even after anchor injec
   assert.equal(f.asked.length, 2);
   assert.ok(hasAnchor(f.asked[1].text));
 });
+
+
+test('a p2p message with no body opens the menu instead of a text-only notice', async () => {
+  // An "@bot" with nothing after it arrives with an empty body once the mention
+  // is stripped. There is no instruction to parse, and the reader is plainly
+  // reaching for the panel — answering with "text only" reads as a refusal.
+  const created = [];
+  const replied = [];
+  const seen = new Set();
+  const bridge = new FeishuHarnessBridge({
+    client: {
+      im: { v1: { message: {
+        create: async (request) => {
+          created.push({
+            type: request.data.msg_type,
+            text: request.data.msg_type === 'text'
+              ? JSON.parse(request.data.content).text
+              : null,
+          });
+          return { code: 0, data: { message_id: `om_created_${created.length}` } };
+        },
+        reply: async (request) => {
+          replied.push({
+            to: request.path.message_id,
+            type: request.data.msg_type,
+            text: request.data.msg_type === 'text'
+              ? JSON.parse(request.data.content).text
+              : null,
+          });
+          return { code: 0, data: { message_id: `om_replied_${replied.length}` } };
+        },
+      } } },
+    },
+    harness: {
+      ensureRunning: async () => true,
+      bindWorkspaceSession: async (key, sessionId) => ({ sessionId, title: 'Test Session' }),
+    },
+    state: {
+      hasSeen: (id) => seen.has(id),
+      markSeen: async (id) => seen.add(id),
+      sessionFor: () => null,
+      setSession: async () => {},
+      clearSession: async () => {},
+    },
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+  });
+
+  await bridge.accept(event('om_empty', '@_user_1', {
+    mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' } }],
+  }));
+  await eventually(
+    () => replied.length >= 1,
+    'the empty p2p message produced no reply',
+  );
+
+  const card = replied.find((item) => item.type === 'interactive');
+  assert.ok(card, 'the menu card is sent as an interactive message');
+  assert.equal(
+    replied.some(({ text }) => text?.includes('目前支持文字、图片和文件消息')),
+    false,
+    'the text-only notice is not sent for a p2p message',
+  );
+});
+
+test('a bare mention opens the menu only when commands are allowed', async () => {
+  // Opening the menu on `@bot` is `/m` by another route, so it has to clear the
+  // same command gate. Treating the empty body as ordinary chat let a sender
+  // without `canExecuteCommands` receive a menu carrying workspace paths and
+  // other session titles.
+  const replied = [];
+  const seen = new Set();
+  const bridge = new FeishuHarnessBridge({
+    client: {
+      im: { v1: { message: {
+        create: async () => ({ code: 0, data: { message_id: 'om_created' } }),
+        reply: async (request) => {
+          replied.push({
+            type: request.data.msg_type,
+            text: request.data.msg_type === 'text'
+              ? JSON.parse(request.data.content).text
+              : null,
+          });
+          return { code: 0, data: { message_id: `om_replied_${replied.length}` } };
+        },
+      } } },
+    },
+    harness: {
+      ensureRunning: async () => true,
+      bindWorkspaceSession: async (key, sessionId) => ({ sessionId, title: 'Test Session' }),
+    },
+    state: {
+      hasSeen: (id) => seen.has(id),
+      markSeen: async (id) => seen.add(id),
+      sessionFor: () => null,
+      setSession: async () => {},
+      clearSession: async () => {},
+    },
+    status: bridgeStatus(),
+    accessPolicy: directAccessPolicy({
+      users: [{ id: 'ou_user', canExecuteCommands: false }],
+    }),
+  });
+
+  await bridge.accept(event('om_bare', '@_user_1', {
+    mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' } }],
+  }));
+  await eventually(() => replied.length >= 1, 'the bare mention produced no reply');
+
+  assert.equal(
+    replied.some(({ type }) => type === 'interactive'),
+    false,
+    'the menu card must not be sent to a sender who cannot execute commands',
+  );
+  assert.equal(
+    replied.some(({ text }) => text?.includes('命令') || text?.includes('权限')),
+    true,
+    'the command-permission denial is reported instead',
+  );
+});
+
+test('/m and a bare mention are refused the same way', async () => {
+  // The two routes must agree, or the gate is only as strong as its weakest
+  // entry point.
+  const run = async (text, overrides = {}) => {
+    const replied = [];
+    const seen = new Set();
+    const bridge = new FeishuHarnessBridge({
+      client: {
+        im: { v1: { message: {
+          create: async () => ({ code: 0, data: { message_id: 'om_created' } }),
+          reply: async (request) => {
+            replied.push({
+              type: request.data.msg_type,
+              text: request.data.msg_type === 'text'
+                ? JSON.parse(request.data.content).text : null,
+            });
+            return { code: 0, data: { message_id: `om_${replied.length}` } };
+          },
+        } } },
+      },
+      harness: { ensureRunning: async () => true },
+      state: {
+        hasSeen: (id) => seen.has(id),
+        markSeen: async (id) => seen.add(id),
+        sessionFor: () => null,
+        setSession: async () => {},
+        clearSession: async () => {},
+      },
+      status: bridgeStatus(),
+      accessPolicy: directAccessPolicy({
+        users: [{ id: 'ou_user', canExecuteCommands: false }],
+      }),
+    });
+    await bridge.accept(event(`om_${text || 'bare'}`, text, overrides));
+    await eventually(() => replied.length >= 1, 'no reply for a denied command');
+    return replied.some(({ type }) => type === 'interactive');
+  };
+
+  const slashMenu = await run('/m');
+  const bareMention = await run('@_user_1', {
+    mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' } }],
+  });
+  assert.equal(slashMenu, false, '/m must be denied');
+  assert.equal(bareMention, false, 'a bare mention must be denied too');
+});
+
+test('a non-text message keeps its own notice instead of opening the menu', async () => {
+  // A voice note, video or sticker has no text to parse. Opening the menu for it
+  // would silently swallow the "not supported" notice the reader needs.
+  const replied = [];
+  const seen = new Set();
+  const bridge = new FeishuHarnessBridge({
+    client: {
+      im: { v1: { message: {
+        create: async () => ({ code: 0, data: { message_id: 'om_created' } }),
+        reply: async (request) => {
+          replied.push({
+            type: request.data.msg_type,
+            text: request.data.msg_type === 'text'
+              ? JSON.parse(request.data.content).text : null,
+          });
+          return { code: 0, data: { message_id: `om_${replied.length}` } };
+        },
+      } } },
+    },
+    harness: { ensureRunning: async () => true },
+    state: {
+      hasSeen: (id) => seen.has(id),
+      markSeen: async (id) => seen.add(id),
+      sessionFor: () => null,
+      setSession: async () => {},
+      clearSession: async () => {},
+    },
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+  });
+
+  for (const [messageType, content] of [
+    ['audio', { file_key: 'file_voice', duration: 1000 }],
+    ['media', { file_key: 'file_video', file_name: 'clip.mp4' }],
+    ['sticker', { file_key: 'file_sticker' }],
+    ['interactive', { elements: [[{ tag: 'img', image_key: 'img_only' }]] }],
+  ]) {
+    const previousReplies = replied.length;
+    await bridge.accept(event(`om_${messageType}`, '', {
+      message_type: messageType,
+      content: JSON.stringify(content),
+    }));
+    assert.equal(replied.length, previousReplies + 1, `${messageType} receives one reply`);
+    assert.equal(replied.at(-1).type, 'text', `${messageType} must not open the menu`);
+    assert.match(replied.at(-1).text, /目前支持文字、图片和文件消息/);
+  }
+});
+
+for (const referenceField of ['parent_id', 'root_id']) {
+  test(`a quoted bare mention remains ordinary chat without command permission (${referenceField})`, async () => {
+    const fixture = stateFixture([['p2p:ou_user', 'session-quoted-mention']]);
+    const lookups = [];
+    const asked = [];
+    const sent = [];
+    const send = async (request) => {
+      sent.push({ type: request.data.msg_type, body: JSON.parse(request.data.content) });
+      return { code: 0, data: { message_id: `om_reply_${sent.length}` } };
+    };
+    const bridge = new FeishuHarnessBridge({
+      client: { im: { v1: { message: {
+        create: send,
+        reply: send,
+        get: async (request) => {
+          lookups.push(request.path.message_id);
+          return { code: 0, data: { items: [{
+            message_id: 'om_quoted',
+            chat_id: 'oc_chat',
+            msg_type: 'text',
+            body: { content: JSON.stringify({ text: '引用的正文 PR254' }) },
+          }] } };
+        },
+      } } } },
+      channel: {},
+      harness: {
+        sessionExists: async () => true,
+        ask: async (sessionId, content) => {
+          asked.push({ sessionId, content });
+          return '引用内容已收到';
+        },
+        listWorkspaces: async () => assert.fail('ordinary chat must not read menu data'),
+      },
+      state: fixture.state,
+      status: bridgeStatus(),
+      accessPolicy: directAccessPolicy({
+        users: [{ id: 'ou_user', canExecuteCommands: false }],
+      }),
+    });
+
+    await bridge.accept(event(`om_mention_${referenceField}`, '@_user_1', {
+      mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' } }],
+      [referenceField]: 'om_quoted',
+    }));
+    await bridge.waitForIdle();
+
+    assert.deepEqual(lookups, ['om_quoted']);
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0].sessionId, 'session-quoted-mention');
+    assert.match(JSON.stringify(asked[0].content), /引用的正文 PR254/);
+    assert.deepEqual(sent, [{ type: 'text', body: { text: '引用内容已收到' } }]);
+    assert.equal(fixture.sessions.get('p2p:ou_user'), 'session-quoted-mention');
+  });
+}
+
+// PR #255: exercise real step-card input shapes and delivered message IDs.
+const reviewTable = n => `### T${n}\n\n| A | B |\n| --- | --- |\n| ${n} | ok |`;
+const reviewTables = (n, start=0) => Array.from({length:n}, (_,i)=>reviewTable(i+start)).join('\n\n');
+const tick = () => new Promise(resolve=>setImmediate(resolve));
+function renderedTableCount(card) {
+  if (!card || typeof card !== 'object') return 0;
+  let n = card.tag === 'markdown' ? (card.content.match(/^\| --- \| --- \|$/gm) ?? []).length : 0;
+  for (const value of Object.values(card)) {
+    if (Array.isArray(value)) n += value.reduce((sum, x)=>sum+renderedTableCount(x),0);
+    else if (value && typeof value === 'object') n += renderedTableCount(value);
+  }
+  return n;
+}
+for (const scenario of [
+  {
+    name: '3 folded + 3 answer with a tool between them',
+    run: async options => {
+      await options.onUpdate({type:'assistant-message',step:0,text:reviewTables(3)}); await tick();
+      await options.onUpdate({type:'tool',name:'bash',arguments:'{"command":"pwd"}'}); await tick();
+      await options.onUpdate({type:'assistant-message',step:1,text:reviewTables(3,3)}); await tick();
+      return reviewTables(3,3);
+    },
+  },
+  {
+    name: 'one short answer containing 6 tables',
+    run: async options => {
+      await options.onUpdate({type:'tool',name:'bash',arguments:'{"command":"pwd"}'}); await tick();
+      await options.onUpdate({type:'assistant-message',step:0,text:reviewTables(6)}); await tick();
+      return reviewTables(6);
+    },
+  },
+  {
+    name: 'three consecutive assistant steps containing 3 tables each',
+    run: async options => {
+      for (let step=0;step<3;step++) {
+        await options.onUpdate({type:'assistant-message',step,text:reviewTables(3,3*step)}); await tick();
+      }
+      return reviewTables(3,6);
+    },
+  },
+]) {
+  test(scenario.name, async t => {
+    const fx=stepCardClient();
+    const rejected=[];
+    const warnings=[];
+    for (const method of ['create','reply','patch']) {
+      const original=fx.client.im.v1.message[method];
+      fx.client.im.v1.message[method]=async request=>{
+        if (method==='patch' || request.data.msg_type==='interactive') {
+          const count=renderedTableCount(JSON.parse(request.data.content));
+          if (count>5) {
+            rejected.push({method,count});
+            return {code:230099,msg:'ErrCode: 11310; card table number over limit'};
+          }
+        }
+        return original(request);
+      };
+    }
+    const bridge=new FeishuHarnessBridge({
+      client:fx.client,channel:stepPushChannel(),harness:stepPushHarness(async(_id,_text,options)=>scenario.run(options)),
+      state:stateFixture().state,status:bridgeStatus(),allowedSenderOpenIds:new Set(['ou_user']),
+      stepPush:true,stepPushMode:'streaming_card',stepPushClock:stepPushClockFixture().stepPushClock,
+      logger:{warn:(...args)=>warnings.push(args.join(' ')),info:()=>{},debug:()=>{}},
+    });
+    await bridge.accept(event('om_review_255','检查多表格'));
+    await bridge.waitForIdle();
+    const finalCards=deliveredCardContents(fx.interactiveCreates,fx.patches,fx.ids);
+    const missingTables=scenario.name.startsWith('three consecutive') ? Array.from({length:9},(_,i)=>`### T${i}`).filter(marker=>!finalCards.join('\n').includes(marker)) : [];
+    t.diagnostic(JSON.stringify({missingTables, rejected,finalCardCount:finalCards.length,stuckRunning:finalCards.some(x=>x.includes('_运行中_')),fallbackPosts:fx.text.length,warnings}));
+    assert.deepEqual(rejected, [], 'Every card sent to Feishu must stay within the 5-table limit');
+    assert.deepEqual(missingTables, [], 'All folded process tables must remain visible in the delivered cards');
+  });
+}
+
+test('repatching cards after an approval must preserve pre-approval cards', async t => {
+  const fx=stepCardClient();
+  const bridge=new FeishuHarnessBridge({
+    client:fx.client,channel:stepPushChannel(),
+    harness:stepPushHarness(async(_id,_text,options)=>{
+      await options.onUpdate({type:'tool',name:'bash',arguments:'{"command":"BEFORE_ROTATION_MARKER"}'}); await tick();
+      await options.onInteraction({kind:'approval',payload:{}}); await tick();
+      await options.onUpdate({type:'assistant-message',step:0,text:reviewTables(6)}); await tick();
+      await options.onUpdate({type:'assistant-message',step:0,text:reviewTables(6)}); await tick();
+      return reviewTables(6);
+    }),
+    state:stateFixture().state,status:bridgeStatus(),allowedSenderOpenIds:new Set(['ou_user']),
+    stepPush:true,stepPushMode:'streaming_card',stepPushClock:stepPushClockFixture().stepPushClock,
+    logger:{warn:()=>{},info:()=>{},debug:()=>{}},
+  });
+  await bridge.accept(event('om_review_rotation','检查交互换卡'));
+  await bridge.waitForIdle();
+  const finalCards=deliveredCardContents(fx.interactiveCreates,fx.patches,fx.ids);
+  const before=JSON.stringify(fx.interactiveCreates[0]);
+  t.diagnostic(JSON.stringify({ids:fx.ids,beforeHadMarker:before.includes('BEFORE_ROTATION_MARKER'),afterHadMarker:finalCards[0].includes('BEFORE_ROTATION_MARKER'),patchTargets:fx.patches.map(p=>p.messageId)}));
+  assert.ok(before.includes('BEFORE_ROTATION_MARKER'));
+  assert.ok(finalCards[0].includes('BEFORE_ROTATION_MARKER'),'The original card must not be overwritten by a post-approval chunk');
+});
+
+for (const scenario of ['final rewrite', 'shrink and regrow', 'unchanged draft']) {
+  test(`step cards synchronize every existing chunk: ${scenario}`, async () => {
+    const fx = stepCardClient();
+    const initial = reviewTables(6);
+    const final = initial.replaceAll('T', 'FINAL_T');
+    const bridge = new FeishuHarnessBridge({
+      client: fx.client, channel: stepPushChannel(),
+      harness: stepPushHarness(async (_id, _text, options) => {
+        const draft = { type: 'assistant-message', step: 0, text: initial };
+        await options.onUpdate(draft);
+        await tick();
+        assert.equal(fx.ids.length, 2);
+        if (scenario === 'shrink and regrow') {
+          await options.onUpdate({ type: 'assistant-message', step: 0, text: 'SHORT_ANSWER' });
+          await tick();
+          const shrunk = deliveredCardContents(fx.interactiveCreates, fx.patches, fx.ids);
+          assert.doesNotMatch(shrunk.join('\n'), /### T/);
+          assert.match(shrunk.at(-1), /SHORT_ANSWER/);
+          await options.onUpdate({ type: 'assistant-message', step: 0, text: final });
+          await tick();
+          assert.equal(fx.ids.length, 2, 'existing cleared cards are reused');
+        } else if (scenario === 'unchanged draft') {
+          const previous = fx.patches.length;
+          await options.onUpdate(draft);
+          await tick();
+          assert.equal(fx.patches.length, previous, 'unchanged contents must not be patched');
+        }
+        // Supply changed delivery text after the draft render, exercising seal.
+        draft.text = final;
+        return final;
+      }),
+      state: stateFixture().state, status: bridgeStatus(), allowedSenderOpenIds: new Set(['ou_user']),
+      stepPush: true, stepPushMode: 'streaming_card', stepPushClock: stepPushClockFixture().stepPushClock,
+    });
+    await bridge.accept(event('om_sync_all_chunks', '检查所有分片'));
+    await bridge.waitForIdle();
+    const delivered = deliveredCardContents(fx.interactiveCreates, fx.patches, fx.ids);
+    assert.doesNotMatch(delivered.join('\n'), /### T|SHORT_ANSWER|_运行中_/);
+    for (let n = 0; n < 6; n++) assert.equal(delivered.join('\n').split(`### FINAL_T${n}`).length - 1, 1);
+    assert.match(delivered.at(-1), /_已完成_/);
+    assert.deepEqual(fx.text, []);
+  });
+}

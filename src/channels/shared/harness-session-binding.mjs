@@ -1,3 +1,4 @@
+import { mkdir } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 
 const MAX_SESSION_ID_LENGTH = 256;
@@ -98,6 +99,9 @@ export async function adoptRegisteredWorkspaceSession(client, value, options = {
       throw bindingError('session-not-registered', 'The session is not registered to a Harness workspace');
     }
     workspace = { path: summary.cwd };
+  }
+  if (await client.isUngroupedWorkspace?.(workspace.path)) {
+    await mkdir(workspace.path, { recursive: true });
   }
   const adopted = await client.rpc('session.create', {
     ...(workspace.workspaceId ? { workspaceId: workspace.workspaceId } : { cwd: workspace.path }),
