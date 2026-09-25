@@ -5256,6 +5256,9 @@ export class FeishuHarnessBridge {
           providerMessageIds: seal.cardIds,
         });
         this.#status.streamResponses = (this.#status.streamResponses ?? 0) + 1;
+        // 流式卡封存成功也是完整答案投递:文本进了卡片,语音回合同样要
+        // 在此消费并合成音频回复——否则语音消息只得到卡片、没有声音。
+        await this.#maybeSendVoiceReply(chatId, deliveryText, messageId);
         const delivery = await this.#deliverArtifacts(
           chatId,
           messageId,
