@@ -17,6 +17,10 @@ function runFfmpeg(bin, args) {
     const p = spawn(bin, ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
     let err = '';
     p.stderr.on('data', (d) => { err += d; if (err.length > 2000) err = err.slice(-2000); });
+    // 启动失败(未安装 ffmpeg、配置路径不存在或不可执行)时 spawn 触发
+    // 'error' 事件而非 'close';不监听会让未处理的 ENOENT 异常击穿 Node 进程。
+    // 这里改为正常 reject,由外层的转写/合成失败降级统一兜底。
+    p.on('error', reject);
     p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}: ${err.slice(-300)}`))));
   });
 }

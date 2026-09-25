@@ -17,6 +17,19 @@ function audioEvent(messageId, fileKey) {
   };
 }
 
+function textEvent(messageId, text) {
+  return {
+    sender: { sender_type: 'user', sender_id: { open_id: 'ou_user' } },
+    message: {
+      message_id: messageId,
+      message_type: 'text',
+      chat_type: 'p2p',
+      chat_id: 'oc_chat',
+      content: JSON.stringify({ text }),
+    },
+  };
+}
+
 function stateFixture() {
   const sessions = new Map();
   const seen = new Set();
@@ -102,6 +115,7 @@ function runBridge({ voice = null, replyThrows = false } = {}) {
   const harness = {
     ensureRunning: async () => true,
     createSession: async () => 'session-test',
+    sessionExists: async () => true,
     ask: async (sessionId, text, options) => {
       asked.push({ sessionId, text });
       await options.onUpdate({ type: 'text', text: 'Harness' });
@@ -198,4 +212,44 @@ test('audio reply falls back to a plain audio message when the reply API fails',
     msg_type: 'audio',
     content: JSON.stringify({ file_key: 'file_key_voice' }),
   });
+});
+
+test('a voice transcript handled as a command leaves no voice turn for later messages', async () => {
+  const voice = fakeVoice('/help');
+  const { bridge, creates, uploads, asked, streamed } = runBridge({ voice });
+
+  bridge.accept(audioEvent('om_voice_help', 'file_key_help'));
+  await bridge.waitForIdle();
+
+  // /help 分支提前返回:本回合不产生音频回复(命令类回复不触发语音)。
+  assert.equal(voice.syntheses.length, 0);
+  assert.equal(uploads.length, 0);
+  assert.equal(asked.length, 0);
+
+  bridge.accept(textEvent('om_text_after', '请讲个故事'));
+  await bridge.waitForIdle();
+
+  // 修复前:上一回合遗留的语音状态会让这条普通文字的答案被合成为音频,
+  // 并回复到已经结束的语音消息上。
+  assert.deepEqual(asked, [{ sessionId: 'session-test', text: '请讲个故事' }]);
+  assert.deepEqual(voice.syntheses, []);
+  assert.equal(uploads.length, 0);
+  assert.equal(streamed.length, 1);
+  assert.equal(creates.filter((request) => request.data?.msg_type === 'audio').length, 0);
+});
+
+test('consecutive voice turns in the same chat each voice their own answer', async () => {
+  const voice = fakeVoice('第一个问题');
+  const { bridge, replies, uploads } = runBridge({ voice });
+
+  bridge.accept(audioEvent('om_voice_a', 'file_key_a'));
+  await bridge.waitForIdle();
+  bridge.accept(audioEvent('om_voice_b', 'file_key_b'));
+  await bridge.waitForIdle();
+
+  // 回合状态随各自消息处理结束清理,后一回合不得沿用或覆盖前一回合,
+  // 音频回复必须各自回到发起语音的那条消息上。
+  assert.deepEqual(voice.syntheses, ['Harness reply', 'Harness reply']);
+  assert.equal(uploads.length, 2);
+  assert.deepEqual(replies.map((reply) => reply.path.message_id), ['om_voice_a', 'om_voice_b']);
 });

@@ -731,6 +731,7 @@ export class MultiBotDshFeishuController {
         groupTopicReply: config.groupTopicReply === true,
         stepPush: config.stepPush === true,
         stepPushMode: normalizeFeishuStepPushMode(config.stepPushMode),
+        voice: normalizeFeishuVoiceConfig(config.voice),
         groupMessagePermissionGranted: config.groupMessagePermissionGranted === true,
         bot: publicBot(config),
         connection,
