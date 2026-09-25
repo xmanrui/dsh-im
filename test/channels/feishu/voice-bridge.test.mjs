@@ -75,10 +75,18 @@ function fakeVoice(transcript) {
   return instance;
 }
 
-function runBridge({ voice = null, replyThrows = false } = {}) {
+function runBridge({
+  voice = null,
+  replyThrows = false,
+  stepPush = false,
+  stepPushMode,
+  stepPushClock,
+  askUpdates = [{ type: 'text', text: 'Harness' }],
+} = {}) {
   const creates = [];
   const replies = [];
   const uploads = [];
+  const patches = [];
   const streamed = [];
   const asked = [];
   const client = {
@@ -86,12 +94,16 @@ function runBridge({ voice = null, replyThrows = false } = {}) {
       message: {
         create: async (request) => {
           creates.push(request);
-          return { code: 0 };
+          return { code: 0, data: { message_id: 'om_created' } };
         },
         reply: async (request) => {
           replies.push(request);
           if (replyThrows) throw new Error('reply api unavailable');
           return { code: 0, data: { message_id: 'om_audio_reply' } };
+        },
+        patch: async (request) => {
+          patches.push(request);
+          return { code: 0 };
         },
       },
       file: { create: async (request) => {
@@ -118,7 +130,7 @@ function runBridge({ voice = null, replyThrows = false } = {}) {
     sessionExists: async () => true,
     ask: async (sessionId, text, options) => {
       asked.push({ sessionId, text });
-      await options.onUpdate({ type: 'text', text: 'Harness' });
+      for (const update of askUpdates) await options.onUpdate(update);
       return 'Harness reply';
     },
   };
@@ -131,8 +143,11 @@ function runBridge({ voice = null, replyThrows = false } = {}) {
     status: statusFixture(),
     allowedSenderOpenIds: new Set(['ou_user']),
     voice,
+    stepPush,
+    stepPushMode,
+    stepPushClock,
   });
-  return { bridge, creates, replies, uploads, streamed, asked };
+  return { bridge, creates, replies, uploads, patches, streamed, asked };
 }
 
 test('voice transcripts an audio message into the normal pipeline and replies with audio', async () => {
@@ -252,4 +267,36 @@ test('consecutive voice turns in the same chat each voice their own answer', asy
   assert.deepEqual(voice.syntheses, ['Harness reply', 'Harness reply']);
   assert.equal(uploads.length, 2);
   assert.deepEqual(replies.map((reply) => reply.path.message_id), ['om_voice_a', 'om_voice_b']);
+});
+
+test('a voice turn answered via streaming step card still gets its audio reply', async () => {
+  const voice = fakeVoice('请讲个故事');
+  const { bridge, patches, replies, uploads, asked } = runBridge({
+    voice,
+    stepPush: true,
+    stepPushMode: 'streaming_card',
+    stepPushClock: { now: () => Date.now(), delay: async () => {} },
+    askUpdates: [{ type: 'tool', name: 'search', arguments: { q: '测试' } }],
+  });
+
+  bridge.accept(audioEvent('om_voice_card', 'file_key_card'));
+  await bridge.waitForIdle();
+
+  // 前提:答案确实走流式卡封存路径(卡消息已投递且密封时重绘过),
+  // 而不是悄悄回退到 post/纯文本阶梯——否则本测试测不到目标分支。
+  assert.ok(replies.some((reply) => reply.data?.msg_type === 'interactive'));
+  assert.ok(patches.length >= 1);
+  assert.deepEqual(asked, [{ sessionId: 'session-test', text: '请讲个故事' }]);
+
+  // 修复前:卡封存成功分支提前 return,语音回合未被消费,音频哑火且
+  // 状态泄漏到下一回合。修复后:合成、上传、音频回复原语音消息。
+  assert.deepEqual(voice.syntheses, ['Harness reply']);
+  assert.equal(uploads.length, 1);
+  const audioReplies = replies.filter((reply) => reply.data?.msg_type === 'audio');
+  assert.equal(audioReplies.length, 1);
+  assert.deepEqual(audioReplies[0].path, { message_id: 'om_voice_card' });
+  assert.deepEqual(audioReplies[0].data, {
+    msg_type: 'audio',
+    content: JSON.stringify({ file_key: 'file_key_voice' }),
+  });
 });
