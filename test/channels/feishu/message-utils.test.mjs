@@ -720,3 +720,40 @@ test('isAllowedSender enforces an open-id allowlist', () => {
   assert.equal(isAllowedSender(event, new Set(['ou_other'])), false);
   assert.equal(isAllowedSender(event, new Set(['*'])), true);
 });
+
+test('extractInboundMessage reads the text of a forwarded card', async () => {
+  // A forwarded card arrives as `interactive`. Without a branch for it the text
+  // was dropped, the message looked empty, and the reader got the
+  // "text, image and file only" notice — even though the same extraction is
+  // already used for quoted cards.
+  const event = {
+    message: {
+      message_id: 'om_card',
+      message_type: 'interactive',
+      content: JSON.stringify({
+        card_schema: 2,
+        header: { title: { tag: 'plain_text', content: '系统告警' } },
+        body: {
+          elements: [{ tag: 'div', text: { tag: 'lark_md', content: 'CPU 使用率 95%' } }],
+        },
+      }),
+    },
+  };
+  const message = extractInboundMessage(event, {});
+  assert.match(message.content, /系统告警/, 'the card title is read');
+  assert.match(message.content, /CPU 使用率 95%/, 'the card body is read');
+});
+
+test('a card with no readable text still reports nothing', async () => {
+  // An image-only card genuinely carries no text; it must not invent one.
+  const event = {
+    message: {
+      message_id: 'om_img_card',
+      message_type: 'interactive',
+      content: JSON.stringify({ card_schema: 2, body: { elements: [{ tag: 'img', img_key: 'img_x' }] } }),
+    },
+  };
+  const message = extractInboundMessage(event, {});
+  assert.equal(message.content, '');
+  assert.equal(message.images.length, 0);
+});

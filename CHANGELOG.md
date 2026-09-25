@@ -6,6 +6,24 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.28.0] - 2026-09-24
+
+### Fixed / 修复
+
+- 飞书分步流式卡片按实际表格数量拆分正文与折叠面板，保留完整表格；重新分片时同步已有卡片，并隔离审批前后的卡片，避免超限、内容缺失或覆盖历史过程。感谢 [@C3H3-AI](https://github.com/C3H3-AI)（[#255](https://github.com/xmanrui/dsh-im/pull/255)）。
+  Feishu step-streaming cards split answers and folded panels by their actual table count while preserving complete tables. Existing chunks are synchronized after redistribution, and cards before an interaction remain isolated from later updates. Thanks to [@C3H3-AI](https://github.com/C3H3-AI) ([#255](https://github.com/xmanrui/dsh-im/pull/255)).
+- 飞书支持读取转发卡片中的可见文字，私聊仅提及机器人时可打开菜单，并沿用命令权限检查；语音、视频、表情和无可读文字的卡片保留不支持类型提示。感谢 [@C3H3-AI](https://github.com/C3H3-AI)（[#254](https://github.com/xmanrui/dsh-im/pull/254)）。
+  Feishu now reads visible text from forwarded cards and opens the menu for a bare private mention with command permissions enforced. Unsupported audio, video, stickers, and unreadable cards retain their existing notice. Thanks to [@C3H3-AI](https://github.com/C3H3-AI) ([#254](https://github.com/xmanrui/dsh-im/pull/254)).
+- 修复私聊引用消息后仅提及机器人时，被误判为菜单命令的问题；允许聊天但禁止命令的用户仍可正常提交引用内容。
+  Fixed quoted private mentions being classified as menu commands, so users who may chat but cannot run commands can still submit quoted content.
+
+### Notes / 使用说明
+
+- 多表格修复覆盖分步流式卡片及复用该流程的会话镜像。表格数量拆分保持表头、分隔行和数据完整；原有过程摘要和字节预算仍生效，不新增单个超大表格的分页能力，也不将该路径的表格上限推广到所有飞书接口。
+  The multi-table fixes cover step-streaming cards and Session mirrors using the same rendering path. Table-count splitting preserves headers, separators, and rows; existing process summaries and byte budgets still apply. This does not add pagination for a single oversized table or generalize this path's table limit to every Feishu API.
+- 宿主兼容性声明保持 DSH 0.1.7-alpha.1，未扩展未经验证的版本范围。升级后请重启 Host 并刷新设置页；旧版 DSH 请继续使用对应的历史插件版本。
+  Host compatibility remains declared for DSH 0.1.7-alpha.1 without expanding to unverified versions. Restart the Host and refresh settings after upgrading; older DSH installations should use the corresponding historical plugin version.
+
 ## [4.27.0] - 2026-09-23
 
 ### Added / 新增
@@ -1265,7 +1283,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.27.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.28.0...HEAD
+[4.28.0]: https://github.com/xmanrui/dsh-im/compare/v4.27.0...v4.28.0
 [4.27.0]: https://github.com/xmanrui/dsh-im/compare/v4.26.0...v4.27.0
 [4.26.0]: https://github.com/xmanrui/dsh-im/compare/v4.25.0...v4.26.0
 [4.25.0]: https://github.com/xmanrui/dsh-im/compare/v4.24.1...v4.25.0

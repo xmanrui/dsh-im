@@ -95,7 +95,7 @@ export async function createProductionController(ctx, config = {}, internals = {
   const { defaultWorkspace, ungroupedWorkspace } = await prepareBotWorkspace(config);
   const WorkspaceStore = internals.WorkspaceStore ?? BotWorkspaceStore;
   const workspaces = diagnosticWorkspaces(internals.workspaces
-    ?? await new WorkspaceStore(paths.workspaces, { defaultWorkspace }).load());
+    ?? await new WorkspaceStore(paths.workspaces, { defaultWorkspace, ungroupedWorkspace }).load());
   const configuredBots = configStore.list();
   await workspaces.reconcile(configuredBots.map((bot) => bot.botId));
   await Promise.all(configuredBots.map((bot) => workspaces.ensure(bot.botId, {

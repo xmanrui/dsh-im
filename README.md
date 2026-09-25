@@ -12,7 +12,7 @@
   <p>
     <img src="https://dsh-im-random-badge.xmanrui-dsh-im.workers.dev" alt="滑动变祖器：今天是梁子或今天是梁圣（随机）">
     <a href="LICENSE"><img src="https://img.shields.io/github/license/xmanrui/dsh-im" alt="MIT 许可证"></a>
-    <a href="#recognition"><img src="https://img.shields.io/badge/DeepSeek%20Harness-%E5%AE%98%E6%96%B9%E8%AE%A4%E5%8F%AF-4176E6?style=flat" alt="DeepSeek Harness 官方认可"></a>
+    <a href="#recognition"><img src="https://img.shields.io/badge/DeepSeek%20Harness-%E5%AE%98%E6%96%B9%E8%B5%9E%E5%8A%A9-4176E6?style=flat" alt="DeepSeek Harness 官方赞助"></a>
     <a href="https://deepseek1024.com/"><img src="https://img.shields.io/badge/deepseek1024-%E4%B8%8B%E8%BD%BD%E9%87%8FTop%2010-D97706?style=flat" alt="deepseek1024 下载量Top 10"></a>
     <a href="https://dshfind.com/zh/plugins/xmanrui/dsh-im"><img src="https://img.shields.io/badge/dshfind-%E5%88%86%E7%B1%BB%E7%AC%AC%E4%B8%80-d97706" alt="dshfind: 分类第一"></a>
     <a href="https://dshfind.com/zh/plugins/xmanrui/dsh-im?ref=badge"><img src="https://dshfind.com/api/badge/xmanrui/dsh-im?metric=downloads&amp;lang=zh" alt="dshfind downloads"></a>
@@ -39,7 +39,7 @@
 <a id="recognition"></a>
 
 > [!NOTE]
-> **DSH-IM 已获得 DeepSeek Harness 官方认可**，并获得价值 **人民币 1,000 元的 Token 额度奖励**。感谢官方对本项目的肯定与支持！
+> **DSH-IM 已获得 DeepSeek Harness 官方**价值 **人民币 1,000 元的 Token 赞助**。感谢官方对本项目的肯定与支持！
 
 ## 简介
 
@@ -148,12 +148,12 @@ dsh web
 | 默认行为 | 说明 |
 | --- | --- |
 | 机器人别名 | 点击机器人名称旁的铅笔设置别名，保存后立即显示，无需重启或重连。原名称始终保留，可点击“恢复原名称”或清空别名后保存；仅影响本机设置页中的显示名称。 |
-| 机器人工作区 | 每个机器人独立保存工作区。新机器人默认使用 `$DSH_HOME/im`（未设置时为 `~/.dsh/im`），目录自动创建，新会话显示在「未分组」；之后可在机器人卡片中修改。显式配置的 `workspace` 优先，`dshHome` 可覆盖环境变量 `DSH_HOME`。 |
+| 机器人工作区 | 每个机器人独立保存工作区。新机器人默认使用 `$DSH_HOME/im`（未设置时为 `~/.dsh/im`），机器人或对话实际选用该目录时自动创建；全部使用其他工作区时，不会仅因启动插件而创建该目录。新会话显示在「未分组」；之后可在机器人卡片中修改。显式配置的 `workspace` 优先，`dshHome` 可覆盖环境变量 `DSH_HOME`。 |
 | 模型 | 每个 IM 渠道的每个机器人都可在工作区下方独立选择模型；未选择时跟随 Host 默认。切换只影响之后新建的会话；当前聊天先发送 `/new`，再发送普通消息才会使用新选择。 |
 | 思考强度 | 在模型下方显式选择该模型支持的思考强度，或跟随模型默认。档位、说明和默认值来自 DSH；切换模型后恢复新模型默认强度。每个机器人独立保存，只影响之后新建的会话。 |
 | Agent Preset | 每个机器人可在设置页卡片中选择 Agent Preset。未选择时跟随 Host 的 `agent-presets.default`；渠道级 `config.agentPreset` 只作为该渠道之后新接入机器人的默认值。切换不会修改或清空已有会话；若当前聊天已有会话，需先发送 `/new`，再发送一条普通消息，才会按新选择创建会话。 |
 | 上下文增强 | 从机器人卡片打开设置，分别决定群聊、私聊是否增强；两个开关默认均关闭，旧机器人升级后也不会自动开启。 |
-| 飞书任务过程展示 | 每个飞书机器人可选择不显示过程、实时直播、实时过程卡或逐步消息。实时直播使用飞书原生思考过程展示推理、工具调用和结果，最终答案单独发送；需要飞书 PC 7.70、移动端 7.74 或更新版本。 |
+| 飞书任务过程展示 | 每个飞书机器人可选择不显示过程、实时直播、实时过程卡或逐步消息。实时直播使用飞书原生思考过程展示推理、工具调用和结果，最终答案单独发送；需要飞书 PC 7.70、移动端 7.74 或更新版本。飞书原生思考过程目前无法发到话题内，因此话题中的回合会改用实时过程卡，过程与答案都留在话题里。 |
 | 会话渠道标识 | 本机 Host 的 IM 渠道与 AI Office 会话自动标记来源。Web 会话列表和搜索结果将「微信 ·」等前缀显示为渠道 Logo；保留 DSH 原有的自动标题生成与更新。已有会话在下次加载时补上。 |
 
 渠道前缀在 DSH 生成标题后追加，完整保留原始标题与自动／手动来源，不会将自动标题锁定为手动命名，也不会额外调用模型。重复生成、刷新或重启不会叠加前缀；真实的手动命名仍遵循 DSH 原有的锁定规则。此功能由当前 Host 的会话事件驱动，显式连接远程 `harnessBaseUrl` 时需在目标 Host 上安装该插件。

@@ -1010,19 +1010,190 @@ export function stepStatusText(status) {
 }
 
 /**
- * Split accumulated blocks into card-sized chunks at block boundaries,
- * budgeted by the encoded running-status card (the largest render). Every
- * chunk keeps at least one block so progress is never dropped. The caller
- * renders all but the last chunk as `sealed` and the last one live.
+ * A single card accepts only this many `table` elements. Feishu rejects the
+ * whole write with `230099 / ErrCode 11310 card table number over limit`, which
+ * leaves the card stuck on its previous content, so the reply never appears.
+ *
+ * The boundary was established by the maintainer against a live bot: five
+ * tables in one card succeeded, six failed, and a folded process panel's tables
+ * counted toward the total (3 folded + 2 in the body succeeded, 3 + 3 failed).
  */
-export function splitStepStreamCardBlocks(blocks, limit = STEP_STREAM_CARD_MAX_BYTES) {
-  const list = (Array.isArray(blocks) ? blocks : []).filter(Boolean);
+export const STEP_STREAM_CARD_MAX_TABLES = 5;
+
+function hasClosingBacktickRun(text, start, length) {
+  for (let index = start; index < text.length;) {
+    if (text[index] !== '`') {
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (text[end] === '`') end += 1;
+    if (end - index === length) return true;
+    index = end;
+  }
+  return false;
+}
+
+function gfmTableCells(line) {
+  const normalized = line.endsWith('\r') ? line.slice(0, -1) : line;
+  if (normalized.startsWith('    ') || normalized.startsWith('\t')) return null;
+  const text = normalized.trim();
+  if (!text) return null;
+
+  const cells = [];
+  let cell = '';
+  let separators = 0;
+  let codeRun = 0;
+  for (let index = 0; index < text.length;) {
+    const character = text[index];
+    if (character === '\\' && index + 1 < text.length) {
+      cell += text.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
+    if (character === '`') {
+      let end = index + 1;
+      while (text[end] === '`') end += 1;
+      const length = end - index;
+      if (codeRun === length) {
+        codeRun = 0;
+      } else if (codeRun === 0 && hasClosingBacktickRun(text, end, length)) {
+        codeRun = length;
+      }
+      cell += text.slice(index, end);
+      index = end;
+      continue;
+    }
+    if (character === '|' && codeRun === 0) {
+      cells.push(cell);
+      cell = '';
+      separators += 1;
+      index += 1;
+      continue;
+    }
+    cell += character;
+    index += 1;
+  }
+  if (separators === 0) return null;
+  cells.push(cell);
+  if (cells[0].trim() === '') cells.shift();
+  if (cells.at(-1)?.trim() === '') cells.pop();
+  return cells.length > 0 ? cells : null;
+}
+
+/** Locate table headers once for both counting and splitting. */
+function markdownTableStarts(text) {
+  if (typeof text !== 'string' || !text) return [];
+  const lines = text.split('\n');
+  const offsets = [];
+  let offset = 0;
+  for (const line of lines) {
+    offsets.push(offset);
+    offset += line.length + 1;
+  }
+  const starts = [];
+  let fence = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].replace(/\r$/, '');
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (opening && (opening[1][0] !== '`' || !opening[2].includes('`'))) {
+      fence = opening[1];
+      continue;
+    }
+    const header = gfmTableCells(line);
+    const delimiter = gfmTableCells(lines[index + 1] ?? '');
+    if (!header || !delimiter || header.length !== delimiter.length
+      || !delimiter.every((cell) => /^\s*:?-+:?\s*$/.test(cell))) continue;
+    starts.push(offsets[index]);
+    index += 1;
+    // A delimiter-looking data row is part of this table, not another header.
+    while (index + 1 < lines.length && gfmTableCells(lines[index + 1])) index += 1;
+  }
+  return starts;
+}
+
+export function countMarkdownTables(text) {
+  return markdownTableStarts(text).length;
+}
+
+function splitMarkdownByTableLimit(text, maxTables) {
+  const starts = markdownTableStarts(text);
+  const parts = [];
+  let from = 0;
+  for (let index = maxTables; index < starts.length; index += maxTables) {
+    parts.push(text.slice(from, starts[index]));
+    from = starts[index];
+  }
+  parts.push(text.slice(from));
+  return parts;
+}
+
+/** Count the Markdown that stepStreamCard actually renders. */
+function stepStreamCardTableCount(blocks) {
+  return blocks.reduce((sum, block) => {
+    const text = block?.kind === 'notes' || block?.kind === 'tools'
+      ? (block.lines ?? []).filter((line) => typeof line === 'string' && line.trim()).join('\n')
+      : block?.text;
+    return sum + countMarkdownTables(text);
+  }, 0);
+}
+
+/** Split display copies; the bridge's logical blocks and answer indices stay intact. */
+export function splitBlockByTableLimit(block, maxTables = STEP_STREAM_CARD_MAX_TABLES) {
+  if (!block || typeof block !== 'object' || !Number.isInteger(maxTables) || maxTables < 1) return [block];
+  if (block.kind === 'notes' || block.kind === 'tools') {
+    const lines = (block.lines ?? []).filter((line) => typeof line === 'string' && line.trim());
+    if (countMarkdownTables(lines.join('\n')) <= maxTables) return [block];
+    const groups = [];
+    let current = [];
+    for (const line of lines) {
+      for (const part of splitMarkdownByTableLimit(line, maxTables)) {
+        if (current.length && countMarkdownTables([...current, part].join('\n')) > maxTables) {
+          groups.push(current);
+          current = [];
+        }
+        current.push(part);
+      }
+    }
+    if (current.length) groups.push(current);
+    return groups.map((lines, index) => ({ ...block, lines, omitted: index === 0 ? block.omitted : 0 }));
+  }
+  if (typeof block.text !== 'string' || countMarkdownTables(block.text) <= maxTables) return [block];
+  return splitMarkdownByTableLimit(block.text, maxTables).map((text) => ({ ...block, text }));
+}
+
+/**
+ * Split accumulated blocks into card-sized chunks at block boundaries,
+ * budgeted by the encoded running-status card (the largest render) **and** by
+ * the table count, because a card accepts only a handful of tables no matter
+ * how small it is. Every chunk keeps at least one block so progress is never
+ * dropped. The caller renders all but the last chunk as `sealed` and the last
+ * one live.
+ */
+export function splitStepStreamCardBlocks(
+  blocks,
+  limit = STEP_STREAM_CARD_MAX_BYTES,
+  maxTables = STEP_STREAM_CARD_MAX_TABLES,
+) {
+  // A single block can carry more tables than a card accepts — one short answer
+  // with six small tables — and splitting only between blocks cannot help. Each
+  // block is broken at table boundaries first, so the walk below sees pieces it
+  // can actually distribute.
+  const list = (Array.isArray(blocks) ? blocks : [])
+    .filter(Boolean)
+    .flatMap((block) => splitBlockByTableLimit(block, maxTables));
   if (list.length === 0) return [];
   const chunks = [];
   let current = [];
   for (const block of list) {
-    if (current.length > 0
-      && Buffer.byteLength(stepStreamCard([...current, block]), 'utf8') > limit) {
+    const tooLarge = Buffer.byteLength(stepStreamCard([...current, block]), 'utf8') > limit;
+    const tooManyTables = stepStreamCardTableCount([...current, block]) > maxTables;
+    if (current.length > 0 && (tooLarge || tooManyTables)) {
       chunks.push(current);
       current = [block];
     } else {

@@ -122,7 +122,7 @@ export async function createProductionController(ctx, config = {}, internals = {
   const { defaultWorkspace, ungroupedWorkspace } = await prepareBotWorkspace(config);
   const WorkspaceStore = internals.WorkspaceStore ?? BotWorkspaceStore;
   const workspaces = internals.workspaces
-    ?? await new WorkspaceStore(paths.workspaces, { defaultWorkspace }).load();
+    ?? await new WorkspaceStore(paths.workspaces, { defaultWorkspace, ungroupedWorkspace }).load();
   const canListConfiguredBots = typeof configStore.list === 'function';
   const listConfiguredBots = () => canListConfiguredBots ? configStore.list() : [];
   const configuredBots = listConfiguredBots();

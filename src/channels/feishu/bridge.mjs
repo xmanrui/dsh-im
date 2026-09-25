@@ -305,6 +305,32 @@ function isFeishuLocalCommand(text, { hasImages = false, hasFiles = false } = {}
     || ARCHIVED_COMMAND.test(command);
 }
 
+/**
+ * A p2p text message that is nothing but a mention of the bot.
+ *
+ * The mention is stripped before we see the text, so `@bot` arrives as an empty
+ * body — indistinguishable from an empty message unless the message type is
+ * checked. Deliberately narrow:
+ *
+ *   - only `p2p`, where the reader is talking to the bot directly;
+ *   - only `text`, so a voice note, video, sticker or forwarded card keeps its
+ *     own "not supported" notice instead of silently opening a menu;
+ *   - only when nothing else came with it, so `@bot 你好` stays a prompt.
+ *
+ * The caller also treats this as a command for access control, because opening
+ * the menu is `/m` by another route and carries the same information.
+ */
+function isBareMentionMenuRequest(event, text, {
+  hasImages = false,
+  hasFiles = false,
+  hasReply = false,
+} = {}) {
+  if (event?.message?.chat_type !== 'p2p') return false;
+  if (event?.message?.message_type !== 'text') return false;
+  if (hasImages || hasFiles || hasReply) return false;
+  return !String(text ?? '').trim();
+}
+
 /** Canonical workspace/session help advertised by every bridge family. */
 const WORKSPACE_HELP_LINES = [
   '/workspace 工作区序号或绝对路径  切换工作区',
@@ -1006,7 +1032,16 @@ export class FeishuHarnessBridge {
         hasImages,
         hasFiles,
       }) || isFeishuLocalCommand(commandText, { hasImages, hasFiles })
-        || (!hasImages && !hasFiles && NUMBER_REPLY.test(commandText) && this.#menus.has(key)),
+        || (!hasImages && !hasFiles && NUMBER_REPLY.test(commandText) && this.#menus.has(key))
+        // Opening the menu on a bare mention is the `/m` command by another
+        // route, so it must clear the same command gate. Treating it as plain
+        // chat let a sender without `canExecuteCommands` receive a menu that
+        // carries workspace paths and other session titles.
+        || isBareMentionMenuRequest(event, commandText, {
+          hasImages,
+          hasFiles,
+          hasReply: hasReplyReference(commandMessage),
+        }),
     });
     if (!access.allowed) {
       this.#acceptedMessageIds.set(messageId, null);
@@ -1501,6 +1536,14 @@ export class FeishuHarnessBridge {
     // accept() 侧已用 nonEmptyString(content) 判定，两侧保持一致。
     const commandText = !hasImages && !hasFiles && text ? text.trim() : null;
     if (!text && !hasImages && !hasFiles && !hasReply) {
+      // An "@bot" with nothing else carries no instruction to parse, and the
+      // menu card is what the reader is reaching for — answer it the way `/m`
+      // does rather than with a "text only" notice. Kept to plain p2p text so a
+      // voice note, video or forwarded card still gets its own notice.
+      if (isBareMentionMenuRequest(event, text, { hasImages, hasFiles, hasReply })) {
+        await this.#sendMenuCard(key, event.message.chat_id, { replyTo: event.message.message_id });
+        return;
+      }
       await this.#send(event.message.chat_id, t('目前支持文字、图片和文件消息。'), { replyTo: event.message.message_id });
       return;
     }
@@ -3792,6 +3835,7 @@ export class FeishuHarnessBridge {
     Object.assign(card, {
       blocks: structuredClone(entry.blocks), cardIds: [...entry.cardIds],
       messageId: entry.cardIds.at(-1), chunkCount: entry.cardIds.length,
+      activeCardStart: 0, renderedCardContents: new Map(),
       answerStart: entry.answerStart ?? null, answerEnd: entry.answerEnd ?? null,
       deliveryViaOpenId: true,
     });
@@ -4349,6 +4393,8 @@ export class FeishuHarnessBridge {
         renderChain: null,
         chunkCount: 1,
         cardIds: [],
+        activeCardStart: 0,
+        renderedCardContents: new Map(),
         answerStart: null,
         answerEnd: null,
         // Answer-integrity tracking: the version bumps every time the draft
@@ -4499,62 +4545,51 @@ export class FeishuHarnessBridge {
     });
   }
 
+  /** Sync only this interaction's cards; earlier interactions remain sealed. */
+  async #syncStepCardChunks(card, chunks, status) {
+    const answerVersion = card.answerVersion ?? 0;
+    const activeIds = card.cardIds.slice(card.activeCardStart);
+    const groups = chunks.length ? [...chunks] : [[]];
+    // Retain the last message as the live card when a rewritten answer shrinks.
+    // Clear stale prefixes without introducing a separate deletion/retry path.
+    while (groups.length < activeIds.length) {
+      groups.unshift([{ kind: 'message', text: t('内容已合并至后续消息。') }]);
+    }
+    // Serialize before the first await: a concurrent draft must not change the
+    // payload halfway through this render or be marked as already delivered.
+    const contents = groups.map((blocks, index) => stepStreamCard(blocks, {
+      status: index === groups.length - 1 ? status : 'sealed',
+    }));
+    for (let index = 0; index < contents.length; index += 1) {
+      let id = activeIds[index];
+      const content = contents[index];
+      if (id) {
+        if (card.renderedCardContents.get(id) !== content) {
+          await this.#patchStepCard(id, content);
+        }
+      } else {
+        id = await this.#sendCard(card.chatId, content, card.deliveryViaOpenId
+          ? { receiveIdType: 'open_id' }
+          : { replyTo: card.replyToMessageId });
+        card.cardIds.push(id);
+        activeIds.push(id);
+      }
+      card.renderedCardContents.set(id, content);
+    }
+    card.messageId = activeIds.at(-1);
+    card.chunkCount = activeIds.length;
+    card.renderedAnswerVersion = answerVersion;
+  }
+
   async #renderStepCardNow(chatId, card) {
     if (card.broken) return;
     const chunks = splitStepStreamCardBlocks(card.blocks);
+    if (!chunks.length && card.messageId === null) return;
     const live = chunks[chunks.length - 1] ?? [];
     try {
-      if (card.messageId === null) {
-        // First render: deliver every chunk. When the turn opens with a long
-        // answer already in memory, chunks.length can exceed one — sending
-        // only the live chunk here would silently drop its prefix, and the
-        // chunkCount bookkeeping below would then rewrite the delivered
-        // message with chunk 0 on the next render.
-        for (let index = 0; index < chunks.length; index += 1) {
-          const isLive = index === chunks.length - 1;
-          const id = await this.#sendCard(
-            chatId,
-            stepStreamCard(chunks[index], { status: isLive ? 'running' : 'sealed' }),
-            card.deliveryViaOpenId
-              ? { receiveIdType: 'open_id' }
-              : { replyTo: card.replyToMessageId },
-          );
-          card.cardIds.push(id);
-          if (isLive) card.messageId = id;
-        }
-        card.chunkCount = chunks.length;
-        await this.#persistMirrorState(card, live, 'running');
-        card.lastRenderAt = this.#stepPushClock.now();
-        card.renderedAnswerVersion = card.answerVersion ?? 0;
-        return;
-      }
-      // Overflow: the accumulated blocks outgrew one card. Seal the current
-      // message (no status line), spill extra chunks, and keep the last one
-      // live. Chunk boundaries are stable because blocks only append.
-      if (chunks.length > card.chunkCount) {
-        await this.#patchStepCard(
-          card.messageId,
-          stepStreamCard(chunks[card.chunkCount - 1], { status: 'sealed' }),
-        );
-        for (let index = card.chunkCount; index < chunks.length; index += 1) {
-          const isLive = index === chunks.length - 1;
-          const id = await this.#sendCard(
-            chatId,
-            stepStreamCard(chunks[index], { status: isLive ? 'running' : 'sealed' }),
-            card.deliveryViaOpenId
-              ? { receiveIdType: 'open_id' }
-              : { replyTo: card.replyToMessageId },
-          );
-          card.cardIds.push(id);
-          if (isLive) card.messageId = id;
-        }
-        card.chunkCount = chunks.length;
-      } else {
-        await this.#patchStepCard(card.messageId, stepStreamCard(live, { status: 'running' }));
-      }
+      await this.#syncStepCardChunks(card, chunks, 'running');
       await this.#persistMirrorState(card, live, 'running');
       card.lastRenderAt = this.#stepPushClock.now();
-      card.renderedAnswerVersion = card.answerVersion ?? 0;
     } catch (error) {
       card.broken = true;
       this.#logger.warn?.(
@@ -4593,52 +4628,8 @@ export class FeishuHarnessBridge {
       this.#writeStepCardAnswer(card, body);
     }
     const chunks = splitStepStreamCardBlocks(card.blocks);
-    const live = chunks[chunks.length - 1] ?? [];
     try {
-      if (card.messageId === null) {
-        // A turn without any queued render (plain Q&A): open the cards
-        // directly with their terminal status; every overflow chunk before
-        // the last one is sealed. An empty turn still opens the status card.
-        const groups = chunks.length > 0 ? chunks : [[]];
-        for (let index = 0; index < groups.length; index += 1) {
-          const isLive = index === groups.length - 1;
-          const id = await this.#sendCard(
-            card.chatId,
-            stepStreamCard(groups[index], { status: isLive ? status : 'sealed' }),
-            card.deliveryViaOpenId
-              ? { receiveIdType: 'open_id' }
-              : { replyTo: card.replyToMessageId },
-          );
-          card.cardIds.push(id);
-        }
-        return { ok: true, cardIds: card.cardIds };
-      }
-      // The live message only ever shows the last chunk; spill every chunk
-      // that has not been delivered yet as sealed cards before patching the
-      // live one, otherwise a long answer finishing on an existing card
-      // would silently drop its prefix.
-      if (chunks.length > card.chunkCount) {
-        await this.#patchStepCard(
-          card.messageId,
-          stepStreamCard(chunks[card.chunkCount - 1], { status: 'sealed' }),
-        );
-        for (let index = card.chunkCount; index < chunks.length; index += 1) {
-          const isLast = index === chunks.length - 1;
-          const id = await this.#sendCard(
-            card.chatId,
-            stepStreamCard(chunks[index], { status: isLast ? status : 'sealed' }),
-            card.deliveryViaOpenId
-              ? { receiveIdType: 'open_id' }
-              : { replyTo: card.replyToMessageId },
-          );
-          card.cardIds.push(id);
-          if (isLast) card.messageId = id;
-        }
-        card.chunkCount = chunks.length;
-      } else {
-        await this.#patchStepCard(card.messageId, stepStreamCard(live, { status }));
-      }
-      card.renderedAnswerVersion = card.answerVersion ?? 0;
+      await this.#syncStepCardChunks(card, chunks, status);
       return { ok: true, cardIds: card.cardIds };
     } catch (error) {
       // Only trust the streamed draft when the LAST SUCCESSFUL render actually
@@ -4689,8 +4680,7 @@ export class FeishuHarnessBridge {
     if (card.messageId === null) return;
     try {
       const chunks = splitStepStreamCardBlocks(card.blocks);
-      const live = chunks[chunks.length - 1] ?? [];
-      await this.#patchStepCard(card.messageId, stepStreamCard(live, { status: 'sealed' }));
+      await this.#syncStepCardChunks(card, chunks, 'sealed');
     } catch (error) {
       this.#logger.warn?.(
         '[dsh-feishu] step streaming card rotate seal failed:',
@@ -4698,6 +4688,8 @@ export class FeishuHarnessBridge {
       );
     }
     // Restart the stream on a fresh card below the interaction message.
+    card.activeCardStart = card.cardIds.length;
+    card.renderedCardContents.clear();
     card.blocks = [];
     card.messageId = null;
     card.chunkCount = 1;
@@ -5071,8 +5063,14 @@ export class FeishuHarnessBridge {
     });
     // 流式卡片模式：每轮一张过程卡（原地 patch），过程与最终答案都进卡；
     // post 模式维持逐条直推。先预建卡片状态，纯问答回合也能在收尾时开卡。
-    const streamingCard = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.STREAMING_CARD;
+    // 飞书原生思考过程按 chat_id 创建，不会落进话题（#244）；话题内的回合改用
+    // 实时过程卡（以 reply_in_thread 回复留在话题内），避免过程出现在话题外。
+    const liveCotInTopic = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.LIVE_COT
+      && this.#replyInThreadFor(messageId);
+    const streamingCard = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.STREAMING_CARD
+      || liveCotInTopic;
     const liveCot = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.LIVE_COT
+      && !liveCotInTopic
       && typeof this.#channel?.createCot === 'function'
       && typeof this.#channel?.writeCotEvents === 'function';
     const cot = liveCot
