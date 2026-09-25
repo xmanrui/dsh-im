@@ -27,17 +27,26 @@ export function VoiceEditor({ value = null, disabled = false, onSave }) {
     }
   }, [value]);
 
-  const save = async () => {
+  const persist = async (payload) => {
     if (saving || disabled) return;
     setSaving(true);
     setError(null);
     try {
-      await onSave?.(enabled ? { enabled: true, secretRef, asrModel, ttsModel, ttsVoice } : null);
+      await onSave?.(payload);
     } catch (cause) {
       setError(cause?.message ?? '语音设置保存失败，请重试。');
     } finally {
       setSaving(false);
     }
+  };
+
+  const save = () => persist(enabled ? { enabled: true, secretRef, asrModel, ttsModel, ttsVoice } : null);
+
+  // 切到“关闭”立即持久化 null:关闭态没有保存按钮,若不在这里落盘,
+  // 后台会一直保持原配置,用户以为语音已停而实际仍在处理语音。
+  const toggle = (next) => {
+    setEnabled(next);
+    if (!next) void persist(null);
   };
 
   const input = (label, state, setState, placeholder) => h('label', { className: 'dim-feishuVoiceField' },
@@ -79,7 +88,7 @@ export function VoiceEditor({ value = null, disabled = false, onSave }) {
     value: enabled ? 'on' : 'off',
     disabled: disabled || saving,
     "aria-label": '语音交互开关',
-    onChange: (event) => setEnabled(event.target.value === 'on'),
+    onChange: (event) => toggle(event.target.value === 'on'),
   },
   h('option', { value: 'off' }, '关闭'),
   h('option', { value: 'on' }, '开启(语音提问与语音回复)')),

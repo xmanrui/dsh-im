@@ -254,3 +254,36 @@ test('synthesize rejects when the TTS response carries no audio url', { skip: SP
     stub.restore();
   }
 });
+
+// 回归:ffmpeg 未安装或路径不存在时 spawn 触发 'error'(ENOENT)而非 'close'。
+// 未监听 'error' 会让异常击穿 Node 进程;修复后应正常 reject,由外层降级兜底。
+// 本用例不依赖 POSIX 替身,全平台执行。
+const MISSING_FFMPEG = '/nonexistent/ffmpeg-missing-binary';
+const isSpawnError = (error) => error?.code === 'ENOENT' || /ENOENT/i.test(error?.message ?? '');
+
+test('missing ffmpeg rejects transcription instead of crashing the host', async () => {
+  const voice = createVoice({
+    settings: { enabled: true, secretRef: 'MY_KEY', ffmpeg: MISSING_FFMPEG },
+    secret: 'sk-voice-test',
+  });
+  await assert.rejects(
+    () => voice.transcribeIncoming(audioEvent('om_voice', 'file_key_1'), voiceResourceClient()),
+    isSpawnError,
+  );
+});
+
+test('missing ffmpeg rejects synthesis instead of crashing the host', async () => {
+  const voice = createVoice({
+    settings: { enabled: true, secretRef: 'MY_KEY', ffmpeg: MISSING_FFMPEG },
+    secret: 'sk-voice-test',
+  });
+  const stub = fetchStub([
+    jsonResponse({ output: { audio: { url: 'https://example.test/audio.wav' } } }),
+    new Response(WAV_BYTES, { status: 200 }),
+  ]);
+  try {
+    await assert.rejects(() => voice.synthesize('你好'), isSpawnError);
+  } finally {
+    stub.restore();
+  }
+});

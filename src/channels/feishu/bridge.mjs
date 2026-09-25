@@ -1547,9 +1547,6 @@ export class FeishuHarnessBridge {
       await this.#send(event.message.chat_id, t('目前支持文字、图片和文件消息。'), { replyTo: event.message.message_id });
       return;
     }
-    if (voiceTurnReplyTo) {
-      this.#voiceTurns.set(event.message.chat_id, { replyTo: voiceTurnReplyTo });
-    }
 
     if (commandText !== null && REPAIR_COMMAND_PREFIX.test(commandText)) {
       await this.#handleRepairCommand(event, commandText);
@@ -1673,6 +1670,14 @@ export class FeishuHarnessBridge {
     }
 
     this.#logger.info?.(`[dsh-feishu] processing ${event.message.chat_type} message ${messageId}`);
+    // 语音回合状态在进入正常问答路径前才登记:上方命令分支(/help、菜单、
+    // 会话列表等)与空内容分支均提前返回,提前登记会让状态遗留到下一回合,
+    // 导致后续普通文字消息的答案被合成为音频并回复到旧的语音消息。
+    // 本路径的 finally 统一清理回合状态;回合间由 per-key 队列串行处理,
+    // 同一会话不存在并发覆盖。
+    if (voiceTurnReplyTo) {
+      this.#voiceTurns.set(event.message.chat_id, { replyTo: voiceTurnReplyTo });
+    }
     const batchSubmission = event.batchSubmission ?? null;
     let batchAskCompleted = false;
     try {
