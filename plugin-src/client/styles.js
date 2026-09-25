@@ -479,6 +479,17 @@ const CSS = String.raw`
 .dim-feishuGroupSelect:focus-visible { outline: none; border-color: var(--dsw-alias-state-business-primary, #3370ff); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-business-primary, #3370ff) 15%, transparent); }
 .dim-feishuGroupSelect:disabled { cursor: not-allowed; opacity: .55; }
 .dim-feishuGroupHelp { margin: -2px 0 0; color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; line-height: 19px; }
+.dim-feishuVoiceForm { min-width: 0; display: grid; gap: 10px; }
+.dim-feishuVoiceField { min-width: 0; display: grid; gap: 5px; }
+.dim-feishuVoiceLabel { color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
+.dim-feishuVoiceInput { min-width: 0; width: 100%; height: 36px; padding: 0 11px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 13px; line-height: 36px; transition: border-color .15s ease, box-shadow .15s ease; }
+.dim-feishuVoiceInput:hover:not(:disabled) { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #3370ff) 42%, var(--dsw-alias-border-l2, #dfe1e5)); }
+.dim-feishuVoiceInput:focus-visible { outline: none; border-color: var(--dsw-alias-state-business-primary, #3370ff); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-business-primary, #3370ff) 15%, transparent); }
+.dim-feishuVoiceInput:disabled { cursor: not-allowed; opacity: .55; }
+.dim-feishuVoiceActions { display: flex; justify-content: flex-start; }
+.dim-feishuVoiceSave { height: 34px; padding: 0 15px; border: 1px solid var(--dsw-alias-state-business-primary, #3370ff); border-radius: 8px; color: var(--dsw-alias-state-business-primary, #3370ff); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 13px; line-height: 32px; cursor: pointer; transition: border-color .15s ease, color .15s ease, background .15s ease; }
+.dim-feishuVoiceSave:hover:not(:disabled) { color: #0f5fce; border-color: #0f5fce; background: color-mix(in srgb, #3370ff 6%, var(--dsw-alias-bg-layer-1, #fff)); }
+.dim-feishuVoiceSave:disabled { cursor: not-allowed; opacity: .55; }
 .dim-feishuGroupPermissionAction { display: flex; justify-content: flex-start; }
 .dim-feishuGroupPermissionAction .dim-deliveryButton { color: var(--dsw-alias-state-business-primary, #3370ff); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #3370ff) 30%, var(--dsw-alias-border-l2, #dfe1e5)); }
 .dim-feishuGroupError, .dim-feishuGroupRefreshError { margin: 0; padding: 9px 11px; border-radius: 8px; font-size: 12px; line-height: 18px; }
