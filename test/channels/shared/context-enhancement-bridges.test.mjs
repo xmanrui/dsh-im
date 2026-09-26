@@ -166,6 +166,9 @@ function fixture(channel, { contextEnhancement, onAsk } = {}) {
       // text presentation; the default interaction cards are tested in the
       // Feishu bridge tests.
       interactionCards: false,
+      // Likewise pin flat conversations: this suite is about enhancement, and
+      // the group fixture mentions the bot (which would open a topic session).
+      mentionTopicReply: false,
       channel: {}, client: { im: { v1: {
         message: { create: async (request) => {
           calls.push(['createMessage', request]);

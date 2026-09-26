@@ -224,7 +224,7 @@ test('group response mode defaults to mention and updates the live runtime witho
   await fx.controller.close();
 });
 
-test('groupTopicReply persists and reaches the live runtime without reconnecting', async () => {
+test('mentionTopicReply persists and reaches the live runtime without reconnecting', async () => {
   const existing = bot('bot_topic_reply', 'topic_reply');
   const fx = fixture({
     bots: [existing],
@@ -232,19 +232,19 @@ test('groupTopicReply persists and reaches the live runtime without reconnecting
   });
   await fx.controller.initialize();
 
-  assert.equal(fx.controller.status().bots[0].groupTopicReply, false);
+  assert.equal(fx.controller.status().bots[0].mentionTopicReply, true);
   const runtime = fx.runtimes.get(existing.id)[0];
   const topicReplies = [];
-  runtime.setGroupTopicReply = (value) => topicReplies.push(value);
-  const updated = await fx.controller.updateGroupTopicReply(existing.id, true);
+  runtime.setMentionTopicReply = (value) => topicReplies.push(value);
+  const updated = await fx.controller.updateMentionTopicReply(existing.id, false);
 
-  assert.equal(updated.bots[0].groupTopicReply, true);
-  assert.equal(fx.configStore.getBot(existing.id).groupTopicReply, true);
-  assert.deepEqual(topicReplies, [true]);
+  assert.equal(updated.bots[0].mentionTopicReply, false);
+  assert.equal(fx.configStore.getBot(existing.id).mentionTopicReply, false);
+  assert.deepEqual(topicReplies, [false]);
   assert.equal(fx.runtimes.get(existing.id).length, 1);
   await assert.rejects(
-    fx.controller.updateGroupTopicReply(existing.id, 'yes'),
-    /Invalid Feishu group topic reply flag/,
+    fx.controller.updateMentionTopicReply(existing.id, 'yes'),
+    /Invalid Feishu mention topic reply flag/,
   );
   await fx.controller.close();
 });

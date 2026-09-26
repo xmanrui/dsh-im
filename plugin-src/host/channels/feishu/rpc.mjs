@@ -304,7 +304,7 @@ function publicBotEntry(entry) {
     contextEnhancement: normalizeContextEnhancementConfig(source.contextEnhancement),
     accessPolicy: normalizeAccessPolicy(source.accessPolicy),
     groupResponseMode: normalizeFeishuGroupResponseMode(source.groupResponseMode),
-    groupTopicReply: source.groupTopicReply === true,
+    mentionTopicReply: source.mentionTopicReply !== false,
     stepPush: source.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(source.stepPushMode),
     groupMessagePermissionGranted: source.groupMessagePermissionGranted === true,
@@ -469,10 +469,10 @@ function validPayload(endpoint, payload) {
       ? null
       : '请选择群聊响应方式。';
   }
-  if (endpoint === FEISHU_ENDPOINTS.setGroupTopicReply) {
-    return hasOnlyKeys(payload, new Set(['botId', 'groupTopicReply']))
+  if (endpoint === FEISHU_ENDPOINTS.setMentionTopicReply) {
+    return hasOnlyKeys(payload, new Set(['botId', 'mentionTopicReply']))
       && safeOpaqueId(payload.botId)
-      && typeof payload.groupTopicReply === 'boolean'
+      && typeof payload.mentionTopicReply === 'boolean'
       ? null
       : '请选择是否以话题方式回复。';
   }
@@ -773,12 +773,12 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
           await controller.updateGroupResponseMode(payload.botId, payload.groupResponseMode),
           { encodeQr: cachedEncodeQr },
         );
-      } else if (endpoint === FEISHU_ENDPOINTS.setGroupTopicReply) {
-        if (typeof controller.updateGroupTopicReply !== 'function') {
-          throw new Error('Group topic reply update is unavailable');
+      } else if (endpoint === FEISHU_ENDPOINTS.setMentionTopicReply) {
+        if (typeof controller.updateMentionTopicReply !== 'function') {
+          throw new Error('Mention topic reply update is unavailable');
         }
         value = await toPublicFeishuStatus(
-          await controller.updateGroupTopicReply(payload.botId, payload.groupTopicReply),
+          await controller.updateMentionTopicReply(payload.botId, payload.mentionTopicReply),
           { encodeQr: cachedEncodeQr },
         );
       } else if (endpoint === FEISHU_ENDPOINTS.setStepPush) {

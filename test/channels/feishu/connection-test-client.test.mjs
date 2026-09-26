@@ -78,12 +78,12 @@ test('Feishu connection check requests and displays test-message feedback', asyn
   assert.match(markup, /补全权限/);
   assert.match(markup, /aria-label="为飞书测试机器人补全权限与回调"/);
   assert.doesNotMatch(markup, /aria-label="群聊响应方式"/);
-  assert.doesNotMatch(markup, /aria-label="群聊以话题方式回复"/);
+  assert.doesNotMatch(markup, /aria-label="被 @ 时以话题方式回复"/);
 });
 
 test('Feishu group settings page saves both migrated group controls', async () => {
   let groupResponseMode = 'mention';
-  let groupTopicReply = false;
+  let mentionTopicReply = false;
   const calls = [];
   const snapshot = () => ({
     schemaVersion: 2,
@@ -94,7 +94,7 @@ test('Feishu group settings page saves both migrated group controls', async () =
       state: 'connected',
       connected: true,
       groupResponseMode,
-      groupTopicReply,
+      mentionTopicReply,
       groupMessagePermissionGranted: true,
       bot: { name: '响应模式机器人' },
       health: { status: 'healthy', summary: '长连接运行正常' },
@@ -107,8 +107,8 @@ test('Feishu group settings page saves both migrated group controls', async () =
       groupResponseMode = payload.groupResponseMode;
       return { ok: true, value: snapshot() };
     }
-    if (endpoint === FEISHU_ENDPOINTS.setGroupTopicReply) {
-      groupTopicReply = payload.groupTopicReply;
+    if (endpoint === FEISHU_ENDPOINTS.setMentionTopicReply) {
+      mentionTopicReply = payload.mentionTopicReply;
       return { ok: true, value: snapshot() };
     }
     throw new Error(`Unexpected endpoint: ${endpoint}`);
@@ -144,19 +144,19 @@ test('Feishu group settings page saves both migrated group controls', async () =
   )));
   assert.equal(renderer.root.findByProps({ 'aria-label': '群聊响应方式' }).props.value, 'all');
 
-  const topicSelect = renderer.root.findByProps({ 'aria-label': '群聊以话题方式回复' });
+  const topicSelect = renderer.root.findByProps({ 'aria-label': '被 @ 时以话题方式回复' });
   assert.equal(topicSelect.props.value, 'off');
   await act(async () => {
     topicSelect.props.onChange({ target: { value: 'on' } });
     await flushMicrotasks();
   });
   assert.ok(calls.some(({ endpoint, payload }) => (
-    endpoint === FEISHU_ENDPOINTS.setGroupTopicReply
+    endpoint === FEISHU_ENDPOINTS.setMentionTopicReply
       && payload.botId === 'bot-mode-test'
-      && payload.groupTopicReply === true
+      && payload.mentionTopicReply === true
   )));
   assert.equal(
-    renderer.root.findByProps({ 'aria-label': '群聊以话题方式回复' }).props.value,
+    renderer.root.findByProps({ 'aria-label': '被 @ 时以话题方式回复' }).props.value,
     'on',
   );
   await act(async () => renderer.unmount());

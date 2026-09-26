@@ -46,7 +46,7 @@ function normalizeBot(value, { legacy = false } = {}) {
     botOpenId: cleanString(value.botOpenId),
     activated: value.activated ?? null,
     groupResponseMode: normalizeFeishuGroupResponseMode(value.groupResponseMode),
-    groupTopicReply: value.groupTopicReply === true,
+    mentionTopicReply: value.mentionTopicReply !== false,
     stepPush: value.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(value.stepPushMode),
     groupMessagePermissionGranted: value.groupMessagePermissionGranted === true,

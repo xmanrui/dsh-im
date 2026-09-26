@@ -44,7 +44,7 @@ async function fixture(t, { history = [answer, end], seed = null, channel = {} }
     channel, harness, state, signal: abort.signal,
     status: { messagesReceived: 0, messagesReplied: 0, messagesRejected: 0 },
     allowedSenderOpenIds: new Set(['ou_owner']),
-    groupTopicReply: true,
+    mentionTopicReply: true,
     logger: { warn() {}, error() {}, info() {} },
   });
   t.after(async () => { abort.abort(); await bridge.waitForIdle(); await sleep(20); await rm(dir, { recursive: true, force: true }); });

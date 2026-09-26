@@ -7,8 +7,9 @@ import {
   extractText,
   isAllowedSender,
   isBotSender,
-  isTopicGroupKey,
-  managedGroupKey,
+  isTopicKey,
+  managedTopicKey,
+  managedTopicRoot,
   splitText,
 } from '../../../src/channels/feishu/message-utils.mjs';
 
@@ -686,19 +687,42 @@ test('conversationKey isolates topic-group threads without affecting regular gro
   }), 'group:oc_group');
 });
 
-test('managedGroupKey builds per-topic managed keys and requires ids', () => {
-  assert.equal(managedGroupKey('oc_group', 'om_root'), 'group:oc_group:managed:om_root');
-  assert.throws(() => managedGroupKey('', 'om_root'), /chat_id/);
-  assert.throws(() => managedGroupKey('oc_group', ''), /message id/);
+test('managedTopicKey builds a key from a conversation scope and requires both parts', () => {
+  assert.equal(managedTopicKey('group:oc_group', 'om_root'), 'group:oc_group:managed:om_root');
+  assert.equal(managedTopicKey('p2p:ou_test', 'om_root'), 'p2p:ou_test:managed:om_root');
+  assert.throws(() => managedTopicKey('', 'om_root'), /conversation scope/);
+  assert.throws(() => managedTopicKey('group:oc_group', ''), /message id/);
 });
 
-test('isTopicGroupKey recognizes thread and managed group keys only', () => {
-  assert.equal(isTopicGroupKey('group:oc_group:thread:omt_a'), true);
-  assert.equal(isTopicGroupKey('group:oc_group:managed:om_root'), true);
-  assert.equal(isTopicGroupKey('group:oc_group'), false);
-  assert.equal(isTopicGroupKey('p2p:ou_test'), false);
-  assert.equal(isTopicGroupKey(null), false);
-  assert.equal(isTopicGroupKey(''), false);
+test('managedTopicRoot reads the root back out of a managed key only', () => {
+  assert.equal(managedTopicRoot('group:oc_group:managed:om_root'), 'om_root');
+  assert.equal(managedTopicRoot('p2p:ou_test:managed:om_root'), 'om_root');
+  assert.equal(managedTopicRoot('group:oc_group:thread:omt_a'), null);
+  assert.equal(managedTopicRoot('p2p:ou_test'), null);
+  assert.equal(managedTopicRoot(':managed:'), null);
+  assert.equal(managedTopicRoot(null), null);
+});
+
+test('isTopicKey recognizes thread and managed keys in both chat types', () => {
+  assert.equal(isTopicKey('group:oc_group:thread:omt_a'), true);
+  assert.equal(isTopicKey('group:oc_group:managed:om_root'), true);
+  assert.equal(isTopicKey('p2p:ou_test:managed:om_root'), true);
+  assert.equal(isTopicKey('p2p:ou_test:thread:omt_a'), true);
+  assert.equal(isTopicKey('group:oc_group'), false);
+  assert.equal(isTopicKey('p2p:ou_test'), false);
+  assert.equal(isTopicKey(null), false);
+  assert.equal(isTopicKey(''), false);
+});
+
+test('conversationKey keeps a direct chat in one session even inside a thread', () => {
+  // A direct chat's thread_id must not split the session: an answer typed in a
+  // thread has to keep matching the question asked in the main window. Only a
+  // managed topic (a topic the bot itself opened) leaves the shared key.
+  assert.equal(conversationKey({
+    sender: { sender_id: { open_id: 'ou_test' } },
+    message: { chat_type: 'p2p', chat_id: 'oc_private', thread_id: 'omt_a' },
+  }), 'p2p:ou_test');
+  assert.equal(isTopicKey('p2p:ou_test:thread:omt_a'), true);
 });
 
 test('splitText preserves all text', () => {

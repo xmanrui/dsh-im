@@ -27,7 +27,7 @@ function SettingsButton({ children, kind = 'secondary', className = '', ...props
 function groupSettingsFrom(value) {
   return {
     groupResponseMode: normalizeGroupResponseMode(value?.groupResponseMode),
-    groupTopicReply: value?.groupTopicReply === true,
+    mentionTopicReply: value?.mentionTopicReply !== false,
     groupMessagePermissionGranted: value?.groupMessagePermissionGranted === true,
   };
 }
@@ -161,7 +161,7 @@ export function GroupResponseModeEditor({
   }, error) : null);
 }
 
-export function GroupTopicReplyEditor({ value = false, disabled = false, onSave }) {
+export function MentionTopicReplyEditor({ value = true, disabled = false, onSave }) {
   const current = value === true ? 'on' : 'off';
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
@@ -174,7 +174,7 @@ export function GroupTopicReplyEditor({ value = false, disabled = false, onSave 
     try {
       await onSave?.(next);
     } catch (cause) {
-      setError(cause?.message ?? '群聊以话题方式回复设置保存失败，请重试。');
+      setError(cause?.message ?? '以话题方式回复设置保存失败，请重试。');
     } finally {
       setSaving(false);
     }
@@ -182,10 +182,10 @@ export function GroupTopicReplyEditor({ value = false, disabled = false, onSave 
 
   return h('section', {
     className: 'dim-feishuGroupControl',
-    'aria-labelledby': 'dim-feishu-group-topic-title',
+    'aria-labelledby': 'dim-feishu-mention-topic-title',
   },
   h('div', { className: 'dim-feishuGroupControlHeader' },
-    h('h3', { id: 'dim-feishu-group-topic-title' }, '群聊以话题方式回复'),
+    h('h3', { id: 'dim-feishu-mention-topic-title' }, '被 @ 时以话题方式回复'),
     saving
       ? h('span', { className: 'dim-feishuGroupControlStatus', role: 'status' }, '保存中…')
       : null),
@@ -193,13 +193,13 @@ export function GroupTopicReplyEditor({ value = false, disabled = false, onSave 
     className: 'dim-feishuGroupSelect',
     value: current,
     disabled: disabled || saving,
-    'aria-label': '群聊以话题方式回复',
+    'aria-label': '被 @ 时以话题方式回复',
     onChange: (event) => { void change(event); },
   },
-  h('option', { value: 'off' }, '关闭（群内直接回复）'),
+  h('option', { value: 'off' }, '关闭（在会话主窗口回复）'),
   h('option', { value: 'on' }, '开启（自动开启独立飞书话题）')),
   h('p', { className: 'dim-feishuGroupHelp' },
-    '开启后，群聊中向机器人提问会自动开启独立飞书话题，回复落在话题内；每个话题是 dsh 会话列表里一条独立会话，上下文互不串。私聊不受影响。'),
+    '开启后，在群聊或私聊里 @机器人 提问，机器人会在那条消息下新建一个飞书话题并在话题内回答；该话题是一条独立会话，话题里的后续消息都属于同一个会话。只发一个 @机器人（打开菜单）不会新建话题，没有 @机器人 的消息也留在原来的会话里。'),
   error ? h('p', {
     className: 'dim-feishuGroupError',
     role: 'alert',
@@ -315,7 +315,7 @@ export function FeishuGroupSettingsPage({ account, rpcCall }) {
   }, [
     account.botId,
     account.groupResponseMode,
-    account.groupTopicReply,
+    account.mentionTopicReply,
     account.groupMessagePermissionGranted,
   ]);
 
@@ -558,12 +558,12 @@ export function FeishuGroupSettingsPage({ account, rpcCall }) {
       },
       onAuthorize: () => startAuthorization(),
     }),
-    h(GroupTopicReplyEditor, {
-      value: settings.groupTopicReply,
+    h(MentionTopicReplyEditor, {
+      value: settings.mentionTopicReply,
       disabled,
-      onSave: (groupTopicReply) => saveSetting(
-        FEISHU_ENDPOINTS.setGroupTopicReply,
-        { groupTopicReply },
+      onSave: (mentionTopicReply) => saveSetting(
+        FEISHU_ENDPOINTS.setMentionTopicReply,
+        { mentionTopicReply },
       ),
     })),
   h(PermissionFlow, {

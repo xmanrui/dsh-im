@@ -21,7 +21,7 @@ test('multi-bot endpoints are bot-scoped and keep legacy operations separate', (
   assert.equal(FEISHU_ENDPOINTS.disconnectBot, 'bot.disconnect');
   assert.equal(FEISHU_ENDPOINTS.deleteBot, 'bot.delete');
   assert.equal(FEISHU_ENDPOINTS.setGroupResponseMode, 'bot.group-response-mode.set');
-  assert.equal(FEISHU_ENDPOINTS.setGroupTopicReply, 'bot.group-topic-reply.set');
+  assert.equal(FEISHU_ENDPOINTS.setMentionTopicReply, 'bot.mention-topic-reply.set');
   assert.equal(FEISHU_ENDPOINTS.setStepPush, 'bot.step-push.set');
   assert.equal(FEISHU_ENDPOINTS.setStepPushMode, 'bot.step-push-mode.set');
   assert.equal(FEISHU_ENDPOINTS.testConnection, 'connection.test');
@@ -39,7 +39,7 @@ test('client normalizes multiple independent bots and derives authoritative tota
         connected: true,
         configured: true,
         groupResponseMode: 'all',
-        groupTopicReply: true,
+        mentionTopicReply: false,
         stepPush: true,
         stepPushMode: 'streaming_card',
         groupMessagePermissionGranted: true,
@@ -57,7 +57,7 @@ test('client normalizes multiple independent bots and derives authoritative tota
         state: 'connected',
         connected: false,
         configured: true,
-        groupTopicReply: 'stale-truthy', // must normalize to false
+        mentionTopicReply: 'stale-falsy', // only a literal false turns topics off
         stepPush: 'stale-truthy', // must normalize to false
         stepPushMode: 'stale-unknown', // must normalize to the legacy post presentation
         bot: { name: '研发助手', domain: 'lark' },
@@ -72,12 +72,12 @@ test('client normalizes multiple independent bots and derives authoritative tota
   assert.deepEqual(snapshot.totals, { configured: 2, connected: 1 });
   assert.equal(snapshot.bots[0].state, 'connected');
   assert.equal(snapshot.bots[0].groupResponseMode, 'all');
-  assert.equal(snapshot.bots[0].groupTopicReply, true);
+  assert.equal(snapshot.bots[0].mentionTopicReply, false);
   assert.equal(snapshot.bots[0].stepPush, true);
   assert.equal(snapshot.bots[0].stepPushMode, 'streaming_card');
   assert.equal(snapshot.bots[0].groupMessagePermissionGranted, true);
   assert.equal(snapshot.bots[1].groupResponseMode, 'mention');
-  assert.equal(snapshot.bots[1].groupTopicReply, false);
+  assert.equal(snapshot.bots[1].mentionTopicReply, true);
   assert.equal(snapshot.bots[1].stepPush, false);
   assert.equal(snapshot.bots[1].stepPushMode, 'post');
   assert.equal(snapshot.bots[1].groupMessagePermissionGranted, false);
