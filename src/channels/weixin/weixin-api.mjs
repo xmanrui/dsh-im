@@ -504,8 +504,9 @@ function validateLoginResponse(value) {
   return value;
 }
 
-export function createWeixinApi({ fetchImpl = fetch } = {}) {
+export function createWeixinApi({ fetchImpl = fetch, uploadFetchImpl = fetchImpl } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl must be a function');
+  if (typeof uploadFetchImpl !== 'function') throw new TypeError('uploadFetchImpl must be a function');
 
   async function sendArtifact({
     baseUrl,
@@ -566,7 +567,7 @@ export function createWeixinApi({ fetchImpl = fetch } = {}) {
     const ciphertextSize = aesEcbPaddedSize(file.bytes.byteLength);
     let downloadParam;
     try {
-      downloadParam = await uploadWeixinCdn(fetchImpl, uploadUrl, file.bytes, aesKey, { signal });
+      downloadParam = await uploadWeixinCdn(uploadFetchImpl, uploadUrl, file.bytes, aesKey, { signal });
     } catch (error) {
       if (signal?.aborted) throw abortError(signal);
       const status = Number(error?.status);

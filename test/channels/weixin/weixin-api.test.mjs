@@ -539,6 +539,42 @@ function weixinFileFetch(finalResponse) {
   };
 }
 
+test('images and files use the injected CDN fetch while JSON requests keep their existing fetch', async () => {
+  for (const operation of ['sendImage', 'sendFile']) {
+    const jsonCalls = [];
+    const uploads = [];
+    const api = createWeixinApi({
+      fetchImpl: async (url, init) => {
+        assert.notEqual(url.pathname, '/c2c/upload');
+        jsonCalls.push({ path: url.pathname, body: JSON.parse(init.body) });
+        return jsonResponse(url.pathname.endsWith('/getuploadurl')
+          ? { ret: 0, upload_param: 'upload-ticket' } : { ret: 0 });
+      },
+      uploadFetchImpl: async (url, init) => {
+        assert.equal(url.hostname, 'novac2c.cdn.weixin.qq.com');
+        assert.equal(url.pathname, '/c2c/upload');
+        assert.equal(init.headers.Authorization, undefined);
+        uploads.push(await uploadBytes(init.body));
+        return new Response(null, { headers: { 'x-encrypted-param': 'private-download' } });
+      },
+    });
+    const request = weixinFileRequest({ file: {
+      fileName: 'test.png', mediaType: 'image/png', bytes: Buffer.from('test-image'),
+    } });
+    await api[operation](request);
+    assert.deepEqual(jsonCalls.map(call => call.path), [
+      '/ilink/bot/getuploadurl', '/ilink/bot/sendmessage',
+    ]);
+    assert.equal(uploads.length, 1);
+    assert.deepEqual(
+      decryptWeixinImage(uploads[0], Buffer.from(jsonCalls[0].body.aeskey, 'hex')),
+      request.file.bytes,
+    );
+    const item = jsonCalls[1].body.msg.item_list[0];
+    assert.equal((item.image_item ?? item.file_item).media.encrypt_query_param, 'private-download');
+  }
+});
+
 test('sendFile allows an upload lasting over 60 seconds while chunks keep progressing', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const plaintext = Buffer.alloc(4 * 64 * 1024 + 7, 0xab);

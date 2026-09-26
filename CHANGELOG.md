@@ -6,6 +6,27 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.28.1] - 2026-09-25
+
+### Fixed / 修复
+
+- 默认 IM 工作区改为按实际选择创建：仅加载渠道或使用自定义工作区时，不再生成未使用的 `$DSH_HOME/im` 空目录；机器人或会话选用默认目录、切回默认目录，以及恢复相关 Session 时按需准备目录。已有工作区选择与未分组 Session 行为不变，不自动删除历史目录，也不自动创建任意自定义路径（[#259](https://github.com/xmanrui/dsh-im/issues/259)、[#260](https://github.com/xmanrui/dsh-im/pull/260)）。
+  The default IM workspace is now created when selected, rather than generating an unused `$DSH_HOME/im` directory while loading channels or using a custom workspace. Bot/conversation selection, switching back, and relevant Session recovery prepare the directory as needed. Existing workspace choices and ungrouped Session behavior are preserved; old directories are not deleted and arbitrary custom paths are not created automatically ([#259](https://github.com/xmanrui/dsh-im/issues/259), [#260](https://github.com/xmanrui/dsh-im/pull/260)).
+- 飞书「实时直播」在需要话题内回复的回合自动使用实时过程卡，让过程和最终答案留在同一话题，避免原生思考过程出现在群聊主时间线。私聊和非话题群聊继续使用原生思考过程，不修改机器人的已保存展示模式。感谢 [@TonyWu2333](https://github.com/TonyWu2333)（[#244](https://github.com/xmanrui/dsh-im/issues/244)、[#265](https://github.com/xmanrui/dsh-im/pull/265)）。
+  Feishu Live process mode now uses a streaming process card for turns that must reply inside a topic, keeping progress and the final answer in that topic instead of posting native thinking progress to the main group timeline. Private and non-topic chats retain native thinking messages, and saved bot presentation settings are unchanged. Thanks to [@TonyWu2333](https://github.com/TonyWu2333) ([#244](https://github.com/xmanrui/dsh-im/issues/244), [#265](https://github.com/xmanrui/dsh-im/pull/265)).
+- 微信图片与文件的 CDN 上传使用延迟创建、独立管理的网络分发器，避免宿主全局分发器导致成功响应缺少 `x-encrypted-param` 而上传失败；继续遵循环境代理配置，控制器关闭时释放资源，保留现有 JSON 请求和上传重试行为（[#270](https://github.com/xmanrui/dsh-im/issues/270)）。
+  Weixin image/file CDN uploads now use a lazy, privately managed dispatcher, avoiding failures when the Host's global dispatcher loses `x-encrypted-param` from otherwise successful responses. Environment proxy settings remain honored, resources are released on controller close, and existing JSON requests and upload retry behavior are preserved ([#270](https://github.com/xmanrui/dsh-im/issues/270)).
+
+### Changed / 变更
+
+- CI 增加 Windows 工作区回归检查，覆盖默认目录创建、工作区切换、绑定恢复及相关并发场景；同步中英文 README 的官方 Token 赞助说明。
+  Added Windows CI regression coverage for workspace creation, switching, binding recovery, and related concurrency cases, and clarified official token sponsorship wording in both READMEs.
+
+### Compatibility / 兼容性
+
+- 插件宿主兼容性元数据保持 DSH 0.1.7-alpha.1，不扩大为未经验证的版本范围。升级插件后请重启 Host 并刷新设置页。
+  Host compatibility metadata remains declared for DSH 0.1.7-alpha.1 without expanding to unverified versions. Restart the Host and refresh settings after upgrading.
+
 ## [4.28.0] - 2026-09-24
 
 ### Fixed / 修复
@@ -1283,7 +1304,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.28.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.28.1...HEAD
+[4.28.1]: https://github.com/xmanrui/dsh-im/compare/v4.28.0...v4.28.1
 [4.28.0]: https://github.com/xmanrui/dsh-im/compare/v4.27.0...v4.28.0
 [4.27.0]: https://github.com/xmanrui/dsh-im/compare/v4.26.0...v4.27.0
 [4.26.0]: https://github.com/xmanrui/dsh-im/compare/v4.25.0...v4.26.0

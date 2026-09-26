@@ -2,6 +2,7 @@ import { getImageInputSettingsStore } from '../../../../src/channels/shared/imag
 import { unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { EnvHttpProxyAgent, fetch as undiciFetch } from 'undici';
 
 import { WeixinConfigStore } from '../../../../src/channels/weixin/config-store.mjs';
 import { HarnessClient } from '../../../../src/channels/weixin/harness-client.mjs';
@@ -83,7 +84,14 @@ export async function createProductionController(ctx, config = {}, internals = {
   const Harness = internals.HarnessClient ?? HarnessClient;
   const Controller = internals.Controller ?? WeixinController;
   const Runtime = internals.Runtime ?? WeixinRuntime;
-  const api = internals.api ?? createWeixinApi();
+  let uploadDispatcher;
+  const api = internals.api ?? createWeixinApi({
+    uploadFetchImpl: (url, options) => {
+      // Keep CDN response headers independent of the host's global dispatcher.
+      uploadDispatcher ??= new EnvHttpProxyAgent();
+      return undiciFetch(url, { ...options, dispatcher: uploadDispatcher });
+    },
+  });
   const createSupervisor = internals.createConnectionSupervisor ?? createConnectionSupervisor;
   const logger = typeof ctx.logger === 'function'
     ? ctx.logger('dsh-weixin')
@@ -232,9 +240,18 @@ export async function createProductionController(ctx, config = {}, internals = {
     }),
     ready: supervisor.ready,
     async close() {
-      await supervisor.close();
-      await controller.close();
-      harness.stopManagedProcess();
+      try {
+        await supervisor.close();
+        await controller.close();
+      } finally {
+        const dispatcher = uploadDispatcher;
+        uploadDispatcher = undefined;
+        try {
+          await dispatcher?.destroy();
+        } finally {
+          harness.stopManagedProcess();
+        }
+      }
     },
   };
 }
