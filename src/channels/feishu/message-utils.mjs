@@ -14,20 +14,43 @@ const FEISHU_CARD_UNAVAILABLE_TEXTS = new Set([
 const FEISHU_IMAGE_PERMISSION_MESSAGE =
   '飞书机器人缺少图片读取权限 im:message:readonly（飞书显示为“获取单聊、群组消息”）。请私聊机器人执行 /repair 命令，或者在「IM机器人」设置页点击“补全权限”按钮并扫码。按飞书提示发布新版本、完成必要审批后，再重新发送图片。';
 
-/** Managed-topic group key: one per Feishu topic auto-rooted at a message. */
-export function managedGroupKey(chatId, rootMessageId) {
-  if (!chatId) throw new Error('Feishu managed-topic key needs a chat_id');
+/**
+ * Managed-topic key: one per Feishu topic the bot auto-rooted at a message.
+ * `scope` is the conversation the topic belongs to (`group:<chat_id>` for a
+ * group, `p2p:<open_id>` for a direct chat).
+ */
+export function managedTopicKey(scope, rootMessageId) {
+  if (!scope) throw new Error('Feishu managed-topic key needs a conversation scope');
   if (!rootMessageId) throw new Error('Feishu managed-topic key needs a root message id');
-  return `group:${chatId}:managed:${rootMessageId}`;
+  return `${scope}:managed:${rootMessageId}`;
 }
 
-/** Whether a key denotes a topic-isolated group conversation (thread or managed). */
-export function isTopicGroupKey(key) {
-  return typeof key === 'string' && key.startsWith('group:')
+/** Root message id encoded in a managed-topic key, or null for any other key. */
+export function managedTopicRoot(key) {
+  if (typeof key !== 'string') return null;
+  const marker = ':managed:';
+  const at = key.lastIndexOf(marker);
+  if (at <= 0) return null;
+  return key.slice(at + marker.length) || null;
+}
+
+/**
+ * Whether a key denotes a topic-isolated conversation: either a thread the
+ * platform created (a topic group, a topic the reader opened, or the topic the
+ * bot's own reply opened) or a managed topic the bot rooted at one message.
+ */
+export function isTopicKey(key) {
+  return typeof key === 'string'
+    && (key.startsWith('group:') || key.startsWith('p2p:'))
     && (key.includes(':thread:') || key.includes(':managed:'));
 }
 
-export function conversationKey(event) {
+/**
+ * The conversation a message belongs to, without the topic dimension: the
+ * stable identity a managed-topic key is built on. Group events are identified
+ * by chat id; a direct chat is identified by its peer.
+ */
+export function conversationScope(event) {
   const chatType = event?.message?.chat_type;
   if (chatType === 'p2p') {
     const senderId = event?.sender?.sender_id?.open_id || event?.sender?.sender_id?.user_id;
@@ -36,12 +59,25 @@ export function conversationKey(event) {
   }
   const chatId = event?.message?.chat_id;
   if (!chatId) throw new Error('Feishu group event has no chat id');
+  return `group:${chatId}`;
+}
+
+export function conversationKey(event) {
+  const scope = conversationScope(event);
   // Topic groups: every message belongs to a thread, so key the session per
   // thread to keep each topic's Harness conversation isolated. Regular group
   // chats carry no thread_id and keep the single shared `group:<chat_id>` key.
+  //
+  // Direct chats deliberately keep one key per peer: their thread_id must not
+  // split the session, or an answer typed inside a thread would no longer reach
+  // the question the bot asked in the main window. A direct chat only leaves
+  // its main session for a topic the bot itself opened (a managed topic key).
   const threadId = event?.message?.thread_id;
-  if (typeof threadId === 'string' && threadId.trim()) return `group:${chatId}:thread:${threadId}`;
-  return `group:${chatId}`;
+  if (event?.message?.chat_type !== 'p2p'
+    && typeof threadId === 'string' && threadId.trim()) {
+    return `${scope}:thread:${threadId}`;
+  }
+  return scope;
 }
 
 function parsedMessageContent(event) {

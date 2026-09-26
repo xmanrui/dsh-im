@@ -1,12 +1,14 @@
 import QRCode from 'qrcode';
 import {
   conversationKey,
+  conversationScope,
   extractInboundMessage,
   extractText,
   isAllowedSender,
   isBotSender,
-  isTopicGroupKey,
-  managedGroupKey,
+  isTopicKey,
+  managedTopicKey,
+  managedTopicRoot,
   splitText,
 } from './message-utils.mjs';
 import {
@@ -331,6 +333,26 @@ function isBareMentionMenuRequest(event, text, {
   return !String(text ?? '').trim();
 }
 
+/**
+ * A message that is nothing but a mention of the bot, with no body of its own.
+ * There is no question to answer — a direct chat opens the menu card for it and
+ * a group gets the "text, image and file only" notice — so it must not open a
+ * topic either: an empty topic would leave an empty session behind, and every
+ * look at the menu would create another one.
+ *
+ * Mirrors the reply-reference test (`feishuReplyTargetId`): an explicit quote
+ * keeps the message a real question even when the mention is all the text it
+ * carries.
+ */
+function isBareMentionMessage(event) {
+  if (event?.message?.message_type !== 'text') return false;
+  const messageId = nonEmptyString(event?.message?.message_id);
+  const parentId = nonEmptyString(event?.message?.parent_id);
+  const rootId = nonEmptyString(event?.message?.root_id);
+  if (parentId || (rootId && rootId !== messageId)) return false;
+  return !String(extractText(event) ?? '').trim();
+}
+
 /** Canonical workspace/session help advertised by every bridge family. */
 const WORKSPACE_HELP_LINES = [
   '/workspace 工作区序号或绝对路径  切换工作区',
@@ -631,8 +653,13 @@ export class FeishuHarnessBridge {
   #appId;
   #botOpenId;
   #groupResponseMode;
-  /** When true, group replies that belong to a Feishu topic ask reply_in_thread. */
-  #groupTopicReply = false;
+  /**
+   * When true (the default), a question addressed to the bot opens a Feishu
+   * topic of its own — in groups and in direct chats alike — and the answer
+   * stays inside it. Turning it off keeps every question in the chat's main
+   * session and answers it in the main feed.
+   */
+  #mentionTopicReply = true;
   /** When true, streaming turns push tool calls and interim notes as discrete messages. */
   #stepPush = false;
   /** Step push presentation: discrete posts, a CardKit card, or native live CoT. */
@@ -698,7 +725,7 @@ export class FeishuHarnessBridge {
     appId,
     botOpenId,
     groupResponseMode = FEISHU_GROUP_RESPONSE_MODES.ALL,
-    groupTopicReply = false,
+    mentionTopicReply = true,
     stepPush = false,
     stepPushMode = FEISHU_STEP_PUSH_MODES.POST,
     stepPushClock = null,
@@ -748,7 +775,7 @@ export class FeishuHarnessBridge {
     this.#appId = nonEmptyString(appId);
     this.#botOpenId = nonEmptyString(botOpenId);
     this.#groupResponseMode = normalizeFeishuGroupResponseMode(groupResponseMode);
-    this.#groupTopicReply = groupTopicReply === true;
+    this.#mentionTopicReply = mentionTopicReply !== false;
     this.#stepPush = stepPush === true;
     this.#stepPushMode = normalizeFeishuStepPushMode(stepPushMode);
     this.#stepPushClock = stepPushClock ?? DEFAULT_STEP_PUSH_CLOCK;
@@ -833,8 +860,8 @@ export class FeishuHarnessBridge {
     this.#groupResponseMode = normalizeFeishuGroupResponseMode(value);
   }
 
-  setGroupTopicReply(value) {
-    this.#groupTopicReply = value === true;
+  setMentionTopicReply(value) {
+    this.#mentionTopicReply = value !== false;
   }
 
   setStepPush(value) {
@@ -851,6 +878,16 @@ export class FeishuHarnessBridge {
 
   #isAddressed(event) {
     if (event?.message?.chat_type === 'p2p') return true;
+    return this.#isMentioned(event);
+  }
+
+  /**
+   * Whether this message mentions the bot. Unlike #isAddressed — which answers
+   * "does this chat expect a reply at all" and is therefore always true in a
+   * direct chat — this asks the literal question, so a topic is only opened for
+   * a message the reader actually addressed to the bot.
+   */
+  #isMentioned(event) {
     const mentions = Array.isArray(event?.message?.mentions) ? event.message.mentions : [];
     if (!this.#botOpenId) return mentions.length > 0;
     return mentions.some((mention) => mention?.id?.open_id === this.#botOpenId
@@ -858,27 +895,31 @@ export class FeishuHarnessBridge {
   }
 
   /**
-   * Conversation key for one inbound event. When group-topic replies are on,
-   * a main-feed question addressed to the bot opens a fresh managed topic
-   * session instead of joining the shared group session, and messages inside
-   * a topic we already opened resolve back to that same managed session.
+   * Conversation key for one inbound event, for groups and direct chats alike.
+   *
+   * - A message inside a topic resolves back to the managed key when the bot
+   *   rooted that topic, so the whole topic keeps one session; every other
+   *   thread keeps the key the channel would have used without managed topics.
+   * - A main-feed message that mentions the bot opens a fresh managed topic
+   *   session instead of joining the chat's shared session. A bare "@bot" is
+   *   excluded: it is a menu request, not a question.
+   * - Everything else stays in the chat's shared session.
    */
   #resolveKey(event) {
-    const chatType = event?.message?.chat_type;
-    const chatId = nonEmptyString(event?.message?.chat_id);
-    if (chatType !== 'group') return conversationKey(event);
     const messageId = nonEmptyString(event?.message?.message_id);
     const threadId = nonEmptyString(event?.message?.thread_id);
     if (threadId) {
       const root = this.#state?.topicRootFor?.(threadId) ?? null;
-      return root && chatId
-        ? managedGroupKey(chatId, root.rootMessageId)
-        : `group:${chatId}:thread:${threadId}`;
+      if (root) return managedTopicKey(conversationScope(event), root.rootMessageId);
+      return conversationKey(event);
     }
-    if (this.#groupTopicReply && chatId && messageId && this.#isAddressed(event)) {
-      return managedGroupKey(chatId, messageId);
+    if (this.#mentionTopicReply
+      && messageId
+      && this.#isMentioned(event)
+      && !isBareMentionMessage(event)) {
+      return managedTopicKey(conversationScope(event), messageId);
     }
-    return `group:${chatId}`;
+    return conversationKey(event);
   }
 
   /**
@@ -890,7 +931,7 @@ export class FeishuHarnessBridge {
    */
   #rememberTopicReply(messageId, key) {
     if (!nonEmptyString(messageId)) return;
-    this.#anchorTopicReply.set(messageId, isTopicGroupKey(key));
+    this.#anchorTopicReply.set(messageId, isTopicKey(key));
     if (this.#anchorTopicReply.size > 2048) {
       const oldest = this.#anchorTopicReply.keys().next().value;
       if (oldest !== undefined) this.#anchorTopicReply.delete(oldest);
@@ -939,13 +980,62 @@ export class FeishuHarnessBridge {
 
   /** Persist thread_id once Feishu auto-opened a topic from a managed root. */
   async #registerTopicFromReply(replyTo, chatId, response) {
-    const threadId = nonEmptyString(response?.data?.thread_id);
+    await this.#registerTopicReply(replyTo, chatId, response?.data?.thread_id);
+  }
+
+  /**
+   * Record the topic for a root this bot asked Feishu to open. The reply
+   * response carries the thread_id in most cases; when it does not — we have
+   * seen a topic come back without one — read it back from the message we
+   * replied to. Feishu opened the topic either way, and a topic left
+   * unrecorded would answer its follow-ups from the chat's own session instead
+   * of the topic's.
+   */
+  async #registerTopicReply(rootMessageId, chatId, threadId) {
+    const known = nonEmptyString(threadId);
+    if (known) {
+      await this.#registerTopicThreadId(known, rootMessageId, chatId);
+      return;
+    }
+    await this.#ensureTopicRegistered(rootMessageId, chatId);
+  }
+
+  /**
+   * Fallback for a threaded reply that reported no thread_id: ask Feishu which
+   * topic the replied-to message now belongs to. Only runs while that message
+   * is still a pending root candidate, so a topic already recorded — or a
+   * conversation that has no topics at all — costs no extra API call.
+   */
+  async #ensureTopicRegistered(rootMessageId, chatId) {
+    this.#pruneRootCandidates();
+    if (!nonEmptyString(rootMessageId) || !this.#rootCandidates.has(rootMessageId)) return;
+    const threadId = await this.#readTopicThreadId(rootMessageId);
     if (threadId) {
-      await this.#registerTopicThreadId(threadId, replyTo, chatId);
-    } else {
-      // No thread_id means the topic did not open; drop the candidate so a
-      // later addressed question opens a fresh session, not a stale slot.
-      this.#forgetTopicRoot(replyTo);
+      await this.#registerTopicThreadId(threadId, rootMessageId, chatId);
+      return;
+    }
+    // Still no topic: drop the candidate so a later addressed question opens a
+    // fresh session rather than reusing a stale slot.
+    this.#forgetTopicRoot(rootMessageId);
+  }
+
+  /** The topic a message belongs to, or null when it is not in one. */
+  async #readTopicThreadId(messageId) {
+    const read = this.#client?.im?.v1?.message?.get;
+    if (typeof read !== 'function') return null;
+    try {
+      const response = await read({ path: { message_id: messageId } });
+      if (response?.code && response.code !== 0) return null;
+      const items = Array.isArray(response?.data?.items) ? response.data.items : [];
+      const item = items.find((candidate) => nonEmptyString(candidate?.message_id) === messageId)
+        ?? items[0];
+      return nonEmptyString(item?.thread_id);
+    } catch (error) {
+      this.#logger.warn?.(
+        '[dsh-feishu] could not read the topic of a replied-to message:',
+        error?.message ?? String(error),
+      );
+      return null;
     }
   }
 
@@ -1032,10 +1122,9 @@ export class FeishuHarnessBridge {
     }
     // Register a managed-topic root only after access is allowed, so a
     // rejected or ignored question never reserves a candidate slot.
-    if (this.#groupTopicReply
-      && event?.message?.chat_type === 'group'
+    if (this.#mentionTopicReply
       && !nonEmptyString(event?.message?.thread_id)
-      && isTopicGroupKey(key)
+      && isTopicKey(key)
       && key.includes(':managed:')) {
       this.#rememberTopicRoot(messageId);
     }
@@ -3370,7 +3459,9 @@ export class FeishuHarnessBridge {
 
   async #deliverDeferredOutcome(entry, outcome) {
     this.#rememberTopicReply(entry.replyToMessageId, entry.key);
-    if (entry.key === managedGroupKey(entry.chatId, entry.replyToMessageId)) {
+    // A late answer still has to open the topic it was rooted at, so re-arm the
+    // root candidate: the key alone says whether this route was a managed topic.
+    if (managedTopicRoot(entry.key) === nonEmptyString(entry.replyToMessageId)) {
       this.#rememberTopicRoot(entry.replyToMessageId);
     }
     const text = deferredOutcomeText(outcome);
@@ -3392,10 +3483,10 @@ export class FeishuHarnessBridge {
           ...(replyToMessageId ? { replyTo: replyToMessageId } : {}),
           ...(this.#replyInThreadFor(replyToMessageId) ? {
             replyInThread: true,
-            onReplyThreadId: async (threadId) => this.#registerTopicThreadId(
-              threadId,
+            onReplyThreadId: async (threadId) => this.#registerTopicReply(
               replyToMessageId,
               chatId,
+              threadId,
             ),
           } : {}),
         });
@@ -4155,7 +4246,7 @@ export class FeishuHarnessBridge {
             replyTo,
             signal: this.#signal,
             ...(this.#replyInThreadFor(replyTo)
-              ? { replyInThread: true, onReplyThreadId: async (threadId) => this.#registerTopicThreadId(threadId, replyTo, chatId) }
+              ? { replyInThread: true, onReplyThreadId: async (threadId) => this.#registerTopicReply(replyTo, chatId, threadId) }
               : {}),
           })
         : undefined,
@@ -4164,7 +4255,7 @@ export class FeishuHarnessBridge {
             replyTo,
             signal: this.#signal,
             ...(this.#replyInThreadFor(replyTo)
-              ? { replyInThread: true, onReplyThreadId: async (threadId) => this.#registerTopicThreadId(threadId, replyTo, chatId) }
+              ? { replyInThread: true, onReplyThreadId: async (threadId) => this.#registerTopicReply(replyTo, chatId, threadId) }
               : {}),
           })
         : undefined,
@@ -5406,7 +5497,7 @@ export class FeishuHarnessBridge {
       }, {
         replyTo: messageId,
         ...(this.#replyInThreadFor(messageId)
-          ? { replyInThread: true, onReplyThreadId: async (threadId) => this.#registerTopicThreadId(threadId, messageId, chatId) }
+          ? { replyInThread: true, onReplyThreadId: async (threadId) => this.#registerTopicReply(messageId, chatId, threadId) }
           : {}),
       });
     } catch (error) {

@@ -330,7 +330,7 @@ test('only Feishu adds a group tab and it contains only the two migrated control
     configured: true,
     state: 'connected',
     groupResponseMode: 'all',
-    groupTopicReply: true,
+    mentionTopicReply: true,
     groupMessagePermissionGranted: true,
     bot: { name: '群聊设置机器人', appIdMasked: 'cli_group••••test' },
     health: { status: 'healthy', summary: '长连接运行正常', lastCheckedAt: Date.now() },
@@ -384,7 +384,7 @@ test('only Feishu adds a group tab and it contains only the two migrated control
   assert.equal(groupSettings.findAllByType('h2').length, 0);
   assert.doesNotMatch(textOf(groupSettings), /这些设置只影响|刷新群聊设置/);
   assert.equal(groupSettings.findByProps({ 'aria-label': '群聊响应方式' }).props.value, 'all');
-  assert.equal(groupSettings.findByProps({ 'aria-label': '群聊以话题方式回复' }).props.value, 'on');
+  assert.equal(groupSettings.findByProps({ 'aria-label': '被 @ 时以话题方式回复' }).props.value, 'on');
 });
 
 test('access settings preserve independent mode drafts and save direct and group atomically', async (t) => {

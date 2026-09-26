@@ -31,18 +31,18 @@ test('PluginConfigStore persists non-secret onboarding facts', async () => {
     ...store.get(),
     groupResponseMode: 'all',
     groupMessagePermissionGranted: true,
-    groupTopicReply: true,
+    mentionTopicReply: true,
   });
   const reloaded = (await new PluginConfigStore(path).load()).get();
   assert.equal(reloaded.groupResponseMode, 'all');
   assert.equal(reloaded.groupMessagePermissionGranted, true);
-  assert.equal(reloaded.groupTopicReply, true);
+  assert.equal(reloaded.mentionTopicReply, true);
 
   await store.clear();
   assert.equal(store.get(), null);
 });
 
-test('PluginConfigStore defaults groupTopicReply off and only persists a literal true', async () => {
+test('PluginConfigStore defaults mentionTopicReply on and only a literal false turns it off', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-feishu-config-topic-'));
   const path = join(dir, 'config.json');
   const store = await new PluginConfigStore(path).load();
@@ -51,12 +51,12 @@ test('PluginConfigStore defaults groupTopicReply off and only persists a literal
     appId: 'cli_topic',
     ownerOpenId: 'ou_owner',
     domain: 'feishu',
-    groupTopicReply: 'yes', // must not be accepted as true
+    mentionTopicReply: 'no', // anything but a literal false keeps the default
   });
-  assert.equal(store.get().groupTopicReply, false);
+  assert.equal(store.get().mentionTopicReply, true);
 
-  await store.save({ ...store.get(), groupTopicReply: true });
-  assert.equal((await new PluginConfigStore(path).load()).get().groupTopicReply, true);
+  await store.save({ ...store.get(), mentionTopicReply: false });
+  assert.equal((await new PluginConfigStore(path).load()).get().mentionTopicReply, false);
 
   await store.clear();
 });

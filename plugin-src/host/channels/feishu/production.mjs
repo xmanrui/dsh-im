@@ -243,7 +243,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         domain: botConfig.domain,
         botOpenId: botConfig.botOpenId,
         groupResponseMode: botConfig.groupResponseMode,
-        groupTopicReply: botConfig.groupTopicReply,
+        mentionTopicReply: botConfig.mentionTopicReply,
         stepPush: botConfig.stepPush,
         stepPushMode: botConfig.stepPushMode,
         sessionSyncTargetsFor: sessionSyncTargetsFor,

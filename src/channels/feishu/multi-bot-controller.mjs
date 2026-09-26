@@ -96,7 +96,7 @@ function configuredBotFingerprint(config) {
     botOpenId: config.botOpenId,
     activated: config.activated,
     groupResponseMode: normalizeFeishuGroupResponseMode(config.groupResponseMode),
-    groupTopicReply: config.groupTopicReply === true,
+    mentionTopicReply: config.mentionTopicReply !== false,
     stepPush: config.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(config.stepPushMode),
     groupMessagePermissionGranted: config.groupMessagePermissionGranted === true,
@@ -603,15 +603,15 @@ export class MultiBotDshFeishuController {
     }));
   }
 
-  async updateGroupTopicReply(botId, groupTopicReply) {
+  async updateMentionTopicReply(botId, mentionTopicReply) {
     this.#assertOpen();
-    if (typeof groupTopicReply !== 'boolean') {
-      throw new TypeError('Invalid Feishu group topic reply flag');
+    if (typeof mentionTopicReply !== 'boolean') {
+      throw new TypeError('Invalid Feishu mention topic reply flag');
     }
     return this.#serializeConfig(() => this.#withBotTransition(botId, async () => {
       const config = this.#requireBot(botId);
-      const saved = await this.#configStore.saveBot({ ...config, groupTopicReply });
-      this.#runtimes.get(botId)?.setGroupTopicReply?.(saved.groupTopicReply);
+      const saved = await this.#configStore.saveBot({ ...config, mentionTopicReply });
+      this.#runtimes.get(botId)?.setMentionTopicReply?.(saved.mentionTopicReply);
       this.#touch();
       return this.status(botId);
     }));
@@ -707,7 +707,7 @@ export class MultiBotDshFeishuController {
         connected,
         configured: true,
         groupResponseMode: normalizeFeishuGroupResponseMode(config.groupResponseMode),
-        groupTopicReply: config.groupTopicReply === true,
+        mentionTopicReply: config.mentionTopicReply !== false,
         stepPush: config.stepPush === true,
         stepPushMode: normalizeFeishuStepPushMode(config.stepPushMode),
         groupMessagePermissionGranted: config.groupMessagePermissionGranted === true,

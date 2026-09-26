@@ -516,9 +516,12 @@ export class VerifiedFeishuChannel {
     if (typeof messageId !== 'string' || !messageId) {
       throw fileDeliveryError('message send', undefined, undefined, { uncertain: true });
     }
-    if (replyTo && typeof onReplyThreadId === 'function') {
+    if (replyTo && replyInThread && typeof onReplyThreadId === 'function') {
+      // The reply itself opens the topic, and the response reports its
+      // thread_id only sometimes (a direct-chat topic comes back without one).
+      // Hand over what we have and let the bridge read it back when missing.
       const threadId = response?.data?.thread_id;
-      if (typeof threadId === 'string' && threadId) await onReplyThreadId(threadId);
+      await onReplyThreadId(typeof threadId === 'string' && threadId ? threadId : null);
     }
     return createDeliveryReceipt({
       deliveryId: file.deliveryKey,
@@ -596,9 +599,11 @@ export class VerifiedFeishuChannel {
     assertApiSuccess('Feishu message send', response);
     const messageId = response?.data?.message_id;
     if (!messageId) throw new Error('Feishu message send returned no message_id');
-    if (replyTo && typeof options.onReplyThreadId === 'function') {
+    if (replyTo && replyInThread && typeof options.onReplyThreadId === 'function') {
+      // See #sendArtifact: the topic is created by the reply, but the response
+      // may omit its thread_id, so pass it through as it came.
       const threadId = response?.data?.thread_id;
-      if (typeof threadId === 'string' && threadId) await options.onReplyThreadId(threadId);
+      await options.onReplyThreadId(typeof threadId === 'string' && threadId ? threadId : null);
     }
     return messageId;
   }
