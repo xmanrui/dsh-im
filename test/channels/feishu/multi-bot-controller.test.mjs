@@ -274,6 +274,40 @@ test('stepPush persists and reaches the live runtime without reconnecting', asyn
   await fx.controller.close();
 });
 
+test('slashPanel persists, normalizes, and reaches the live runtime without reconnecting', async () => {
+  const existing = bot('bot_slash_panel', 'slash_panel');
+  const fx = fixture({
+    bots: [existing],
+    secrets: { [existing.secretRef]: 'stable-secret' },
+  });
+  await fx.controller.initialize();
+
+  // A bot that never configured the panel follows the shipped manifest.
+  assert.deepEqual(fx.controller.status().bots[0].slashPanel, { mode: 'default', order: [] });
+  const runtime = fx.runtimes.get(existing.id)[0];
+  const panels = [];
+  runtime.setSlashPanel = (value) => panels.push(value);
+  const updated = await fx.controller.updateSlashPanel(existing.id, {
+    mode: 'custom',
+    order: ['new', 'stop'],
+  });
+
+  assert.deepEqual(updated.bots[0].slashPanel, { mode: 'custom', order: ['new', 'stop'] });
+  assert.deepEqual(fx.configStore.getBot(existing.id).slashPanel, { mode: 'custom', order: ['new', 'stop'] });
+  assert.deepEqual(panels, [{ mode: 'custom', order: ['new', 'stop'] }]);
+  // The panel lives on Feishu's side: recording it must not bounce the bot.
+  assert.equal(fx.runtimes.get(existing.id).length, 1);
+  await assert.rejects(
+    fx.controller.updateSlashPanel(existing.id, { mode: 'custom', order: ['nope'] }),
+    /Invalid Feishu slash panel config/,
+  );
+  await assert.rejects(
+    fx.controller.updateSlashPanel(existing.id, { mode: 'default', order: ['new'] }),
+    /Invalid Feishu slash panel config/,
+  );
+  await fx.controller.close();
+});
+
 test('stepPushMode persists, normalizes, and reaches the live runtime without reconnecting', async () => {
   const existing = bot('bot_step_push_mode', 'step_push_mode');
   const fx = fixture({

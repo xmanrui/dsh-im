@@ -24,6 +24,7 @@ test('multi-bot endpoints are bot-scoped and keep legacy operations separate', (
   assert.equal(FEISHU_ENDPOINTS.setGroupTopicReply, 'bot.group-topic-reply.set');
   assert.equal(FEISHU_ENDPOINTS.setStepPush, 'bot.step-push.set');
   assert.equal(FEISHU_ENDPOINTS.setStepPushMode, 'bot.step-push-mode.set');
+  assert.equal(FEISHU_ENDPOINTS.setSlashPanel, 'bot.slash-panel.set');
   assert.equal(FEISHU_ENDPOINTS.testConnection, 'connection.test');
 });
 

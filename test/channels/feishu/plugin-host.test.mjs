@@ -358,6 +358,64 @@ test('Host validates and updates the Feishu step push flag', async () => {
   await fx.dispose();
 });
 
+test('Host validates and updates the Feishu command panel', async () => {
+  let slashPanel = { mode: 'default', order: [] };
+  const current = () => status({
+    schemaVersion: 2,
+    revision: 6,
+    configured: true,
+    bots: [{
+      botId: 'bot_panel',
+      phase: 'connected',
+      connected: true,
+      configured: true,
+      slashPanel,
+      bot: { name: '指令面板机器人', domain: 'feishu' },
+      connection: {
+        ready: true,
+        feishuLongConnectionState: 'connected',
+        harnessReachable: true,
+      },
+    }],
+  });
+  const controller = {
+    status: async () => current(),
+    startRegistration: async () => current(),
+    cancelRegistration: async () => current(),
+    disconnect: async () => status(),
+    updateSlashPanel: async (botId, value) => {
+      assert.equal(botId, 'bot_panel');
+      slashPanel = value;
+      return current();
+    },
+  };
+  const fx = await rpcFixture(controller);
+
+  const updated = await fx.registration.handler(
+    FEISHU_ENDPOINTS.setSlashPanel,
+    { botId: 'bot_panel', slashPanel: { mode: 'custom', order: ['new', 'stop'] } },
+    signal(),
+  );
+  assert.equal(updated.ok, true);
+  assert.deepEqual(updated.value.bots[0].slashPanel, { mode: 'custom', order: ['new', 'stop'] });
+
+  for (const damaged of [
+    { mode: 'custom', order: ['nope'] },
+    { mode: 'custom', order: ['/new'] },
+    { mode: 'custom', order: ['new', 'new'] },
+    { mode: 'default', order: ['new'] },
+  ]) {
+    const invalid = await fx.registration.handler(
+      FEISHU_ENDPOINTS.setSlashPanel,
+      { botId: 'bot_panel', slashPanel: damaged },
+      signal(),
+    );
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.error.code, 'bad-request');
+  }
+  await fx.dispose();
+});
+
 test('manual credentials accept only supported optional domains and forward them unchanged', async (t) => {
   const calls = [];
   const fx = await rpcFixture({

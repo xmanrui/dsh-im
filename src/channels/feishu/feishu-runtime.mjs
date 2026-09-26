@@ -6,9 +6,10 @@ import { VerifiedFeishuChannel } from './feishu-channel.mjs';
 import { normalizeFeishuGroupResponseMode } from './group-response-mode.mjs';
 import { normalizeFeishuStepPushMode } from './step-push-mode.mjs';
 import {
-  registerSlashCommands,
+  syncSlashCommands,
   SLASH_COMMAND_MANIFEST,
 } from './slash-command-registry.mjs';
+import { normalizeSlashPanelConfig } from './slash-command-panel.mjs';
 import {
   connectionTestTargetUnavailable,
   sendRememberedConnectionTest,
@@ -94,6 +95,7 @@ export function createBridgeStatus({ allowedSenderCount = 1 } = {}) {
     slashCommandsRegistered: 0,
     slashCommandsExisting: 0,
     slashCommandsFailed: 0,
+    slashCommandsRemoved: 0,
     slashCommandsError: null,
   };
 }
@@ -137,6 +139,15 @@ export class FeishuRuntime {
   #pendingCardActionProbes = new Map();
   #status;
   #slashCommands = true;
+  /** Which commands the "/" panel should offer, and in which order. */
+  #slashPanel = null;
+  /** HTTP instance kept for panel re-syncs after startup. */
+  #slashHttpInstance = null;
+  /**
+   * Bumped on every panel change: a sync started for an older config stops at
+   * its next await instead of racing the newer one (last writer wins).
+   */
+  #slashSyncEpoch = 0;
 
   constructor({
     lark,
@@ -161,6 +172,7 @@ export class FeishuRuntime {
     connectTimeoutMs = 15000,
     requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
     slashCommands = true,
+    slashPanel = null,
     wsAgent,
     logger = console,
   }) {
@@ -201,6 +213,7 @@ export class FeishuRuntime {
     this.#connectTimeoutMs = connectTimeoutMs;
     this.#requestTimeoutMs = requestTimeoutMs;
     this.#slashCommands = Boolean(slashCommands);
+    this.#slashPanel = normalizeSlashPanelConfig(slashPanel);
     this.#wsAgent = wsAgent;
     this.#logger = logger; this.#diagnostics = createConnectionDiagnostics({ channel: 'feishu', logger });
     this.#status = createBridgeStatus({ allowedSenderCount: normalizedOwners.length });
@@ -228,6 +241,25 @@ export class FeishuRuntime {
   setStepPushMode(value) {
     this.#stepPushMode = normalizeFeishuStepPushMode(value);
     this.#bridge?.setStepPushMode(this.#stepPushMode);
+  }
+
+  /**
+   * Record which commands the "/" panel should offer. The panel itself lives on
+   * Feishu's side, so a connected bot re-syncs it in the background; the newer
+   * config wins and any sync still running for the older one stops.
+   */
+  setSlashPanel(value) {
+    this.#slashPanel = normalizeSlashPanelConfig(value);
+    this.#slashSyncEpoch += 1;
+    const httpInstance = this.#slashHttpInstance;
+    const signal = this.#abortController?.signal;
+    if (!this.#slashCommands || !httpInstance || !signal || signal.aborted) return;
+    void this.#registerSlashCommands(
+      httpInstance,
+      () => !signal.aborted,
+      signal,
+      this.#slashSyncEpoch,
+    );
   }
 
   async start() {
@@ -428,8 +460,10 @@ export class FeishuRuntime {
       assertCurrentStart();
       // Register the native Slash Command panel best-effort and asynchronously
       // so it never blocks the long-connection startup. The panel is only a
-      // client-side convenience; failure here must not take the bot down.
+      // client-side convenience; failure here must not take the bot down. The
+      // HTTP instance is kept so a later panel change can re-sync while running.
       if (this.#slashCommands && httpInstance) {
+        this.#slashHttpInstance = httpInstance;
         void this.#registerSlashCommands(httpInstance, isCurrentStart, signal);
       }
       return this.status;
@@ -673,28 +707,34 @@ export class FeishuRuntime {
     return { sent: true };
   }
 
-  async #registerSlashCommands(httpInstance, isCurrentStart, signal) {
+  async #registerSlashCommands(httpInstance, isCurrentStart, signal, epoch = this.#slashSyncEpoch) {
     this.#status.slashCommandRegistration = 'registering';
     this.#status.slashCommandsError = null;
     try {
-      const result = await registerSlashCommands({
+      const result = await syncSlashCommands({
         appId: this.#appId,
         appSecret: this.#appSecret,
         domain: this.#domain,
         httpInstance,
         signal,
         manifest: SLASH_COMMAND_MANIFEST,
+        config: this.#slashPanel,
       });
-      if (!isCurrentStart()) return;
+      // A newer panel config took over while this sync was running: its own run
+      // reports the outcome, so this one only stops.
+      if (!isCurrentStart() || epoch !== this.#slashSyncEpoch) return;
       this.#status.slashCommandRegistration = 'done';
       this.#status.slashCommandsRegistered = result.created.length;
       this.#status.slashCommandsExisting = result.existing.length;
       this.#status.slashCommandsFailed = result.failed.length;
+      this.#status.slashCommandsRemoved = result.deleted.length;
       this.#status.slashCommandsError = result.failed.length > 0
         ? result.failed.map((f) => `/${f.command}: ${f.error?.message ?? String(f.error)}`).join('; ')
         : null;
-      if (result.created.length > 0) {
-        this.#logger.info?.(`[dsh-feishu] registered ${result.created.length} slash command(s)`);
+      if (result.created.length > 0 || result.deleted.length > 0) {
+        this.#logger.info?.(
+          `[dsh-feishu] slash panel synced: ${result.created.length} added, ${result.deleted.length} removed`,
+        );
       }
       if (result.failed.length > 0) {
         this.#logger.warn?.(

@@ -4,8 +4,10 @@ import { SHARED_COMMAND_CATALOG } from '../../../src/channels/shared/command-cat
 import {
   listSlashCommands,
   registerSlashCommands,
+  syncSlashCommands,
   SLASH_COMMAND_TENANT_SCOPES,
   SLASH_COMMAND_MANIFEST,
+  SLASH_PANEL_CREATE_INTERVAL_MS,
 } from '../../../src/channels/feishu/slash-command-registry.mjs';
 
 function fakeHttpInstance(handlers) {
@@ -194,4 +196,195 @@ test('registerSlashCommands treats duplicate-create as already-existing', async 
   });
   assert.equal(result.created.length, 0);
   assert.equal(result.failed.length, 0);
+});
+
+/**
+ * Emulates the app's command registry: Feishu assigns the command_id, stamps
+ * create_time to the second and returns the list newest-first.
+ */
+function slashPanelRemote({ items = [], onDelete = null } = {}) {
+  const registered = new Map(items.map((item) => [item.command, { ...item }]));
+  let sequence = 0;
+  const created = [];
+  const deleted = [];
+  const requests = [];
+  const http = {
+    async request(options) {
+      requests.push(options);
+      const key = `${options.method} ${options.url.split('/open-apis/')[1]}`;
+      if (key === AUTH_KEY) return { code: 0, tenant_access_token: 'tenant-token' };
+      if (key === LIST_KEY) {
+        const list = [...registered.values()]
+          .sort((a, b) => Number(b.create_time) - Number(a.create_time));
+        return { code: 0, data: { items: list.map((item) => ({ ...item })) } };
+      }
+      if (key === 'POST application/v7/app_slash_commands') {
+        sequence += 1;
+        const command = options.data.command;
+        const entry = { command, command_id: `created-${sequence}`, create_time: String(10_000 + sequence) };
+        registered.set(command, entry);
+        created.push(command);
+        return { code: 0, data: { command_id: entry.command_id } };
+      }
+      const match = /^DELETE application\/v7\/app_slash_commands\/(.+)$/.exec(key);
+      if (match) {
+        if (typeof onDelete === 'function') onDelete(match[1]);
+        const entry = [...registered.values()].find((item) => item.command_id === match[1]);
+        if (!entry) throw new Error(`no fake handler for ${key}`);
+        registered.delete(entry.command);
+        deleted.push(entry.command);
+        return { code: 0, data: {} };
+      }
+      throw new Error(`no fake handler for ${key}`);
+    },
+  };
+  return { http, registered, created, deleted, requests };
+}
+
+function authenticationCalls(requests) {
+  return requests.filter((request) => request.url.includes('/tenant_access_token/')).length;
+}
+
+function panelOrder(remote) {
+  return [...remote.registered.values()]
+    .sort((a, b) => Number(b.create_time) - Number(a.create_time))
+    .map((item) => item.command);
+}
+
+const PANEL_TEST_MANIFEST = Object.freeze([
+  { command: 'menu', default: '打开菜单', en_us: 'Open menu' },
+  { command: 'status', default: '状态', en_us: 'Status' },
+  { command: 'stop', default: '停止', en_us: 'Stop' },
+  { command: 'new', default: '新会话', en_us: 'New session' },
+]);
+
+test('syncSlashCommands keeps adding missing commands when no panel is configured', async () => {
+  const remote = slashPanelRemote({
+    items: [
+      { command: 'menu', command_id: 'm1', create_time: '5' },
+      { command: 'external_command', command_id: 'x1', create_time: '4' },
+    ],
+  });
+  const result = await syncSlashCommands({
+    appId: 'a', appSecret: 's', httpInstance: remote.http, manifest: PANEL_TEST_MANIFEST,
+  });
+
+  assert.deepEqual(remote.created, ['status', 'stop', 'new']);
+  assert.deepEqual(remote.deleted, []);
+  assert.deepEqual(result.external, ['external_command']);
+  assert.equal(result.changed, true);
+  assert.equal(authenticationCalls(remote.requests), 1);
+});
+
+test('syncSlashCommands removes the commands a custom panel does not list', async () => {
+  const remote = slashPanelRemote({
+    items: [
+      { command: 'menu', command_id: 'm1', create_time: '3' },
+      { command: 'status', command_id: 's1', create_time: '2' },
+      { command: 'stop', command_id: 't1', create_time: '1' },
+      { command: 'external_command', command_id: 'x1', create_time: '0' },
+    ],
+  });
+  const result = await syncSlashCommands({
+    appId: 'a', appSecret: 's', httpInstance: remote.http, manifest: PANEL_TEST_MANIFEST,
+    config: { mode: 'custom', order: ['status'] },
+  });
+
+  // Everything of ours is recreated so the order is ours to choose; the command
+  // registered outside the manifest is left where it is.
+  assert.deepEqual(remote.deleted, ['menu', 'status', 'stop']);
+  assert.deepEqual(remote.created, ['status']);
+  assert.deepEqual(panelOrder(remote), ['status', 'external_command']);
+  assert.ok(result.external.includes('external_command'));
+  assert.equal(authenticationCalls(remote.requests), 1);
+});
+
+test('syncSlashCommands rebuilds a custom panel newest-first with a pause between creates', async () => {
+  const remote = slashPanelRemote({
+    items: [
+      { command: 'new', command_id: 'n1', create_time: '3' },
+      { command: 'stop', command_id: 't1', create_time: '2' },
+      { command: 'menu', command_id: 'm1', create_time: '1' },
+    ],
+  });
+  const waits = [];
+  const result = await syncSlashCommands({
+    appId: 'a', appSecret: 's', httpInstance: remote.http, manifest: PANEL_TEST_MANIFEST,
+    config: { mode: 'custom', order: ['menu', 'stop', 'new'] },
+    wait: async (milliseconds) => { waits.push(milliseconds); },
+  });
+
+  // Feishu reports the panel in creation order, so the wanted order is created
+  // back to front and each create needs its own second.
+  assert.deepEqual(remote.created, ['new', 'stop', 'menu']);
+  assert.deepEqual(waits, [SLASH_PANEL_CREATE_INTERVAL_MS, SLASH_PANEL_CREATE_INTERVAL_MS]);
+  assert.deepEqual(panelOrder(remote), ['menu', 'stop', 'new']);
+  assert.deepEqual(remote.deleted, ['new', 'stop', 'menu']);
+  assert.equal(result.changed, true);
+});
+
+test('syncSlashCommands leaves a panel that already matches the configuration', async () => {
+  const remote = slashPanelRemote({
+    items: [
+      { command: 'new', command_id: 'n1', create_time: '3' },
+      { command: 'stop', command_id: 't1', create_time: '2' },
+      { command: 'menu', command_id: 'm1', create_time: '1' },
+    ],
+  });
+  const waits = [];
+  const result = await syncSlashCommands({
+    appId: 'a', appSecret: 's', httpInstance: remote.http, manifest: PANEL_TEST_MANIFEST,
+    config: { mode: 'custom', order: ['new', 'stop', 'menu'] },
+    wait: async (milliseconds) => { waits.push(milliseconds); },
+  });
+
+  // Restarting a bot must never rebuild a panel that is already correct.
+  assert.deepEqual(remote.created, []);
+  assert.deepEqual(remote.deleted, []);
+  assert.deepEqual(waits, []);
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.existing, ['new', 'stop', 'menu']);
+});
+
+test('syncSlashCommands stops before recreating when a delete fails', async () => {
+  const remote = slashPanelRemote({
+    items: [
+      { command: 'menu', command_id: 'm1', create_time: '2' },
+      { command: 'status', command_id: 's1', create_time: '1' },
+    ],
+    onDelete: (commandId) => {
+      if (commandId !== 's1') return;
+      const error = new Error('Access denied');
+      error.response = { data: { code: 99991672, msg: 'Access denied' } };
+      throw error;
+    },
+  });
+  const result = await syncSlashCommands({
+    appId: 'a', appSecret: 's', httpInstance: remote.http, manifest: PANEL_TEST_MANIFEST,
+    config: { mode: 'custom', order: ['stop'] },
+  });
+
+  // A half-emptied panel is recoverable; a duplicate create is not. The next
+  // sync converges instead.
+  assert.deepEqual(remote.created, []);
+  assert.equal(result.created.length, 0);
+  assert.equal(result.failed.length, 1);
+  assert.equal(result.failed[0].command, 'status');
+  assert.deepEqual(remote.deleted, ['menu']);
+  assert.ok(remote.registered.has('status'), 'the command that failed to delete is still registered');
+});
+
+test('syncSlashCommands reports a registered command without an id instead of deleting it', async () => {
+  const remote = slashPanelRemote({
+    items: [{ command: 'menu', create_time: '1' }],
+  });
+  const result = await syncSlashCommands({
+    appId: 'a', appSecret: 's', httpInstance: remote.http, manifest: PANEL_TEST_MANIFEST,
+    config: { mode: 'custom', order: ['stop'] },
+  });
+
+  assert.deepEqual(remote.deleted, []);
+  assert.equal(result.failed.length, 1);
+  assert.match(result.failed[0].error, /command_id/);
+  assert.deepEqual(remote.created, []);
 });

@@ -80,6 +80,35 @@ test('PluginConfigStore defaults stepPush off and only persists a literal true',
   await store.clear();
 });
 
+test('PluginConfigStore defaults the slash panel to the manifest and normalizes damaged values', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-feishu-config-slash-panel-'));
+  const path = join(dir, 'config.json');
+  const store = await new PluginConfigStore(path).load();
+
+  assert.deepEqual(store.get()?.slashPanel, undefined);
+  await store.save({
+    appId: 'cli_slash_panel',
+    ownerOpenId: 'ou_owner',
+    domain: 'feishu',
+    slashPanel: { mode: 'custom', order: ['/new', 'stop', 'new', 'nope'] },
+  });
+  // Unknown names and duplicates never reach the panel; a leading slash is how
+  // users write a command, not how it is stored.
+  assert.deepEqual(store.get().slashPanel, { mode: 'custom', order: ['new', 'stop'] });
+  assert.deepEqual(
+    (await new PluginConfigStore(path).load()).get().slashPanel,
+    { mode: 'custom', order: ['new', 'stop'] },
+  );
+
+  await store.save({ ...store.get(), slashPanel: { mode: 'default', order: ['new'] } });
+  assert.deepEqual(store.get().slashPanel, { mode: 'default', order: [] });
+
+  await store.save({ ...store.get(), slashPanel: 'custom' });
+  assert.deepEqual(store.get().slashPanel, { mode: 'default', order: [] });
+
+  await store.clear();
+});
+
 test('PluginConfigStore defaults stepPushMode to post and normalizes unknown values', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-feishu-config-step-push-mode-'));
   const path = join(dir, 'config.json');
