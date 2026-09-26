@@ -1337,3 +1337,179 @@ test('the Feishu command panel page can go back to the shipped manifest', async 
     slashPanel: { mode: 'default', order: [] },
   }]);
 });
+
+test('the Feishu command panel page can copy a panel to every other bot', async (t) => {
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    setInterval() { return 1; },
+    clearInterval() {},
+    setTimeout() { return 1; },
+    clearTimeout() {},
+    requestAnimationFrame(callback) { callback(); return 1; },
+    cancelAnimationFrame() {},
+  };
+  const source = {
+    botId: 'bot_panel_source',
+    configured: true,
+    state: 'connected',
+    slashPanel: { mode: 'custom', order: ['new', 'stop'] },
+    bot: { name: '来源机器人', appIdMasked: 'cli_source••••test' },
+    health: { status: 'healthy', summary: '长连接运行正常', lastCheckedAt: Date.now() },
+  };
+  const other = {
+    botId: 'bot_panel_other',
+    configured: true,
+    state: 'disconnected',
+    slashPanel: { mode: 'default', order: [] },
+    bot: { name: '另一个机器人', appIdMasked: 'cli_other••••test' },
+    health: { status: 'offline', summary: '等待重连' },
+  };
+  const status = { schemaVersion: 2, revision: 1, state: 'connected', bots: [source, other] };
+  const calls = [];
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(IMSettingsTab, {
+      browserLocation: { href: 'http://localhost:9527/settings' },
+      weixinRpcCall: async () => ({ ok: true, value: { revision: 1, bots: [] } }),
+      feishuRpcCall: async (endpoint, payload) => {
+        calls.push({ endpoint, payload });
+        if (endpoint === FEISHU_ENDPOINTS.setSlashPanel) {
+          const bot = status.bots.find((entry) => entry.botId === payload.botId);
+          bot.slashPanel = payload.slashPanel;
+          return { ok: true, value: status };
+        }
+        return { ok: true, value: status };
+      },
+      deliveryRpcCall: async () => ({ ok: true, value: { targets: [] } }),
+      updateRpcCall: async () => ({ ok: true, value: { runningVersion: '4.0.1', canInstall: false } }),
+    }));
+    await flush();
+  });
+  t.after(async () => {
+    await act(async () => { renderer.unmount(); await flush(); });
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  });
+
+  await act(async () => {
+    renderer.root.findByProps({ id: 'dim-tab-feishu' }).props.onClick();
+    await flush();
+    await flush();
+  });
+  const sourceCard = renderer.root.findByProps({ 'data-bot-id': 'bot_panel_source' });
+  await act(async () => {
+    sourceCard.findByProps({ 'aria-label': '展开该账号的设置' }).props.onClick({ stopPropagation() {} });
+  });
+  await act(async () => {
+    sourceCard.findByProps({ 'aria-label': '更多机器人设置' }).props.onClick();
+    await flush();
+  });
+  const page = renderer.root.findByProps({ className: 'dim-deliveryPage' });
+  await act(async () => {
+    button(page, '指令面板').props.onClick();
+    await flush();
+  });
+
+  // The copy asks first and says how many bots lose their own panel.
+  await act(async () => {
+    button(renderer.root, '保存并同步到其他机器人').props.onClick();
+    await flush();
+    await flush();
+  });
+  const panelRoot = () => renderer.root.findByProps({ className: 'dim-feishuGroupSettings' });
+  assert.match(textOf(panelRoot()), /将把这套面板设置写入另外\s*1\s*个飞书机器人/);
+  assert.equal(
+    calls.filter((call) => call.endpoint === FEISHU_ENDPOINTS.setSlashPanel).length,
+    0,
+    'asking for confirmation must not write anything yet',
+  );
+
+  await act(async () => {
+    button(renderer.root, '确认同步').props.onClick();
+    await flush();
+    await flush();
+  });
+
+  assert.deepEqual(
+    calls.filter((call) => call.endpoint === FEISHU_ENDPOINTS.setSlashPanel),
+    [
+      { endpoint: FEISHU_ENDPOINTS.setSlashPanel, payload: { botId: 'bot_panel_source', slashPanel: { mode: 'custom', order: ['new', 'stop'] } } },
+      { endpoint: FEISHU_ENDPOINTS.setSlashPanel, payload: { botId: 'bot_panel_other', slashPanel: { mode: 'custom', order: ['new', 'stop'] } } },
+    ],
+  );
+  assert.deepEqual(other.slashPanel, { mode: 'custom', order: ['new', 'stop'] });
+  assert.match(textOf(panelRoot()), /已同步到\s*2\s*个机器人/);
+});
+
+test('the Feishu command panel page reports a single-bot channel instead of copying', async (t) => {
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    setInterval() { return 1; },
+    clearInterval() {},
+    setTimeout() { return 1; },
+    clearTimeout() {},
+    requestAnimationFrame(callback) { callback(); return 1; },
+    cancelAnimationFrame() {},
+  };
+  const solo = {
+    botId: 'bot_panel_solo',
+    configured: true,
+    state: 'connected',
+    slashPanel: { mode: 'custom', order: ['new'] },
+    bot: { name: '唯一的机器人', appIdMasked: 'cli_solo••••test' },
+    health: { status: 'healthy', summary: '长连接运行正常', lastCheckedAt: Date.now() },
+  };
+  const status = { schemaVersion: 2, revision: 1, state: 'connected', bots: [solo] };
+  const calls = [];
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(IMSettingsTab, {
+      browserLocation: { href: 'http://localhost:9527/settings' },
+      weixinRpcCall: async () => ({ ok: true, value: { revision: 1, bots: [] } }),
+      feishuRpcCall: async (endpoint, payload) => {
+        calls.push({ endpoint, payload });
+        return { ok: true, value: status };
+      },
+      deliveryRpcCall: async () => ({ ok: true, value: { targets: [] } }),
+      updateRpcCall: async () => ({ ok: true, value: { runningVersion: '4.0.1', canInstall: false } }),
+    }));
+    await flush();
+  });
+  t.after(async () => {
+    await act(async () => { renderer.unmount(); await flush(); });
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  });
+
+  await act(async () => {
+    renderer.root.findByProps({ id: 'dim-tab-feishu' }).props.onClick();
+    await flush();
+    await flush();
+  });
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '展开该账号的设置' }).props.onClick({ stopPropagation() {} });
+  });
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '更多机器人设置' }).props.onClick();
+    await flush();
+  });
+  const page = renderer.root.findByProps({ className: 'dim-deliveryPage' });
+  await act(async () => {
+    button(page, '指令面板').props.onClick();
+    await flush();
+  });
+  await act(async () => {
+    button(renderer.root, '保存并同步到其他机器人').props.onClick();
+    await flush();
+    await flush();
+  });
+
+  assert.match(
+    textOf(renderer.root.findByProps({ className: 'dim-feishuGroupSettings' })),
+    /这个渠道没有其他飞书机器人，不用同步。/,
+  );
+  assert.equal(
+    calls.filter((call) => call.endpoint === FEISHU_ENDPOINTS.setSlashPanel).length,
+    0,
+  );
+});

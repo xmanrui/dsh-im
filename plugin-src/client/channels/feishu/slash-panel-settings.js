@@ -52,6 +52,10 @@ export function FeishuSlashPanelSettingsPage({ account, rpcCall }) {
   const [dirty, setDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
+  const [syncing, setSyncing] = React.useState(false);
+  /** Bot ids waiting for the reader to confirm a copy, or null when idle. */
+  const [syncTargets, setSyncTargets] = React.useState(null);
+  const [syncNotice, setSyncNotice] = React.useState(null);
   const [error, setError] = React.useState(null);
   const mounted = React.useRef(true);
 
@@ -90,33 +94,100 @@ export function FeishuSlashPanelSettingsPage({ account, rpcCall }) {
     setPending('');
   };
 
+  /** The panel this page currently shows, in the shape the Host stores. */
+  const draftPanel = () => (mode === SLASH_PANEL_MODES.CUSTOM
+    ? { mode: SLASH_PANEL_MODES.CUSTOM, order: [...order] }
+    : { mode: SLASH_PANEL_MODES.DEFAULT, order: [] });
+
+  /** Adopt a Host snapshot as the new baseline for this page. */
+  const applySnapshot = (value) => {
+    const snapshot = normalizeBotsSnapshot(value);
+    const bot = snapshot.bots.find((entry) => entry.botId === account.botId);
+    const stored = normalizeSlashPanelConfig(bot?.slashPanel);
+    setMode(stored.mode);
+    setOrder([...stored.order]);
+    setDirty(false);
+    setSaved(true);
+    return snapshot;
+  };
+
   const save = async () => {
     if (saving) return;
     setSaving(true);
     setError(null);
     try {
       if (typeof rpcCall !== 'function') throw new Error('飞书指令面板设置暂不可用。');
-      const payload = mode === SLASH_PANEL_MODES.CUSTOM
-        ? { mode: SLASH_PANEL_MODES.CUSTOM, order: [...order] }
-        : { mode: SLASH_PANEL_MODES.DEFAULT, order: [] };
       const value = unwrapRpcResult(await rpcCall(
         FEISHU_ENDPOINTS.setSlashPanel,
-        { botId: account.botId, slashPanel: payload },
+        { botId: account.botId, slashPanel: draftPanel() },
       ));
       if (!mounted.current) return;
-      const snapshot = normalizeBotsSnapshot(value);
-      const bot = snapshot.bots.find((entry) => entry.botId === account.botId);
-      const stored = normalizeSlashPanelConfig(bot?.slashPanel);
-      setMode(stored.mode);
-      setOrder([...stored.order]);
-      setDirty(false);
-      setSaved(true);
+      applySnapshot(value);
     } catch (cause) {
       if (!mounted.current) return;
       setError(presentError(cause));
     } finally {
       if (mounted.current) setSaving(false);
     }
+  };
+
+  /**
+   * Copy this panel to every other Feishu bot. Each bot keeps its own stored
+   * panel, so the copy is one save per bot (the same endpoint the Save button
+   * uses) — offline bots pick the panel up when they start.
+   */
+  const startSyncAll = async () => {
+    if (saving || syncing || typeof rpcCall !== 'function') return;
+    setSyncing(true);
+    setError(null);
+    setSyncNotice(null);
+    try {
+      const snapshot = normalizeBotsSnapshot(unwrapRpcResult(
+        await rpcCall(FEISHU_ENDPOINTS.status, {}),
+      ));
+      const others = snapshot.bots
+        .map((entry) => entry.botId)
+        .filter((botId) => botId && botId !== account.botId);
+      if (!mounted.current) return;
+      if (others.length === 0) {
+        setSyncNotice({ scope: 'none' });
+        return;
+      }
+      // Ask first: the other bots lose whatever panel they had.
+      setSyncTargets(others);
+    } catch (cause) {
+      if (mounted.current) setError(presentError(cause));
+    } finally {
+      if (mounted.current) setSyncing(false);
+    }
+  };
+
+  const confirmSyncAll = async () => {
+    const targets = syncTargets;
+    if (!targets || syncing || typeof rpcCall !== 'function') return;
+    setSyncing(true);
+    setError(null);
+    setSyncTargets(null);
+    const payload = draftPanel();
+    let done = 0;
+    let failed = 0;
+    // The bot on screen goes first so its own state is authoritative even when
+    // a later bot fails.
+    for (const botId of [account.botId, ...targets]) {
+      try {
+        const value = unwrapRpcResult(await rpcCall(
+          FEISHU_ENDPOINTS.setSlashPanel,
+          { botId, slashPanel: payload },
+        ));
+        if (botId === account.botId && mounted.current) applySnapshot(value);
+        done += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    if (!mounted.current) return;
+    setSyncing(false);
+    setSyncNotice({ scope: 'done', done, failed });
   };
 
   const available = ALL_COMMANDS.filter((name) => !order.includes(name));
@@ -142,7 +213,7 @@ export function FeishuSlashPanelSettingsPage({ account, rpcCall }) {
     className: 'dim-feishuGroupSelect',
     value: mode,
     'aria-label': '指令面板模式',
-    disabled: saving,
+    disabled: saving || syncing,
     onChange: (event) => edit(() => {
       const next = event.target.value;
       setMode(next);
@@ -167,17 +238,17 @@ export function FeishuSlashPanelSettingsPage({ account, rpcCall }) {
           h('span', { className: 'dim-feishuPanelRowActions' },
             h(PanelButton, {
               'aria-label': [localizeText('上移'), `/${name}`].join(' '),
-              disabled: saving || index === 0,
+              disabled: saving || syncing || index === 0,
               onClick: () => move(index, -1),
             }, '↑'),
             h(PanelButton, {
               'aria-label': [localizeText('下移'), `/${name}`].join(' '),
-              disabled: saving || index === order.length - 1,
+              disabled: saving || syncing || index === order.length - 1,
               onClick: () => move(index, 1),
             }, '↓'),
             h(PanelButton, {
               'aria-label': [localizeText('移除'), `/${name}`].join(' '),
-              disabled: saving,
+              disabled: saving || syncing,
               onClick: () => remove(index),
             }, '移除'))))),
       h('div', { className: 'dim-feishuPanelAdd' },
@@ -185,30 +256,62 @@ export function FeishuSlashPanelSettingsPage({ account, rpcCall }) {
           className: 'dim-feishuGroupSelect',
           value: pending,
           'aria-label': '添加指令',
-          disabled: saving || available.length === 0,
+          disabled: saving || syncing || available.length === 0,
           onChange: (event) => setPending(event.target.value),
         },
         h('option', { value: '' }, available.length === 0 ? '指令都已加入' : '选择要加入的指令'),
         available.map((name) => h('option', { key: name, value: name }, commandText(name)))),
         h(PanelButton, {
-          disabled: saving || !pending,
+          disabled: saving || syncing || !pending,
           onClick: add,
         }, '加入'),
         h(PanelButton, {
-          disabled: saving || available.length === 0,
+          disabled: saving || syncing || available.length === 0,
           onClick: () => edit(() => setOrder([...ALL_COMMANDS])),
         }, '恢复全部'),
         h(PanelButton, {
-          disabled: saving || order.length === 0,
+          disabled: saving || syncing || order.length === 0,
           onClick: () => edit(() => setOrder([])),
         }, '全部移除')))
     : null,
   h('div', { className: 'dim-feishuPanelFooter' },
     h(PanelButton, {
       'data-kind': 'primary',
-      disabled: saving || !dirty,
+      disabled: saving || syncing || !dirty,
       onClick: () => { void save(); },
-    }, '保存')),
+    }, '保存'),
+    h(PanelButton, {
+      disabled: saving || syncing,
+      onClick: () => { void startSyncAll(); },
+    }, '保存并同步到其他机器人')),
+  syncTargets
+    ? h('div', { className: 'dim-feishuPanelFooter' },
+      h('span', { className: 'dim-feishuGroupHelp' },
+        [localizeText('将把这套面板设置写入另外'),
+          ` ${syncTargets.length} `,
+          localizeText('个飞书机器人，它们各自的面板设置会被覆盖。')].join('')),
+      h(PanelButton, {
+        disabled: syncing,
+        onClick: () => { void confirmSyncAll(); },
+      }, '确认同步'),
+      h(PanelButton, {
+        disabled: syncing,
+        onClick: () => setSyncTargets(null),
+      }, '取消'))
+    : null,
+  syncing
+    ? h('p', { className: 'dim-feishuGroupHelp', role: 'status' }, '正在同步…')
+    : null,
+  syncNotice?.scope === 'none'
+    ? h('p', { className: 'dim-feishuGroupHelp', role: 'status' }, '这个渠道没有其他飞书机器人，不用同步。')
+    : null,
+  syncNotice?.scope === 'done'
+    ? h('p', { className: 'dim-feishuGroupHelp', role: 'status' },
+      syncNotice.failed > 0
+        ? [localizeText('已同步到'), ` ${syncNotice.done} `, localizeText('个机器人，'),
+          ` ${syncNotice.failed} `, localizeText('个失败。')].join('')
+        : [localizeText('已同步到'), ` ${syncNotice.done} `, localizeText('个机器人。')].join(''))
+    : null,
   error
     ? h('p', { className: 'dim-feishuGroupError', role: 'alert' }, error)
     : null));
