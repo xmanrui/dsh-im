@@ -5,6 +5,7 @@ import { cardActionProbeCard } from './feishu-cards.mjs';
 import { VerifiedFeishuChannel } from './feishu-channel.mjs';
 import { normalizeFeishuGroupResponseMode } from './group-response-mode.mjs';
 import { normalizeFeishuStepPushMode } from './step-push-mode.mjs';
+import { createVoice } from './voice.mjs';
 import {
   registerSlashCommands,
   SLASH_COMMAND_MANIFEST,
@@ -115,6 +116,7 @@ export class FeishuRuntime {
   #groupTopicReply;
   #stepPush;
   #stepPushMode;
+  #voice = null;
   #sessionSyncTargetsFor;
   #ownerOpenIds;
   #harness;
@@ -149,6 +151,7 @@ export class FeishuRuntime {
     groupTopicReply = false,
     stepPush = false,
     stepPushMode = 'post',
+    voice = null,
     sessionSyncTargetsFor = null,
     ownerOpenId,
     ownerOpenIds,
@@ -188,6 +191,11 @@ export class FeishuRuntime {
     this.#groupTopicReply = groupTopicReply === true;
     this.#stepPush = stepPush === true;
     this.#stepPushMode = normalizeFeishuStepPushMode(stepPushMode);
+    // voice 为 { config, secret } 来源;凭据缺失时 createVoice 返回禁用对象,
+    // 桥接层完全跳过语音路径,不影响连接。
+    this.#voice = voice == null
+      ? null
+      : createVoice({ settings: voice.config, secret: voice.secret, logger });
     this.#sessionSyncTargetsFor = typeof sessionSyncTargetsFor === 'function'
       ? sessionSyncTargetsFor
       : null;
@@ -228,6 +236,13 @@ export class FeishuRuntime {
   setStepPushMode(value) {
     this.#stepPushMode = normalizeFeishuStepPushMode(value);
     this.#bridge?.setStepPushMode(this.#stepPushMode);
+  }
+
+  setVoice(source) {
+    this.#voice = source == null
+      ? null
+      : createVoice({ settings: source.config, secret: source.secret, logger: this.#logger });
+    this.#bridge?.setVoice(this.#voice);
   }
 
   async start() {
@@ -321,6 +336,7 @@ export class FeishuRuntime {
         groupTopicReply: this.#groupTopicReply,
         stepPush: this.#stepPush,
         stepPushMode: this.#stepPushMode,
+        voice: this.#voice,
         sessionSyncTargetsFor: this.#sessionSyncTargetsFor,
         repair: this.#repair,
         replyTimeoutMs: this.#replyTimeoutMs,
