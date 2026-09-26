@@ -1549,9 +1549,13 @@ test('a turn waiting on approval does not stop later mail being read', async () 
     if (runtime.bridge) runtime.bridge.accept = () => new Promise(() => {});
 
     const firstCheck = runtime.status.lastCheckedAt;
-    await new Promise((resolve) => { setTimeout(resolve, 300); });
-    assert.notEqual(runtime.status.lastCheckedAt, firstCheck,
-      'the poll loop keeps running while a turn is parked');
+    // Wait for the loop to check again rather than sleeping a fixed 300ms: under
+    // a loaded full-suite run one poll can take longer than that, and the
+    // assertion then failed on timing rather than on the behaviour it guards.
+    await waitFor(
+      () => runtime.status.lastCheckedAt !== firstCheck,
+      () => 'the poll loop keeps running while a turn is parked',
+    );
 
     // Shutdown must not hang on the parked delivery either.
     const stopped = await Promise.race([
