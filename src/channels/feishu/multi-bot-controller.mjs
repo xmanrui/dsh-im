@@ -21,6 +21,10 @@ import {
   isFeishuStepPushMode,
   normalizeFeishuStepPushMode,
 } from './step-push-mode.mjs';
+import {
+  isSlashPanelConfig,
+  normalizeSlashPanelConfig,
+} from './slash-command-panel.mjs';
 
 const ACTIVE_REGISTRATION_STATES = new Set([
   'starting', 'qr_ready', 'polling', 'slow_down', 'domain_switched',
@@ -99,6 +103,7 @@ function configuredBotFingerprint(config) {
     groupTopicReply: config.groupTopicReply === true,
     stepPush: config.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(config.stepPushMode),
+    slashPanel: normalizeSlashPanelConfig(config.slashPanel),
     groupMessagePermissionGranted: config.groupMessagePermissionGranted === true,
     deletionPending: config.deletionPending === true,
     connectedAt: config.connectedAt ?? null,
@@ -617,6 +622,22 @@ export class MultiBotDshFeishuController {
     }));
   }
 
+  async updateSlashPanel(botId, slashPanel) {
+    this.#assertOpen();
+    if (!isSlashPanelConfig(slashPanel)) {
+      throw new TypeError('Invalid Feishu slash panel config');
+    }
+    return this.#serializeConfig(() => this.#withBotTransition(botId, async () => {
+      const config = this.#requireBot(botId);
+      const saved = await this.#configStore.saveBot({ ...config, slashPanel });
+      // The panel lives on Feishu's side, so the runtime re-syncs it in the
+      // background; this call only records what the panel should be.
+      this.#runtimes.get(botId)?.setSlashPanel?.(saved.slashPanel);
+      this.#touch();
+      return this.status(botId);
+    }));
+  }
+
   async updateStepPush(botId, stepPush) {
     this.#assertOpen();
     if (typeof stepPush !== 'boolean') {
@@ -710,6 +731,7 @@ export class MultiBotDshFeishuController {
         groupTopicReply: config.groupTopicReply === true,
         stepPush: config.stepPush === true,
         stepPushMode: normalizeFeishuStepPushMode(config.stepPushMode),
+        slashPanel: normalizeSlashPanelConfig(config.slashPanel),
         groupMessagePermissionGranted: config.groupMessagePermissionGranted === true,
         bot: publicBot(config),
         connection,

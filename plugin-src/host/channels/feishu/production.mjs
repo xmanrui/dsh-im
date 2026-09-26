@@ -256,6 +256,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         }),
         replyTimeoutMs: config.replyTimeoutMs ?? 600_000,
         slashCommands: config.slashCommands !== false,
+        slashPanel: botConfig.slashPanel,
         ...(wsAgent ? { wsAgent } : {}),
         logger: {
           error: (...args) => logger.error?.(`[${botId ?? botConfig.id}]`, ...args),

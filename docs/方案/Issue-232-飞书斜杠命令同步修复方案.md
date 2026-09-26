@@ -4,6 +4,8 @@
 
 关联反馈：[Issue #232](https://github.com/xmanrui/dsh-im/issues/232)。
 
+> **后续变更（2026-09-26）**：面板已可逐机器人配置（「更多设置 → 指令面板」）。「跟随默认」仍然是本文描述的只补缺行为；「自定义」会删掉不再列出的自有指令、并按每秒一条重新注册以固定顺序（见 `src/channels/feishu/slash-command-panel.mjs` 与 `src/channels/feishu/slash-command-registry.mjs` 的 `syncSlashCommands`）。清单之外、由飞书后台手工添加的指令仍然永远不会被删除。
+
 **直接在现有 SLASH_COMMAND_MANIFEST 中补上 17 个已经支持的主命令，继续复用原注册流程。核心生产代码只改一个文件。**
 
 ## 1. 用户可见的结果

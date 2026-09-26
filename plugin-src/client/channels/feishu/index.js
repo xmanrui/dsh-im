@@ -609,6 +609,7 @@ export function BotCard({
           channelSettings: {
             groupResponseMode: connection.groupResponseMode,
             groupTopicReply: connection.groupTopicReply,
+            slashPanel: connection.slashPanel,
             groupMessagePermissionGranted: connection.groupMessagePermissionGranted,
           },
         }),

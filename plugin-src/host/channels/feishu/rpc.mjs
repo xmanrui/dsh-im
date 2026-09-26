@@ -31,6 +31,10 @@ import {
   normalizeFeishuStepPushMode,
 } from '../../../../src/channels/feishu/step-push-mode.mjs';
 import {
+  isSlashPanelConfig,
+  normalizeSlashPanelConfig,
+} from '../../../../src/channels/feishu/slash-command-panel.mjs';
+import {
   FEISHU_ENDPOINTS as FEISHU_CLIENT_ENDPOINTS,
   FEISHU_RPC_CHANNEL,
 } from '../../../client/channels/feishu/api.js';
@@ -307,6 +311,7 @@ function publicBotEntry(entry) {
     groupTopicReply: source.groupTopicReply === true,
     stepPush: source.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(source.stepPushMode),
+    slashPanel: normalizeSlashPanelConfig(source.slashPanel),
     groupMessagePermissionGranted: source.groupMessagePermissionGranted === true,
     bot: publicBot(source.bot),
     health: publicHealth(source, connected),
@@ -489,6 +494,13 @@ function validPayload(endpoint, payload) {
       && isFeishuStepPushMode(payload.stepPushMode)
       ? null
       : '请选择分步直推的呈现方式。';
+  }
+  if (endpoint === FEISHU_ENDPOINTS.setSlashPanel) {
+    return hasOnlyKeys(payload, new Set(['botId', 'slashPanel']))
+      && safeOpaqueId(payload.botId)
+      && isSlashPanelConfig(payload.slashPanel)
+      ? null
+      : '请选择面板要显示的指令与顺序。';
   }
   return 'Unknown Feishu endpoint.';
 }
@@ -795,6 +807,14 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
         }
         value = await toPublicFeishuStatus(
           await controller.updateStepPushMode(payload.botId, payload.stepPushMode),
+          { encodeQr: cachedEncodeQr },
+        );
+      } else if (endpoint === FEISHU_ENDPOINTS.setSlashPanel) {
+        if (typeof controller.updateSlashPanel !== 'function') {
+          throw new Error('Slash panel update is unavailable');
+        }
+        value = await toPublicFeishuStatus(
+          await controller.updateSlashPanel(payload.botId, payload.slashPanel),
           { encodeQr: cachedEncodeQr },
         );
       } else {

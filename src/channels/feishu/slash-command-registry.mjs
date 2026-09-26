@@ -16,6 +16,17 @@
  * existing "/xxx" text commands.
  */
 
+import {
+  DEFAULT_SLASH_COMMAND_ICON,
+  SLASH_COMMAND_MANIFEST,
+  isCustomSlashPanel,
+  resolveSlashPanelManifest,
+} from './slash-command-panel.mjs';
+
+// The manifest describes the panel, so it lives with the panel's configuration;
+// re-exported here because this is where callers have always imported it from.
+export { SLASH_COMMAND_MANIFEST };
+
 const SLASH_ENDPOINT = '/open-apis/application/v7/app_slash_commands';
 const MISSING_PERMISSION_CODES = new Set(['99991640', '99991672']);
 
@@ -24,50 +35,15 @@ export const SLASH_COMMAND_TENANT_SCOPES = Object.freeze([
   'application:app_slash_command:write',
 ]);
 
-// Icon keys are the documented values in the Feishu Slash Command doc.
-const DEFAULT_ICON = 'ai-agent_outlined';
+const DEFAULT_ICON = DEFAULT_SLASH_COMMAND_ICON;
 
 /**
- * The dsh-im Feishu command manifest. Every entry's `command` is registered
- * WITHOUT the leading slash; Feishu displays it as "/<command>" in the panel
- * and sends "/<command>" back as text, which matches the bridge's regexes.
- *
- * Descriptions should stay short and match what the command actually does in
- * bridge.mjs / the shared command modules.
+ * Feishu returns the panel in creation order (newest first, time to the
+ * second), so a chosen order is only reachable by creating the commands in
+ * reverse, one per second. Anything faster lands in the same second and the
+ * order degrades to the platform's tie-break.
  */
-export const SLASH_COMMAND_MANIFEST = Object.freeze([
-  { command: 'menu', icon: 'skill_outlined', default: '打开功能菜单', en_us: 'Open the feature menu' },
-  { command: 'new', icon: 'ai-deepthink_outlined', default: '开启全新会话', en_us: 'Start a fresh session' },
-  { command: 'help', icon: 'promptword_outlined', default: '查看帮助', en_us: 'Show help' },
-  { command: 'status', icon: 'ai-functions_outlined', default: '查看机器人状态', en_us: 'Show bot status' },
-  { command: 'compact', icon: 'ai-block_outlined', default: '压缩当前会话上下文', en_us: 'Compact the current session' },
-  { command: 'sessionlist', icon: 'chat-ai_outlined', default: '列出会话', en_us: 'List sessions' },
-  { command: 'workspacelist', icon: 'folder_outlined', default: '列出工作区', en_us: 'List workspaces' },
-  { command: 'workspaces', icon: 'folder_outlined', default: '列出工作区', en_us: 'List workspaces' },
-  { command: 'wsl', icon: 'folder_outlined', default: '列出工作区', en_us: 'List workspaces' },
-  { command: 'ws', icon: 'folder_outlined', default: '切换工作区', en_us: 'Switch workspace' },
-  { command: 'watch', icon: 'flag_outlined', default: '关注一个会话', en_us: 'Watch a session' },
-  { command: 'unwatch', icon: 'clear_outlined', default: '取消关注会话', en_us: 'Unwatch a session' },
-  { command: 'watchlist', icon: 'flag_outlined', default: '查看关注列表', en_us: 'List watched sessions' },
-  { command: 'archived', icon: 'folder_outlined', default: '设置归档会话显隐（on/off）', en_us: 'Show or hide archived sessions (on/off)' },
-  { command: 'history', icon: 'chat-ai_outlined', default: '查看最近历史消息（仅私聊）', en_us: 'Show recent history (private chats only)' },
-  { command: 'workspace', icon: 'folder_outlined', default: '切换工作区', en_us: 'Switch workspace' },
-  { command: 'conv', icon: 'folder_outlined', default: '设置当前对话专属工作区', en_us: 'Set the workspace for this conversation' },
-  { command: 'session', icon: 'chat-ai_outlined', default: '绑定已有会话', en_us: 'Bind an existing session' },
-  { command: 'models', icon: 'ai-functions_outlined', default: '列出可用模型', en_us: 'List available models' },
-  { command: 'model', icon: 'ai-agent_outlined', default: '查看或切换当前模型', en_us: 'Show or switch the current model' },
-  { command: 'reasoninglist', icon: 'ai-deepthink_outlined', default: '列出可用推理等级', en_us: 'List available reasoning efforts' },
-  { command: 'reasoning', icon: 'ai-deepthink_outlined', default: '查看或切换推理等级', en_us: 'Show or switch the reasoning effort' },
-  { command: 'presetlist', icon: 'skill_outlined', default: '列出可用 Agent 预设', en_us: 'List available Agent Presets' },
-  { command: 'preset', icon: 'skill_outlined', default: '查看或切换 Agent 预设', en_us: 'Show or switch the Agent Preset' },
-  { command: 'stop', icon: 'clear_outlined', default: '停止当前任务', en_us: 'Stop the current task' },
-  { command: 'steer', icon: 'promptword_outlined', default: '给当前任务补充指令', en_us: 'Send additional instructions to the current task' },
-  { command: 'batch', icon: 'chat-ai_outlined', default: '开始批量输入（仅私聊）', en_us: 'Start batch input (private chats only)' },
-  { command: 'send', icon: 'chat-ai_outlined', default: '提交当前批次（仅私聊）', en_us: 'Submit the current batch (private chats only)' },
-  { command: 'cancel', icon: 'clear_outlined', default: '取消当前批次（仅私聊）', en_us: 'Cancel the current batch (private chats only)' },
-  { command: 'version', icon: 'ai-functions_outlined', default: '查看插件版本', en_us: 'Show the plugin version' },
-  { command: 'repair', icon: 'ai-functions_outlined', default: '补全飞书权限与卡片回调（仅私聊）', en_us: 'Complete Feishu permissions and card callbacks (private chats only)' },
-]);
+export const SLASH_PANEL_CREATE_INTERVAL_MS = 1_100;
 
 // Commands that require a parameter are registered too, so the user can type
 // "/watch <session ID>" from the panel. A leading placeholder hint is not part of
@@ -274,6 +250,208 @@ export async function registerSlashCommands({
     existing: [...existing].filter((c) => c !== null && c !== undefined),
     failed,
   };
+}
+
+/** Delete one registered command with an already-fetched tenant token. */
+async function deleteSlashCommandWithToken({
+  tenantAccessToken, domain, httpInstance, timeoutMs, signal, commandId,
+}) {
+  await requestJson(httpInstance, {
+    method: 'DELETE',
+    url: endpointFor(domain, `${SLASH_ENDPOINT}/${commandId}`).href,
+    headers: { authorization: `Bearer ${tenantAccessToken}` },
+    signal: requestSignal(signal, timeoutMs),
+    timeout: timeoutMs,
+  }, 'Feishu slash command delete');
+}
+
+/** Plain timer used between creates; tests inject their own. */
+function defaultWait(ms, signal) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}
+
+function commandNameOf(item) {
+  return typeof item?.command === 'string' && item.command ? item.command : null;
+}
+
+/**
+ * The commands of ours in panel order. Feishu returns the list newest-first
+ * with second precision, so `create_time` is the panel order and `command_id`
+ * only breaks ties inside the same second.
+ */
+function orderedOwnedNames(items, owned) {
+  return items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => owned.has(commandNameOf(item)))
+    .sort((a, b) => {
+      const aTime = Number(a.item.create_time);
+      const bTime = Number(b.item.create_time);
+      if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return bTime - aTime;
+      const aId = Number(a.item.command_id);
+      const bId = Number(b.item.command_id);
+      if (Number.isFinite(aId) && Number.isFinite(bId) && aId !== bId) return bId - aId;
+      return a.index - b.index;
+    })
+    .map(({ item }) => commandNameOf(item))
+    .filter(Boolean);
+}
+
+function slashPanelDescription(entry, command) {
+  return {
+    default_value: entry.default ?? entry.en_us ?? command,
+    i18n: {
+      zh_cn: entry.default ?? command,
+      en_us: entry.en_us ?? entry.default ?? command,
+    },
+  };
+}
+
+/**
+ * Sync one bot's "/" panel with its configured manifest.
+ *
+ * `default` mode is the pre-configurable behaviour: create what is missing and
+ * leave everything else alone. `custom` mode converges the app to the
+ * configured commands *and order*:
+ *
+ *   1. read the registered commands (with command_id and create_time);
+ *   2. stop when the panel already holds exactly that order — Feishu reports the
+ *      panel in creation order, so a matching order needs no calls at all;
+ *   3. otherwise delete our commands and recreate the configured ones
+ *      newest-first, one per `intervalMs`, because the order *is* the creation
+ *      order.
+ *
+ * Commands registered outside the manifest are never deleted: dsh-im does not
+ * own them, and their position is the platform's business.
+ *
+ * @returns {{ created: Array<{command,command_id}>, deleted: string[],
+ *   existing: string[], external: string[], failed: Array<{command,error}>,
+ *   changed: boolean }}
+ */
+export async function syncSlashCommands({
+  appId, appSecret, domain = 'feishu', httpInstance, timeoutMs = 15000,
+  signal, manifest = SLASH_COMMAND_MANIFEST, config = null,
+  intervalMs = SLASH_PANEL_CREATE_INTERVAL_MS, wait = defaultWait,
+}) {
+  const tenantAccessToken = await fetchTenantAccessToken({
+    appId, appSecret, domain, httpInstance, timeoutMs, signal,
+  });
+  const items = await listSlashCommandsWithToken({
+    tenantAccessToken, domain, httpInstance, timeoutMs, signal,
+  });
+  const owned = new Set(manifest.map((entry) => commandNameOf(entry)).filter(Boolean));
+  const external = items
+    .map((item) => commandNameOf(item))
+    .filter((name) => name && !owned.has(name));
+  const registered = new Set(
+    items.map((item) => commandNameOf(item)).filter(Boolean),
+  );
+
+  if (!isCustomSlashPanel(config)) {
+    const created = [];
+    const failed = [];
+    for (const entry of resolveSlashPanelManifest(config, manifest)) {
+      const command = commandNameOf(entry);
+      if (!command || registered.has(command)) continue;
+      try {
+        const commandId = await createSlashCommandWithToken({
+          tenantAccessToken, domain, httpInstance, timeoutMs, signal,
+          command,
+          description: slashPanelDescription(entry, command),
+          icon: entry.icon ?? DEFAULT_ICON,
+        });
+        created.push({ command, command_id: commandId });
+        registered.add(command);
+      } catch (error) {
+        if (error?.code === '40000000' && /already exists/i.test(error?.msg ?? '')) {
+          registered.add(command);
+          continue;
+        }
+        failed.push({ command, error: error?.message ?? String(error) });
+        if (MISSING_PERMISSION_CODES.has(error?.code)
+          || /(?:lacks permission|access denied)/i.test(error?.msg ?? '')) {
+          break;
+        }
+      }
+    }
+    return {
+      created,
+      deleted: [],
+      existing: [...registered].filter(Boolean),
+      external,
+      failed,
+      changed: created.length > 0,
+    };
+  }
+
+  const current = orderedOwnedNames(items, owned);
+  const plannedEntries = resolveSlashPanelManifest(config, manifest)
+    .filter((entry) => commandNameOf(entry));
+  const plannedNames = plannedEntries.map((entry) => commandNameOf(entry));
+  if (current.length === plannedNames.length
+    && plannedNames.every((name, index) => name === current[index])) {
+    return {
+      created: [], deleted: [], existing: current, external, failed: [], changed: false,
+    };
+  }
+
+  const byName = new Map(
+    items.map((item) => [commandNameOf(item), item]).filter(([name]) => name && owned.has(name)),
+  );
+  const deleted = [];
+  const failed = [];
+  for (const name of current) {
+    const item = byName.get(name);
+    if (!item?.command_id) {
+      failed.push({ command: name, error: 'the registered command reports no command_id' });
+      continue;
+    }
+    try {
+      await deleteSlashCommandWithToken({
+        tenantAccessToken, domain, httpInstance, timeoutMs, signal, commandId: item.command_id,
+      });
+      deleted.push(name);
+    } catch (error) {
+      failed.push({ command: name, error: error?.message ?? String(error) });
+    }
+  }
+  // Deleting only part of the panel would leave it half-converged, and
+  // recreating a name that still exists is rejected as a duplicate. Stop here;
+  // the next sync (config change, reconnect, or a later start) converges.
+  if (failed.length > 0) {
+    return { created: [], deleted, existing: current, external, failed, changed: deleted.length > 0 };
+  }
+
+  const created = [];
+  for (const [index, entry] of [...plannedEntries].reverse().entries()) {
+    const command = commandNameOf(entry);
+    try {
+      if (index > 0) {
+        await wait(intervalMs, signal);
+        signal?.throwIfAborted();
+      }
+      const commandId = await createSlashCommandWithToken({
+        tenantAccessToken, domain, httpInstance, timeoutMs, signal,
+        command,
+        description: slashPanelDescription(entry, command),
+        icon: entry.icon ?? DEFAULT_ICON,
+      });
+      created.push({ command, command_id: commandId });
+    } catch (error) {
+      failed.push({ command, error: error?.message ?? String(error) });
+      if (MISSING_PERMISSION_CODES.has(error?.code)
+        || /(?:lacks permission|access denied)/i.test(error?.msg ?? '')) {
+        break;
+      }
+    }
+  }
+
+  return { created, deleted, existing: [], external, failed, changed: true };
 }
 
 export default registerSlashCommands;
