@@ -630,7 +630,11 @@ export class FeishuHarnessBridge {
   #botId;
   /** Optional voice capability (语音输入/语音回复); null disables all voice paths. */
   #voice = null;
-  /** Pending voice turns: chat_id → { replyTo }, consumed when the full answer lands. */
+  /**
+   * Pending voice turns: session key → { replyTo }, consumed when the full
+   * answer lands. Keyed by the same session key as the message queue so
+   * concurrent topics of one group chat never share a voice slot.
+   */
   #voiceTurns = new Map();
   #appId;
   #botOpenId;
@@ -1531,6 +1535,37 @@ export class FeishuHarnessBridge {
     const hasImages = hasInboundImages(message);
     const hasFiles = hasInboundFiles(message);
     const hasReply = hasReplyReference(message);
+    // 语音转写后的命令权限复检:accept() 的访问判定发生在转写前,音频消息
+    // 没有命令文本,按普通消息放行;转写得到的文本可能包含命令,须用与
+    // accept() 相同的命令识别与权限规则再校验一次,防止"允许聊天、禁止命令"
+    // 的用户经语音入口绕过 canExecuteCommands——文字与语音入口行为一致。
+    // 仅"命令不允许"给用户提示(与文字路径同文案),其余拒绝原因静默丢弃。
+    if (voiceTurnReplyTo) {
+      const transcribedAccess = evaluateInboundAccess(this.#accessPolicy, {
+        conversationType: event.message.chat_type === 'p2p' ? 'direct'
+          : event.message.chat_type === 'group' ? 'group' : null,
+        senderIds: senderOpenId(event),
+        text,
+        hasImages,
+        hasFiles,
+        isCommand: isSharedLocalCommand(text, { hasImages, hasFiles })
+          || isFeishuLocalCommand(text, { hasImages, hasFiles })
+          || (!hasImages && !hasFiles && NUMBER_REPLY.test(text) && this.#menus.has(key)),
+      });
+      if (!transcribedAccess.allowed) {
+        if (transcribedAccess.reason === 'command-not-allowed') {
+          await this.#send(
+            event.message.chat_id,
+            t(COMMAND_PERMISSION_DENIED_MESSAGE),
+            { replyTo: event.message.message_id },
+          );
+          this.#status.messagesReplied += 1;
+          this.#status.lastReplyAt = new Date().toISOString();
+        }
+        this.#status.lastError = null;
+        return;
+      }
+    }
     // 命令识别对 text 与纯文本 post 一视同仁：post 富文本若仅含单个
     // 文本段落（如复制粘贴的 /new），同样按命令处理；带图片/文件不认。
     // accept() 侧已用 nonEmptyString(content) 判定，两侧保持一致。
@@ -1673,10 +1708,11 @@ export class FeishuHarnessBridge {
     // 语音回合状态在进入正常问答路径前才登记:上方命令分支(/help、菜单、
     // 会话列表等)与空内容分支均提前返回,提前登记会让状态遗留到下一回合,
     // 导致后续普通文字消息的答案被合成为音频并回复到旧的语音消息。
-    // 本路径的 finally 统一清理回合状态;回合间由 per-key 队列串行处理,
-    // 同一会话不存在并发覆盖。
+    // 本路径的 finally 统一清理回合状态。状态以会话 key 登记——与消息队列
+    // 同粒度:同群不同话题的 key 不同、可并行处理,共用 chat_id 槽位会让
+    // 后登记的回合覆盖先登记的,先完成的回合合成到后一条语音消息上。
     if (voiceTurnReplyTo) {
-      this.#voiceTurns.set(event.message.chat_id, { replyTo: voiceTurnReplyTo });
+      this.#voiceTurns.set(key, { replyTo: voiceTurnReplyTo });
     }
     const batchSubmission = event.batchSubmission ?? null;
     let batchAskCompleted = false;
@@ -1723,7 +1759,7 @@ export class FeishuHarnessBridge {
     } finally {
       await this.#cancelPendingInteraction(key);
       await this.#approvals.closeRoute(key);
-      this.#voiceTurns.delete(event.message.chat_id);
+      this.#voiceTurns.delete(key);
     }
   }
 
@@ -4185,12 +4221,13 @@ export class FeishuHarnessBridge {
   }
 
   // 语音回复(渠道能力):同回合转写过语音消息的会话,在完整答案投递后追加
-  // 音频回复。回合登记随消息处理结束(finally)清除,命令类回复(菜单、会话
-  // 列表等)与延迟交付不触发语音;此处失败只告警,不影响文字投递。
-  async #maybeSendVoiceReply(chatId, answer, replyTo = null) {
-    const voiceTurn = this.#voiceTurns.get(chatId);
+  // 音频回复。回合按会话 key 登记并消费——同群不同话题各自只消费自己的
+  // 回合;登记随消息处理结束(finally)清除,命令类回复(菜单、会话列表等)
+  // 与延迟交付不触发语音;此处失败只告警,不影响文字投递。
+  async #maybeSendVoiceReply(key, chatId, answer, replyTo = null) {
+    const voiceTurn = this.#voiceTurns.get(key);
     if (!voiceTurn) return;
-    this.#voiceTurns.delete(chatId);
+    this.#voiceTurns.delete(key);
     try {
       await this.#sendVoiceAnswer(chatId, answer, voiceTurn.replyTo ?? replyTo);
     } catch (error) {
@@ -5258,7 +5295,7 @@ export class FeishuHarnessBridge {
         this.#status.streamResponses = (this.#status.streamResponses ?? 0) + 1;
         // 流式卡封存成功也是完整答案投递:文本进了卡片,语音回合同样要
         // 在此消费并合成音频回复——否则语音消息只得到卡片、没有声音。
-        await this.#maybeSendVoiceReply(chatId, deliveryText, messageId);
+        await this.#maybeSendVoiceReply(key, chatId, deliveryText, messageId);
         const delivery = await this.#deliverArtifacts(
           chatId,
           messageId,
@@ -5308,7 +5345,7 @@ export class FeishuHarnessBridge {
         providerMessageIds,
       });
       this.#status.streamResponses = (this.#status.streamResponses ?? 0) + 1;
-      await this.#maybeSendVoiceReply(chatId, deliveryText, messageId);
+      await this.#maybeSendVoiceReply(key, chatId, deliveryText, messageId);
     } catch (error) {
       this.#status.streamErrors = (this.#status.streamErrors ?? 0) + 1;
       this.#logger.warn?.('[dsh-feishu] step push post failed; sending final text:', error.message);
@@ -5359,10 +5396,10 @@ export class FeishuHarnessBridge {
         setLastMessageFailure(this.#status, textSendError);
       }
       this.#status.streamFallbacks = (this.#status.streamFallbacks ?? 0) + 1;
-      await this.#maybeSendVoiceReply(chatId, deliveryText, messageId);
+      await this.#maybeSendVoiceReply(key, chatId, deliveryText, messageId);
       return { ...delivery, textDeliveryErrors: textSendError ? 1 : 0 };
     }
-    await this.#maybeSendVoiceReply(chatId, deliveryText, messageId);
+    await this.#maybeSendVoiceReply(key, chatId, deliveryText, messageId);
     const delivery = await this.#deliverArtifacts(
       chatId,
       messageId,
@@ -5430,7 +5467,7 @@ export class FeishuHarnessBridge {
           error,
         );
       }
-      await this.#maybeSendVoiceReply(chatId, answerTextForDelivery(answer, artifacts), messageId);
+      await this.#maybeSendVoiceReply(key, chatId, answerTextForDelivery(answer, artifacts), messageId);
       const delivery = await this.#deliverArtifacts(chatId, messageId, artifacts, textReceipt);
       const artifactDispatched = delivery.receipt.artifacts.some(
         ({ outcome }) => outcome === 'sent' || outcome === 'unknown',
@@ -5497,7 +5534,7 @@ export class FeishuHarnessBridge {
           completedAnswer = completed.answer;
           completedArtifacts = completed.artifacts ?? [];
           await controller.setContent(answerTextForDelivery(completedAnswer, completedArtifacts));
-          await this.#maybeSendVoiceReply(chatId, answerTextForDelivery(completedAnswer, completedArtifacts), messageId);
+          await this.#maybeSendVoiceReply(key, chatId, answerTextForDelivery(completedAnswer, completedArtifacts), messageId);
         },
       }, {
         replyTo: messageId,
@@ -5531,7 +5568,7 @@ export class FeishuHarnessBridge {
             fallbackError,
           );
         }
-        await this.#maybeSendVoiceReply(chatId, answerTextForDelivery(completedAnswer, completedArtifacts), messageId);
+        await this.#maybeSendVoiceReply(key, chatId, answerTextForDelivery(completedAnswer, completedArtifacts), messageId);
         const delivery = await this.#deliverArtifacts(
           chatId,
           messageId,
@@ -5588,7 +5625,7 @@ export class FeishuHarnessBridge {
           fallbackError,
         );
       }
-      await this.#maybeSendVoiceReply(chatId, answerTextForDelivery(answer, artifacts), messageId);
+      await this.#maybeSendVoiceReply(key, chatId, answerTextForDelivery(answer, artifacts), messageId);
       const delivery = await this.#deliverArtifacts(chatId, messageId, artifacts, textReceipt);
       const artifactDispatched = delivery.receipt.artifacts.some(
         ({ outcome }) => outcome === 'sent' || outcome === 'unknown',
