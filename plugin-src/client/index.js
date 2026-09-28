@@ -318,11 +318,11 @@ export function IMSettingsTab({
   return h(WorkspaceDirectoryPickerContext.Provider, { value: workspaceDirectoryPicker },
     h('section', { className: 'dim-page', 'aria-label': 'IM机器人设置' },
     h('header', { className: 'dim-title' },
+      // The Plugins page draws this bundle's title, version tag, package name
+      // and one-liner directly above the section, so the header keeps only
+      // what the page cannot draw: the version the Host reports it is running.
       h('div', { className: 'dim-brand' },
-        h('div', { className: 'dim-brandHeading' },
-          h('strong', { className: 'dim-brandName' }, 'DSH-IM'),
-          h('span', { className: 'dim-brandVersion' }, `v${runningVersion}`)),
-        h('p', null, '让 DeepSeek Harness 触手可及')),
+        h('span', { className: 'dim-brandVersion' }, `v${runningVersion}`)),
       h('div', { className: 'dim-titleActions' },
         h(UpdatePanel, {
           rpcCall: rpcCalls.updateRpcCall,
@@ -448,6 +448,16 @@ export function IMSettingsTab({
   ));
 }
 
+/**
+ * The bundle's configuration as the Plugins page asks for it. The page draws
+ * the title, the icon, the crumb and the one-liner itself and only asks for the
+ * page view, so the summary view renders nothing here.
+ */
+export function IMPluginConfigSection({ view, ...seat }) {
+  if (view !== 'page') return null;
+  return h(IMSettingsTab, seat);
+}
+
 export function apply(ctx) {
   ctx.effect(
     () => ctx.locale.register(IM_LOCALE_NAMESPACE, { zh, en }),
@@ -557,12 +567,22 @@ export function apply(ctx) {
 
   // Stable for this plugin lifetime: creating an element must not create a
   // new component type and reset the reader's selected tab or unsaved input.
-  function IMPanel({ preferredSectionId }) {
+  // One element type serves both the client service's render path and the
+  // Plugins page's slot, so a host asking for one never resets the other. A
+  // page view that throws stays local inside the boundary that wraps both.
+  //
+  // `view` is threaded through rather than gated here: the exported section
+  // renders the page view and nothing for the summary, while a host that does
+  // not pass `view` at all - an older one, or the service's own render - still
+  // gets the page. Only the declared dependencies reach the panel, so a caller
+  // cannot substitute its own RPC call.
+  function IMPanel({ view = 'page', preferredSectionId }) {
     React.useSyncExternalStore(subscribeLocale, localeSnapshot, localeSnapshot);
     return h(IMPanelErrorBoundary, null,
-      h(IMSettingsTab, { ...panelDependencies, preferredSectionId }));
+      h(IMPluginConfigSection, { ...panelDependencies, view, preferredSectionId }));
   }
   const buildPanelElement = (props = {}) => h(IMPanel, {
+    view: props.view,
     preferredSectionId: props.preferredSectionId,
   });
 
@@ -582,12 +602,10 @@ export function apply(ctx) {
       }
       // The existing slot controller owns late declarations, withdrawal and
       // re-declaration. Cancelling it also cancels a pending registration.
-      stopSettings = ctx.slots.inject('settings.section', () => {
+      stopSettings = ctx.slots.inject('plugins.bundle.config', () => {
         const unregister = ctx.slots.register({
-          name: 'settings.section',
-          id: 'xmanrui-dsh-im',
-          order: 21,
-          label: () => t('IM机器人'),
+          name: 'plugins.bundle.config',
+          key: '@xmanrui/dsh-im',
           locale: IM_LOCALE_NAMESPACE,
           inject: () => panelDependencies,
         }, buildPanelElement);
