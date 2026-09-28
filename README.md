@@ -117,7 +117,7 @@ Matrix 加密目前仅供非敏感测试：默认 optional 模式尝试启动加
 dsh plugin --profile web add -w @xmanrui/dsh-im
 ```
 
-重启 `dsh web`、刷新浏览器，然后打开「设置 → IM机器人」。IM机器人使用 `order: 21`，尽量排在一级设置菜单的「Agent 预设」之后；插件页面不再保留旧入口。从旧版升级不会改变已有机器人、凭据、工作区、Agent Preset 或会话绑定。
+重启 `dsh web`、刷新浏览器，然后在侧边栏 **Plugins** 页的 **Installed** 组打开 `@xmanrui/dsh-im`：配置区在该 bundle 详情页的描述与行列表之间，设置菜单里的「IM机器人」入口已移除。该配置槽由宿主 DSH 0.1.6 引入 —— 更早的宿主上机器人照常工作，但**插件页里不会出现配置区**（静默，不报错）；需要配置界面请把宿主升到 `0.1.6-alpha.2` 或更高。从旧版升级不会改变已有机器人、凭据、工作区、Agent Preset 或会话绑定。
 
 本机 `dsh web` 和 DSH Desktop 默认直接复用当前 Host 的内部服务：旧版 Harness 使用 `apiProxy`，新版 Harness 自动使用 Typert Gateway、Session Controller 和 Workspace Controller，不需要配置 Harness 地址，也不绕行本机 HTTP 端口。Desktop 的兼容模式、扩展窗口和增强模式均无需开启“允许在浏览器中打开”或局域网访问。渠道配置中显式设置的 `harnessBaseUrl` 仅保留给旧版远程 HTTP/WebSocket Harness；内部调用失败不会自动改连其他 Host。
 
@@ -246,7 +246,7 @@ Logo 由 dsh-im 的浏览器适配显示，无需修改 DSH。适配保留原始
 
 ## 设计
 
-- Harness 一级设置菜单中只注册一个「IM机器人」设置页，其中包含内置 IM 渠道和一个 AI Office Connector；
+- 只注册一个 `@xmanrui/dsh-im` bundle 配置区（侧边栏 **Plugins** → **Installed** → 该 bundle 详情页），其中包含内置 IM 渠道和一个 AI Office Connector；
 - 内置渠道及 Office Connector 的 Host、客户端与运行时源码都在本仓库维护，不依赖外部独立插件；
 - 设置页跟随 DeepSeek Harness 的语言选择，在中文和 English 之间即时切换；机器人发出的聊天消息、命令帮助和 Telegram 命令菜单同样跟随该界面语言并即时切换，中文始终为兜底，未收录的文案原样输出；
 - 左侧使用 Logo 切换微信、飞书、钉钉、企业微信、企业微信应用、QQ、Slack、Telegram、Discord、WhatsApp、iMessage、Matrix 和 AI Office，不使用启用/停用开关；
@@ -255,7 +255,7 @@ Logo 由 dsh-im 的浏览器适配显示，无需修改 DSH。适配保留原始
 
 ## 本地开发
 
-最新版 dsh-im 跟随最新版 DSH，本次支持基线为 DSH `0.1.7-alpha.1`（Session 格式 v4）。后续功能和修复不再增加旧版 DSH 的兼容分支，已有其他兼容逻辑暂时保留；旧宿主请使用对应的历史插件版本。`package.json` 只声明当前实际验证的宿主版本，不承诺未经验证的未来版本。升级插件后重启 Host 并刷新设置页，使 Host 和客户端使用同一版插件。
+最新版 dsh-im 跟随最新版 DSH，本次支持基线为 DSH `0.1.7-alpha.1`（Session 格式 v4），并兼容 `0.1.6-alpha.2`。后续功能和修复不再增加旧版 DSH 的兼容分支，已有其他兼容逻辑暂时保留；旧宿主请使用对应的历史插件版本。`package.json` 只声明当前实际验证的宿主版本，不承诺未经验证的未来版本。配置区注册在宿主的 `plugins.bundle.config` 槽上，该槽由 `0.1.6-alpha.2` 引入：更早的宿主上机器人功能照常工作，但插件不再提供配置界面。升级插件后重启 Host 并刷新设置页，使 Host 和客户端使用同一版插件。
 
 上下文增强中的来源信息、引导词和引用回复使用 v4 的 `plugin:dsh-im` 来源字段，修复了它们触发的 `SessionFormatError: format v4 message requires a producer-owned source kind`。消息顺序、用户正文和会话级引导词去重沿用原有机制，历史会话由宿主负责迁移。
 

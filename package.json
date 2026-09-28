@@ -143,15 +143,16 @@
       "inject": [
         "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-locale"
       ],
       "platform": "web"
     },
     "compatibility": {
-      "dsh": "0.1.7-alpha.1",
+      "dsh": "0.1.6-alpha.2 || 0.1.7-alpha.1",
       "dshReleases": {
+        "0.1.6-alpha.2": "compatible",
         "0.1.7-alpha.1": "compatible"
       },
       "profiles": [

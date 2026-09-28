@@ -10,6 +10,7 @@ import TestRenderer from 'react-test-renderer';
 import {
   apply as applyClient,
   IM_PLUGIN_VERSION,
+  IMPluginConfigSection,
   IMSettingsTab,
   inject as clientInject,
 } from '../plugin-src/client/index.js';
@@ -214,11 +215,14 @@ test('IM settings renders twelve IM channels plus the AI Office connector', asyn
   }));
 
   assert.match(markup, /IM机器人/);
-  assert.match(markup, /让 DeepSeek Harness 触手可及/);
+  // The Plugins page draws the bundle's title and one-liner itself; the section
+  // keeps only the version the Host reports it is running.
+  assert.doesNotMatch(markup, /让 DeepSeek Harness 触手可及/);
+  assert.doesNotMatch(markup, /dim-brandName/);
   assert.match(markup, /class="dim-brand"/);
   assert.equal(IM_PLUGIN_VERSION, packageVersion);
   assert.match(markup, new RegExp(
-    `<div class="dim-brandHeading"><strong class="dim-brandName">DSH-IM<\\/strong><span class="dim-brandVersion">v${packageVersion.replaceAll('.', '\\.')}<\\/span><\\/div>`,
+    `<div class="dim-brand"><span class="dim-brandVersion">v${packageVersion.replaceAll('.', '\\.')}<\\/span><\\/div>`,
   ));
   assert.doesNotMatch(markup, /dim-versionTooltip|当前版本/);
   assert.doesNotMatch(markup, /dim-brandLogo|<img/);
@@ -1264,6 +1268,7 @@ test('client source contains no legacy Plugins-tab settings registrations', asyn
 });
 
 test('client registers one top-level bilingual IM settings section with a directory picker', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   const effects = [];
   const registrations = [];
   const dictionaries = [];
@@ -1310,7 +1315,7 @@ test('client registers one top-level bilingual IM settings section with a direct
     },
     slots: {
       inject(name, install) {
-        assert.equal(name, 'settings.section');
+        assert.equal(name, 'plugins.bundle.config');
         return install();
       },
       register(options, component) {
@@ -1330,11 +1335,12 @@ test('client registers one top-level bilingual IM settings section with a direct
     assert.equal(dictionaries[0].namespace, IM_LOCALE_NAMESPACE);
     assert.deepEqual(Object.keys(dictionaries[0].value.en).sort(), Object.keys(dictionaries[0].value.zh).sort());
     assert.equal(registrations.length, 1);
-    assert.equal(registrations[0].options.name, 'settings.section');
-    assert.equal(registrations[0].options.id, 'xmanrui-dsh-im');
-    assert.equal(registrations[0].options.order, 21);
+    assert.equal(registrations[0].options.name, 'plugins.bundle.config');
+    // The page renders this entry only on the detail page of the bundle whose
+    // package name is the key, so the key must be the manifest name verbatim.
+    assert.equal(registrations[0].options.key, '@xmanrui/dsh-im');
+    assert.equal(registrations[0].options.key, manifest.name);
     assert.equal(registrations[0].options.locale, IM_LOCALE_NAMESPACE);
-    assert.equal(registrations[0].options.label(), 'IM bots');
     assert.equal(typeof registrations[0].component, 'function');
 
     const injected = registrations[0].options.inject();
@@ -1359,8 +1365,14 @@ test('client registers one top-level bilingual IM settings section with a direct
 
     const markup = renderToStaticMarkup(React.createElement(
       registrations[0].component,
-      injected,
+      { ...injected, view: 'page' },
     ));
+    // The page asks a bundle's configuration for its page view only; the
+    // summary view renders nothing rather than failing.
+    assert.equal(renderToStaticMarkup(React.createElement(
+      registrations[0].component,
+      { ...injected, view: 'summary' },
+    )), '');
     // A browser-derived interface locale reaches the Host only through this
     // mirror, so the settings section must report it while it is mounted.
     const mirrorEffect = effects.find((entry) =>
@@ -1377,7 +1389,6 @@ test('client registers one top-level bilingual IM settings section with a direct
     disposeMirror();
     assert.equal(localeListeners.size, 0);
 
-    assert.match(markup, /Connecting DeepSeek Harness/);
     assert.match(markup, new RegExp(
       `class="dim-brandVersion">v${IM_PLUGIN_VERSION.replaceAll('.', '\\.')}<\\/span>`,
     ));
@@ -1417,7 +1428,7 @@ test('client directory picker uses the current DSH uiWorkspace service', async (
     },
     slots: {
       inject(name, install) {
-        assert.equal(name, 'settings.section');
+        assert.equal(name, 'plugins.bundle.config');
         return install();
       },
       register(options, component) {
@@ -1575,15 +1586,14 @@ test('every channel tab receives its RPC call from the settings render site', as
   assert.ok(tabIds.length >= 12, `expected the channel tab list, found ${tabIds.length}`);
 
   // Parse the dependency block that feeds IMSettingsTab. Upstream (#231)
-  // refactored the render site into a reusable panel, so the props now come
-  // from `panelDependencies` rather than an inline `inject` block; this guard
-  // is about the props reaching the tab, not how they are assembled.
-  const renderSite = source.indexOf('h(IMSettingsTab, {');
-  assert.ok(renderSite > 0, 'the IMSettingsTab render site must exist');
-  const blockStart = source.lastIndexOf('const panelDependencies = {', renderSite);
-  const injectStart = blockStart >= 0
-    ? blockStart
-    : source.lastIndexOf('inject: () => ({', renderSite);
+  // refactored the render site into a reusable panel, and this branch moved the
+  // default surface to the Plugins page, so both entry points now render through
+  // `IMPanel`, which spreads `panelDependencies` into the exported config
+  // section; that section forwards the same props to `IMSettingsTab`. This guard
+  // is about the props reaching the tab, not about which layer assembles them.
+  const renderSite = source.indexOf('h(IMPluginConfigSection, {');
+  assert.ok(renderSite > 0, 'the settings panel render site must exist');
+  const injectStart = source.lastIndexOf('const panelDependencies = {', renderSite);
   assert.ok(injectStart > 0, 'the settings tab dependency block must exist');
   const injectBlock = source.slice(injectStart, source.indexOf('};', injectStart));
   const providedProps = new Set(

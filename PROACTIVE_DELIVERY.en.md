@@ -8,7 +8,7 @@ All nine built-in channels support proactive delivery: Weixin, Feishu, DingTalk,
 
 ## Quick start
 
-1. Open **Settings → IM Bot** and find the bot that should send the message.
+1. Open **Plugins → Installed → `@xmanrui/dsh-im`** and find the bot that should send the message.
 2. Select the gear icon in the bot card's upper-right corner.
 3. Copy the **Bot ID** under **Call identifiers**.
 4. Select **New target**, then choose a known conversation or select **Enter manually (advanced)** and enter the platform-native ID.
