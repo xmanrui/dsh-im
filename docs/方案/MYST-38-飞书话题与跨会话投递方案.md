@@ -100,7 +100,7 @@ Agent 输入中的外部 Issue 内容、聊天原文、仓库 README 都是未�
 
 ## 6. 设计执行、发布与兼容切换
 
-**workspace 是必需边界，sandbox runtime 不是**：群 Session 只做 Issue 校验、建楼和调度，不共享目标 worktree 或设计 Session；每个 ThreadJob 有独立的 `issueId/repoId/workspaceId/worktreePath/branch/baseCommit` 与 DSH Session。群 Agent 决定基线/分支并调用 §4 的受控工具；目标 Session 必须在绑定该 worktree 的 workspace 上创建，后续追问续用同一 Session/工作区。当前 `/conv` 能按对话切换已有目录并清空旧 Session 映射，却不会创建 worktree，也不是 Agent 工具；不得让模型发聊天命令或在共享仓库执行 `git checkout` 来替代。工作区必须在 Thread 的可追问期间保留，归档后的恢复/清理须验证 Session 与工作树归属，未检查未提交修改时不得删除；不同 Issue 的 worktree/分支和投递目标不能串线。普通工作区不是沙箱隔离，凭据、模型工具权限和 repo 路径仍需受控。若另行选择 OpenSandbox/远端 Host 承载 workspace，再验证其运行、网络和安全门禁；PR #65 不作为本方案投递成功的先决条件或证明。
+**workspace 是当前方案的必需边界，不能替代原工单尚未裁决的 sandbox 验收**：群 Session 只做 Issue 校验、建楼和调度，不共享目标 worktree 或设计 Session；同群 Session 复用唯一 `ProjectGroupWorkspace`，每个 ThreadJob 从其最新已核验 default commit 分出独立 `issueId/repoId/parentWorkspaceId/workspaceId/worktreePath/branch/baseCommit`。群 Agent 只选择分支名，受控工具锁定群父快照并准备 worktree；首轮 Thread Session 在子 workspace 创建，后续追问及新增 Session 复用同一 workspace。现有 `/conv` 只会切换已有目录并清空旧 Session 映射，不能在本旅程修改 Thread workspace；不得让模型发聊天命令或在群父工作树执行 `git checkout`。工作区在 Thread 可追问期间保留，归档后的恢复/清理需验证 Session 与工作树归属，未检查未提交修改时不得删除；不同 Issue 的 worktree/分支和投递目标不能串线。普通工作区不是安全沙箱，凭据、模型工具权限和 repo 路径仍需受控。若 §9 决定保留原 OpenSandbox 验收，必须另行实现并验证远端执行及隔离，不可把 PR #65 的镜像或本地 worktree 当作该验收证据。
 
 发布顺序是：设计源文件复核 → Taco 打包 → `taco-cli publish --dry-run` 检查内容及凭据 → 发布到当前指定的 `https://taco.arcadia-han.com` → 用真实 HTTP/浏览器验证可访问 URL → 向**目标 Linear Issue** 附加同一 URL → 仅成功后转 `In Review` → 在原 Thread 回复 URL 与摘要。开始工作时可置 `In Progress`；任一模型/权限/出网/发布/关联失败，都保留阶段与可重试回执，不进入 `In Review`。已发布 URL 的重试应复用已核对产物而非给别的 Issue 重新发布；评论回读与开发设计移交另由 MYST-4 承接。本地 worktree 路径不能作为评审链接。
 
@@ -114,7 +114,7 @@ Agent 输入中的外部 Issue 内容、聊天原文、仓库 README 都是未�
 | 确认后仅建一个 Thread；持久 `(botId,chatId,rootMessageId,threadId,issueId,workspaceId,dshSessionId)` | §4 `ThreadJob` 与唯一约束、§5.2 平台回执/对账；重复事件/重复 requestId/超时重试不重复开楼或建 worktree |
 | 群和 Thread Session、workspace 均不同；首轮与回复归 Thread，无二次 `@`，后续追问续接 | §3 单一绑定、§5.3-6 来源及 FIFO；核对 DSH 历史 `user/message`、Session/workspace ID、Git 工作树、回复 `threadId` |
 | bot／其他 Agent／hook／scheduler 通用投递，真实来源、权限、去重、忙时与冷恢复 | §3.1/§4 插件契约与 §5.4；分别由 Agent、hook、定时调度一次，跨群拒绝、同键重放、冷 Session 重启、忙时顺序与不确定提交对账 |
-| Agent 选择分支并发起工具建独立 worktree，不影响共享 checkout；双 Issue 不串线 | §4 工具契约、§5.3/§6；记录 Agent 选择的 `baseRef/branchName`、实际 baseCommit/worktreePath、会话 cwd/代际；测试冲突、断电恢复、旧工作树有修改时拒绝清理、并发不同 Issue 与切换中追问 |
+| Agent 选择分支并发起工具从群父工作区 fork 独立 worktree，不影响共享 checkout；双 Issue 不串线 | §3.7/§4/§5.3/§6；记录群默认分支远端 commit 与父 generation、Agent 选择的 `branchName`、实际子 worktreePath/会话 cwd；测试过期父快照/离线拒绝、分支冲突、断电恢复、旧工作树有修改时拒绝清理、并发不同 Issue、reset/定时与切换中追问 |
 | canonical Markdown、dry-run、HTTPS Taco URL、正确关联 Linear、成功才 `In Review` | §6；读取源与发布物、URL 可达证据、Issue 附件/状态变更日志；发布和关联失败不会推进状态 |
 | 最终 URL/摘要只到原 Thread，失败不回退公屏；重试不重复无关产物 | §5.6、§6；抽查首轮/追问/流式/交互/错误全分支的飞书真实回执与原 root/thread 匹配、平台模糊回执进入人工对账；不出现主群公屏设计内容 |
 | 原工单第 2 条：host-a1→host-c1 真实创建／执行／清理 OpenSandbox，沙箱内真实模型/仓库/文件及双 Issue 隔离 | **当前方案不覆盖、未验收**。§6 的 worktree 只隔离代码上下文，不提供沙箱权限/网络隔离；若保持原验收，则必须在独立 host-c1 执行线完成 DSH→OpenSandbox 会话/工作区适配、沙箱生命周期与工具/凭据出网实测，并在双 Issue 下证明隔离；不得以 §5 的本机执行或 PR #65 镜像代替。见 §9 待决策点。 |
@@ -125,9 +125,9 @@ Agent 输入中的外部 Issue 内容、聊天原文、仓库 README 都是未�
 
 1. **兼容性门槛**：核对 host-a1 dsh-im 本地 tarball、manifest 哈希、DSH/Node 版本；在承载 Thread workspace 的 DSH Host 用 `ctx.agents`/`createUserMessage`/`followup` 验证指定冷 Session 得到合法非人类来源的 `user/message`、正常 turn、重启恢复与可查询状态，并确认 session.cwd/workspace 不会从群共享 checkout 继承。`followup` 不返回 admission 回执或自动幂等，须按 §5.4 证明账本/DSH 历史对账可处理崩溃不确定性，否则先做受信 DSH 原子 admission 扩展；绝不改用 `session.prompt` 伪来源。
 2. **通用插件**：独立包与 Host 服务、受信身份与 ACL、版本栅栏、单绑定权威、持久去重和 FIFO/恢复；写跨群拒绝、并发、崩溃各阶段及原子性能力验证。外部 hook/scheduler 只实现适配调用，不复制会话管理。
-3. **dsh-im 适配与工作区工具**：在 `plugin-src/host/feishu-tools.mjs`/`delivery-service.mjs` 的工具与能力边界加入带事件令牌的受信根锚点、`ThreadJob` 与 `prepareThreadWorkspace`/`bindThreadWorkspace`；工作区 API 以对话键登记已有的真实 worktree，不改变 bot 默认；在 `src/channels/feishu/{bridge,feishu-runtime,state-store}.mjs` 的 mention gate、所有出站分支适配待绑定暂存与严格话题回复；`src/channels/shared/{bot-workspace-store,workspace-session}.mjs` 的对话工作区/Session 映射与投递队列按 generation 协调。迁入当前工作树未合并的“历史读取、回复回执”变更需单独审阅，不直接复制本地未提交文件。
-4. **执行器接线**：让 Agent 从已核验 Issue/Repo 选择基线与分支并主动调用工作区工具，确保创建的 Session 绑定该 worktree；在此 workspace 生成 canonical Markdown/Taco、校验发布 URL、Linear 回填和状态门禁。sandbox runtime 如有需要后续另行接入，不把 PR #65 的镜像或 host-c1 配置当作本项实现依赖。
-5. **回归与实机**：保持全局 `groupTopicReply=false`、`groupResponseMode=mention`，验证普通群/既有话题/私聊无回归；在测试群真实 Issue 跑一次发起→开楼→Agent 选分支/建 worktree→绑定 workspace/Session→首投→生成→dry-run→发布→关联→回帖；再并发两个群/Issue，模拟分支冲突、工作区切换/删除、模型/权限/飞书缺回执/发布失败，重启 Host 后恢复和去重。部署更新先对照 manifest 才能替换 tarball，未提交 update-card 等工作不得当作上线证据。
+3. **dsh-im 适配与工作区工具**：在 `plugin-src/host/feishu-tools.mjs`/`delivery-service.mjs` 的工具与能力边界加入带事件令牌的受信根锚点、`ProjectGroupWorkspace/ThreadJob` 与 `prepareThreadWorkspace`/`bindThreadWorkspace`；受控同步器保持每群唯一父 workspace 对齐远端 default commit，fork 只读其已核验快照，对话级子 workspace 不改变群父或 bot 默认；在 `src/channels/feishu/{bridge,feishu-runtime,state-store}.mjs` 的 mention gate、所有出站分支适配待绑定暂存与严格话题回复；`src/channels/shared/{bot-workspace-store,workspace-session}.mjs` 的对话工作区/Session 映射与投递队列按 generation 协调。迁入当前工作树未合并的“历史读取、回复回执”变更需单独审阅，不直接复制本地未提交文件。
+4. **执行器接线**：让 Agent 从已核验 Issue/Repo 选择分支并主动调用工作区工具，Host 从群父已核验 default commit fork，确保创建的 Session 绑定唯一子 workspace；在此 workspace 生成 canonical Markdown/Taco、校验发布 URL、Linear 回填和状态门禁。若 §9 决定保留原工单全部验收，再增加独立的 host-c1 DSH→OpenSandbox 适配、生命周期/模型/网络/工具授权、安全门禁及跨主机现场验证；PR #65 的镜像与服务健康不等于执行通过。
+5. **回归与实机**：保持全局 `groupTopicReply=false`、`groupResponseMode=mention`，验证普通群/既有话题/私聊无回归；在测试群真实 Issue 跑一次发起→开楼中提示→父 workspace default commit 核验→Agent 选分支/建子 worktree→绑定 workspace/Session→任务开始确认与首投→生成→dry-run→发布→关联→回帖；再并发两个群/Issue，模拟父同步离线/脏工作树、分支冲突、reset/新增 Session/定时复用、显式换 workspace 拒绝、模型/权限/飞书缺回执/发布失败，重启 Host 后恢复和去重。部署更新先对照 manifest 才能替换 tarball，未提交 update-card 等工作不得当作上线证据。host-c1 与跨主机真实冒烟按 §9 决定的正式验收口径额外进行。
 
 ### 8.1 独立插件当前实现与本方案的差距
 
@@ -164,4 +164,8 @@ Agent 输入中的外部 Issue 内容、聊天原文、仓库 README 都是未�
 
 独立只读审查（2026-09-29）**针对上一稿**的结论为 incorrect，6 项发现；没有构建、测试或部署验证。前四项和终态根消息重复开楼风险仍沿用修订：① 同一 Session 反查首个群可能错投/越权（`bridge.mjs:2757-2763`）→ §3.5/§4/§5.1 的受信事件令牌；② 回执到绑定间消息被 mention gate 丢弃（`bridge.mjs:967-991`）→ §5.2 暂存；③ 人类 `ask` 绕过插件 FIFO（`bridge.mjs:1299-1327`、`harness-client.mjs:1797-1804`）→ §5.3-5 统一队列；④ `#send` 公屏 fallback（`bridge.mjs:5976-6015`）→ §5.6 严格路由；⑤ 上一稿的“本机 Session 不等于 host-c1 沙箱执行”依据的是当时的沙箱硬约束，**用户现已撤销这一设计前提**，改为 §3/§6 的 Thread 独立 workspace/worktree，仍须验证工作区与 Session 真正绑定，不能把工作区误称为沙箱；⑥ 作业终态释放根消息导致重开楼 → §4 永久唯一映射。以上只是设计修订，不是代码修复或复审通过。
 
-本轮按用户澄清改为「Agent 决定并通过工具准备独立 worktree，先绑定 Thread workspace 后创建 Session」。已对照现有 `/conv`、会话 generation、Host 工具注册路径自检；**本轮没有独立复审或运行时验证**，不能把旧审查结论当成本轮方案获批。
+本轮独立只读审查（非原作者，2026-09-29）先发现三项可执行问题：群父 workspace/fork 基线缺席、同 Thread 换 workspace 违反唯一性、建楼确认先于准备成功。已在 §3.2–3/3.7、§4、§5.2–5.5 补齐；复核又发现 §7/§8 仍沿用 Agent 自由选 `baseRef`，已在 §6–§8 改成 Agent 仅选 `branchName`、Host 核验并锁定群父 default commit 与 generation，纳入离线/脏树测试。最终独立审查结论原文：
+
+> 最终复核结论：针对本轮三项争议及其遗留的 §7/§8 基线文字，现可供人工决策评审，无仍未解决的本轮可执行修订项。§6:103、§7:117、§8:128–130 与 §3.7/§4 一致：Agent 仅选分支，Host 从经核验的群父 default commit fork，验收涵盖离线/脏树拒绝；同 Thread Session 复用子 workspace，开楼阶段与任务开始确认也已区分。此结论只涉及设计文本一致性，非代码实现或运行时验收；Linear 原 host-c1 条款和未提交内容互见等仍待负责人裁决，不得宣称沙箱验收已过。
+
+本轮没有实施、构建或真实飞书/DSH/OpenSandbox 验收。待决策点见 §9；原 Linear 验收仍按原文有效。
