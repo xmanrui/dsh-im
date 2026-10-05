@@ -161,7 +161,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         roomHistory,
         ...(cryptoStore ? { cryptoStore } : {}),
         contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
-        accessPolicy: accessPolicyProvider(workspaces, botId, {
+        accessPolicy: accessPolicyProvider(workspaces, botId, { personalAccess: config.personalAccess === true,
           channel: 'matrix', config: botConfig,
         }),
         ...(typeof internals.isKnownCommand === 'function'

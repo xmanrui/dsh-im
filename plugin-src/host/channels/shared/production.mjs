@@ -170,6 +170,7 @@ export async function createTokenProductionController(ctx, config, internals, de
         : null;
       return new ResolvedRuntime({
         ...channelRuntimeOptions,
+        personalAccess: config.personalAccess === true,
         config: botConfig,
         token,
         // The mailbox may authenticate with an OAuth pair instead of a password.
@@ -182,7 +183,7 @@ export async function createTokenProductionController(ctx, config, internals, de
         harness: workspaceScope.harness,
         state: workspaceScope.state,
         contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
-        accessPolicy: accessPolicyProvider(workspaces, botId, { channel, config: botConfig }),
+        accessPolicy: accessPolicyProvider(workspaces, botId, { personalAccess: config.personalAccess === true, channel, config: botConfig }),
         replyTimeoutMs: config.replyTimeoutMs ?? 600_000,
         connectTimeoutMs: config.connectTimeoutMs ?? 20_000,
         logger: {

@@ -7,13 +7,19 @@ import { installIMessageStyles } from './styles.js';
 import { h } from '../../i18n.js';
 
 function PermissionPanel({ permissions, busy, error, onSubmit, onCancel }) {
+  const [riskAccepted, setRiskAccepted] = React.useState(false);
   const databaseReady = permissions?.database === 'granted';
   const automationReady = permissions?.automation === 'granted';
   return h('section', { className: 'ddt-card dim-surfaceCard dim-imessagePermissionPanel' },
     h('h3', null, '启用 macOS 原生 iMessage'),
     h('p', null, '支持同账号自聊：在 iPhone 或 Mac 上给自己已登录的 iMessage 邮箱或号码发指令。AI 回复以 🤖 DSH 开头，不会再次触发机器人。'),
     h('p', null, 'DeepSeek Harness 通过 macOS Messages.app 收发文本消息。首次使用需要授予以下权限：'),
-    h('ol', { className: 'dim-imessagePermissionSteps' },
+    h('p', { role: 'note' }, '开启这些权限后，模型执行的命令也能读取 iMessage 记录、邮件等受系统保护的数据。请仅在信任当前运行环境时开启。'),
+    h('label', { className: 'ddt-label' },
+      h('input', { type: 'checkbox', checked: riskAccepted, disabled: busy,
+        onChange: event => setRiskAccepted(event.target.checked) }),
+      '我已了解权限范围和风险'),
+    riskAccepted ? h('ol', { className: 'dim-imessagePermissionSteps' },
       h('li', null,
         h('strong', null, databaseReady ? '✓ 完全磁盘访问权限已授予' : '1. 授予完全磁盘访问权限'),
         databaseReady ? null : h('p', null, '在“系统设置 → 隐私与安全性 → 完全磁盘访问权限”中，打开运行 DeepSeek Harness 的终端或应用。'),
@@ -21,11 +27,11 @@ function PermissionPanel({ permissions, busy, error, onSubmit, onCancel }) {
       h('li', null,
         h('strong', null, automationReady ? '✓ Messages 自动化权限已授予' : '2. 允许自动化控制 Messages'),
         automationReady ? null : h('p', null, '在“系统设置 → 隐私与安全性 → 自动化”中，允许运行 DeepSeek Harness 的应用控制 Messages。'),
-        automationReady ? null : h('a', { href: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation' }, '打开自动化设置'))),
+        automationReady ? null : h('a', { href: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation' }, '打开自动化设置'))) : null,
     error ? h(ConnectionError, { error: error }) : null,
     h('div', { className: 'ddt-actions dim-viewActions' },
       h('button', { type: 'button', className: 'ddt-button', onClick: onCancel, disabled: busy }, '取消'),
-      h('button', { type: 'button', className: 'ddt-button', 'data-kind': 'primary', onClick: () => onSubmit({}), disabled: busy },
+      h('button', { type: 'button', className: 'ddt-button', 'data-kind': 'primary', onClick: () => { if (riskAccepted) onSubmit({}); }, disabled: busy || !riskAccepted },
         busy ? '正在检查…' : '检查权限并启用')));
 }
 

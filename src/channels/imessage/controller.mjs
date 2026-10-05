@@ -30,7 +30,9 @@ export class IMessageController extends TokenBotController {
   }
 
   async permissions() {
-    return new MacOSMessagesApi().getPermissions();
+    // Settings polling must never trigger an Automation consent prompt.
+    // Binding, after the permission panel's confirmation, checks it actively.
+    return new MacOSMessagesApi().getPermissions({ requestAutomation: false });
   }
 }
 

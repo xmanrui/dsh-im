@@ -138,6 +138,10 @@ export class DiscordApi {
     });
   }
 
+  getGuild({ guildId, signal } = {}) {
+    return this.#request(`guilds/${snowflake(guildId, 'guild id')}`, { method: 'GET', signal });
+  }
+
   getMessage({ channelId, messageId, signal } = {}) {
     return this.#request(
       `channels/${snowflake(channelId, 'channel id')}/messages/${snowflake(messageId, 'message id')}`,

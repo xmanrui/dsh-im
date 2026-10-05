@@ -36,7 +36,10 @@ function channelConfig(config, name, deliveryService) {
   const withAuthority = config.rpcAuthority === undefined
     ? channel
     : { ...channel, rpcAuthority: config.rpcAuthority };
-  return name === 'office' ? withAuthority : { ...withAuthority, deliveryService };
+  return name === 'office' ? withAuthority : {
+    ...withAuthority, deliveryService,
+    ...(config.personalAccess === true ? { personalAccess: true } : {}),
+  };
 }
 
 export function createImHostPlugin(internals = {}) {
@@ -84,6 +87,13 @@ export function createImHostPlugin(internals = {}) {
     name,
     inject,
     async apply(ctx, config = {}) {
+      if (config.personalAccess !== undefined && typeof config.personalAccess !== 'boolean') {
+        throw new TypeError('personalAccess must be a boolean');
+      }
+      if (config.disabledChannels !== undefined && (!Array.isArray(config.disabledChannels)
+        || config.disabledChannels.some(channel => !channels.some(([name]) => name === channel)))) {
+        throw new TypeError('disabledChannels must contain known channel names');
+      }
       const unavailableSessionSyncChannels = channels
         .map(([channel]) => channel)
         .filter((channel) => channel !== 'office'
@@ -187,6 +197,7 @@ export function createImHostPlugin(internals = {}) {
     // Each channel mounts its management RPC before awaiting initialization.
     // Start them together so a slow channel cannot leave later routes absent.
     await Promise.all(channels.map(async ([channel, start]) => {
+      if (config.disabledChannels?.includes(channel)) return;
       try {
         await start(ctx, channelConfig(config, channel, deliveryService));
       } catch (error) {

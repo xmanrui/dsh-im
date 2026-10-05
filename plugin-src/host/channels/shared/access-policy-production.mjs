@@ -126,7 +126,7 @@ export function privilegedSenderIdsFor(channel, config = {}) {
   return [];
 }
 
-export function accessPolicyProvider(workspaces, botId, { channel, config, equals } = {}) {
+export function accessPolicyProvider(workspaces, botId, { channel, config, equals, personalAccess = false } = {}) {
   if (!workspaces || typeof workspaces.accessPolicyFor !== 'function') {
     throw new TypeError('A workspace store with access policies is required');
   }
@@ -134,8 +134,23 @@ export function accessPolicyProvider(workspaces, botId, { channel, config, equal
   const sameSender = typeof equals === 'function' ? equals : (left, right) => left === right;
   return Object.freeze({
     botId,
-    getSettings: () => workspaces.accessPolicyFor(botId),
+    getSettings: () => {
+      const policy = workspaces.accessPolicyFor(botId);
+      if (personalAccess !== true) return policy;
+      // Personal profiles never inherit the open baseline. The direct
+      // allowlist is the owner's explicit configuration; empty means deny.
+      const scope = createAccessPolicyScope({
+        mode: 'allowlist',
+        open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
+        allowlist: { users: policy?.direct?.allowlist?.users ?? [] },
+      });
+      return createAccessPolicy({
+        direct: scope,
+        group: channel === 'discord' ? scope : allowlistScope(),
+      });
+    },
     isPrivileged(senderIds, conversationType) {
+      if (personalAccess === true) return false;
       if (!['direct', 'group'].includes(conversationType)) return false;
       const candidates = Array.isArray(senderIds) ? senderIds : [senderIds];
       try {

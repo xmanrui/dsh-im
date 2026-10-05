@@ -99,7 +99,7 @@ export class MacOSMessagesApi {
     }
   }
 
-  async getPermissions() {
+  async getPermissions({ requestAutomation = true } = {}) {
     const result = { platform: process.platform, database: 'unknown', automation: 'unknown' };
     if (process.platform !== 'darwin') {
       return { ...result, database: 'unsupported', automation: 'unsupported' };
@@ -111,6 +111,7 @@ export class MacOSMessagesApi {
       result.database = /authorization denied|not authorized|unable to open database/i.test(String(error?.stderr ?? error))
         ? 'required' : 'error';
     }
+    if (!requestAutomation) return result;
     try {
       await this.#osascript('tell application "Messages" to get name');
       result.automation = 'granted';

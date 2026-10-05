@@ -22,6 +22,8 @@ import {
 } from '../../../src/channels/discord/discord-runtime.mjs';
 import { setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
 import { COMMAND_PERMISSION_DENIED_MESSAGE } from '../../../src/channels/shared/inbound-access.mjs';
+import { createAccessPolicy, createAccessPolicyScope } from '../../../src/channels/shared/access-policy.mjs';
+import { accessPolicyProvider } from '../../../plugin-src/host/channels/shared/access-policy-production.mjs';
 import {
   DISCORD_ENDPOINTS,
   createDiscordRpcHandler,
@@ -1963,5 +1965,48 @@ test('discord synced approval accepts the DM recipient, never the channel id as 
     emit('333333333333333333');
     await eventually(() => result);
     assert.equal(result.value.outcome, 'allowed-once');
+  } finally { await runtime.stop(); }
+});
+
+test('personal Discord Gateway accepts only the server owner mentioning the bot and replies in place', async () => {
+  const bot = '1234567890123456789';
+  const owner = '333333333333333333';
+  const guild = '444444444444444444';
+  const channel = '222222222222222222';
+  const asks = [], replies = [], lookups = [], errors = [];
+  const sessions = new Map(), seen = new Set();
+  let socket;
+  const scope = createAccessPolicyScope({ mode: 'open', open: { defaultCanExecuteCommands: true, commandPermissionOverrides: [] }, allowlist: { users: [{ id: owner, canExecuteCommands: true }] } });
+  const accessPolicy = accessPolicyProvider({ accessPolicyFor: () => createAccessPolicy({ direct: scope, group: scope }) }, 'discord_test', { channel: 'discord', personalAccess: true });
+  const runtime = new DiscordRuntime({
+    config: { botId: 'discord_test', platformId: bot }, token: TOKEN, personalAccess: true, accessPolicy,
+    harness: { ensureRunning: async () => true, createSession: async () => 'session-personal', sessionExists: async () => true, ask: async (_id, text) => { asks.push(text); return `answer:${text}`; } },
+    state: { sessionFor: key => sessions.get(key), setSession: async (key, id) => { sessions.set(key, id); }, clearSession: async key => { sessions.delete(key); }, hasSeen: id => seen.has(id), markSeen: async id => { seen.add(id); } },
+    createApi: () => ({
+      getCurrentUser: async () => ({ id: bot, bot: true }), getGatewayBot: async () => ({ url: 'wss://gateway.discord.gg' }),
+      getGuild: async ({ guildId }) => { lookups.push(guildId); if (guildId === '444444444444444446') throw new Error('ownership unavailable'); return { id: guildId, owner_id: guildId === guild ? owner : '999999999999999999' }; },
+      getChannel: async () => assert.fail('personal access must not resolve threads'),
+      startThreadFromMessage: async () => assert.fail('personal access must not create threads'),
+      sendTyping: async () => {}, createMessage: async request => { replies.push(request); return { id: '888888888888888888' }; },
+    }),
+    createWebSocket: () => { socket = new FakeSocket(); queueMicrotask(() => socket.emit('message', { data: JSON.stringify({ op: 10, d: { heartbeat_interval: 45_000 } }) })); return socket; },
+    random: () => 0.5, logger: { warn() {}, error(...args) { errors.push(args); } },
+  });
+  let sequence = 1;
+  const emit = (id, author, guildId, mentioned = true, channelId = channel) => socket.emit('message', { data: JSON.stringify({ op: 0, t: 'MESSAGE_CREATE', s: ++sequence, d: { id, channel_id: channelId, guild_id: guildId, author: { id: author, bot: false }, mentions: mentioned ? [{ id: bot }] : [], content: mentioned ? `<@${bot}> ${id}` : id } }) });
+  try {
+    await runtime.start();
+    emit('111111111111111191', '555555555555555555', guild);
+    emit('111111111111111192', owner, '444444444444444445');
+    emit('111111111111111193', owner, guild, false);
+    emit('111111111111111194', owner, guild, false, '222222222222222223');
+    emit('111111111111111195', owner, '444444444444444446');
+    emit('111111111111111196', owner, guild);
+    await eventually(() => runtime.status.messagesReplied === 1 && errors.length === 1);
+    assert.deepEqual(asks, ['111111111111111196']);
+    assert.deepEqual(lookups.sort(), [guild, '444444444444444445', '444444444444444446']);
+    assert.equal(sessions.size, 1);
+    assert.ok(replies.every(reply => reply.channelId === channel));
+    assert.equal(replies.filter(reply => reply.content.includes('answer:111111111111111196')).length, 1);
   } finally { await runtime.stop(); }
 });

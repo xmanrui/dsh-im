@@ -131,3 +131,18 @@ test('rejects malformed chat targets', () => {
     guid: 'p:3', chatGuid: 'any;-;10000', serviceName: 'SMS', text: 'spam', sender: '10000',
   }), null);
 });
+
+test('passive permission checks never request Automation before risk acknowledgement', async (t) => {
+  const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+  t.after(() => Object.defineProperty(process, 'platform', platformDescriptor));
+  let automationRequests = 0;
+  const api = new MacOSMessagesApi({
+    execFileImpl: async () => ({ stdout: '[{"ok":1}]' }),
+    osascriptImpl: async () => { automationRequests++; return { stdout: 'Messages' }; },
+  });
+  assert.deepEqual(await api.getPermissions({ requestAutomation: false }), { platform: 'darwin', database: 'granted', automation: 'unknown' });
+  assert.equal(automationRequests, 0);
+  assert.equal((await api.getPermissions()).automation, 'granted');
+  assert.equal(automationRequests, 1);
+});

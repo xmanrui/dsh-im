@@ -266,7 +266,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         harness: workspaceScope.harness,
         state: workspaceScope.state,
         contextEnhancement: { botId: id, getSettings: () => workspaces.contextEnhancementFor(id) },
-        accessPolicy: accessPolicyProvider(workspaces, id, {
+        accessPolicy: accessPolicyProvider(workspaces, id, { personalAccess: config.personalAccess === true,
           channel: 'feishu', config: botConfig,
         }),
         replyTimeoutMs: config.replyTimeoutMs ?? 600_000,

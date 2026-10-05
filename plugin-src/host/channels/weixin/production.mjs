@@ -174,7 +174,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         harness: workspaceScope.harness,
         state: workspaceScope.state,
         contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
-        accessPolicy: accessPolicyProvider(workspaces, botId, {
+        accessPolicy: accessPolicyProvider(workspaces, botId, { personalAccess: config.personalAccess === true,
           channel: 'weixin', config: accountConfig,
         }),
         replyTimeoutMs: config.replyTimeoutMs ?? 600_000,

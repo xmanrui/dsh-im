@@ -345,6 +345,7 @@ export async function resolveDiscordMessageRoute(message, botId, {
   fetchImpl = fetch,
   signal,
   onChannel,
+  replyInSourceChannel = false,
 } = {}) {
   const normalized = normalizeDiscordMessage(message, botId, {
     fetchImpl,
@@ -356,6 +357,12 @@ export async function resolveDiscordMessageRoute(message, botId, {
   signal?.throwIfAborted();
   if (normalized.kind === 'direct') {
     return withConversationRoute(normalized, { id: normalized.conversationId, type: 1 }, botId);
+  }
+  if (replyInSourceChannel) {
+    // A personal profile requires an explicit mention on every guild message,
+    // even inside a thread previously created by this bot.
+    if (!normalized.addressed) return null;
+    return withConversationRoute(normalized, { id: normalized.conversationId }, botId);
   }
   if (!api || typeof api.getChannel !== 'function') {
     throw new TypeError('Discord route resolution requires the Discord API');
@@ -559,6 +566,7 @@ export class DiscordRuntime {
   #starting = null;
   #channels = new Map();
   #routing = new Map();
+  #personalAccess;
 
   constructor({
     config,
@@ -567,6 +575,7 @@ export class DiscordRuntime {
     state,
     contextEnhancement,
     accessPolicy,
+    personalAccess = false,
     logger = console,
     replyTimeoutMs = 600_000,
     connectTimeoutMs = 20_000,
@@ -579,6 +588,7 @@ export class DiscordRuntime {
     }
     if (typeof createWebSocket !== 'function') throw new TypeError('DiscordRuntime requires WebSocket');
     this.#config = config;
+    this.#personalAccess = personalAccess === true;
     this.#token = token;
     this.#harness = harness;
     this.#state = state;
@@ -850,9 +860,22 @@ export class DiscordRuntime {
   }
 
   async #acceptMessage(message, bridge) {
+    if (this.#personalAccess && !this.#accessPolicy) return;
     const messageId = String(message?.id ?? '');
     if (!messageId || this.#state.hasSeen(messageId)) return;
     const preflight = normalizeDiscordMessage(message, this.#config.platformId);
+    if (this.#personalAccess && preflight?.kind === 'group') {
+      if (!preflight.addressed || preflight.senderIsBot) return;
+      const personalDecision = evaluateInboundAccess(this.#accessPolicy, {
+        conversationType: 'group', senderIds: [preflight.senderId], text: preflight.content,
+        hasImages: preflight.images.length > 0, hasFiles: preflight.files.length > 0,
+      });
+      if (!personalDecision.allowed) return;
+      if (typeof this.#api.getGuild !== 'function') return;
+      const guild = await this.#api.getGuild({ guildId: message.guild_id, signal: this.#abortController?.signal });
+      if (String(guild?.id) !== String(message.guild_id)
+        || String(guild?.owner_id) !== preflight.senderId) return;
+    }
     let accessDecision;
     if (preflight?.kind === 'group' && preflight.addressed === true
       && preflight.senderIsBot !== true) {
@@ -881,6 +904,7 @@ export class DiscordRuntime {
         channel: this.#channels.get(String(message.channel_id)),
         signal: this.#abortController?.signal,
         onChannel: (resolved) => this.#rememberChannel(resolved),
+        replyInSourceChannel: this.#personalAccess,
       });
       route = { pendingRoute, contextSnapshot };
       this.#routing.set(messageId, route);
