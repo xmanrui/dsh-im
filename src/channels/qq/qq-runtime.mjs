@@ -9,6 +9,7 @@ import { t } from '../shared/i18n.mjs';
 import { evaluateInboundAccess } from '../shared/inbound-access.mjs';
 import { createQqBridgeStatus, QqHarnessBridge } from './qq-bridge.mjs';
 import { isQqMessageAddressed, normalizeQqMentions } from './qq-mention.mjs';
+import { QqExternalConsumer, qqRefusal, verifiedQqAccount } from './external-consumer.mjs';
 
 function timeoutError() {
   const error = new Error('QQ WebSocket did not become ready in time');
@@ -48,6 +49,8 @@ export class QqRuntime {
   #abortController = null;
   #runTask = null;
   #starting = null;
+  #externalConsumer;
+  #externalBridge = null;
 
   constructor({
     config,
@@ -61,6 +64,7 @@ export class QqRuntime {
     connectTimeoutMs = 20_000,
     createBot = (options) => new QQBot(options),
     typingMiddleware = typingIndicator,
+    externalConsumer,
   }) {
     if (!config || !appSecret || !harness || !state) {
       throw new TypeError('QqRuntime requires config, app secret, Harness, and state');
@@ -76,10 +80,56 @@ export class QqRuntime {
     this.#connectTimeoutMs = connectTimeoutMs;
     this.#createBot = createBot;
     this.#typingMiddleware = typingMiddleware;
+    this.#externalConsumer = externalConsumer;
   }
 
   get status() {
     return structuredClone(this.#status);
+  }
+
+  async describeDeliveryAccount(signal) {
+    signal?.throwIfAborted();
+    if (!this.#status.ready || !this.#bot) throw qqRefusal('bot-not-connected');
+    const bot = this.#bot;
+    try {
+      const user = await bot.api.get('/users/@me');
+      signal?.throwIfAborted();
+      if (this.#bot !== bot || !this.#status.ready) throw qqRefusal('bot-not-connected');
+      const account = verifiedQqAccount(this.#config.appId, user);
+      if (this.#status.error?.details?.stage === 'credential.verify') {
+        this.#status.error = null;
+        this.#status.lastError = null;
+      }
+      return account;
+    } catch (error) {
+      if (!signal?.aborted && this.#bot === bot) {
+        const qualificationHints = {
+          'application-id': t('QQ 应用标识无效。'),
+          'native-user-id': t('QQ 账号响应未提供有效的原生用户标识。'),
+          'native-bot-flag': t('QQ 账号响应返回了无效或矛盾的机器人标志。'),
+        };
+        this.#status.error = this.#diagnostics.report(error, { operation: 'connection.status',
+          stage: 'credential.verify', botId: this.#config.botId,
+          httpStatus: error?.httpStatus, providerCode: error?.bizCode,
+          ...(error?.code === 'account-unverified' ? { publicError: {
+            code: 'account-unverified', message: t('QQ 账号资格验证失败。'),
+            details: { reason: 'invalid-response', hint: qualificationHints[error.verificationFailure] },
+          } } : {}),
+        }).publicError;
+        this.#status.lastError = this.#status.error.message;
+      }
+      throw error;
+    }
+  }
+
+  qualifyReplyChecked(route, { signal } = {}) {
+    if (!this.#externalBridge) throw qqRefusal('consumer-unavailable');
+    return this.#externalBridge.qualify(route, signal);
+  }
+
+  replyChecked(route, text, options) {
+    if (!this.#externalBridge) throw qqRefusal('consumer-unavailable');
+    return this.#externalBridge.reply(route, text, options);
   }
 
   async sendConnectionTest(text) {
@@ -151,13 +201,32 @@ export class QqRuntime {
     this.#status.startedAt = new Date().toISOString();
     this.#status.qqConnectionState = 'connecting';
     this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
-    await atConnectionStage('harness.check', () => this.#harness.ensureRunning());
+    if (this.#config.consumerMode !== 'external-consumer')
+      await atConnectionStage('harness.check', () => this.#harness.ensureRunning());
     this.#status.harnessReachable = true;
 
+    const controller = new AbortController();
+    this.#abortController = controller;
+    const observeTransport = (message) => {
+      if (controller.signal.aborted || this.#abortController !== controller || typeof message !== 'string') return;
+      // SDK 1.0.4 exposes close through its public Logger, not a disconnect event.
+      if (message.startsWith(`[${this.#config.botId}] WebSocket closed:`)
+        || message.startsWith(`[${this.#config.botId}] Connection failed:`)
+        || message.startsWith(`[${this.#config.botId}] Connecting to `)) {
+        this.#status.ready = false;
+        this.#status.qqConnectionState = 'connecting';
+      } else if (message === `[${this.#config.botId}] Max reconnect attempts reached or aborted`) {
+        this.#status.ready = false;
+        this.#status.qqConnectionState = 'failed';
+      } else return false;
+      this.#logger.info?.(`[dsh-im:qq] ${JSON.stringify({ event: 'receiver-state',
+        botId: this.#config.botId, phase: this.#status.qqConnectionState })}`);
+      return true;
+    };
     const sdkLogger = {
-      error: (...args) => this.#logger.error?.(...args),
+      error: (...args) => { if (!observeTransport(args[0])) this.#logger.error?.(...args); },
       warn: (...args) => this.#logger.warn?.(...args),
-      info: (...args) => this.#logger.info?.(...args),
+      info: (...args) => { if (!observeTransport(args[0])) this.#logger.info?.(...args); },
       debug: () => {},
     };
     const bot = this.#createBot({
@@ -174,10 +243,19 @@ export class QqRuntime {
     if (!bot || typeof bot.start !== 'function' || typeof bot.stop !== 'function') {
       throw new TypeError('QQ bot factory returned an invalid client');
     }
-    const controller = new AbortController();
-    this.#abortController = controller;
     this.#bot = bot;
-    this.#bridge = new QqHarnessBridge({
+    if (this.#config.consumerMode === 'external-consumer' && this.#externalConsumer) {
+      try {
+        const account = verifiedQqAccount(this.#config.appId, await bot.api.get('/users/@me'));
+        controller.signal.throwIfAborted();
+        this.#externalBridge = new QqExternalConsumer({ bot, account, botId: this.#config.botId,
+          accept: this.#externalConsumer });
+      } catch (error) {
+        await this.stop();
+        throw error;
+      }
+    }
+    this.#bridge = this.#config.consumerMode === 'external-consumer' ? null : new QqHarnessBridge({
       bot,
       ownerUserOpenid: this.#config.ownerUserOpenid,
       harness: this.#harness,
@@ -198,7 +276,7 @@ export class QqRuntime {
     // tags. Parse them into readable text so the Harness sees what the sender
     // actually meant instead of an unusable markup fragment.
     bot.use(contentSanitizer({ parseFaceTags: true }));
-    bot.use?.(this.#typingMiddleware({
+    if (this.#config.consumerMode !== 'external-consumer') bot.use?.(this.#typingMiddleware({
       keepAlive: true,
       predicate: (ctx) => {
         const message = ctx?.message;
@@ -223,6 +301,7 @@ export class QqRuntime {
       readyReject = reject;
     });
     const onReady = (data) => {
+      if (controller.signal.aborted || this.#bot !== bot) return;
       if (typeof data?.user?.id === 'string' && data.user.id.trim()) {
         botMentionIds.add(data.user.id.trim());
       }
@@ -235,17 +314,23 @@ export class QqRuntime {
       readyResolve();
     };
     const onError = (error) => {
+      if (controller.signal.aborted || this.#bot !== bot) return;
       if (!this.#status.ready) readyReject(error);
       else {
         this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#config?.botId, automatic: true }).publicError;
         this.#status.lastError = this.#status.error.message;
         this.#logger.warn?.(`[dsh-im:qq] bot ${this.#config.botId} connection error:`, extractConnectionEvidence(error).details);
       }
+      this.#status.ready = false;
+      this.#status.qqConnectionState = 'connecting';
     };
-    const onMessage = (_ctx, message) => {
-      const task = this.#bridge?.accept(message);
+    const onMessage = async (_ctx, message) => {
+      if (controller.signal.aborted || this.#bot !== bot) return;
+      const task = this.#config.consumerMode === 'external-consumer'
+        ? this.#externalBridge?.accept(message, controller.signal)
+        : this.#bridge?.accept(message);
       if (!task) return;
-      void task.catch((error) => {
+      return task.catch((error) => {
         if (controller.signal.aborted) return;
         this.#logger.error?.(
           `[dsh-im:qq] bot ${this.#config.botId} message handling failed:`,
@@ -303,6 +388,7 @@ export class QqRuntime {
     this.#abortController = null;
     this.#bot = null;
     this.#bridge = null;
+    this.#externalBridge = null;
     this.#runTask = null;
     try {
       bot?.stop();

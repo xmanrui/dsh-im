@@ -42,6 +42,12 @@ const DELIVERY_ERROR_CODES = new Set([
   'invalid-inbound',
   'stale-route',
   'reply-result-unknown',
+  'source-not-found',
+  'source-unavailable',
+  'reply-permission-denied',
+  'reply-window-expired',
+  'reply-limit-exceeded',
+  'reply-rate-limited',
   'history-permission-denied',
   'history-unavailable',
   'thread-unavailable',
@@ -423,6 +429,26 @@ export class DeliveryService {
       this.#assertRegistered(registration);
       if (signal.aborted || error?.name === 'AbortError') throw deliveryError('cancelled');
       throw publicOperationError(error, 'history-unavailable');
+    }
+  }
+
+  async qualifyReplyChecked(botId, route, options = {}) {
+    const id = botIdOf(botId);
+    cancellation(options.signal);
+    if (!/^[a-f0-9]{64}$/.test(options.expectedFingerprint ?? '')) throw deliveryError('bad-request');
+    const registration = await this.#checkedRegistrationFor(id);
+    if (typeof registration.adapter.qualifyReplyChecked !== 'function') throw deliveryError('capability-unavailable');
+    this.#assertRegistered(registration);
+    const signal = options.signal ? AbortSignal.any([options.signal, registration.controller.signal]) : registration.controller.signal;
+    try {
+      const result = await registration.adapter.qualifyReplyChecked(id, structuredClone(route), { ...options, signal });
+      this.#assertRegistered(registration);
+      cancellation(signal);
+      return result;
+    } catch (error) {
+      this.#assertRegistered(registration);
+      if (signal.aborted || error?.name === 'AbortError') throw deliveryError('cancelled');
+      throw publicOperationError(error, 'source-unavailable');
     }
   }
 
