@@ -289,7 +289,9 @@ node bin/dsh-im.mjs install --source .
 
 `npm run check` 运行单元测试、构建 Host/Client 产物，并验证发布包不包含凭据或独立渠道设置页注册。
 
-构建后运行 `node scripts/verify-injected-context.mjs /path/to/built/deepseek-harness`，验证发布产物中的上下文钩子能通过真实 DSH v4 JSONL 持久化，覆盖普通消息、来源信息、引导词、引用、组合和多段文本，以及关闭后重新读取、继续写入下一轮。脚本从指定宿主加载组件，使用并清理临时会话目录，无需机器人凭据或模型请求。
+改动设置页的表现层（`plugin-src/client/styles.js` 与各渠道的 `styles.js`）前，先读[表现层样式契约](docs/adr/0002-presentation-layer-style-contract.md)：它记录了「同一角色多个作者」的四种层叠机制、验收口径、已收敛的轴，以及三个契约测试护栏。
+
+本机两个运行实例（`dsh web` 与隔离 profile `imui`）的启动方式、URL token 的取法、构建产物与仓库的核对方法，以及安装形态（两者均已是指向仓库的符号链接，改完仓库只需 `npm run build`）与版本策略，见[本地运行环境说明](docs/local-environment.md)。
 
 IM 管理接口默认沿用 Harness 的浏览器认证和 Host／Origin 信任检查。只要 Harness 已允许并认证当前局域网访问，便可直接查看和配置 IM 机器人，无需额外修改 dsh-im 配置。
 
