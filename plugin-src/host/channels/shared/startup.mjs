@@ -45,9 +45,11 @@ export async function installProductionChannel(ctx, config, {
   }, { authority: resolveRpcAuthority(config.rpcAuthority) });
   let production;
   let unregisterDelivery;
+  let unregisterSetup;
   let closing;
   const closeProduction = () => (closing ??= (async () => {
     try {
+      unregisterSetup?.();
       await unregisterDelivery?.();
     } finally {
       await production?.close();
@@ -61,6 +63,7 @@ export async function installProductionChannel(ctx, config, {
     ctx.effect(() => closeProduction, `dsh-im: close ${channel} connections`);
     followHostLanguage(ctx, channel, production.controller, logger);
     handler = readyHandler;
+    unregisterSetup = config.deliveryService?.appSetup?.register(channel, production.controller);
   } catch (error) {
     startupError = reportStartupError
       ? reportStartupError(error, false)

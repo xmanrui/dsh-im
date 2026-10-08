@@ -62,9 +62,12 @@ test('Host update initialization failure leaves all channel activations availabl
   internals.installHostLanguage = () => undefined;
   internals.installHostLanguageRpc = () => {};
   const errors = [];
+  const routes = new Map();
   await createImHostPlugin(internals).apply({
-    connection: { fetch: {} }, logger: { error: (...args) => errors.push(args) },
+    connection: { fetch: managementFetch((channel, handler) => routes.set(channel, handler)) },
+    logger: { error: (...args) => errors.push(args) },
   });
+  assert.equal((await routes.get('/app-setup')('setup.poll', { attemptId: 'missing' })).error.code, 'setup-expired');
   assert.deepEqual(calls, channels);
   assert.equal(errors.length, 1);
   assert.match(errors[0][0], /update management/);

@@ -11,6 +11,166 @@ import { normalizeBotsSnapshot } from '../../../plugin-src/client/channels/feish
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('inline setup returns verified identity and starts the new app only as an external consumer', async () => {
+  const { AppSetupService, installAppSetupRpc } = await import('../../../plugin-src/host/app-setup.mjs');
+  const { managementFetch } = await import('../../fixtures/management-rpc.mjs');
+  const fx = fixture();
+  const records = [];
+  const setup = new AppSetupService({
+    describeBot: id => fx.controller.describeDeliveryAccount(id),
+    logger: { info: record => records.push(JSON.parse(record)) },
+  });
+  const unregister = setup.register('feishu', fx.controller);
+  let rpc;
+  installAppSetupRpc({ connection: { fetch: managementFetch((_channel, handler) => { rpc = handler; }) } }, setup);
+  try {
+    assert.deepEqual(setup.describe('feishu'), {
+      version: 1, channel: 'feishu', endpoint: 'dsh-im/app-setup', kind: 'credentials',
+    });
+    assert.equal(setup.describe('weixin'), undefined);
+    const started = await rpc('setup.start', { channel: 'feishu' });
+    assert.equal(started.ok, true);
+    const created = await rpc('setup.credentials', {
+      attemptId: started.value.attemptId,
+      appId: 'cli_inline', appSecret: 'private-inline-secret', domain: 'lark',
+    });
+    assert.equal(created.ok, true);
+    assert.equal(created.value.state, 'ready');
+    assert.equal(created.value.accountRef, 'bot_generated_1');
+    assert.equal(created.value.description.channel, 'feishu');
+    assert.match(created.value.description.account.fingerprint, /^[a-f0-9]{64}$/);
+    assert.equal(fx.runtimes.get('bot_generated_1')[0].config.consumerMode, 'external-consumer');
+    assert.doesNotMatch(JSON.stringify({ created, records }), /private-inline-secret|secretRef/);
+    assert.deepEqual(records.map(record => record.phase), ['started', 'creating', 'ready']);
+    assert.equal((await rpc('setup.poll', { attemptId: started.value.attemptId })).value.accountRef, created.value.accountRef);
+    assert.equal((await rpc('setup.cancel', { attemptId: started.value.attemptId })).value.state, 'ready');
+    assert.equal(fx.controller.status().bots.length, 1);
+  } finally { unregister(); await fx.controller.close(); }
+});
+
+test('replacing the setup channel fences an earlier credential operation before account creation', async () => {
+  const { AppSetupService, installAppSetupRpc } = await import('../../../plugin-src/host/app-setup.mjs');
+  const { managementFetch } = await import('../../fixtures/management-rpc.mjs');
+  let release;
+  let entered = false;
+  const gate = new Promise(resolve => { release = resolve; });
+  const fx = fixture({ verifyApp: async () => {
+    entered = true; await gate; return { name: 'Verified', openId: 'ou_verified', activated: 1 };
+  } });
+  const setup = new AppSetupService({ describeBot: id => fx.controller.describeDeliveryAccount(id) });
+  const oldRegistration = setup.register('feishu', fx.controller);
+  let currentRegistration;
+  let rpc;
+  installAppSetupRpc({ connection: { fetch: managementFetch((_channel, handler) => { rpc = handler; }) } }, setup);
+  try {
+    const started = await rpc('setup.start', { channel: 'feishu' });
+    const creating = rpc('setup.credentials', { attemptId: started.value.attemptId,
+      appId: 'cli_retired', appSecret: 'retired-secret', domain: 'lark' });
+    await waitFor(() => entered);
+    currentRegistration = setup.register('feishu', fx.controller);
+    release();
+    assert.equal((await creating).ok, false);
+    assert.equal(fx.controller.status().bots.length, 0);
+    assert.equal(fx.values.size, 0);
+    oldRegistration();
+    assert.equal(setup.describe('feishu').version, 1);
+    const fresh = await rpc('setup.start', { channel: 'feishu' });
+    assert.equal(fresh.ok, true);
+    const result = await rpc('setup.credentials', { attemptId: fresh.value.attemptId,
+      appId: 'cli_fresh', appSecret: 'fresh-secret', domain: 'lark' });
+    assert.equal(result.value.state, 'ready');
+  } finally { release(); oldRegistration(); currentRegistration?.(); await fx.controller.close(); }
+});
+
+test('an expired inline attempt cannot finish a credential operation or be resumed', async (t) => {
+  const { AppSetupService, installAppSetupRpc } = await import('../../../plugin-src/host/app-setup.mjs');
+  const { managementFetch } = await import('../../fixtures/management-rpc.mjs');
+  let release;
+  let entered = false;
+  const gate = new Promise(resolve => { release = resolve; });
+  const fx = fixture({ verifyApp: async () => {
+    entered = true; await gate; return { name: 'Verified', openId: 'ou_verified', activated: 1 };
+  } });
+  const setup = new AppSetupService({ describeBot: id => fx.controller.describeDeliveryAccount(id) });
+  const unregister = setup.register('feishu', fx.controller);
+  let rpc;
+  installAppSetupRpc({ connection: { fetch: managementFetch((_channel, handler) => { rpc = handler; }) } }, setup);
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  try {
+    const started = await rpc('setup.start', { channel: 'feishu' });
+    const creating = rpc('setup.credentials', { attemptId: started.value.attemptId,
+      appId: 'cli_expired', appSecret: 'expired-secret', domain: 'lark' });
+    await waitFor(() => entered);
+    t.mock.timers.tick(10 * 60_000 + 1);
+    assert.equal((await rpc('setup.poll', { attemptId: started.value.attemptId })).error.code, 'setup-expired');
+    release();
+    assert.equal((await creating).ok, false);
+    assert.equal(fx.controller.status().bots.length, 0);
+    assert.equal(fx.values.size, 0);
+    assert.equal((await rpc('setup.poll', { attemptId: started.value.attemptId })).error.code, 'setup-expired');
+    assert.equal((await rpc('setup.start', { channel: 'feishu' })).ok, true);
+  } finally { release(); t.mock.timers.reset(); unregister(); await fx.controller.close(); }
+});
+
+test('inline setup preserves an already configured app and its running account', async () => {
+  const { AppSetupService, installAppSetupRpc } = await import('../../../plugin-src/host/app-setup.mjs');
+  const { managementFetch } = await import('../../fixtures/management-rpc.mjs');
+  const original = bot('existing_bot', 'existing');
+  const fx = fixture({ bots: [original], secrets: { [original.secretRef]: 'original-secret' } });
+  const setup = new AppSetupService({ describeBot: id => fx.controller.describeDeliveryAccount(id) });
+  const unregister = setup.register('feishu', fx.controller);
+  let rpc;
+  installAppSetupRpc({ connection: { fetch: managementFetch((_channel, handler) => { rpc = handler; }) } }, setup);
+  try {
+    await fx.controller.initialize();
+    const before = fx.controller.status();
+    const started = await rpc('setup.start', { channel: 'feishu' });
+    const result = await rpc('setup.credentials', { attemptId: started.value.attemptId,
+      appId: original.appId, appSecret: 'replacement-secret', domain: 'feishu' });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'setup-account-exists');
+    const after = fx.controller.status();
+    assert.deepEqual(after.bots, before.bots);
+    assert.equal(after.revision, before.revision);
+    assert.equal(fx.values.get(original.secretRef), 'original-secret');
+    assert.equal(fx.runtimes.get(original.id).length, 1);
+    assert.equal(fx.runtimes.get(original.id)[0].stops, 0);
+  } finally { unregister(); await fx.controller.close(); }
+});
+
+for (const phase of ['credential-read', 'credential-save']) test(`cancelling inline ${phase} prevents a new account and resumes as cancelled`, async () => {
+  const { AppSetupService, installAppSetupRpc } = await import('../../../plugin-src/host/app-setup.mjs');
+  const { managementFetch } = await import('../../fixtures/management-rpc.mjs');
+  let release;
+  let entered = false;
+  const gate = new Promise(resolve => { release = resolve; });
+  const fx = fixture({
+    credentialResolve: async () => { if (phase === 'credential-read') { entered = true; await gate; } },
+    credentialSet: async ({ ref, value, values }) => {
+      values.set(ref, value);
+      if (phase === 'credential-save') { entered = true; await gate; }
+    },
+  });
+  const setup = new AppSetupService({ describeBot: id => fx.controller.describeDeliveryAccount(id) });
+  const unregister = setup.register('feishu', fx.controller);
+  let rpc;
+  installAppSetupRpc({ connection: { fetch: managementFetch((_channel, handler) => { rpc = handler; }) } }, setup);
+  try {
+    const started = await rpc('setup.start', { channel: 'feishu' });
+    const attemptId = started.value.attemptId;
+    const creating = rpc('setup.credentials', { attemptId, appId: 'cli_cancel', appSecret: 'cancelled-secret', domain: 'lark' });
+    await waitFor(() => entered);
+    const cancelling = rpc('setup.cancel', { attemptId });
+    await flush();
+    release();
+    assert.equal((await cancelling).value.state, 'cancelled');
+    assert.equal((await creating).ok, false);
+    assert.equal((await rpc('setup.poll', { attemptId })).value.state, 'cancelled');
+    assert.equal(fx.controller.status().bots.length, 0);
+    assert.equal(fx.values.size, 0);
+  } finally { release(); unregister(); await fx.controller.close(); }
+});
+
 test('panel management RPC preserves legacy defaults, validates input, and updates only the saved bot without reconnecting', async (t) => {
   const existing = bot('bot_panels', 'panels');
   const other = bot('bot_other', 'other');
@@ -99,6 +259,7 @@ function fixture({
   callbackProbe,
   verifyApp,
   credentialSet,
+  credentialResolve,
   deleteState,
 } = {}) {
   const configStore = suppliedStore ?? new MemoryConfigStore(bots);
@@ -123,6 +284,7 @@ function fixture({
     })),
     credentials: {
       async resolve(ref) {
+        await credentialResolve?.(ref);
         if (failResolveRefs.has(ref)) throw new Error('credential provider unavailable');
         return values.has(ref) ? { value: values.get(ref), source: 'file' } : undefined;
       },

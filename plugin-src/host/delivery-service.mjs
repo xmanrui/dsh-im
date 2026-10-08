@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { normalizeDeliveryTarget } from './delivery-adapter.mjs';
+import { AppSetupService } from './app-setup.mjs';
 import { COMPETITIVE_APPROVAL_CHANNELS } from '../../src/channels/shared/harness-approval.mjs';
 import { t } from '../../src/channels/shared/i18n.mjs';
 
@@ -130,10 +131,12 @@ function sessionSyncState(value, available) {
 }
 
 export class DeliveryService {
+  appSetup;
   #adapters = new Map();
   #unavailableSessionSyncChannels;
 
-  constructor({ unavailableSessionSyncChannels = [] } = {}) {
+  constructor({ unavailableSessionSyncChannels = [], logger } = {}) {
+    this.appSetup = new AppSetupService({ describeBot: id => this.describeBot(id), logger });
     if (!Array.isArray(unavailableSessionSyncChannels)
       || unavailableSessionSyncChannels.some((channel) => (
         typeof channel !== 'string' || !CHANNEL_PATTERN.test(channel)

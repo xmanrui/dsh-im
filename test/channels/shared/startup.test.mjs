@@ -216,7 +216,8 @@ test('the composed host serves other real channels while Feishu is loading and a
   try {
     // Allow Cordis to enter its activation callback; Feishu stays gated.
     await new Promise(setImmediate);
-    assert.equal(f.routes.size, channels.length);
+    assert.deepEqual([...f.routes.keys()].sort(), [...channels.map(({ id }) => `/${id}`), '/app-setup'].sort());
+    assert.equal((await f.call('app-setup', 'setup.poll', { attemptId: 'missing' })).error.code, 'setup-expired');
     await allLoaded.promise;
     assert.equal((await f.call('feishu')).error.code, 'feishu-initializing');
     // Let the other channels finish their local workspace reconciliation.
@@ -234,6 +235,30 @@ test('the composed host serves other real channels while Feishu is loading and a
   } finally {
     gate.resolve();
   }
+});
+
+test('setup discovery follows the real production controller lifetime and exposes no credential command', async t => {
+  const f = await fixture(t);
+  const config = Object.fromEntries(channels.map(({ id, key }) => [key, f.config(id)]));
+  const internals = Object.fromEntries([
+    'installUpdateRpc', 'installInboundTtlRpc', 'installDeliveryRpc', 'installDeliveryHttp',
+    'installSessionSyncCoordinator', 'installHostLanguage', 'installHostLanguageRpc',
+  ].map(name => [name, () => {}]));
+  const fiber = f.start(createImHostPlugin(internals).apply, config);
+  await fiber.await();
+  const service = f.ctx.dshIm;
+  assert.equal(service.setupVersion, 1);
+  assert.deepEqual(service.describeSetup('feishu'), {
+    version: 1, channel: 'feishu', endpoint: 'dsh-im/app-setup', kind: 'credentials',
+  });
+  assert.equal(service.describeSetup('weixin'), undefined);
+  assert.equal(service.setupCredentials, undefined);
+  const started = await f.call('app-setup', 'setup.start', { channel: 'feishu' });
+  assert.equal(started.value.state, 'credentials');
+  assert.equal((await f.call('app-setup', 'setup.cancel', { attemptId: started.value.attemptId })).value.state, 'cancelled');
+  await fiber.dispose();
+  assert.equal(service.describeSetup('feishu'), undefined);
+  assert.equal(f.routes.size, 0);
 });
 
 test('startup rolls back prepared resources even when delivery cleanup fails', async t => {
