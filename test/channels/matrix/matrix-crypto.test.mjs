@@ -2,6 +2,7 @@ import test, { after } from 'node:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { setImmediate } from 'node:timers/promises';
 import { deepStrictEqual, equal, match, ok, rejects } from 'node:assert';
 
 import {
@@ -17,6 +18,7 @@ const ALICE = '@alice:example.org';
 const ROOM = '!room:example.org';
 
 const tempDirectories = new Set();
+const engines = new Set();
 
 async function makeTempDirectory(prefix) {
   const created = await mkdtemp(join(tmpdir(), prefix));
@@ -25,6 +27,7 @@ async function makeTempDirectory(prefix) {
 }
 
 after(async () => {
+  for (const engine of engines) await engine.stop();
   for (const directory of tempDirectories) await rm(directory, { recursive: true, force: true });
 });
 
@@ -97,16 +100,18 @@ function createHub() {
 
 async function startEngine(hub, { userId, deviceId, storePath, logger = loggerFixture() }) {
   const store = await new MatrixCryptoStore(storePath).load();
+  const api = hub.apiFor(userId, deviceId);
   const engine = new MatrixCryptoEngine({
-    api: hub.apiFor(userId, deviceId),
+    api,
     store,
     userId,
     deviceId,
     logger,
   });
+  engines.add(engine);
   hub.engines.set(`${userId}|${deviceId}`, engine);
   await engine.start();
-  return { engine, store, logger };
+  return { engine, store, logger, api };
 }
 
 test('bootstrap registers device keys and a restart restores the same identity from the pickled store', async () => {
@@ -128,6 +133,7 @@ test('bootstrap registers device keys and a restart restores the same identity f
   // A restart on the very same store must restore the pickled account instead of
   // generating a fresh device identity; this also proves the bootstrap passphrase
   // round-trips through the store (a mismatch throws on unpickle and fails here).
+  await first.engine.stop();
   const second = await startEngine(hub, { userId: BOT, deviceId: 'BOTDEV', storePath });
   equal(second.engine.getStats().ed25519Fingerprint, firstStats.ed25519Fingerprint,
     'the restored account keeps the original ed25519 identity');
@@ -267,4 +273,97 @@ test('the pk algorithm constant and the store file layout stay in the documented
   ok(document.accountPickle && document.pkDecryptionPickle, 'both pickles are stored');
   match(document.picklingPassphrase, /^[A-Za-z0-9+/=]+$/, 'the pickling passphrase is stored as the bootstrap secret');
   ok(document.pkEncryptionKey, 'the public pk-encryption key is stored beside it');
+});
+
+test('stop waits for queued outbound persistence before the store can be removed', async (t) => {
+  const directory = await makeTempDirectory('dsh-im-matrix-crypto-stop-write-');
+  const hub = createHub();
+  hub.members = new Set([BOT]);
+  const { engine, store } = await startEngine(hub, {
+    userId: BOT, deviceId: 'BOTDEV', storePath: matrixCryptoPathFor(directory),
+  });
+  const releaseWrite = Promise.withResolvers();
+  const apply = store.apply.bind(store);
+  store.apply = async (patch) => {
+    await releaseWrite.promise;
+    return apply(patch);
+  };
+  t.after(async () => {
+    releaseWrite.resolve();
+    await engine.stop();
+  });
+
+  const encrypted = await engine.encryptForRoom(ROOM, { msgtype: 'm.text', body: 'persist before stop' });
+  let stopped = false;
+  const stopping = engine.stop().then(() => { stopped = true; });
+  equal(engine.ready, false, 'stopping immediately rejects new work');
+  await setImmediate();
+  equal(stopped, false, 'stop must wait for the delayed outbound writes');
+
+  releaseWrite.resolve();
+  await stopping;
+  const document = JSON.parse(await readFile(store.path, 'utf8'));
+  equal(document.groupOutbound[ROOM].sessionId, encrypted.session_id);
+  equal(document.groupOutbound[ROOM].messageIndex, 1);
+  await rm(directory, { recursive: true, force: true });
+});
+
+test('stop drains a pending key request and the persistence it schedules during shutdown', async (t) => {
+  const directory = await makeTempDirectory('dsh-im-matrix-crypto-stop-request-');
+  const hub = createHub();
+  const alice = await startEngine(hub, {
+    userId: ALICE, deviceId: 'ALICEDEV', storePath: join(directory, 'alice-matrix-crypto.json'),
+  });
+  const bot = await startEngine(hub, {
+    userId: BOT, deviceId: 'BOTDEV', storePath: matrixCryptoPathFor(directory),
+  });
+  const requestStarted = Promise.withResolvers();
+  const releaseRequest = Promise.withResolvers();
+  const writeStarted = Promise.withResolvers();
+  const releaseWrite = Promise.withResolvers();
+  const sendToDevice = bot.api.sendToDevice;
+  bot.api.sendToDevice = async (type, messages) => {
+    requestStarted.resolve();
+    await releaseRequest.promise;
+    return sendToDevice(type, messages);
+  };
+  const apply = bot.store.apply.bind(bot.store);
+  bot.store.apply = async (patch) => {
+    writeStarted.resolve();
+    await releaseWrite.promise;
+    return apply(patch);
+  };
+  t.after(async () => {
+    releaseRequest.resolve();
+    releaseWrite.resolve();
+    await bot.engine.stop();
+    await alice.engine.stop();
+  });
+
+  equal(await bot.engine.decryptRoomEvent(ROOM, {
+    event_id: '$missing:example.org', sender: ALICE,
+    content: {
+      algorithm: MATRIX_MEGOLM_ALGORITHM,
+      sender_key: 'missing-sender-key', session_id: 'missing-session', ciphertext: 'zzz',
+    },
+  }), null);
+  await requestStarted.promise;
+  let stopped = false;
+  const stopping = bot.engine.stop().then(() => { stopped = true; });
+  await setImmediate();
+  equal(stopped, false, 'stop must wait for the outstanding key request');
+
+  releaseRequest.resolve();
+  await writeStarted.promise;
+  await setImmediate();
+  equal(stopped, false, 'stop must also wait for writes queued by that request');
+  releaseWrite.resolve();
+  await stopping;
+
+  const document = JSON.parse(await readFile(bot.store.path, 'utf8'));
+  equal(document.requestState[`req|${ROOM}|missing-session|missing-sender-key`].tries, 1);
+  equal(bot.engine.getStats().pendingEvents, 0);
+  equal(bot.engine.getStats().cachedDevices, 0);
+  await alice.engine.stop();
+  await rm(directory, { recursive: true, force: true });
 });

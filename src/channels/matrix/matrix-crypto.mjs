@@ -97,6 +97,7 @@ export class MatrixCryptoEngine {
   #seenIndex = new Map();
   #pendingEvents = new Map();
   #requestState = new Map();
+  #pendingTasks = new Set();
   #lastKeyMaintenanceAt = 0;
   #stats = {
     undecryptable: 0,
@@ -239,6 +240,12 @@ export class MatrixCryptoEngine {
   }
 
   async stop() {
+    this.#ready = false;
+    // A key request can enqueue persistence after shutdown starts. Drain both
+    // before releasing sessions or allowing the caller to remove the store.
+    while (this.#pendingTasks.size > 0) {
+      await Promise.allSettled([...this.#pendingTasks]);
+    }
     for (const entry of this.#inbound.values()) entry.session.free?.();
     for (const entry of this.#outbound.values()) entry.session.free?.();
     this.#inbound.clear();
@@ -247,7 +254,12 @@ export class MatrixCryptoEngine {
     this.#memberCache.clear();
     this.#pendingEvents.clear();
     this.#seenIndex.clear();
-    this.#ready = false;
+  }
+
+  #trackTask(task) {
+    const tracked = task.finally(() => this.#pendingTasks.delete(tracked));
+    this.#pendingTasks.add(tracked);
+    return tracked;
   }
 
   async maintain() {
@@ -717,7 +729,9 @@ export class MatrixCryptoEngine {
     if (!entry) {
       this.#stats.undecryptable += 1;
       this.#pendingEvents.set(`${key}|${event?.event_id ?? 'x'}`, { roomId, event, at: this.#now() });
-      void this.#requestRoomKey(roomId, event);
+      void this.#trackTask(this.#requestRoomKey(roomId, event).catch((error) => {
+        this.#logger.warn?.('[dsh-im:matrix] a room key request failed:', error?.message ?? error);
+      }));
       return null;
     }
     const seen = this.#seenIndexes(key);
@@ -908,7 +922,7 @@ export class MatrixCryptoEngine {
     } catch {
       return Promise.resolve();
     }
-    return this.#store.apply({ groupOutbound }).catch(() => undefined);
+    return this.#trackTask(this.#store.apply({ groupOutbound }).catch(() => undefined));
   }
 
   #persistInbound(key) {
@@ -936,7 +950,7 @@ export class MatrixCryptoEngine {
         lastUsedAt: entry.lastUsedAt,
       },
     ].slice(-900);
-    return this.#store.apply({ groupInbound }).catch(() => undefined);
+    return this.#trackTask(this.#store.apply({ groupInbound }).catch(() => undefined));
   }
 
   #persistRequestState() {
@@ -944,7 +958,7 @@ export class MatrixCryptoEngine {
     if (!snapshot) return Promise.resolve();
     const requestState = {};
     for (const [key, state] of [...this.#requestState].slice(-200)) requestState[key] = { ...state };
-    return this.#store.apply({ requestState }).catch(() => undefined);
+    return this.#trackTask(this.#store.apply({ requestState }).catch(() => undefined));
   }
 
   // ---- key registration ---------------------------------------------------
