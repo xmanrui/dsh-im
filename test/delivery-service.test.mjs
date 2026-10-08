@@ -44,6 +44,39 @@ function memoryAdapter({ channel = 'telegram', botId = 'bot_one' } = {}) {
   };
 }
 
+test('QQ reply qualification preserves native refusals and registration cancellation through the public Service', async () => {
+  const service = createDeliveryService();
+  const adapter = memoryAdapter({ channel: 'qq' });
+  const route = { messageId: 'source', conversationId: 'group', actorId: 'member' };
+  const options = { expectedFingerprint: 'c'.repeat(64) };
+  adapter.qualifyReplyChecked = async (_botId, received, context) => {
+    assert.deepEqual(received, route);
+    assert.equal(context.expectedFingerprint, options.expectedFingerprint);
+    assert.equal(context.signal.aborted, false);
+    return received;
+  };
+  const dispose = service.registerAdapter(adapter);
+  assert.deepEqual(await service.qualifyReplyChecked('bot_one', route, options), route);
+  for (const code of ['source-not-found', 'source-unavailable', 'reply-permission-denied',
+    'reply-window-expired', 'reply-limit-exceeded', 'reply-rate-limited']) {
+    adapter.qualifyReplyChecked = async () => { throw Object.assign(new Error('refused'), { code }); };
+    await assert.rejects(() => service.qualifyReplyChecked('bot_one', route, options), { code });
+  }
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  adapter.qualifyReplyChecked = async (_botId, _route, context) => {
+    started();
+    await new Promise(resolve => context.signal.addEventListener('abort', resolve, { once: true }));
+    return route;
+  };
+  const pending = service.qualifyReplyChecked('bot_one', route, options);
+  const rejected = assert.rejects(pending, { code: 'capability-unavailable' });
+  await ready;
+  dispose();
+  await rejected;
+  assert.deepEqual(adapter.sends, []);
+});
+
 test('DeliveryService shares target CRUD and sending through one adapter', async () => {
   const service = createDeliveryService();
   const adapter = memoryAdapter();

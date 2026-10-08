@@ -124,11 +124,15 @@ test('QQ runtime waits for gateway ready, installs typing, and stops its client'
   botOptions.logger.info('gateway ready');
   assert.deepEqual(sdkLogs, [['info', 'gateway ready']]);
   bot.emit('error', new Error('temporary disconnect'));
+  assert.equal(runtime.status.ready, false);
   bot.emit('resumed');
   assert.equal(runtime.status.ready, true);
   assert.equal(runtime.status.lastError, null);
   await runtime.stop();
   assert.equal(bot.stopped, true);
+  assert.equal(runtime.status.ready, false);
+  bot.emit('ready', {});
+  bot.emit('resumed', {});
   assert.equal(runtime.status.ready, false);
 });
 
