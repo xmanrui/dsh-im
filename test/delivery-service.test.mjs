@@ -4,6 +4,19 @@ import test from 'node:test';
 import { createDeliveryAdapter } from '../plugin-src/host/delivery-adapter.mjs';
 import { createDeliveryService } from '../plugin-src/host/delivery-service.mjs';
 
+test('reachable posting exposes a bounded preflight refusal without dispatching on account lookup failure', async () => {
+  const service = createDeliveryService();
+  const adapter = memoryAdapter();
+  adapter.describeAccount = async () => { throw new Error('private provider diagnostic'); };
+  adapter.listReachableConversations = async () => assert.fail('No discovery after failed account lookup');
+  adapter.postConversationChecked = async () => assert.fail('No dispatch after failed account lookup');
+  service.registerAdapter(adapter);
+  await assert.rejects(service.postConversationChecked('bot_one', 'oc_group', 'Result', {
+    expectedFingerprint: 'a'.repeat(64), beforeSend: () => true,
+  }), { code: 'send-preflight-unavailable', message: 'send-preflight-unavailable' });
+  assert.equal(adapter.sends.length, 0);
+});
+
 function memoryAdapter({ channel = 'telegram', botId = 'bot_one' } = {}) {
   const targets = new Map();
   const sends = [];
@@ -311,6 +324,16 @@ async function checkedTarget(fx) {
   const {createHash} = await import('node:crypto');
   return createHash('sha256').update(JSON.stringify({kind: target.kind, route: target.route})).digest('hex');
 }
+
+test('checked saved-target sending honors the caller final authorization before any native effect', async () => {
+  const fx = checkedFixture();
+  fx.service.registerAdapter(fx.adapter);
+  const digest = await checkedTarget(fx);
+  await assert.rejects(fx.service.sendChecked('bot_one', 'self', 'hello', {
+    expectedFingerprint: fx.fingerprint, expectedTargetDigest: digest, beforeSend: () => false,
+  }), { code: 'send-permission-denied' });
+  assert.equal(fx.adapter.sends.length, 0);
+});
 
 test('checked sending rejects changed targets and account identities before a side effect', async () => {
   const fx = checkedFixture(); fx.service.registerAdapter(fx.adapter);

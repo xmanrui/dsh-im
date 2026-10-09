@@ -608,7 +608,7 @@ export class MultiBotDshFeishuController {
       this.#assertOpen('capability-unavailable');
       return { version: 1, botId, channel: 'feishu', account,
         connected: isConnected(connectionStatus(this.#runtimes.get(botId))),
-        capabilities: ['proactive-text-checked', 'proactive-receipt-checked', 'exclusive-text-consumer', 'reply-text-checked', 'history-text-checked', 'thread-history-text-checked'] };
+        capabilities: ['reachable-conversations-checked', 'proactive-text-checked', 'proactive-receipt-checked', 'exclusive-text-consumer', 'reply-text-checked', 'history-text-checked', 'thread-history-text-checked'] };
     });
   }
 
@@ -685,6 +685,42 @@ export class MultiBotDshFeishuController {
         throw Object.assign(new Error('capability-unavailable'), { code: 'capability-unavailable' });
       return runtime.replyChecked(route, text, { signal });
     });
+  }
+
+  async #withReachableRuntime(botId, options, operation) {
+    this.#assertOpen();
+    return this.#withBotTransition(botId, async () => {
+      this.#assertOpen();
+      options.signal?.throwIfAborted();
+      const config = this.#requireBot(botId);
+      const account = await this.#deliveryAccount(config);
+      if (account.fingerprint !== options.expectedFingerprint)
+        throw Object.assign(new Error('account-changed'), { code: 'account-changed' });
+      const runtime = this.#runtimes.get(botId);
+      if (!isConnected(connectionStatus(runtime)))
+        throw Object.assign(new Error('bot-not-connected'), { code: 'bot-not-connected' });
+      options.signal?.throwIfAborted();
+      const result = await operation(runtime);
+      return result;
+    });
+  }
+
+  async listReachableConversations(botId, options = {}) {
+    const result = await this.#withReachableRuntime(botId, options, runtime => runtime.listReachableConversations(options));
+    this.#assertOpen('capability-unavailable');
+    return result;
+  }
+
+  async postConversationChecked(botId, conversationId, text, options = {}) {
+    return this.#withReachableRuntime(botId, options,
+      runtime => runtime.postConversationChecked(conversationId, text, { ...options, beforeSend: () => {
+        this.#assertOpen('provider-unavailable');
+        options.signal?.throwIfAborted();
+        const allowed = options.beforeSend?.() === true;
+        this.#assertOpen('provider-unavailable');
+        options.signal?.throwIfAborted();
+        return allowed;
+      } }));
   }
 
   async sendProactiveText(botId, target, text, options = {}) {

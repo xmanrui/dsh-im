@@ -6,6 +6,22 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- 同 Host 的公开 `dshIm` Service 新增可选 checked 群发现和首次文字发送；Feishu/Lark 按当前机器人身份核验群成员资格及发言名单，无需先收到消息或保存投递目标。发送前重新检查平台权限、调用方同步授权和 Provider 生命周期，并保留精确原群消息回执；未知结果不自动重试。此贡献仍未发布，维护 fork 的实机记录不等同于新版上游实机验收（[BotHarness #1115](https://github.com/BotHarness/DeepSeekBot/issues/1115)）。
+  The same-Host public `dshIm` Service adds optional checked group discovery and first text posts. Feishu/Lark verifies current Bot membership and native speaking lists without prior inbound traffic or a saved delivery target. Sending rechecks platform permission, the caller's synchronous authorization and Provider lifecycle, returning an exact native group receipt without automatically retrying unknown outcomes. This contribution is unreleased; maintained-fork runtime evidence does not qualify the modern upstream build ([BotHarness #1115](https://github.com/BotHarness/DeepSeekBot/issues/1115)).
+
+### Fixed / 修复
+
+- checked 群主动发送在最终消费者授权回调后重新检查 Controller 关闭与取消，阻止回调内关闭 Provider 后仍发出消息。
+  Checked group posting rechecks Controller closure and cancellation after the final consumer callback, preventing a send when that callback closes the Provider.
+
+- checked 群主动发送在账户核验失败时返回公开的 `send-preflight-unavailable`，不直接暴露 Provider 内部错误；未启动发送与发送后未知结果保持区分。
+  Checked group posting reports account-check failures as public `send-preflight-unavailable` errors instead of exposing internal Provider errors, distinguishing unstarted sends from unknown dispatch outcomes.
+
+- checked 保存目标发送现在遵守调用方的最终授权回调；旧调用方未提供回调时仍沿用既有行为。
+  Checked saved-target sending now honors the caller's final authorization callback while preserving existing behavior for callers that omit it.
+
 ## [4.38.0] - 2026-10-09
 
 ### Added / 新增

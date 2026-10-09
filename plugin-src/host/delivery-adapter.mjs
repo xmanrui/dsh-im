@@ -269,6 +269,16 @@ export function createDeliveryAdapter({ channel, workspaces, coreController, sta
       return coreController.describeDeliveryAccount(botId);
     },
     ownsBot: (botId) => workspaces.has(botId),
+    listReachableConversations: (botId, options) => {
+      if (typeof coreController.listReachableConversations !== 'function')
+        throw Object.assign(new Error('capability-unavailable'), { code: 'capability-unavailable' });
+      return coreController.listReachableConversations(botId, options);
+    },
+    postConversationChecked: (botId, conversationId, text, options) => {
+      if (typeof coreController.postConversationChecked !== 'function')
+        throw Object.assign(new Error('capability-unavailable'), { code: 'capability-unavailable' });
+      return coreController.postConversationChecked(botId, conversationId, text, options);
+    },
     listBots: () => workspaces.listBotIds(),
     async listTargets(botId) {
       const targets = workspaces.listDeliveryTargets(botId);

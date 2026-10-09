@@ -93,6 +93,10 @@ export function createImHostPlugin(internals = {}) {
         ctx.provide('dshIm', Object.freeze({
           contractVersion: 1,
           receiptVersion: 1,
+          postFenceVersion: 1,
+          reachableConversationVersion: 1,
+          listReachableConversations: (botId, options) => deliveryService.listReachableConversations(botId, options),
+          postConversationChecked: (botId, conversationId, text, options) => deliveryService.postConversationChecked(botId, conversationId, text, options),
           inboundVersion: 1,
           consumeInbound: (botId, options) => deliveryService.consumeInbound(botId, options),
           historyChecked: (botId, route, query, options) => deliveryService.historyChecked(botId, route, query, options),

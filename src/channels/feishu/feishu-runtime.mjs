@@ -708,7 +708,76 @@ export class FeishuRuntime {
     }, options);
   }
 
-  async sendProactiveText(target, text, { signal, format = 'plain', receipt = false } = {}) {
+  async #canPostToGroup(conversationId, { signal } = {}) {
+    signal?.throwIfAborted();
+    this.#abortController.signal.throwIfAborted();
+    if (!this.#status.ready || !this.#client)
+      throw Object.assign(new Error('bot-not-connected'), { code: 'bot-not-connected' });
+    const client = this.#client;
+    // This native endpoint requires the caller to be a member. Metadata or a
+    // previously observed inbound message is insufficient proof of membership.
+    let cursor;
+    let setting;
+    const seen = new Set();
+    for (let page = 0; page < 10; page++) {
+      const response = await client.im.v1.chatModeration.get({path: {chat_id: conversationId},
+        params: {user_id_type: 'open_id', page_size: 100, ...(cursor ? {page_token: cursor} : {})}});
+      signal?.throwIfAborted();
+      this.#abortController.signal.throwIfAborted();
+      if (this.#client !== client) throw Object.assign(new Error('bot-not-connected'), { code: 'bot-not-connected' });
+      if (response?.code !== 0) return false;
+      const data = response.data;
+      if (page === 0) setting = data?.moderation_setting;
+      if (data?.moderation_setting !== setting) return false;
+      if (setting === 'all_members') return true;
+      if (!this.#botOpenId || !['only_owner', 'moderator_list'].includes(setting) || !Array.isArray(data.items)) return false;
+      if (data.items.some(item => item.user_id_type === 'open_id' && item.user_id === this.#botOpenId)) return true;
+      if (data.has_more !== true) return false;
+      cursor = data.page_token;
+      if (typeof cursor !== 'string' || !cursor || cursor.length > 2048 || seen.has(cursor)) break;
+      seen.add(cursor);
+    }
+    throw Object.assign(new Error('send-preflight-unavailable'), { code: 'send-preflight-unavailable' });
+  }
+
+  async listReachableConversations({ signal, cursor } = {}) {
+    if (cursor !== undefined && (typeof cursor !== 'string' || !cursor || cursor.length > 2048))
+      throw Object.assign(new Error('bad-request'), { code: 'bad-request' });
+    signal?.throwIfAborted();
+    if (!this.#status.ready || !this.#client)
+      throw Object.assign(new Error('bot-not-connected'), { code: 'bot-not-connected' });
+    const response = await this.#client.im.v1.chat.list({params: {page_size: 100,
+      ...(cursor ? {page_token: cursor} : {})}});
+    signal?.throwIfAborted();
+    this.#abortController.signal.throwIfAborted();
+    if (response?.code !== 0 || !Array.isArray(response.data?.items))
+      throw Object.assign(new Error('provider-unavailable'), { code: 'provider-unavailable' });
+    const conversations = [];
+    for (const value of response.data.items) {
+      if (typeof value?.chat_id !== 'string' || !value.chat_id || value.chat_status === 'dissolved'
+        || value.chat_status === 'dissolved_save' || value.chat_mode === 'p2p') continue;
+      if (await this.#canPostToGroup(value.chat_id, {signal}))
+        conversations.push({id: value.chat_id, kind: 'group', name: typeof value.name === 'string' ? value.name : value.chat_id});
+    }
+    return {version: 1, conversations, hasMore: response.data.has_more === true,
+      ...(response.data.has_more ? {cursor: response.data.page_token} : {})};
+  }
+
+  async postConversationChecked(conversationId, text, options = {}) {
+    let allowed;
+    try { allowed = await this.#canPostToGroup(conversationId, options); }
+    catch (error) {
+      if (options.signal?.aborted || this.#abortController.signal.aborted)
+        throw Object.assign(new Error('cancelled'), {code: 'cancelled'});
+      throw Object.assign(new Error('send-preflight-unavailable'), {code: 'send-preflight-unavailable', cause: error});
+    }
+    if (!allowed)
+      throw Object.assign(new Error('send-permission-denied'), { code: 'send-permission-denied' });
+    return this.sendProactiveText({kind: 'group', route: {chatId: conversationId}}, text,
+      {...options, receipt: true});
+  }
+
+  async sendProactiveText(target, text, { signal, format = 'plain', receipt = false, beforeSend } = {}) {
     if (!this.#status.ready || !this.#client) {
       const error = new Error('飞书机器人尚未连接');
       error.code = 'bot-not-connected';
@@ -742,14 +811,20 @@ export class FeishuRuntime {
     const activeSignal = signal
       ? AbortSignal.any([signal, this.#abortController.signal])
       : this.#abortController.signal;
-    const response = await waitForFeishuOperation(() => this.#client.im.v1.message.create({
+    const response = await waitForFeishuOperation(() => {
+      activeSignal.throwIfAborted();
+      if (beforeSend !== undefined && beforeSend() !== true)
+        throw Object.assign(new Error('send-permission-denied'), { code: 'send-permission-denied' });
+      activeSignal.throwIfAborted();
+      return this.#client.im.v1.message.create({
       params: { receive_id_type: receiveIdType },
       data: {
         receive_id: receiveId,
         msg_type: format === 'markdown' ? 'interactive' : 'text',
         content: JSON.stringify(content),
       },
-    }), {
+      });
+    }, {
       signal: activeSignal,
       timeoutMs: this.#requestTimeoutMs,
       stage: `proactive text send (${this.#requestTimeoutMs}ms)`,
