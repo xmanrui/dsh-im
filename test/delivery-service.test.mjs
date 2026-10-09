@@ -44,6 +44,39 @@ function memoryAdapter({ channel = 'telegram', botId = 'bot_one' } = {}) {
   };
 }
 
+test('QQ reply qualification preserves native refusals and registration cancellation through the public Service', async () => {
+  const service = createDeliveryService();
+  const adapter = memoryAdapter({ channel: 'qq' });
+  const route = { messageId: 'source', conversationId: 'group', actorId: 'member' };
+  const options = { expectedFingerprint: 'c'.repeat(64) };
+  adapter.qualifyReplyChecked = async (_botId, received, context) => {
+    assert.deepEqual(received, route);
+    assert.equal(context.expectedFingerprint, options.expectedFingerprint);
+    assert.equal(context.signal.aborted, false);
+    return received;
+  };
+  const dispose = service.registerAdapter(adapter);
+  assert.deepEqual(await service.qualifyReplyChecked('bot_one', route, options), route);
+  for (const code of ['source-not-found', 'source-unavailable', 'reply-permission-denied',
+    'reply-window-expired', 'reply-limit-exceeded', 'reply-rate-limited']) {
+    adapter.qualifyReplyChecked = async () => { throw Object.assign(new Error('refused'), { code }); };
+    await assert.rejects(() => service.qualifyReplyChecked('bot_one', route, options), { code });
+  }
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  adapter.qualifyReplyChecked = async (_botId, _route, context) => {
+    started();
+    await new Promise(resolve => context.signal.addEventListener('abort', resolve, { once: true }));
+    return route;
+  };
+  const pending = service.qualifyReplyChecked('bot_one', route, options);
+  const rejected = assert.rejects(pending, { code: 'capability-unavailable' });
+  await ready;
+  dispose();
+  await rejected;
+  assert.deepEqual(adapter.sends, []);
+});
+
 test('DeliveryService shares target CRUD and sending through one adapter', async () => {
   const service = createDeliveryService();
   const adapter = memoryAdapter();
@@ -391,6 +424,25 @@ test('checked receipt requires capability and exact frozen group correspondence,
   fx.adapter.sendText = async () => { calls++; return { sent: true, receipt: { version: 1, messageId: 'om_other', conversationId: 'oc_other' } }; };
   await assert.rejects(fx.service.sendChecked('bot_one', 'group', 'report', options), { code: 'send-result-unknown' });
   assert.equal(calls, 2);
+});
+
+test('checked Lark sending honors caller revocation at its final controller fence', async () => {
+  const fx = checkedFixture();
+  fx.service.registerAdapter(fx.adapter);
+  const digest = await checkedTarget(fx);
+  let allowed = true;
+  let nativeEffects = 0;
+  fx.adapter.sendText = async (_id, _target, _text, options) => {
+    await Promise.resolve();
+    allowed = false;
+    options.beforeSend();
+    nativeEffects++;
+    return { sent: true };
+  };
+  await assert.rejects(() => fx.service.sendChecked('bot_one', 'self', 'retained result', {
+    expectedFingerprint: fx.fingerprint, expectedTargetDigest: digest, beforeSend: () => allowed,
+  }), { code: 'send-permission-denied' });
+  assert.equal(nativeEffects, 0);
 });
 
 test('consumer replacement aborts the old account lease and stale dispose cannot remove its successor', async () => {

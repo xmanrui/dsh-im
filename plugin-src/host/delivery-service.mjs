@@ -42,10 +42,21 @@ const DELIVERY_ERROR_CODES = new Set([
   'invalid-inbound',
   'stale-route',
   'reply-result-unknown',
+  'source-not-found',
+  'source-unavailable',
+  'reply-permission-denied',
+  'reply-window-expired',
+  'reply-limit-exceeded',
+  'reply-rate-limited',
   'history-permission-denied',
   'history-unavailable',
   'thread-unavailable',
   'untrusted-source',
+  'resource-unavailable',
+  'artifact-too-large',
+  'file-upload-failed',
+  'send-permission-denied',
+  'send-rate-limited',
 ]);
 
 const SESSION_SYNC_METHODS = Object.freeze([
@@ -406,6 +417,20 @@ export class DeliveryService {
     return dispose;
   }
 
+  async externalFileChecked(botId, route, value, options = {}) {
+    const id = botIdOf(botId);
+    cancellation(options.signal);
+    if (!/^[a-f0-9]{64}$/.test(options.expectedFingerprint ?? '')) throw deliveryError('bad-request');
+    const registration = await this.#checkedRegistrationFor(id);
+    if (typeof registration.adapter.externalFileChecked !== 'function') throw deliveryError('capability-unavailable');
+    this.#assertRegistered(registration);
+    try {
+      return await registration.adapter.externalFileChecked(id, structuredClone(route), structuredClone(value), {
+        ...options, signal: options.signal ? AbortSignal.any([options.signal, registration.controller.signal]) : registration.controller.signal,
+      });
+    } catch (error) { throw publicOperationError(error); }
+  }
+
   async historyChecked(botId, route, query, options = {}) {
     const id = botIdOf(botId);
     cancellation(options.signal);
@@ -426,6 +451,26 @@ export class DeliveryService {
     }
   }
 
+  async qualifyReplyChecked(botId, route, options = {}) {
+    const id = botIdOf(botId);
+    cancellation(options.signal);
+    if (!/^[a-f0-9]{64}$/.test(options.expectedFingerprint ?? '')) throw deliveryError('bad-request');
+    const registration = await this.#checkedRegistrationFor(id);
+    if (typeof registration.adapter.qualifyReplyChecked !== 'function') throw deliveryError('capability-unavailable');
+    this.#assertRegistered(registration);
+    const signal = options.signal ? AbortSignal.any([options.signal, registration.controller.signal]) : registration.controller.signal;
+    try {
+      const result = await registration.adapter.qualifyReplyChecked(id, structuredClone(route), { ...options, signal });
+      this.#assertRegistered(registration);
+      cancellation(signal);
+      return result;
+    } catch (error) {
+      this.#assertRegistered(registration);
+      if (signal.aborted || error?.name === 'AbortError') throw deliveryError('cancelled');
+      throw publicOperationError(error, 'source-unavailable');
+    }
+  }
+
   async replyChecked(botId, route, text, options = {}) {
     const id = botIdOf(botId);
     cancellation(options.signal);
@@ -441,7 +486,7 @@ export class DeliveryService {
     catch (error) { throw publicOperationError(error); }
   }
 
-  async sendChecked(botId, targetId, text, { expectedFingerprint, expectedTargetDigest, signal, format = 'plain', receipt = false } = {}) {
+  async sendChecked(botId, targetId, text, { expectedFingerprint, expectedTargetDigest, signal, format = 'plain', receipt = false, beforeSend: callerBeforeSend } = {}) {
     const id = botIdOf(botId);
     const key = targetIdOf(targetId);
     if (typeof text !== 'string' || !text.trim() || !['plain', 'markdown'].includes(format) || typeof receipt !== 'boolean'
@@ -468,20 +513,34 @@ export class DeliveryService {
         throw deliveryError('capability-unavailable');
       }
       if (account.account?.fingerprint !== expectedFingerprint) throw deliveryError('account-changed');
-      if (receipt && (!account.capabilities?.includes('proactive-receipt-checked') || target.kind !== 'group'))
+      const receiptConversation = target.kind === 'group'
+        ? adapter.channel === 'qq' ? target.route.groupOpenId : target.route.chatId : undefined;
+      if (receipt && (!account.capabilities?.includes('proactive-receipt-checked') || !receiptConversation))
         throw deliveryError('capability-unavailable');
+      if (adapter.channel === 'qq' &&
+        (!account.capabilities?.includes('proactive-fence-checked') || typeof callerBeforeSend !== 'function'))
+        throw deliveryError('capability-unavailable');
+      const deliverySignal = signal ? AbortSignal.any([signal, registration.controller.signal]) : registration.controller.signal;
       const beforeSend = () => {
         cancellation(signal);
         this.#assertRegistered(registration);
+        cancellation(deliverySignal);
+        const allowed = callerBeforeSend === undefined || callerBeforeSend() === true;
+        cancellation(signal);
+        this.#assertRegistered(registration);
+        cancellation(deliverySignal);
+        if (!allowed)
+          throw deliveryError('send-permission-denied');
+        return true;
       };
       beforeSend();
-      const result = await adapter.sendText(id, target, text, { signal, expectedFingerprint, beforeSend,
+      const result = await adapter.sendText(id, target, text, { signal: deliverySignal, expectedFingerprint, beforeSend,
         ...(receipt ? { receipt: true } : {}),
         ...(format === 'markdown' ? { format } : {}) });
       if (!receipt) return { sent: true };
       if (result?.sent !== true || result.receipt?.version !== 1
         || typeof result.receipt.messageId !== 'string' || !result.receipt.messageId || result.receipt.messageId.length > 512
-        || result.receipt.conversationId !== target.route.chatId)
+        || result.receipt.conversationId !== receiptConversation)
         throw deliveryError('send-result-unknown');
       return { sent: true, receipt: { version: 1, messageId: result.receipt.messageId, conversationId: result.receipt.conversationId } };
     } catch (error) { throw publicOperationError(error); }

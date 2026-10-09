@@ -50,6 +50,7 @@ function normalizeBot(value) {
     appId,
     secretRef,
     ownerUserOpenid,
+    ...(value.consumerMode === 'external-consumer' ? { consumerMode: value.consumerMode } : {}),
     createdAt: cleanString(value.createdAt) ?? new Date().toISOString(),
     connectedAt: cleanString(value.connectedAt),
   });

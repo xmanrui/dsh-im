@@ -1,3 +1,5 @@
+import { isQqVoiceAttachment } from './voice-attachment.mjs';
+import { createHash } from 'node:crypto';
 import { extractConnectionEvidence, createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
 import { QQBot, contentSanitizer, typingIndicator } from '@tencent-connect/qqbot-nodejs';
 
@@ -9,6 +11,8 @@ import { t } from '../shared/i18n.mjs';
 import { evaluateInboundAccess } from '../shared/inbound-access.mjs';
 import { createQqBridgeStatus, QqHarnessBridge } from './qq-bridge.mjs';
 import { isQqMessageAddressed, normalizeQqMentions } from './qq-mention.mjs';
+import { QqExternalConsumer, qqRefusal, verifiedQqAccount } from './external-consumer.mjs';
+import { postQqText } from './external-post.mjs';
 
 function timeoutError() {
   const error = new Error('QQ WebSocket did not become ready in time');
@@ -48,6 +52,12 @@ export class QqRuntime {
   #abortController = null;
   #runTask = null;
   #starting = null;
+  #externalConsumer;
+  #sourceImages;
+  #sourceFiles;
+  #sourceVoiceTranscripts;
+  #sourceVoiceAudio;
+  #externalBridge = null;
 
   constructor({
     config,
@@ -61,6 +71,10 @@ export class QqRuntime {
     connectTimeoutMs = 20_000,
     createBot = (options) => new QQBot(options),
     typingMiddleware = typingIndicator,
+    externalConsumer,
+    sourceImages = () => false,
+    sourceFiles = () => false,
+    sourceVoiceTranscripts = () => false, sourceVoiceAudio = () => false,
   }) {
     if (!config || !appSecret || !harness || !state) {
       throw new TypeError('QqRuntime requires config, app secret, Harness, and state');
@@ -76,10 +90,75 @@ export class QqRuntime {
     this.#connectTimeoutMs = connectTimeoutMs;
     this.#createBot = createBot;
     this.#typingMiddleware = typingMiddleware;
+    this.#externalConsumer = externalConsumer;
+    this.#sourceImages = sourceImages;
+    this.#sourceFiles = sourceFiles;
+    this.#sourceVoiceTranscripts = sourceVoiceTranscripts;
+    this.#sourceVoiceAudio = sourceVoiceAudio;
   }
 
   get status() {
     return structuredClone(this.#status);
+  }
+
+  async describeDeliveryAccount(signal) {
+    signal?.throwIfAborted();
+    if (!this.#status.ready || !this.#bot) throw qqRefusal('bot-not-connected');
+    const bot = this.#bot;
+    try {
+      const user = await bot.api.get('/users/@me');
+      signal?.throwIfAborted();
+      if (this.#bot !== bot || !this.#status.ready) throw qqRefusal('bot-not-connected');
+      const account = verifiedQqAccount(this.#config.appId, user);
+      if (this.#status.error?.details?.stage === 'credential.verify') {
+        this.#status.error = null;
+        this.#status.lastError = null;
+      }
+      return account;
+    } catch (error) {
+      if (!signal?.aborted && this.#bot === bot) {
+        const qualificationHints = {
+          'application-id': t('QQ 应用标识无效。'),
+          'native-user-id': t('QQ 账号响应未提供有效的原生用户标识。'),
+          'native-bot-flag': t('QQ 账号响应返回了无效或矛盾的机器人标志。'),
+        };
+        this.#status.error = this.#diagnostics.report(error, { operation: 'connection.status',
+          stage: 'credential.verify', botId: this.#config.botId,
+          httpStatus: error?.httpStatus, providerCode: error?.bizCode,
+          ...(error?.code === 'account-unverified' ? { publicError: {
+            code: 'account-unverified', message: t('QQ 账号资格验证失败。'),
+            details: { reason: 'invalid-response', hint: qualificationHints[error.verificationFailure] },
+          } } : {}),
+        }).publicError;
+        this.#status.lastError = this.#status.error.message;
+      }
+      throw error;
+    }
+  }
+
+  qualifyReplyChecked(route, { signal } = {}) {
+    if (!this.#externalBridge) throw qqRefusal('consumer-unavailable');
+    return this.#externalBridge.qualify(route, signal);
+  }
+
+  replyChecked(route, text, options) {
+    if (!this.#externalBridge) throw qqRefusal('consumer-unavailable');
+    return this.#externalBridge.reply(route, text, options);
+  }
+
+  readSourceImage(route, attachment, options) {
+    if (!this.#externalBridge) throw qqRefusal('consumer-unavailable');
+    return this.#externalBridge.readImage(route, attachment, options);
+  }
+
+  readSourceFile(route, attachment, options) {
+    if (!this.#externalBridge) throw qqRefusal('consumer-unavailable');
+    return this.#externalBridge.readFile(route, attachment, options);
+  }
+
+  replyFileChecked(route, file, options) {
+    if (!this.#externalBridge) throw qqRefusal('consumer-unavailable');
+    return this.#externalBridge.replyFile(route, file, options);
   }
 
   async sendConnectionTest(text) {
@@ -114,7 +193,45 @@ export class QqRuntime {
     }, options);
   }
 
-  async sendProactiveText(target, text, { signal } = {}) {
+  async sendProactiveText(target, text, { signal, expectedFingerprint, beforeSend, verifyAccount } = {}) {
+    if (expectedFingerprint !== undefined) {
+      const bot = this.#bot;
+      const bridge = this.#externalBridge;
+      if (!bot || !this.#status.ready || !this.#abortController) throw qqRefusal('bot-not-connected');
+      const sendSignal = signal ? AbortSignal.any([signal, this.#abortController.signal]) : this.#abortController.signal;
+      const started = Date.now();
+      const report = (phase, reason, nativePost) => {
+        try {
+          this.#logger.info?.('[dsh-im:qq] checked post', { event: 'qq-external-post',
+            initiator: 'external-consumer', phase, durationMs: Math.max(0, Date.now() - started),
+            ...(reason ? { reason } : {}),
+            ...(nativePost ? { stage: 'native-post',
+              ...(Number.isInteger(nativePost.httpStatus) && nativePost.httpStatus >= 100 && nativePost.httpStatus <= 599
+                ? { httpStatus: nativePost.httpStatus } : {}),
+              ...(Number.isSafeInteger(nativePost.providerCode) && nativePost.providerCode >= 0
+                ? { providerCode: nativePost.providerCode } : {}),
+            } : {}) });
+        } catch {}
+      };
+      report('preparing');
+      let nativePostEvidence;
+      try {
+        const result = await postQqText({ bot, target, text, signal: sendSignal, beforeSend, verifyAccount,
+          onNativeFailure: evidence => { nativePostEvidence = evidence; },
+          assertCurrent: () => {
+            if (this.#bot !== bot || !this.#status.ready) throw qqRefusal('bot-not-connected');
+          } });
+        bridge?.recordNativeReceipt(result.receipt, sendSignal);
+        report('accepted', 'native-receipt');
+        return result;
+      } catch (error) {
+        const reason = ['invalid-target', 'bad-request', 'cancelled', 'provider-unavailable',
+          'account-changed', 'consumer-unavailable', 'bot-not-connected', 'send-permission-denied',
+          'send-rate-limited', 'send-result-unknown'].includes(error?.code) ? error.code : 'operation-failed';
+        report(reason === 'send-result-unknown' ? 'unknown' : 'refused', reason, nativePostEvidence);
+        throw error;
+      }
+    }
     const nativeId = target?.kind === 'user'
       ? (typeof target?.route?.userOpenId === 'string' ? target.route.userOpenId.trim() : '')
       : target?.kind === 'group'
@@ -151,13 +268,32 @@ export class QqRuntime {
     this.#status.startedAt = new Date().toISOString();
     this.#status.qqConnectionState = 'connecting';
     this.#status.lastError = null; this.#status.error = null; this.#diagnostics.clear();
-    await atConnectionStage('harness.check', () => this.#harness.ensureRunning());
+    if (this.#config.consumerMode !== 'external-consumer')
+      await atConnectionStage('harness.check', () => this.#harness.ensureRunning());
     this.#status.harnessReachable = true;
 
+    const controller = new AbortController();
+    this.#abortController = controller;
+    const observeTransport = (message) => {
+      if (controller.signal.aborted || this.#abortController !== controller || typeof message !== 'string') return;
+      // SDK 1.0.4 exposes close through its public Logger, not a disconnect event.
+      if (message.startsWith(`[${this.#config.botId}] WebSocket closed:`)
+        || message.startsWith(`[${this.#config.botId}] Connection failed:`)
+        || message.startsWith(`[${this.#config.botId}] Connecting to `)) {
+        this.#status.ready = false;
+        this.#status.qqConnectionState = 'connecting';
+      } else if (message === `[${this.#config.botId}] Max reconnect attempts reached or aborted`) {
+        this.#status.ready = false;
+        this.#status.qqConnectionState = 'failed';
+      } else return false;
+      this.#logger.info?.(`[dsh-im:qq] ${JSON.stringify({ event: 'receiver-state',
+        botId: this.#config.botId, phase: this.#status.qqConnectionState })}`);
+      return true;
+    };
     const sdkLogger = {
-      error: (...args) => this.#logger.error?.(...args),
+      error: (...args) => { if (!observeTransport(args[0])) this.#logger.error?.(...args); },
       warn: (...args) => this.#logger.warn?.(...args),
-      info: (...args) => this.#logger.info?.(...args),
+      info: (...args) => { if (!observeTransport(args[0])) this.#logger.info?.(...args); },
       debug: () => {},
     };
     const bot = this.#createBot({
@@ -174,10 +310,25 @@ export class QqRuntime {
     if (!bot || typeof bot.start !== 'function' || typeof bot.stop !== 'function') {
       throw new TypeError('QQ bot factory returned an invalid client');
     }
-    const controller = new AbortController();
-    this.#abortController = controller;
     this.#bot = bot;
-    this.#bridge = new QqHarnessBridge({
+    if (this.#config.consumerMode === 'external-consumer' && this.#externalConsumer) {
+      try {
+        const account = verifiedQqAccount(this.#config.appId, await bot.api.get('/users/@me'));
+        controller.signal.throwIfAborted();
+        this.#externalBridge = new QqExternalConsumer({ bot, account, botId: this.#config.botId,
+          accept: this.#externalConsumer,
+          sourceImages: this.#sourceImages,
+          sourceFiles: this.#sourceFiles,
+          sourceVoiceTranscripts: this.#sourceVoiceTranscripts,
+          sourceVoiceAudio: this.#sourceVoiceAudio,
+          reportNativeObservation: record => this.#logger.info?.('[dsh-im:qq] native reply observation', record),
+        });
+      } catch (error) {
+        await this.stop();
+        throw error;
+      }
+    }
+    this.#bridge = this.#config.consumerMode === 'external-consumer' ? null : new QqHarnessBridge({
       bot,
       ownerUserOpenid: this.#config.ownerUserOpenid,
       harness: this.#harness,
@@ -198,7 +349,7 @@ export class QqRuntime {
     // tags. Parse them into readable text so the Harness sees what the sender
     // actually meant instead of an unusable markup fragment.
     bot.use(contentSanitizer({ parseFaceTags: true }));
-    bot.use?.(this.#typingMiddleware({
+    if (this.#config.consumerMode !== 'external-consumer') bot.use?.(this.#typingMiddleware({
       keepAlive: true,
       predicate: (ctx) => {
         const message = ctx?.message;
@@ -223,6 +374,7 @@ export class QqRuntime {
       readyReject = reject;
     });
     const onReady = (data) => {
+      if (controller.signal.aborted || this.#bot !== bot) return;
       if (typeof data?.user?.id === 'string' && data.user.id.trim()) {
         botMentionIds.add(data.user.id.trim());
       }
@@ -235,24 +387,106 @@ export class QqRuntime {
       readyResolve();
     };
     const onError = (error) => {
+      if (controller.signal.aborted || this.#bot !== bot) return;
       if (!this.#status.ready) readyReject(error);
       else {
         this.#status.error = this.#diagnostics.report(error, { operation: 'connection.monitor', botId: this.#config?.botId, automatic: true }).publicError;
         this.#status.lastError = this.#status.error.message;
         this.#logger.warn?.(`[dsh-im:qq] bot ${this.#config.botId} connection error:`, extractConnectionEvidence(error).details);
       }
+      this.#status.ready = false;
+      this.#status.qqConnectionState = 'connecting';
     };
-    const onMessage = (_ctx, message) => {
-      const task = this.#bridge?.accept(message);
+    const onMessage = async (_ctx, message) => {
+      if (controller.signal.aborted || this.#bot !== bot) return;
+      const elements = Array.isArray(message?.raw?.msg_elements) ? message.raw.msg_elements : [];
+      const quotedAttachments = elements.slice(0, 2).flatMap(element => Array.isArray(element?.attachments)
+        ? element.attachments.slice(0, 33) : []);
+      const quotedFiles = quotedAttachments.filter(file => file?.content_type === 'file');
+      const lastInbound = {
+        observedAt: new Date().toISOString(),
+        eventType: ['GROUP_AT_MESSAGE_CREATE', 'GROUP_MESSAGE_CREATE', 'C2C_MESSAGE_CREATE'].includes(message?.rawEventType)
+          ? message.rawEventType : 'other',
+        messageType: Number.isSafeInteger(message?.msgType) ? message.msgType : null,
+        mentionCount: Array.isArray(message?.mentions) ? Math.min(message.mentions.length, 128) : 0,
+        explicitSelfMention: Array.isArray(message?.mentions) && message.mentions.some(mention => mention?.is_you === true),
+        textPresent: typeof message?.content === 'string' && !!message.content.trim(),
+        directAttachments: Array.isArray(message?.attachments) ? Math.min(message.attachments.length, 33) : 0,
+        quotedElements: Math.min(elements.length, 2), quotedFiles: Math.min(quotedFiles.length, 33),
+        quoteIndexMatches: typeof message?.refMsgIdx === 'string' && message.refMsgIdx.length > 0
+          && elements.length === 1 && elements[0]?.msg_idx === message.refMsgIdx,
+      };
+      if (message?.msgType === 103) {
+        const attachmentShape = value => value === undefined ? 'absent' : value === null ? 'null'
+          : Array.isArray(value) ? value.length ? 'nonempty-array' : 'empty-array' : 'other';
+        lastInbound.quoteShape = {
+          directAttachments: attachmentShape(message.attachments),
+          rawDirectAttachments: attachmentShape(message.raw?.attachments),
+          elementFields: elements[0] && typeof elements[0] === 'object'
+            ? Object.keys(elements[0]).filter(key => /^[a-z_]{1,32}$/.test(key)).sort().slice(0, 16) : [],
+          elementMessageType: Number.isSafeInteger(elements[0]?.message_type) && elements[0].message_type >= 0
+            ? elements[0].message_type : null,
+          normalizedElementMatches: Array.isArray(message.msgElements) && message.msgElements.length === 1
+            && elements.length === 1 && message.msgElements[0]?.msg_idx === elements[0]?.msg_idx,
+          files: quotedFiles.slice(0, 2).map(file => ({
+            urlPresent: typeof file.url === 'string' && file.url.length > 0,
+            httpsUrl: typeof file.url === 'string' && file.url.startsWith('https://'),
+            sizeType: file.size === undefined ? 'absent' : file.size === null ? 'null'
+              : ['string', 'number'].includes(typeof file.size) ? typeof file.size : 'other',
+            sizeValid: file.size === undefined || (Number.isSafeInteger(file.size) && file.size > 0),
+          })),
+        };
+      }
+      const voices = [...(Array.isArray(message?.attachments) ? message.attachments.slice(0, 2) : []), ...quotedAttachments.slice(0, 2)]
+        .filter(isQqVoiceAttachment);
+      if (voices.length) lastInbound.voice = {
+        count: Math.min(voices.length, 2),
+        quotedAttachmentCount: Math.min(quotedAttachments.length, 8),
+        quotedCategories: quotedAttachments.slice(0, 4).map(file => {
+          const type = file?.content_type;
+          return typeof type === 'string' && /^(?:voice|file|image|audio\/[a-z0-9!#$&^_.+-]+|image\/[a-z0-9!#$&^_.+-]+)$/i.test(type)
+            ? type.slice(0, 64) : typeof type;
+        }),
+        platformTranscriptPresent: voices.some(file => typeof file.asr_refer_text === 'string' && !!file.asr_refer_text.trim()),
+        platformWavPresent: voices.some(file => typeof file.voice_wav_url === 'string' && !!file.voice_wav_url),
+      };
+      this.#status.lastInbound = lastInbound;
+      const task = this.#config.consumerMode === 'external-consumer'
+        ? this.#externalBridge?.accept(message, controller.signal)
+        : this.#bridge?.accept(message);
       if (!task) return;
-      void task.catch((error) => {
+      return task.catch((error) => {
         if (controller.signal.aborted) return;
+        lastInbound.refusalCode = typeof error?.code === 'string' && /^[a-z-]{1,64}$/.test(error.code)
+          ? error.code : 'message-handling-failed';
+        if (['quote-envelope-invalid', 'quote-reference-invalid', 'quote-elements-invalid',
+          'file-category-invalid', 'file-url-invalid', 'file-size-invalid'].includes(error?.reason))
+          lastInbound.refusalReason = error.reason;
         this.#logger.error?.(
           `[dsh-im:qq] bot ${this.#config.botId} message handling failed:`,
           extractConnectionEvidence(error).details,
         );
       });
     };
+    let notificationObservations = 0;
+    const onRawEvent = (context) => {
+      if (controller.signal.aborted || this.#bot !== bot || context?.bot !== bot
+        || notificationObservations >= 64) return;
+      if (!['GROUP_MSG_RECEIVE', 'GROUP_MSG_REJECT'].includes(context.eventType)) return;
+      const group = context.data?.group_openid;
+      if (typeof group !== 'string' || !group.trim() || group.length > 512) return;
+      notificationObservations += 1;
+      const evidence = {
+        event: 'qq-group-notification',
+        phase: context.eventType === 'GROUP_MSG_RECEIVE' ? 'enabled-observed' : 'disabled-observed',
+        authority: 'observation-only',
+        botId: this.#config.botId,
+        groupDigest: createHash('sha256').update(group).digest('hex'),
+        observedAt: new Date().toISOString(),
+      };
+      try { this.#logger.info?.('[dsh-im:qq:notification]', evidence); } catch {}
+    };
+    bot.on('rawEvent', onRawEvent);
     bot.on('ready', onReady);
     bot.on('resumed', onReady);
     bot.on('error', onError);
@@ -303,6 +537,7 @@ export class QqRuntime {
     this.#abortController = null;
     this.#bot = null;
     this.#bridge = null;
+    this.#externalBridge = null;
     this.#runTask = null;
     try {
       bot?.stop();

@@ -386,3 +386,12 @@ options 必须包含 `expectedFingerprint`、`expectedTargetDigest`，可选 `si
 只返回该 Bot 可见的 Human 文本，沿用标准事件格式。平台返回的可选 `sender_name` 和 mention `name` 仅用于展示，不能用于身份或授权；缺失时不猜测，不查通讯录、不使用 Human token。读取不自动投递普通消息到 Inbox、不唤醒、不回复、不标记已读、不同步撤回；这些决定及 canonical 持久化由消费应用负责。
 
 Bot 权限不足返回 `history-permission-denied`；来源消失或改变返回 `stale-route`；来源没有话题返回 `thread-unavailable`；平台故障及无效分页返回 `history-unavailable`；混入其他群／话题返回 `untrusted-source`。调用取消、接收权释放、Host 关闭、Provider 替换都会丢弃未返回结果。消费方需保留接收生命周期直到读取结束。本能力不保证完整历史，也不提供全平台搜索。
+
+## QQ 群通知原生观察（BotHarness #1154）
+
+通过官方 SDK 的 raw-event hook，把 `GROUP_MSG_RECEIVE`、`GROUP_MSG_REJECT` 记录为有界开发诊断。每次连接最多记录 64 次观察，仅包含本地 Bot 身份、群定位的 SHA-256 摘要、本地观察时间及开启／关闭提示；不记录群／成员 OpenID、原始事件内容或凭据，忽略非法事件与已停止／替换连接的回调。这些事件不进入 Source／Inbox，不改变能力或授权，不触发发送或重试保留结果，也不能证明当前主动发送资格；仍需不依赖来源的实际 API 接收回执及原群确认。连接开始前发生的开关变化不能补查。
+
+第一方依据：[QQ 事件订阅与群通知事件](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html)。
+
+
+QQ 开启「获取群内全部消息」后使用 GROUP_MESSAGE_CREATE 载荷。checked 文字接收仅保留平台明确标记的自身 @（mentions[].is_you === true），不自动启用普通消息参与。公开连接诊断仅提供有界 @ 数量和自身 @ 布尔值，不含身份值或正文。

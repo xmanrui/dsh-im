@@ -6,6 +6,8 @@ import { t } from '../shared/i18n.mjs';
 import { publicMessageFailure } from '../shared/message-failure.mjs';
 import { deriveQqBotIdentity, maskQqAppId } from './config-store.mjs';
 import { publicQqStateError } from './state-error.mjs';
+import { ExclusiveInboundConsumers } from '../shared/exclusive-inbound-consumers.mjs';
+import { qqRefusal } from './external-consumer.mjs';
 
 const ACTIVE_ATTEMPT_STATES = new Set(['starting', 'pending', 'refreshing', 'connecting']);
 const TERMINAL_ATTEMPT_STATES = new Set(['connected', 'failed', 'cancelled']);
@@ -52,6 +54,7 @@ export class QqController {
   #transitions = new Map();
   #revision = 0;
   #closed = false;
+  #inboundConsumers = new ExclusiveInboundConsumers();
 
   constructor({
     qrAuth,
@@ -210,6 +213,7 @@ export class QqController {
         appId: normalizedAppId,
         secretRef: identity.secretRef,
         ownerUserOpenid: previousConfig?.ownerUserOpenid ?? '*',
+        ...(previousConfig?.consumerMode === 'external-consumer' ? { consumerMode: 'external-consumer' } : {}),
         createdAt: previousConfig?.createdAt ?? new Date().toISOString(),
         connectedAt: new Date().toISOString(),
       };
@@ -287,6 +291,14 @@ export class QqController {
     const config = this.#configStore.get(botId);
     if (!config) throw new Error('Unknown QQ bot');
     return this.#withBotTransition(botId, async () => {
+      if (options.expectedFingerprint !== undefined) {
+        const checked = await this.#checkedRuntime(botId, options.expectedFingerprint, options.signal);
+        const verifyAccount = async () => {
+          const current = await this.#checkedRuntime(botId, options.expectedFingerprint, checked.signal);
+          if (current.runtime !== checked.runtime) throw qqRefusal('account-changed');
+        };
+        return checked.runtime.sendProactiveText(target, text, { ...options, signal: checked.signal, verifyAccount });
+      }
       const runtime = this.#runtimes.get(botId);
       if (!runtime?.status?.ready || typeof runtime.sendProactiveText !== 'function') {
         const error = new Error(t('QQ机器人尚未连接'));
@@ -311,12 +323,91 @@ export class QqController {
     });
   }
 
+  async #deliveryAccount(botId, signal) {
+    if (this.#closed) throw qqRefusal('provider-unavailable');
+    if (!this.#configStore.get(botId)) throw qqRefusal('unknown-bot');
+    const runtime = this.#runtimes.get(botId);
+    if (!runtime?.status?.ready) throw qqRefusal('bot-not-connected');
+    return runtime.describeDeliveryAccount(signal);
+  }
+
+  async describeDeliveryAccount(botId) {
+    return this.#withBotTransition(botId, async () => ({
+      version: 1, botId, channel: 'qq', account: await this.#deliveryAccount(botId), connected: true,
+      capabilities: ['proactive-text-checked', 'proactive-receipt-checked', 'proactive-fence-checked',
+        'exclusive-text-consumer', 'reply-text-checked', 'reply-context-checked',
+        'reply-receipt-checked', 'reply-fence-checked', 'source-file-checked', 'source-image-checked',
+        'reply-file-checked', 'reply-image-fence-checked', 'reply-file-receipt-checked',
+        'source-generic-file-checked', 'reply-file-fence-checked', 'source-voice-transcript-checked', 'source-voice-audio-checked'],
+    }));
+  }
+
+  async consumeInbound(botId, { expectedFingerprint, onEvent, signal, sourceImages = false, sourceFiles = false, sourceVoiceTranscripts = false, sourceVoiceAudio = false } = {}) {
+    return this.#withBotTransition(botId, async () => {
+      const account = await this.#deliveryAccount(botId, signal);
+      if (account.fingerprint !== expectedFingerprint) throw qqRefusal('account-changed');
+      const dispose = this.#inboundConsumers.register(botId, { fingerprint: expectedFingerprint, onEvent, signal, sourceImages, sourceFiles, sourceVoiceTranscripts, sourceVoiceAudio });
+      try {
+        const saved = await this.#configStore.save({ ...this.#configStore.get(botId), consumerMode: 'external-consumer' });
+        const secret = await this.#resolveSecret(saved.secretRef);
+        if (!secret) throw qqRefusal('account-unverified');
+        await this.#startRuntime(saved, secret);
+        signal?.throwIfAborted();
+        return dispose;
+      } catch (error) { dispose(); throw error; }
+    });
+  }
+
+  async #checkedRuntime(botId, expectedFingerprint, signal) {
+    let account;
+    try { account = await this.#deliveryAccount(botId, signal); }
+    catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError') throw qqRefusal('cancelled');
+      throw error;
+    }
+    if (account.fingerprint !== expectedFingerprint) throw qqRefusal('account-changed');
+    const runtime = this.#runtimes.get(botId);
+    if (this.#configStore.get(botId)?.consumerMode !== 'external-consumer') throw qqRefusal('capability-unavailable');
+    const lease = this.#inboundConsumers.signalFor(botId, expectedFingerprint);
+    return { runtime, signal: signal ? AbortSignal.any([signal, lease]) : lease };
+  }
+
+  async qualifyReplyChecked(botId, route, options = {}) {
+    return this.#withBotTransition(botId, async () => {
+      const checked = await this.#checkedRuntime(botId, options.expectedFingerprint, options.signal);
+      return checked.runtime.qualifyReplyChecked(route, { signal: checked.signal });
+    });
+  }
+
+  async replyChecked(botId, route, text, options = {}) {
+    return this.#withBotTransition(botId, async () => {
+      const checked = await this.#checkedRuntime(botId, options.expectedFingerprint, options.signal);
+      return checked.runtime.replyChecked(route, text, { ...options, signal: checked.signal });
+    });
+  }
+
+  async externalFileChecked(botId, route, value, options = {}) {
+    return this.#withBotTransition(botId, async () => {
+      const checked = await this.#checkedRuntime(botId, options.expectedFingerprint, options.signal);
+      const verifyAccount = async () => {
+        const current = await this.#checkedRuntime(botId, options.expectedFingerprint, checked.signal);
+        if (current.runtime !== checked.runtime) throw qqRefusal('account-changed');
+      };
+      if (options.reply) return checked.runtime.replyFileChecked(route, value, { ...options,
+        signal: checked.signal, verifyAccount });
+      return value?.mediaType === 'application/octet-stream' || value?.mediaType === 'audio/unknown'
+        ? checked.runtime.readSourceFile(route, value, { ...options, signal: checked.signal, verifyAccount })
+        : checked.runtime.readSourceImage(route, value, { ...options, signal: checked.signal, verifyAccount });
+    });
+  }
+
   async deleteBot(botId) {
     const warnings = [];
     const config = this.#configStore.get(botId);
     if (!config) throw new Error('Unknown QQ bot');
     await this.#withBotTransition(botId, async () => {
       const previous = await atConnectionStage('credential.read', () => this.#credentials.resolve(config.secretRef), 'credential-store');
+      this.#inboundConsumers.remove(botId);
       await this.#stopRuntime(botId);
       try {
         await atConnectionStage('credential.remove', () => this.#credentials.unset(config.secretRef), 'credential-store');
@@ -363,6 +454,7 @@ export class QqController {
               ?? (state === 'error' ? t('QQ 连接未就绪，插件会自动重试') : t('QQ 连接当前离线')),
           lastCheckedAt: runtimeStatus?.lastCheckedAt ?? null,
           lastConnectedAt: runtimeStatus?.lastConnectedAt ?? null,
+          ...(runtimeStatus?.lastInbound ? { lastInbound: structuredClone(runtimeStatus.lastInbound) } : {}),
         },
         stats: {
           messagesReceived: runtimeStatus?.messagesReceived ?? 0,
@@ -391,6 +483,7 @@ export class QqController {
   async close() {
     if (this.#closed) return;
     this.#closed = true;
+    this.#inboundConsumers.close();
     if (this.#activeAttemptId) await this.cancelProvisioning(this.#activeAttemptId);
     await Promise.allSettled([...this.#transitions.values()]);
     await Promise.allSettled([...this.#runtimes.keys()].map((botId) => this.#stopRuntime(botId)));
@@ -437,6 +530,7 @@ export class QqController {
       appId,
       secretRef: identity.secretRef,
       ownerUserOpenid,
+      ...(previousConfig?.consumerMode === 'external-consumer' ? { consumerMode: 'external-consumer' } : {}),
       createdAt: previousConfig?.createdAt ?? new Date().toISOString(),
       connectedAt: new Date().toISOString(),
     };
@@ -480,7 +574,15 @@ export class QqController {
     if (this.#closed) throw new Error('QQ controller is closed');
     await this.#stopRuntime(config.botId);
     if (this.#closed) throw new Error('QQ controller is closed');
-    const runtime = await atConnectionStage('runtime.prepare', () => this.#createRuntime({ botId: config.botId, config, appSecret }));
+    const runtime = await atConnectionStage('runtime.prepare', () => this.#createRuntime({ botId: config.botId, config, appSecret,
+      ...(config.consumerMode === 'external-consumer' ? {
+        externalConsumer: (event, signal) => this.#inboundConsumers.accept(config.botId, event, signal),
+        sourceImages: () => this.#inboundConsumers.acceptsImages(config.botId),
+        sourceFiles: () => this.#inboundConsumers.acceptsFiles(config.botId),
+        sourceVoiceTranscripts: () => this.#inboundConsumers.acceptsVoiceTranscripts(config.botId),
+        sourceVoiceAudio: () => this.#inboundConsumers.acceptsVoiceAudio(config.botId),
+      } : {}),
+    }));
     if (!runtime || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
       throw new TypeError('createRuntime returned an invalid QQ runtime');
     }
