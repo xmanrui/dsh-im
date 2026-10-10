@@ -27,12 +27,15 @@ export async function modelAttributionFor(harness, sessionId) {
 }
 
 /**
- * Append the model line to an answer. Returns the answer untouched when
- * attribution is off or the model could not be resolved.
+ * Put the model line at the head of an answer. Returns the answer untouched
+ * when attribution is off or the model could not be resolved.
  */
 export function withModelAttribution(answer, modelId) {
   const line = modelAttributionLine(modelId);
   if (!line) return answer;
   if (typeof answer !== 'string' || !answer.trim()) return answer;
-  return `${answer}\n\n${line}`;
+  // Head, not tail: the model is context for what follows, and a footer is easy
+  // to miss — a long answer pushes it out of view, and a folded card hides
+  // anything below the fold.
+  return `${line}\n\n${answer}`;
 }

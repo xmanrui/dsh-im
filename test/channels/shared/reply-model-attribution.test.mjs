@@ -32,10 +32,12 @@ test('model attribution is off by default and never alters a reply', async () =>
   });
 });
 
-test('when enabled, the reply names the model on its own line', async () => {
+test('when enabled, the reply leads with the model on its own line', async () => {
   await withAttribution(true, async () => {
     const result = withModelAttribution('answer body', 'ai-proxy/deepseek-v4.1-flash');
-    assert.equal(result, 'answer body\n\n_模型：ai-proxy/deepseek-v4.1-flash_');
+    // Head, not tail: a footer is easy to miss behind a long or folded answer.
+    assert.equal(result, '_模型：ai-proxy/deepseek-v4.1-flash_\n\nanswer body');
+    assert.ok(result.startsWith('_模型：'), 'the model line comes first');
   });
 });
 

@@ -66,6 +66,7 @@ import {
   workspacePathSnapshot,
 } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import { modelAttributionFor, withModelAttribution } from '../shared/reply-model-annotate.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import {
   captureContextEnhancement,
@@ -5565,7 +5566,14 @@ export class FeishuHarnessBridge {
     const finalText = (typeof finalStepText === 'string' && finalStepText.trim())
       ? finalStepText
       : completed.answer;
-    const deliveryText = answerTextForDelivery(finalText, completed.artifacts ?? []);
+    // Feishu answers through its own card ladder rather than the shared bridge,
+    // so the model line is attached here — before the text splits between the
+    // streaming card, the post fallback and the voice reply, so all of them
+    // carry it and none of them has to know about attribution.
+    const deliveryText = withModelAttribution(
+      answerTextForDelivery(finalText, completed.artifacts ?? []),
+      await modelAttributionFor(this.#harness, completed.sessionId),
+    );
     // 流式卡模式：答案已随步骤流进过程卡，封存后直接以卡片作回执；
     // 无卡/坏卡/封存失败时才回退到下方 post 阶梯。
     if (streamingCard) {
