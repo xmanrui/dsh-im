@@ -34,6 +34,7 @@ import {
   runPresetCommand,
 } from './preset-command.mjs';
 import { askInWorkspaceSession } from './workspace-session.mjs';
+import { modelAttributionFor, withModelAttribution } from './reply-model-annotate.mjs';
 import { HarnessApprovalQueue } from './harness-approval.mjs';
 import {
   BatchInputManager,
@@ -860,7 +861,7 @@ export class TextHarnessBridge {
         }, this.#keepaliveIntervalMs);
         keepaliveTimer.unref?.();
       }
-      const { answer, artifacts = [] } = await askInWorkspaceSession({
+      const { answer, artifacts = [], sessionId: answeredSessionId } = await askInWorkspaceSession({
         deferredDelivery: () => ({ coordinator: this.#deferred, target: this.#descriptor.key === 'whatsapp' ? { jid: target.jid, selfChat: target.selfChat } : target }),
         harness: this.#harness,
         state: this.#state,
@@ -927,7 +928,7 @@ export class TextHarnessBridge {
       const fileOnlyCompletion = !cleanText(answer) && artifacts.length > 0;
       const visibleAnswer = fileOnlyCompletion
         ? t(FILE_ONLY_COMPLETION_TEXT)
-        : answer;
+        : withModelAttribution(answer, modelAttributionFor(this.#harness, answeredSessionId));
       const answerFormat = fileOnlyCompletion ? 'plain' : 'markdown';
       let textDeliveryError = null;
       let textReceipt = null;

@@ -2,9 +2,15 @@ import { splitWorkspaceCommandMessage } from './workspace-command.mjs';
 import { t } from './i18n.mjs';
 import { WORKSPACE_SESSION_STALE } from './workspace-session.mjs';
 import { withSessionBindingLock } from './session-binding-lock.mjs';
+import {
+  normalizeModelInfoSetting,
+  replyModelAttributionEnabled,
+  setReplyModelAttribution,
+} from './reply-model-attribution.mjs';
 
 const MODEL_COMMAND = /^\/model(?=$|\s)/i;
 const MODELS_COMMAND = /^\/models(?=$|\s)/i;
+const MODEL_INFO_COMMAND = /^\/modelinfo(?=$|\s)/i;
 const REASONING_COMMAND = /^\/reasoning(?=$|\s)/i;
 const REASONINGS_COMMAND = /^\/reasonings(?=$|\s)/i;
 const REASONING_LIST_COMMAND = /^\/reasoninglist(?=$|\s)/i;
@@ -302,6 +308,28 @@ function formatCatalog(catalog) {
   return lines.join('\n');
 }
 
+/**
+ * `/modelinfo on|off` — whether replies name the model that produced them.
+ * With no argument it reports the current setting rather than changing it, so
+ * the command is safe to send when unsure.
+ */
+function setModelAttribution(command) {
+  const match = /^\/modelinfo(?:[ \t]+([^\s]+))?[ \t]*$/iu.exec(command);
+  if (!match) return t('用法：/modelinfo on 或 /modelinfo off');
+  const requested = match[1];
+  if (!requested) {
+    return replyModelAttributionEnabled()
+      ? t('回复附带模型：已开启。关闭：/modelinfo off')
+      : t('回复附带模型：已关闭。开启：/modelinfo on');
+  }
+  const resolved = normalizeModelInfoSetting(requested);
+  if (resolved === null) return t('用法：/modelinfo on 或 /modelinfo off');
+  setReplyModelAttribution(resolved);
+  return resolved
+    ? t('已开启：回复会附带本轮使用的模型。')
+    : t('已关闭：回复不再附带模型。');
+}
+
 function currentModelMessage(catalog) {
   return [
     t('当前模型：'),
@@ -509,6 +537,7 @@ export function isModelCommand(text) {
   const command = text.trim();
   return MODELS_COMMAND.test(command)
     || MODEL_COMMAND.test(command)
+    || MODEL_INFO_COMMAND.test(command)
     || REASONING_LIST_COMMAND.test(command)
     || REASONINGS_COMMAND.test(command)
     || REASONING_COMMAND.test(command);
@@ -521,6 +550,10 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
     return commandResult(t('模型和推理等级命令仅支持纯文字，请移除图片后重试。'));
   }
   const requestOptions = rpcOptions(options.signal);
+
+  if (MODEL_INFO_COMMAND.test(command)) {
+    return commandResult(setModelAttribution(command));
+  }
 
   if (isModelsCommand(command)) {
     if (!/^\/models[ \t]*$/iu.test(command)) return commandResult(t(MODELS_USAGE));

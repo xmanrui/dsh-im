@@ -287,4 +287,16 @@ export default {
   '已排队，等待前序消息处理。': 'Queued. Waiting for the preceding messages to finish.',
   '已提交补充指令，Agent 会在下一步读取。':
     'Additional instruction submitted; the Agent will read it at the next step.',
+    '用法：/modelinfo on 或 /modelinfo off':
+      'Usage: /modelinfo on or /modelinfo off',
+    '回复附带模型：已开启。关闭：/modelinfo off':
+      'Replies name the model: on. Turn off: /modelinfo off',
+    '回复附带模型：已关闭。开启：/modelinfo on':
+      'Replies name the model: off. Turn on: /modelinfo on',
+    '已开启：回复会附带本轮使用的模型。':
+      'Enabled: replies will name the model used for this turn.',
+    '已关闭：回复不再附带模型。':
+      'Disabled: replies will no longer name the model.',
+    '_模型：{}_':
+      '_Model: {}_',
 };
