@@ -1,5 +1,7 @@
 import { extractConnectionEvidence, createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
 import { splitMessageText } from '../shared/editable-message-stream.mjs';
+import { chunkMarkdownParts } from '../shared/markdown-chunks.mjs';
+import { createTextDeliveryBlock } from '../shared/semantic/delivery.mjs';
 import { t } from '../shared/i18n.mjs';
 import { SlackApi } from './slack-api.mjs';
 import { createSlackBridgeStatus, SlackHarnessBridge } from './slack-bridge.mjs';
@@ -346,6 +348,34 @@ export class SlackBotClient {
         signal: this.#signal,
       });
       if (typeof result?.ts === 'string' && result.ts) providerMessageIds.push(result.ts);
+    }
+    return { providerMessageIds };
+  }
+
+  async sendDelivery(target, value) {
+    const block = createTextDeliveryBlock(value);
+    if (block.format === 'plain') return this.sendText(target, block.text);
+    const providerMessageIds = [];
+    // Standard Markdown blocks have a 12,000-character payload limit.
+    for (const chunk of chunkMarkdownParts(block.text, SLACK_STREAM_CHUNK_LIMIT)) {
+      this.#signal?.throwIfAborted();
+      try {
+        const result = await this.#api.postMessage({
+          channelId: target.channelId, threadTs: target.threadTs,
+          text: chunk.markdown, format: 'markdown', signal: this.#signal,
+        });
+        if (typeof result?.ts === 'string' && result.ts) providerMessageIds.push(result.ts);
+      } catch (error) {
+        // Retry only a definite formatting rejection, never an ambiguous send.
+        if (this.#signal?.aborted || Number(error?.status) >= 500
+          || !['invalid_blocks', 'invalid_blocks_format', 'invalid_markdown']
+            .includes(error?.providerCode)) throw error;
+        this.#logger?.warn?.('[dsh-im:slack] Markdown rejected; sending this chunk as text');
+        if (chunk.plain) {
+          const result = await this.sendText(target, chunk.plain);
+          providerMessageIds.push(...result.providerMessageIds);
+        }
+      }
     }
     return { providerMessageIds };
   }

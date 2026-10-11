@@ -177,6 +177,11 @@ test('runtime sends a connection test to the bound Weixin owner without reply co
   assert.equal(sends[1].text, '主动投递');
   assert.equal(sends[1].contextToken, undefined);
   assert.equal(sends[1].runId, undefined);
+  const markdown = '# 同步\n**中文😀** `code` [link](https://example.com)';
+  await runtime.sendProactiveText({ kind: 'user', route: { toUserId: 'target-user' } },
+    markdown, { format: 'markdown' });
+  assert.equal(sends[2].text, markdown);
+  assert.equal(sends[2].toUserId, 'target-user');
   await runtime.stop();
 });
 
@@ -273,6 +278,105 @@ test('proactive rejection remains visible while polling is healthy, without retr
     await runtime.sendConnectionTest('test');
     assert.equal(runtime.status.lastMessageError, null);
   } finally { await runtime.stop(); }
+});
+
+async function proactiveRuntime(sendText, remembered = []) {
+  const runtime = new WeixinRuntime({
+    api: {
+      notifyStart: async () => {}, notifyStop: async () => {}, sendText,
+      getUpdates: ({ signal }) => abortable(new Promise(() => {}), signal),
+    },
+    config: { botId: 'bot', baseUrl: 'https://ilinkai.weixin.qq.com/', ownerUserId: 'owner' },
+    token: 'login', harness: { ensureRunning: async () => true },
+    state: {
+      getUpdatesBuf: () => '', contextTokenFor: () => 'fresh-context',
+      rememberOutboundMessage: async (message) => remembered.push(message),
+    },
+    logger: { warn() {}, error() {} },
+  });
+  await runtime.start();
+  return runtime;
+}
+
+test('proactive long Markdown fits the Weixin limit and preserves all fenced code rows', async () => {
+  const sends = [];
+  const remembered = [];
+  const runtime = await proactiveRuntime(async (request) => {
+    assert.ok(request.text.length <= 1_800, 'each provider request must fit the existing limit');
+    sends.push(request);
+    return { providerMessageIds: [`sent-${sends.length}`] };
+  }, remembered);
+  const rows = Array.from({ length: 400 }, (_, index) => (
+    `  WX_${String(index + 1).padStart(4, '0')} 中文😀 const value = "**literal** a_b";`
+  ));
+  try {
+    assert.deepEqual(await runtime.sendProactiveText(
+      { kind: 'user', route: { toUserId: 'owner' } },
+      `# 长回答\n\n\`\`\`js\n${rows.join('\n')}\n\`\`\`\n\nEND_339`,
+      { format: 'markdown' },
+    ), { sent: true });
+    assert.ok(sends.length > 2);
+    const deliveredRows = [];
+    for (const request of sends) {
+      assert.equal(request.contextToken, 'fresh-context');
+      assert.equal(request.toUserId, 'owner');
+      assert.equal(request.runId, undefined);
+      assert.equal(request.text.isWellFormed(), true);
+      if (!request.text.includes('WX_')) continue;
+      assert.match(request.text, /^```js\n[\s\S]*\n```$/);
+      deliveredRows.push(...request.text.split('\n').slice(1, -1));
+    }
+    assert.deepEqual(deliveredRows, rows, 'no dropped, repeated or changed code rows');
+    assert.match(sends.at(-1).text, /END_339$/);
+    assert.equal(remembered.length, sends.length);
+    assert.deepEqual(remembered.map((message) => message.text), sends.map((request) => request.text));
+    assert.deepEqual(remembered.map((message) => message.providerMessageIds), sends.map((_, index) => [`sent-${index + 1}`]));
+  } finally { await runtime.stop(); }
+});
+
+test('proactive long plain text reuses Weixin splitting without adding Markdown fences', async () => {
+  const sends = [];
+  const runtime = await proactiveRuntime(async ({ text }) => { sends.push(text); return {}; });
+  const text = '中文文本'.repeat(1_000);
+  try {
+    await runtime.sendProactiveText({ kind: 'user', route: { toUserId: 'owner' } }, text);
+    assert.ok(sends.length > 1);
+    assert.ok(sends.every((chunk) => chunk.length <= 1_800));
+    assert.equal(sends.join(''), text);
+  } finally { await runtime.stop(); }
+});
+
+test('proactive multipart failure or cancellation stops without resending accepted parts', async (t) => {
+  for (const scenario of ['rejection', 'network-error', 'cancel-before', 'cancel-after-first']) {
+    await t.test(scenario, async () => {
+      const controller = new AbortController();
+      const sends = [];
+      const remembered = [];
+      const runtime = await proactiveRuntime(async (request) => {
+        sends.push(request);
+        if (sends.length === 2) {
+          throw new WeixinApiError(scenario === 'rejection' ? 'send-rejected' : 'network-error', 'test failure');
+        }
+        if (scenario === 'cancel-after-first') controller.abort();
+        return {};
+      }, remembered);
+      if (scenario === 'cancel-before') controller.abort();
+      try {
+        await assert.rejects(runtime.sendProactiveText(
+          { kind: 'user', route: { toUserId: 'owner' } }, '长消息'.repeat(2_000),
+          { format: 'markdown', signal: controller.signal },
+        ));
+        assert.equal(sends.length, scenario === 'cancel-before' ? 0 : scenario === 'cancel-after-first' ? 1 : 2);
+        assert.equal(remembered.length, scenario === 'cancel-before' ? 0 : 1);
+        if (scenario === 'rejection' || scenario === 'network-error') {
+          assert.equal(runtime.status.lastMessageError.code,
+            scenario === 'rejection' ? 'CHANNEL_DELIVERY' : 'CHANNEL_DELIVERY_UNCERTAIN');
+          assert.match(runtime.status.lastMessageError.message, /chunk=2\/4/);
+          assert.match(runtime.status.lastMessageError.message, /totalChars=6000/);
+        }
+      } finally { await runtime.stop(); }
+    });
+  }
 });
 
 test('runtime cancels typing before notifying iLink that it stopped', async () => {

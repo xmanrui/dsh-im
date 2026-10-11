@@ -761,6 +761,7 @@ export class TelegramBotClient {
     try {
       chunks = splitTelegramRichMarkdown(block.text);
     } catch {
+      this.#logger.warn?.('[dsh-im:telegram] Rich Markdown could not be prepared; sending plain text');
       return this.#sendPlain(target, block.text);
     }
     const providerMessageIds = [];

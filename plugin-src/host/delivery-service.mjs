@@ -341,11 +341,12 @@ export class DeliveryService {
     return false;
   }
 
-  async sendSessionSyncText(botId, targetId, sessionId, text, { signal } = {}) {
+  async sendSessionSyncText(botId, targetId, sessionId, text, { signal, format = 'plain' } = {}) {
     const id = botIdOf(botId);
     const targetKey = targetIdOf(targetId);
     if (typeof sessionId !== 'string' || !sessionId
-      || typeof text !== 'string' || !text.trim()) {
+      || typeof text !== 'string' || !text.trim()
+      || (format !== 'plain' && format !== 'markdown')) {
       throw deliveryError('bad-request', 'Invalid session sync delivery');
     }
     cancellation(signal);
@@ -354,7 +355,7 @@ export class DeliveryService {
       throw deliveryError('session-sync-unavailable', 'Session sync is unavailable');
     }
     try {
-      await adapter.sendSessionSyncText(id, targetKey, sessionId, text, { signal });
+      await adapter.sendSessionSyncText(id, targetKey, sessionId, text, { signal, format });
       return { sent: true };
     } catch (error) {
       if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {

@@ -4,6 +4,7 @@ import { WSAuthFailureError, WSClient, WSReconnectExhaustedError } from '@wecom/
 import { createWecomBridgeStatus, WecomHarnessBridge } from './wecom-bridge.mjs';
 import { sendRememberedConnectionTest } from '../shared/connection-test.mjs';
 import { t } from '../shared/i18n.mjs';
+import { chunkMarkdownText } from '../shared/markdown-chunks.mjs';
 
 function timeoutError() {
   const error = new Error('Enterprise WeChat WebSocket authentication timed out');
@@ -240,7 +241,7 @@ export class WecomRuntime {
     }, options);
   }
 
-  async sendProactiveText(target, text, { signal } = {}) {
+  async sendProactiveText(target, text, { signal, format = 'plain' } = {}) {
     const chatId = typeof target?.route?.chatId === 'string'
       ? target.route.chatId.trim() : '';
     if ((target?.kind !== 'user' && target?.kind !== 'group') || !chatId) {
@@ -254,10 +255,15 @@ export class WecomRuntime {
       throw error;
     }
     signal?.throwIfAborted();
-    await this.#client.sendMessage(chatId, {
-      msgtype: 'markdown',
-      markdown: { content: text },
-    });
+    // At most three UTF-8 bytes per UTF-16 unit: stay within the existing
+    // bridge's 18,000-byte budget while keeping Markdown structures intact.
+    const chunks = format === 'markdown' ? chunkMarkdownText(text, 6_000) : [text];
+    for (const content of chunks) {
+      signal?.throwIfAborted();
+      await this.#client.sendMessage(chatId, {
+        msgtype: 'markdown', markdown: { content },
+      });
+    }
     return { sent: true };
   }
 

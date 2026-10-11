@@ -163,7 +163,7 @@ export class DingtalkRuntime {
     maxMessageChars = 4_000,
     connectTimeoutMs = 15_000,
     connectPollIntervalMs = 25,
-    api = createDingtalkApi(),
+    api = createDingtalkApi({ logger }),
     streamFactory = defaultStreamFactory,
   }) {
     if (!config || !nonEmptyString(config.clientId) || !nonEmptyString(clientSecret)) {
@@ -443,7 +443,7 @@ export class DingtalkRuntime {
     }, options);
   }
 
-  async sendProactiveText(target, text, { signal } = {}) {
+  async sendProactiveText(target, text, { signal, format = 'plain' } = {}) {
     const userId = typeof target?.route?.userId === 'string'
       ? target.route.userId.trim() : '';
     const openConversationId = typeof target?.route?.openConversationId === 'string'
@@ -471,6 +471,7 @@ export class DingtalkRuntime {
           ...(target.kind === 'user' ? { userId } : { openConversationId }),
         },
         text,
+        format,
         signal: signal ?? this.#abortController.signal,
       });
     } catch (cause) {

@@ -209,6 +209,7 @@ test('all adapters enable, resolve, and revalidate one private Session target', 
     let syncKey = null;
     const sends = [];
     const approvals = [];
+    let sendResult;
     const workspaces = {
       has: (candidate) => candidate === botId,
       listBotIds: () => [botId],
@@ -228,7 +229,7 @@ test('all adapters enable, resolve, and revalidate one private Session target', 
       channel,
       workspaces,
       coreController: {
-        async sendProactiveText(...args) { sends.push(args); },
+        async sendProactiveText(...args) { sends.push(args); return sendResult; },
         async presentSessionSyncApproval(...args) { approvals.push(args); return true; },
       },
       stateFor: async () => ({ snapshot: () => ({ sessions }) }),
@@ -250,6 +251,17 @@ test('all adapters enable, resolve, and revalidate one private Session target', 
       channel,
     );
     assert.deepEqual(sends.at(-1), [botId, target, 'synced', {}], channel);
+    await adapter.sendSessionSyncText(botId, target.targetId, sessionId, '**answer**', { format: 'markdown' });
+    assert.deepEqual(sends.at(-1), [botId, target, '**answer**', { format: 'markdown' }], channel);
+    for (const result of [false, { sent: false }, { deliveryOutcome: 'failed' }, { deliveryOutcome: 'unknown' }]) {
+      sendResult = result;
+      const count = sends.length;
+      await assert.rejects(adapter.sendSessionSyncText(botId, target.targetId, sessionId, '**answer**', { format: 'markdown' }), {
+        code: result?.deliveryOutcome === 'unknown' ? 'send-result-unknown' : 'delivery-failed',
+      }, channel);
+      assert.equal(sends.length, count + 1, 'never retry failed or uncertain delivery in the adapter');
+    }
+    sendResult = undefined;
 
     let decisions = 0;
     let withdrawn = 0;

@@ -9,6 +9,7 @@ import { t } from '../shared/i18n.mjs';
 import { evaluateInboundAccess } from '../shared/inbound-access.mjs';
 import { createQqBridgeStatus, QqHarnessBridge } from './qq-bridge.mjs';
 import { isQqMessageAddressed, normalizeQqMentions } from './qq-mention.mjs';
+import { sendMarkdownReply } from './markdown-reply.mjs';
 
 function timeoutError() {
   const error = new Error('QQ WebSocket did not become ready in time');
@@ -114,7 +115,7 @@ export class QqRuntime {
     }, options);
   }
 
-  async sendProactiveText(target, text, { signal } = {}) {
+  async sendProactiveText(target, text, { signal, format = 'plain' } = {}) {
     const nativeId = target?.kind === 'user'
       ? (typeof target?.route?.userOpenId === 'string' ? target.route.userOpenId.trim() : '')
       : target?.kind === 'group'
@@ -131,10 +132,17 @@ export class QqRuntime {
       throw error;
     }
     signal?.throwIfAborted();
-    return this.#bot.sendText({
+    const replyTarget = {
       scope: target.kind === 'user' ? 'c2c' : 'group',
       targetId: nativeId,
-    }, text);
+    };
+    if (format === 'markdown') {
+      await sendMarkdownReply(this.#bot, replyTarget, text, {
+        logger: this.#logger, signal, requireComplete: true,
+      });
+      return { sent: true };
+    }
+    return this.#bot.sendText(replyTarget, text);
   }
 
   async start() {

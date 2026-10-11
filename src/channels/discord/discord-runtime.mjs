@@ -1,5 +1,7 @@
 import { extractConnectionEvidence, createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
 import { createEditableMessageStream, splitMessageText } from '../shared/editable-message-stream.mjs';
+import { chunkMarkdownText } from '../shared/markdown-chunks.mjs';
+import { createTextDeliveryBlock } from '../shared/semantic/delivery.mjs';
 import { fetchFileStream } from '../shared/file-download.mjs';
 import { fetchImageBuffer } from '../shared/image-prompt.mjs';
 import { t } from '../shared/i18n.mjs';
@@ -428,10 +430,19 @@ export class DiscordBotClient {
     this.#signal = signal;
   }
 
-  async sendText(target, text) {
+  sendText(target, text) {
+    return this.#sendText(target, text, false);
+  }
+
+  sendDelivery(target, value) {
+    const block = createTextDeliveryBlock(value);
+    return this.#sendText(target, block.text, block.format === 'markdown');
+  }
+
+  async #sendText(target, text, markdown) {
     const notice = !this.#deliveredNotices.has(target) && target?.notice
       ? String(target.notice) : null;
-    const chunks = splitMessageText(notice ? `${notice}\n\n${text}` : text, 1_900);
+    const chunks = (markdown ? chunkMarkdownText : splitMessageText)(notice ? `${notice}\n\n${text}` : text, 1_900);
     const providerMessageIds = [];
     for (const [index, chunk] of chunks.entries()) {
       const result = await this.#api.createMessage({

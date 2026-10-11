@@ -79,6 +79,30 @@ async function fixture(t, { state, targets = [target], create, patch, history = 
   };
 }
 
+test('mirror keeps every long code segment fenced across cards without losing indentation or Unicode', async t => {
+  const f = await fixture(t);
+  const rows = Array.from({ length: 400 }, (_, i) => `  ROW_${String(i + 1).padStart(4, '0')}=${'abc'.repeat(20)}中文😀`);
+  f.emit(start()); f.emit(user()); await f.drain();
+  f.emit(answer(`## Long code\n\n\`\`\`text\n${rows.join('\n')}\n\`\`\`\n\nEND_LONG_CODE`));
+  f.emit(end()); await f.drain();
+  const cards = [...f.visible.values()];
+  assert.ok(cards.length > 1);
+  const receivedRows = [];
+  for (const card of cards) {
+    assert.ok(Buffer.byteLength(card, 'utf8') < 30_000);
+    for (const element of JSON.parse(card).body.elements) {
+      if (element.tag !== 'markdown' || !element.content.includes('ROW_')) continue;
+      const code = /```text\n([\s\S]*?)\n```/.exec(element.content);
+      assert.ok(code, 'each Markdown element containing code must have its own fences');
+      receivedRows.push(...code[1].split('\n').filter(line => line.includes('ROW_')));
+    }
+  }
+  assert.deepEqual(receivedRows, rows);
+  assert.match(cards.at(-1), /END_LONG_CODE/);
+  assert.match(cards.at(-1), /已完成/);
+  assert.equal(f.texts.filter(args => args[3].startsWith('[DSH 助手]')).length, 0);
+});
+
 test('mirror snapshots match the delivered expansion even if preferences change during PATCH', async t => {
   const original = { thinkingExpanded: true, toolsExpanded: false };
   const next = { thinkingExpanded: false, toolsExpanded: true };
@@ -137,12 +161,12 @@ for (const input of [user, scheduled]) {
       assert.equal(f.texts.filter(r => r[3].startsWith('[DSH 助手]')).length, 0, 'wait for real card outcome');
       release();
       await f.drain();
-      assert.equal(f.texts.filter(r => r[3] === '[DSH 助手]\ncomplete answer').length, 1);
+      assert.equal(f.texts.filter(r => r[3] === '[DSH 助手]\n\ncomplete answer').length, 1);
       if (input === scheduled) assert.equal(f.texts.filter(r => r[3].startsWith('[来自 DSH]')).length, 0);
       f.emit(start(2)); f.emit(input(2)); f.emit(answer('next answer', 2)); f.emit(end(2));
       await f.drain();
       assert.ok([...f.visible.values()].some(text => text.includes('next answer')));
-      assert.equal(f.texts.filter(r => r[3].includes('[DSH 助手]\nnext answer')).length, 0);
+      assert.equal(f.texts.filter(r => r[3].includes('[DSH 助手]\n\nnext answer')).length, 0);
     });
   }
 }
@@ -175,8 +199,8 @@ for (const phase of ['create', 'running patch', 'final patch']) {
       assert.ok([...f.visible.values()].some(text => text.includes('next answer')),
         'a hanging request must not block the next turn');
       await f.drain();
-      assert.equal(f.texts.filter(r => r[0] === 'bot-a' && r[3] === '[DSH 助手]\ncomplete answer').length, 1);
-      assert.ok(f.texts.some(r => r[0] === 'bot-b' && r[3] === '[DSH 助手]\ncomplete answer'));
+      assert.equal(f.texts.filter(r => r[0] === 'bot-a' && r[3] === '[DSH 助手]\n\ncomplete answer').length, 1);
+      assert.ok(f.texts.some(r => r[0] === 'bot-b' && r[3] === '[DSH 助手]\n\ncomplete answer'));
       assert.ok(f.warnings.some(args => args.some(arg => String(arg).includes('timed out'))));
       const saved = structuredClone(f.state.mirrorEntries());
       const delivered = structuredClone(f.texts);

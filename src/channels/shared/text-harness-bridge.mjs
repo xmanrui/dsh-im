@@ -649,8 +649,11 @@ export class TextHarnessBridge {
     });
   }
 
-  sendProactiveText(target, text, { signal } = {}) {
+  sendProactiveText(target, text, { signal, format = 'plain' } = {}) {
     signal?.throwIfAborted();
+    if (format === 'markdown' && typeof this.#bot.sendDelivery === 'function') {
+      return this.#bot.sendDelivery(target, createTextDeliveryBlock(text, format));
+    }
     return this.#bot.sendText(target, text);
   }
 

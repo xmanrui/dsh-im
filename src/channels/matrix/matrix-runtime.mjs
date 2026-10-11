@@ -36,6 +36,7 @@ import {
   extractOutboundMentions,
   hasRoomMention,
 } from './matrix-rich-text.mjs';
+import { chunkMarkdownParts } from '../shared/markdown-chunks.mjs';
 
 const RECONNECT_DELAYS_MS = Object.freeze([1_000, 3_000, 5_000, 10_000, 30_000]);
 const SYNC_LONG_POLL_MS = 30_000;
@@ -917,14 +918,23 @@ export class MatrixRuntime {
       ? target.threadId : null;
     const replyToEventId = typeof target?.replyToEventId === 'string' && isMatrixEventId(target.replyToEventId)
       ? target.replyToEventId : null;
-    const chunks = splitMessageText(text, this.#config.maxMessageLength);
+    const chunks = options.format === 'markdown'
+      ? chunkMarkdownParts(text, this.#config.maxMessageLength)
+      : splitMessageText(text, this.#config.maxMessageLength).map(plain => ({ markdown: plain, plain }));
     const providerMessageIds = [];
     for (const chunk of chunks) {
-      const content = buildMatrixTextContent({
-        text: chunk,
-        mentionUserIds: extractOutboundMentions(chunk),
-        roomMention: this.#config.allowRoomMentions && hasRoomMention(chunk),
-      });
+      let content;
+      try {
+        content = buildMatrixTextContent({
+          text: chunk.markdown,
+          mentionUserIds: extractOutboundMentions(chunk.markdown),
+          roomMention: this.#config.allowRoomMentions && hasRoomMention(chunk.markdown),
+        });
+      } catch {
+        this.#logger.warn?.('[dsh-im:matrix] Rich text could not be prepared; sending plain text');
+        if (!chunk.plain) continue;
+        content = { msgtype: 'm.text', body: chunk.plain };
+      }
       applyMatrixRelations(content, { threadId, replyToEventId });
       const result = await this.#sendRoomEvent(roomId, 'm.room.message', content, {
         ...(options.signal ? { signal: options.signal } : {}),

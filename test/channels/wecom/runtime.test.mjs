@@ -50,6 +50,23 @@ test('Enterprise WeChat runtime sends a connection test only to the remembered p
     chatId: 'group-target',
     body: { msgtype: 'markdown', markdown: { content: '主动投递' } },
   });
+  await runtime.sendProactiveText({ kind: 'user', route: { chatId: 'member-private' } },
+    '**同步回答**', { format: 'markdown' });
+  assert.deepEqual(client.sent[2], {
+    chatId: 'member-private', body: { msgtype: 'markdown', markdown: { content: '**同步回答**' } },
+  });
+  const rows = Array.from({ length: 500 }, (_, i) => `row_${i} = "中文😀";`);
+  await runtime.sendProactiveText({ kind: 'user', route: { chatId: 'member-private' } },
+    '```js\n' + rows.join('\n') + '\n```', { format: 'markdown' });
+  const chunks = client.sent.slice(3).map(call => call.body.markdown.content);
+  assert.ok(chunks.length > 1);
+  assert.ok(chunks.every(chunk => Buffer.byteLength(chunk) <= 18_000));
+  for (const row of rows) assert.equal(chunks.join('\n').split(row).length - 1, 1);
+  let failedCalls = 0;
+  client.sendMessage = async () => { failedCalls++; throw new Error('send failed'); };
+  await assert.rejects(runtime.sendProactiveText({ kind: 'user', route: { chatId: 'member-private' } },
+    '**失败**', { format: 'markdown' }), /send failed/);
+  assert.equal(failedCalls, 1);
   await runtime.stop();
 });
 

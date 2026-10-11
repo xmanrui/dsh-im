@@ -271,13 +271,14 @@ export class SlackApi {
       : null;
   }
 
-  postMessage({ channelId, text, threadTs, signal }) {
+  postMessage({ channelId, text, threadTs, signal, format = 'plain' }) {
     return this.#request('chat.postMessage', {
       tokenKind: 'bot',
       signal,
       body: {
         channel: slackId(channelId, 'channel id'),
         text: safeOutgoingText(text),
+        ...(format === 'markdown' ? { blocks: [{ type: 'markdown', text: safeOutgoingText(text) }] } : {}),
         ...(threadTs ? { thread_ts: cleanString(threadTs) } : {}),
         mrkdwn: true,
         link_names: false,

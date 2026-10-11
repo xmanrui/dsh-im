@@ -404,7 +404,15 @@ export function createDeliveryAdapter({ channel, workspaces, coreController, sta
       if (typeof coreController.sendProactiveText !== 'function') {
         throw new TypeError('delivery controller cannot send proactive text');
       }
-      await coreController.sendProactiveText(botId, target, text, options);
+      const result = await coreController.sendProactiveText(botId, target, text, options);
+      // Rich senders may report failure without throwing. Never report these
+      // as success, or retry an uncertain send that may already be visible.
+      if (result === false || result?.sent === false
+        || result?.deliveryOutcome === 'failed' || result?.deliveryOutcome === 'unknown') {
+        const error = new Error('Session sync delivery was not confirmed');
+        error.code = result?.deliveryOutcome === 'unknown' ? 'send-result-unknown' : 'delivery-failed';
+        throw error;
+      }
       return { sent: true };
     },
   });

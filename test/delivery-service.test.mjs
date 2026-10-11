@@ -263,8 +263,19 @@ test('DeliveryService exposes and revalidates local Session sync without changin
   );
   assert.deepEqual(syncCalls, [
     ['set', 'bot_one', 'direct', true],
-    ['send', 'bot_one', 'direct', 'session-one', 'hello', { signal: undefined }],
+    ['send', 'bot_one', 'direct', 'session-one', 'hello', { signal: undefined, format: 'plain' }],
   ]);
+  const signal = new AbortController().signal;
+  await service.sendSessionSyncText('bot_one', 'direct', 'session-one', '**answer**', { signal, format: 'markdown' });
+  assert.deepEqual(syncCalls.at(-1), ['send', 'bot_one', 'direct', 'session-one', '**answer**', { signal, format: 'markdown' }]);
+  const sent = syncCalls.length;
+  for (const format of ['html', '', null, false]) {
+    await assert.rejects(service.sendSessionSyncText('bot_one', 'direct', 'session-one', 'answer', { format }), { code: 'bad-request' });
+  }
+  await assert.rejects(service.sendSessionSyncText('bot_one', 'direct', 'session-one', 'answer', {
+    format: 'markdown', signal: AbortSignal.abort(),
+  }), { code: 'cancelled' });
+  assert.equal(syncCalls.length, sent);
 });
 
 test('DeliveryService marks explicit remote Harness channels unavailable for Session sync', async () => {

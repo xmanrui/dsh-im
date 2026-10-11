@@ -9,6 +9,23 @@ import {
 
 const target = { scope: 'c2c', targetId: 'user-openid', msgId: 'msg-1' };
 
+test('proactive Markdown requires complete delivery and never resends accepted chunks', async () => {
+  for (const failPlain of [false, true]) {
+    const calls = [];
+    const failure = new Error('connection lost');
+    const bot = { send: async request => {
+      calls.push(request);
+      if (calls.length === 1) return { id: 'first' };
+      if (failPlain && request.msgType === 2) throw apiRejection();
+      throw failure;
+    } };
+    await assert.rejects(sendMarkdownReply(bot, { scope: 'c2c', targetId: 'owner' },
+      'one\n'.repeat(1400), { requireComplete: true }), error => error === failure);
+    assert.equal(calls.length, failPlain ? 3 : 2);
+    assert.ok(calls.every(call => call.target.msgId === undefined));
+  }
+});
+
 function apiRejection(
   message = 'markdown rejected',
   httpStatus = 400,

@@ -14,6 +14,9 @@ import { t } from '../shared/i18n.mjs';
 import { ImagePromptError } from '../shared/image-prompt.mjs';
 import { trackOutboundArtifactProviderPromise } from '../shared/semantic/artifact.mjs';
 import { createWhatsappBridgeStatus, WhatsappHarnessBridge } from './whatsapp-bridge.mjs';
+import { createTextDeliveryBlock } from '../shared/semantic/delivery.mjs';
+import { chunkMarkdownText } from '../shared/markdown-chunks.mjs';
+import { markdownToWhatsapp } from './whatsapp-markdown.mjs';
 import {
   WHATSAPP_ACCESS_MODES,
   normalizeWhatsappAccountJid,
@@ -490,6 +493,25 @@ export class WhatsappBotClient {
     return { providerMessageIds };
   }
 
+  async sendDelivery(target, value) {
+    const block = createTextDeliveryBlock(value);
+    if (block.format === 'plain') return this.sendText(target, block.text);
+    let chunks;
+    try {
+      chunks = chunkMarkdownText(markdownToWhatsapp(block.text), WHATSAPP_TEXT_LIMIT);
+    } catch {
+      this.#logger.warn?.('[dsh-im:whatsapp] Markdown could not be prepared; sending plain text');
+      return this.sendText(target, block.text);
+    }
+    await this.#stopTyping(target.jid);
+    const providerMessageIds = [];
+    for (const [index, chunk] of chunks.entries()) {
+      const result = await this.#sendTextMessage(target, chunk, { quote: index === 0 });
+      providerMessageIds.push(result.key.id);
+    }
+    return { providerMessageIds };
+  }
+
   async #sendTextMessage(target, text, { edit, quote = true } = {}) {
     this.#signal?.throwIfAborted();
     const messageId = randomBytes(10).toString('hex').toUpperCase();
@@ -886,7 +908,7 @@ export class WhatsappRuntime {
     }, options);
   }
 
-  async sendProactiveText(target, text, { signal } = {}) {
+  async sendProactiveText(target, text, { signal, format = 'plain' } = {}) {
     const jid = typeof target?.route?.jid === 'string' ? target.route.jid.trim() : '';
     const validUser = target?.kind === 'user'
       && /^[^@\s]+@(s\.whatsapp\.net|lid)$/.test(jid);
@@ -902,6 +924,9 @@ export class WhatsappRuntime {
       throw error;
     }
     signal?.throwIfAborted();
+    if (format === 'markdown') {
+      return this.#client.sendDelivery({ jid }, createTextDeliveryBlock(text, format));
+    }
     return this.#client.sendText({ jid }, text);
   }
 

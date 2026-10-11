@@ -181,6 +181,8 @@ IM channels with proactive delivery support can send text through a stable `botI
 
 Saved direct-message targets also offer an opt-in **Two-way Session sync** switch. Once enabled, user text submitted from DSH Web/CLI and the final assistant text in that DM's current Session are mirrored back to the DM, including final assistant text from successfully completed scheduled tasks; ordinary IM prompts and `/steer` are not duplicated. The switch follows the current Session across `/session`, `/new`, and workspace changes. The first version supports text DMs on the current Host only; groups, Topics, Threads, and explicit remote `harnessBaseUrl` connections are unavailable.
 
+Synced answers use channel-specific Markdown rendering: Feishu cards, Telegram rich text, QQ/DingTalk/Slack formatted messages, and existing WeCom bot, Matrix and Discord support. WhatsApp adapts common formatting; WeCom app and Weixin preserve the full text. Formatting fallback and long-message handling reuse channel mechanisms without adding retries for uncertain delivery.
+
 See the [Proactive Delivery Guide](PROACTIVE_DELIVERY.en.md) ([简体中文](PROACTIVE_DELIVERY.md)) for setup steps, native fields for each supported channel, complete call examples, management endpoints, error codes, and troubleshooting.
 
 ### Client panel integration

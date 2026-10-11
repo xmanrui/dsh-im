@@ -174,6 +174,13 @@ test('QQ runtime sends a proactive connection test to the explicit owner fallbac
     target: { scope: 'group', targetId: 'group-openid' },
     text: 'proactive-test',
   });
+  const rich = [];
+  bot.send = async request => { rich.push(request); return { id: 'rich-1' }; };
+  await runtime.sendProactiveText({ kind: 'user', route: { userOpenId: 'owner-openid' } },
+    '**answer**', { format: 'markdown' });
+  assert.equal(rich[0].msgType, 2);
+  assert.equal(rich[0].markdown.content, '**answer**');
+  assert.deepEqual(rich[0].target, { scope: 'c2c', targetId: 'owner-openid' });
   await runtime.stop();
 });
 

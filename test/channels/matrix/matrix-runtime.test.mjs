@@ -666,6 +666,35 @@ test('proactive delivery routes rooms directly, creates dm rooms once and reject
 });
 
 // ---- 端到端加密（E2EE）接线 -------------------------------------------------
+test('Matrix proactive Markdown preserves long code without retrying network errors', async () => {
+  const context = await createContext({
+    config: { maxMessageLength: 500 },
+    apiOptions: { initial: { next_batch: 'b0', rooms: {} } },
+  });
+  try {
+    await context.runtime.start();
+    const target = { kind: 'dm', route: { userId: '@owner:example.org' } };
+    const rows = Array.from({ length: 100 }, (_, i) => `row_${i} = "中文😀";`);
+    await context.runtime.sendProactiveText(target, '```js\n' + rows.join('\n') + '\n```', { format: 'markdown' });
+    const sent = sentMessages(context.fake);
+    ok(sent.length > 1);
+    for (const { content } of sent) {
+      ok(content.body.length <= 500);
+      equal(content.format, 'org.matrix.custom.html');
+      match(content.formatted_body, /<pre><code/);
+      equal((content.body.match(/^```/gm) ?? []).length, 2);
+    }
+    const joined = sent.map(call => call.content.body).join('\n');
+    for (const row of rows) equal(joined.split(row).length - 1, 1);
+    let calls = 0;
+    context.fake.sendEvent = async () => { calls++; throw new Error('network lost'); };
+    await rejects(context.runtime.sendProactiveText(target, '**answer**', { format: 'markdown' }), /network lost/);
+    equal(calls, 1);
+  } finally {
+    await context.stop();
+  }
+});
+
 // The runtime-side contract with the crypto engine: the three e2eeMode gates, the
 // decrypt-then-normalise inbound rewrite, the encrypt wrap on outbound sends into an
 // encrypted room, to-device dispatch, membership-driven re-share invalidation, the

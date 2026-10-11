@@ -3,6 +3,7 @@ import { extname } from 'node:path';
 
 import { fetchImageBuffer, ImagePromptError } from '../shared/image-prompt.mjs';
 import { t } from '../shared/i18n.mjs';
+import { chunkMarkdownParts } from '../shared/markdown-chunks.mjs';
 import { DINGTALK_MENU_TEMPLATE_ID, dingtalkMenuCardData } from './dingtalk-menu.mjs';
 
 export const DINGTALK_REGISTRATION_BASE_URL = 'https://oapi.dingtalk.com/';
@@ -402,6 +403,7 @@ function positiveNumber(value, fallback) {
 }
 
 export function createDingtalkApi({
+  logger = console,
   fetchImpl = fetch,
   registrationBaseUrl = process.env.DINGTALK_REGISTRATION_BASE_URL
     || DINGTALK_REGISTRATION_BASE_URL,
@@ -1075,37 +1077,52 @@ export function createDingtalkApi({
       return true;
     },
 
-    async sendRobotText({ clientId, clientSecret, target, text, signal }) {
+    async sendRobotText({ clientId, clientSecret, target, text, signal, format = 'plain' }) {
       if (typeof text !== 'string' || !text.trim()) throw new TypeError('text is required');
-      const content = text;
       const normalizedTarget = normalizeFileTarget(target);
       const token = await accessToken({ clientId, clientSecret, signal });
-      const body = {
-        robotCode: normalizedTarget.robotCode,
-        msgKey: 'sampleText',
-        msgParam: JSON.stringify({ content }),
-        ...(normalizedTarget.type === 'group'
-          ? { openConversationId: normalizedTarget.openConversationId }
-          : { userIds: [normalizedTarget.userId] }),
-      };
       const pathname = normalizedTarget.type === 'group'
         ? 'v1.0/robot/groupMessages/send'
         : 'v1.0/robot/oToMessages/batchSend';
-      const response = await requestJson(fetchImpl, endpoint(apiBase, pathname), {
-        body,
-        headers: { 'x-acs-dingtalk-access-token': token },
-        signal,
-        action: '主动文字消息发送',
-      });
-      const rejection = rejectedProviderResponse(response);
-      if (rejection) {
-        throw new DingtalkApiError(
-          'send-rejected',
-          '钉钉服务拒绝了主动文字消息。',
-          { providerCode: rejection },
-        );
+      const send = async (content, markdown) => {
+        const response = await requestJson(fetchImpl, endpoint(apiBase, pathname), {
+          body: {
+            robotCode: normalizedTarget.robotCode,
+            msgKey: markdown ? 'sampleMarkdown' : 'sampleText',
+            msgParam: JSON.stringify(markdown ? { title: 'DSH', text: content } : { content }),
+            ...(normalizedTarget.type === 'group'
+              ? { openConversationId: normalizedTarget.openConversationId }
+              : { userIds: [normalizedTarget.userId] }),
+          },
+          headers: { 'x-acs-dingtalk-access-token': token },
+          signal,
+          action: '主动文字消息发送',
+        });
+        const rejection = rejectedProviderResponse(response);
+        if (rejection) {
+          throw new DingtalkApiError('send-rejected', '钉钉服务拒绝了主动文字消息。', {
+            providerCode: rejection,
+          });
+        }
+        return response;
+      };
+      if (format !== 'markdown') return send(text, false);
+      // Conservative Unicode payload size; reuse QQ's fence/table-aware split.
+      const chunks = chunkMarkdownParts(text, 1_000);
+      let result;
+      for (const chunk of chunks) {
+        try {
+          result = await send(chunk.markdown, true);
+        } catch (error) {
+          // A missing message model is a definite format rejection. Do not
+          // retry auth/target failures, rate limits or ambiguous transport errors.
+          if (signal?.aborted || error?.providerCode !== 'sendMessage.model.notMatch'
+            || !(error.code === 'send-rejected' || error.status === 400)) throw error;
+          logger.warn?.('[dsh-im:dingtalk] Markdown rejected; sending this chunk as text');
+          if (chunk.plain) result = await send(chunk.plain, false);
+        }
       }
-      return response;
+      return result;
     },
 
     async sendFile(request) {

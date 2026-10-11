@@ -6,7 +6,7 @@ import {
 import { deliverSessionSyncMirror } from '../../src/channels/shared/session-sync-registry.mjs';
 
 const DSH_USER_PREFIX = '[来自 DSH]\n';
-const DSH_ASSISTANT_PREFIX = '[DSH 助手]\n';
+const DSH_ASSISTANT_PREFIX = '[DSH 助手]\n\n';
 
 function completedTurn(reason) {
   return (typeof reason === 'string' ? reason : reason?.kind) === 'completed';
@@ -55,7 +55,7 @@ export function createSessionSyncCoordinator({ deliveryService, logger = console
     );
   };
 
-  const deliver = async (sessionId, targets, text, phase) => {
+  const deliver = async (sessionId, targets, text, phase, format = 'plain') => {
     const unique = new Map();
     for (const target of targets) {
       if (validRecipient(target)) unique.set(recipientKey(target), target);
@@ -67,6 +67,9 @@ export function createSessionSyncCoordinator({ deliveryService, logger = console
         target.targetId,
         sessionId,
         text,
+        // Feishu has already tried its dedicated mirror card. Preserve its
+        // existing plain fallback instead of attempting another rich card.
+        { format: target.channel === 'feishu' ? 'plain' : format },
       )
     )));
     const successful = new Map();
@@ -165,13 +168,14 @@ export function createSessionSyncCoordinator({ deliveryService, logger = console
         return false;
       }
     }));
-    const plain = recipients.filter((_target, index) => !rendered[index]);
-    if (plain.length === 0) return;
+    const fallback = recipients.filter((_target, index) => !rendered[index]);
+    if (fallback.length === 0) return;
     await deliver(
       sessionId,
-      plain,
+      fallback,
       `${DSH_ASSISTANT_PREFIX}${state.assistant.text}`,
       'assistant delivery',
+      'markdown',
     );
   };
 

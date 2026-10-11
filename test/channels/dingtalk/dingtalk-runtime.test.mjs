@@ -132,6 +132,10 @@ test('runtime sends a DingTalk connection test only through the remembered priva
   });
   assert.equal(proactiveSends[0].text, '主动投递');
   assert.equal('sessionWebhook' in proactiveSends[0], false);
+  await runtime.sendProactiveText({ kind: 'user', route: { userId: 'staff-one' } },
+    '**answer**', { format: 'markdown' });
+  assert.equal(proactiveSends[1].format, 'markdown');
+  assert.equal(proactiveSends[1].target.userId, 'staff-one');
   proactiveFailure = Object.assign(new Error('provider detail'), { code: 'send-rejected' });
   await assert.rejects(() => runtime.sendProactiveText({
     kind: 'user',

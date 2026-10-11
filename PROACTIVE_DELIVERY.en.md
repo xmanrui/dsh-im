@@ -175,9 +175,24 @@ await ctx.dshIm.send(botId, targetId, '# Daily report\n\n**Checks complete**', {
 });
 ```
 
-`format` accepts only `plain` and `markdown`, defaulting to `plain`. Markdown formatting is currently implemented for Feishu/Lark: both direct and group destinations receive a native Markdown card without starting a Session or a stream. Other channels retain their existing delivery behavior; Markdown rendering is not guaranteed there. HTTP and `message.send` RPC accept the same optional `format` field in their payloads.
+`format` accepts only `plain` and `markdown`, defaulting to `plain`. HTTP and `message.send` RPC accept the same optional field. Markdown uses the existing channel delivery paths, without starting a Session or a new stream:
 
-The original Markdown, including whitespace, is preserved without silent truncation or automatic splitting; platform message-size and Markdown-syntax limits still apply. Rejection, timeout, and cancellation use the existing error handling, with no automatic plain-text resend that could duplicate delivery. Older dsh-im Host APIs may ignore this option; both the consumer and dsh-im must load the updated code.
+| Channel | Markdown presentation |
+| --- | --- |
+| Feishu/Lark | Native Markdown card |
+| Telegram | Rich Markdown, with the existing text fallback |
+| QQ | Markdown message; known format rejection falls back for the current chunk |
+| DingTalk | Proactive Markdown message; definite format rejection falls back to text |
+| Slack | Standard Markdown block with top-level notification text; explicit block rejection falls back to the existing text sender |
+| WeCom bot | Existing Markdown message type |
+| Matrix | Sanitized HTML with a text body |
+| Discord | Native Markdown in message content |
+| WhatsApp | Limited conversion of common formatting; code is protected and complex syntax stays literal |
+| WeCom app / Weixin | Full text, including code and link destinations |
+
+Channels apply their own message limits and splitting. Feishu proactive cards retain their existing unsplit behavior and do not automatically resend as text after rejection or an uncertain result. Other newly added fallback paths only handle local formatting errors or definite format rejection; they do not resend accepted chunks or retry ambiguous network outcomes. Older Hosts may ignore `format`; load the updated plugin on the Host.
+
+Session sync requests Markdown for final assistant answers and retains the existing default text behavior for user echoes. Feishu keeps its dedicated mirror cards and existing plain-text fallback when the mirror cannot confirm the final answer. This does not expand the supported sync targets.
 
 A same-Host plugin may also list the saved targets for one bot:
 
@@ -308,6 +323,7 @@ The HTTP protocol layer may also return `method-not-allowed` (405), `unsupported
 - Targets remain editable while a bot is offline, but testing and delivery require a connected bot.
 - WeChat proactive sends, connection tests, and deferred task results use the latest `context_token` received from the corresponding user by that bot. Context is stored only in the Host account state and restored after restart; it is never included in delivery targets or returned to callers. Rebinding with a different login credential clears it. After upgrading, an inbound user message is needed to populate the cache.
 - iLink server rules still govern whether WeChat accepts a send. Healthy long polling does not guarantee proactive delivery. If `ret=-2 prepare failed` persists, avoid repeated heartbeat messages as a renewal strategy; ask the recipient to send a message before retrying. This error alone does not establish login expiry, context expiry, or exhausted quota.
+- Long proactive WeChat text uses the existing 1,800-character chunk budget. Synced assistant Markdown keeps complete code fences in each chunk. Each chunk consumes a platform send; splitting does not remove server quotas. A rejection or uncertain result stops delivery and reports failure without resending accepted chunks. Diagnostics identify the failed chunk and total chunk count.
 
 - Failed WeChat proactive sends remain visible in the account’s latest message error, with sanitized diagnostics including the provider code and whether context was included. Healthy polling does not clear this error; a successful outbound send does. HTTP/RPC still return the existing `delivery-failed` error, with no automatic retry or disconnection of healthy long polling.
 

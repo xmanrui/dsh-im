@@ -75,7 +75,7 @@ test('Session sync mirrors direct DSH text and one ordered multi-step assistant 
       botId: 'bot-a',
       targetId: 'alice',
       sessionId: 'session-one',
-      text: '[DSH 助手]\n第一步结果\n\n第二步结果',
+      text: '[DSH 助手]\n\n第一步结果\n\n第二步结果',
     },
   ]);
 });
@@ -108,7 +108,7 @@ test('Session sync suppresses IM, unknown, non-append, and unsuccessful Turn out
   await coordinator.whenIdle();
 
   assert.deepEqual(sends, [[
-    'bot-a', 'alice', 'session-failed', '[来自 DSH]\n输入',
+    'bot-a', 'alice', 'session-failed', '[来自 DSH]\n输入', { format: 'plain' },
   ]]);
 });
 
@@ -167,7 +167,7 @@ test('installed Session sync classifies an unregistered Host user rpcId as direc
 
   assert.deepEqual(sends.map((entry) => entry[3]), [
     '[来自 DSH]\nDesktop 输入',
-    '[DSH 助手]\nDesktop 回答',
+    '[DSH 助手]\n\nDesktop 回答',
   ]);
   effects[0]();
   installed.close();
@@ -198,9 +198,32 @@ test('installed Session sync sends one scheduled answer without echoing its inte
   listener(session, turnEnd());
   await installed.whenIdle();
   assert.deepEqual(sends, [[
-    'bot-weixin', 'owner', 'scheduled-session', '[DSH 助手]\nfirst step\n\nsecond step',
+    'bot-weixin', 'owner', 'scheduled-session', '[DSH 助手]\n\nfirst step\n\nsecond step', { format: 'markdown' },
   ]]);
   installed.close();
+});
+
+test('all eleven sync channels request Markdown for answers while Feishu retains its plain mirror fallback', async () => {
+  const channels = ['feishu', 'telegram', 'qq', 'dingtalk', 'slack', 'wecom',
+    'matrix', 'discord', 'whatsapp', 'wecom-app', 'weixin'];
+  const sends = [];
+  const coordinator = createSessionSyncCoordinator({ deliveryService: {
+    listSessionSyncTargets: async () => channels.map(channel => ({ channel, botId: channel, targetId: 'owner' })),
+    sendSessionSyncText: async (...args) => sends.push(args),
+  } });
+  await coordinator.enqueue('session', turnStart());
+  await coordinator.enqueue('session', userMessage('**literal question**'), 'dsh');
+  await coordinator.enqueue('session', assistantMessage(0, '# Heading\n\n**answer**'));
+  await coordinator.enqueue('session', turnEnd());
+  for (const channel of channels) {
+    const [question, answer] = sends.filter(args => args[0] === channel);
+    assert.deepEqual(question.slice(3), ['[来自 DSH]\n**literal question**', { format: 'plain' }]);
+    assert.deepEqual(answer.slice(3), ['[DSH 助手]\n\n# Heading\n\n**answer**', {
+      format: channel === 'feishu' ? 'plain' : 'markdown',
+    }]);
+  }
+  assert.equal(sends.length, channels.length * 2);
+  coordinator.close();
 });
 
 test('scheduled sync keeps target selection, completion, and IM ownership checks', async () => {

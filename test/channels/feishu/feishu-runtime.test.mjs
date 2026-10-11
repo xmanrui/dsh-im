@@ -576,9 +576,9 @@ for (const phase of ['user echo', 'final fallback']) {
     emitTurn(2);
     t.mock.timers.tick(15_000);
     await coordinator.whenIdle();
-    assert.ok(delivered.includes('[DSH 助手]\nanswer 1'));
-    assert.ok(delivered.includes('[DSH 助手]\nanswer 2'));
-    assert.ok(FakeClient.sent.some(request => JSON.parse(request.data.content).text === '[DSH 助手]\nanswer 2'));
+    assert.ok(delivered.includes('[DSH 助手]\n\nanswer 1'));
+    assert.ok(delivered.includes('[DSH 助手]\n\nanswer 2'));
+    assert.ok(FakeClient.sent.some(request => JSON.parse(request.data.content).text === '[DSH 助手]\n\nanswer 2'));
     const sent = FakeClient.sent.length;
     pending.resolve({ code: 0 });
     await new Promise(resolve => setImmediate(resolve));

@@ -1,5 +1,6 @@
 import { createWeixinDiagnostics } from './connection-error.mjs';
-import { DEFAULT_WEIXIN_MAX_MESSAGE_CHARS, WeixinApiError, rejectedProviderResponse } from './weixin-api.mjs';
+import { DEFAULT_WEIXIN_MAX_MESSAGE_CHARS, WeixinApiError, rejectedProviderResponse, splitWeixinText } from './weixin-api.mjs';
+import { chunkMarkdownText } from '../shared/markdown-chunks.mjs';
 import {
   createWeixinBridgeStatus, WeixinHarnessBridge, weixinSendError, weixinSendFailureOptions,
 } from './weixin-bridge.mjs';
@@ -350,7 +351,7 @@ export class WeixinRuntime {
     return { sent: true };
   }
 
-  async #sendTrackedText({ toUserId, text, signal }) {
+  async #sendTrackedText({ toUserId, text, signal, fullText = text, chunkIndex = 0, chunkCount = 1 }) {
     const sentAt = Date.now();
     const contextToken = this.#state.contextTokenFor?.(toUserId);
     let result;
@@ -366,7 +367,7 @@ export class WeixinRuntime {
     } catch (cause) {
       if (signal?.aborted) throw cause;
       const error = weixinSendError(cause, {
-        baseUrl: this.#config.baseUrl, text, chunk: text, chunkIndex: 0, chunkCount: 1,
+        baseUrl: this.#config.baseUrl, text: fullText, chunk: text, chunkIndex, chunkCount,
         maxMessageChars: this.#maxMessageChars, contextToken,
       });
       const failure = setLastMessageFailure(this.#status,
@@ -402,7 +403,7 @@ export class WeixinRuntime {
     }, options);
   }
 
-  async sendProactiveText(target, text, { signal } = {}) {
+  async sendProactiveText(target, text, { signal, format = 'plain' } = {}) {
     const toUserId = typeof target?.route?.toUserId === 'string'
       ? target.route.toUserId.trim() : '';
     if (target?.kind !== 'user' || !toUserId) {
@@ -415,12 +416,18 @@ export class WeixinRuntime {
       error.code = 'bot-not-connected';
       throw error;
     }
-    signal?.throwIfAborted();
-    await this.#sendTrackedText({
-      toUserId,
-      text,
-      signal: signal ?? this.#abortController.signal,
-    });
+    const sendSignal = signal ?? this.#abortController.signal;
+    sendSignal.throwIfAborted();
+    const chunks = format === 'markdown'
+      ? chunkMarkdownText(text, this.#maxMessageChars)
+      : splitWeixinText(text, this.#maxMessageChars);
+    for (const [chunkIndex, chunk] of chunks.entries()) {
+      sendSignal.throwIfAborted();
+      await this.#sendTrackedText({
+        toUserId, text: chunk, signal: sendSignal,
+        fullText: text, chunkIndex, chunkCount: chunks.length,
+      });
+    }
     return { sent: true };
   }
 }

@@ -1,6 +1,7 @@
 import { BusyMessageDispatcher, canAutomaticallySteer } from '../shared/busy-message-dispatcher.mjs';
 import { isPermissionCommand, runPermissionCommand } from '../shared/permission-command.mjs';
 import { randomUUID } from 'node:crypto';
+import { chunkMarkdownText } from '../shared/markdown-chunks.mjs';
 import QRCode from 'qrcode';
 import { waitForFeishuOperation } from './feishu-channel.mjs';
 import {
@@ -4790,7 +4791,13 @@ export class FeishuHarnessBridge {
 
   /** Replace the draft interval with `text` chunked into splitter-safe blocks. */
   #writeStepCardAnswer(card, text) {
-    const blocks = splitStepPostMarkdown(text, STEP_STREAM_ANSWER_CHUNK_MAX_BYTES)
+    // JSON can expand one UTF-16 unit to six bytes (for example a control
+    // character). Leave room for the element wrapper, and let the existing
+    // Markdown splitter reopen fences in each independently rendered block.
+    const chunks = Buffer.byteLength(JSON.stringify(text), 'utf8') + 128 <= STEP_STREAM_ANSWER_CHUNK_MAX_BYTES
+      ? [text]
+      : chunkMarkdownText(text, Math.floor((STEP_STREAM_ANSWER_CHUNK_MAX_BYTES - 128) / 6));
+    const blocks = chunks
       .map((chunk) => ({ kind: 'message', text: chunk }));
     if (card.answerStart !== null) {
       card.blocks.splice(card.answerStart, card.answerEnd - card.answerStart + 1, ...blocks);
