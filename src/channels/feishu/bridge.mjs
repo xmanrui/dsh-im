@@ -4585,6 +4585,18 @@ export class FeishuHarnessBridge {
     });
   }
 
+  async #sendAnswerMarkdown(chatId, answer, { deliveryId, presentation, replyTo }) {
+    const providerMessageIds = [];
+    // 最终答案保留 Markdown；复用富文本投递的限流重试、话题路由与纯文本兜底。
+    for (const chunk of splitStepPostMarkdown(answer)) {
+      this.#signal?.throwIfAborted();
+      const result = await this.#sendStepPost(chatId, replyTo, [[{ tag: 'md', text: chunk }]], chunk);
+      if (!result.ok) throw result.error ?? new Error('Feishu final answer delivery failed');
+      if (result.messageId) providerMessageIds.push(result.messageId);
+    }
+    return createDeliveryReceipt({ deliveryId, presentation, providerMessageIds });
+  }
+
   // 语音回复(渠道能力):同回合转写过语音消息的会话,在完整答案投递后追加
   // 音频回复。回合按会话 key 登记并消费——同群不同话题各自只消费自己的
   // 回合;登记随消息处理结束(finally)清除,命令类回复(菜单、会话列表等)
@@ -5832,7 +5844,7 @@ export class FeishuHarnessBridge {
       let textReceipt;
       let textSendError = null;
       try {
-        textReceipt = await this.#sendAnswerText(
+        textReceipt = await this.#sendAnswerMarkdown(
           chatId,
           answerTextForDelivery(answer, artifacts),
           {
@@ -5933,7 +5945,7 @@ export class FeishuHarnessBridge {
         let textReceipt;
         let textSendError = null;
         try {
-          textReceipt = await this.#sendAnswerText(
+          textReceipt = await this.#sendAnswerMarkdown(
             chatId,
             answerTextForDelivery(completedAnswer, completedArtifacts),
             {
@@ -5990,7 +6002,7 @@ export class FeishuHarnessBridge {
       let textReceipt;
       let textSendError = null;
       try {
-        textReceipt = await this.#sendAnswerText(
+        textReceipt = await this.#sendAnswerMarkdown(
           chatId,
           answerTextForDelivery(answer, artifacts),
           {
