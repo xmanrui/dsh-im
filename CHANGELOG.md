@@ -6,46 +6,14 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
-### Added / 新增
-
-- 同 Host 插件服务 `dshIm` 新增 `createTarget(botId, target)`，消费插件可把已知的会话路由注册成投递目标，注册后即可用 `targetId` 投递并出现在设置页目标列表；已存在的 `targetId` 以 `target-conflict` 拒绝。
-  The same-Host `dshIm` service now exposes `createTarget(botId, target)`, so a consumer plugin can register a known conversation route as a delivery target; the target is then addressable by `targetId` and listed in the settings panel. An existing `targetId` is rejected with `target-conflict`.
-
-## [5.4.0] - 2026-10-21
-
-### Added / 新增
-
-- 新增独立于投递目标设置的 DS Bot 私聊绑定：已有 IM 私聊可绑定到当前 Host 的 DS Bot，会话随 Bot 切换并同步到桌面；解绑后释放双方占用，保留原有普通会话同步设置。绑定选择器过滤已占用的 Bot 和私聊，并处理并发冲突、会话切换及旧数据迁移。（[#410](https://github.com/xmanrui/dsh-im/pull/410)、[#411](https://github.com/xmanrui/dsh-im/pull/411)）
-  Added DS Bot private-chat bindings independent of delivery targets. Existing IM private chats can follow a DS Bot session on the current Host and sync to the desktop. Unbinding releases both sides while preserving ordinary session-sync preferences. Selectors exclude occupied bots and chats, with conflict handling, session rollover, and migration support. ([#410](https://github.com/xmanrui/dsh-im/pull/410), [#411](https://github.com/xmanrui/dsh-im/pull/411))
-
-- Telegram 新增默认及逐群回复规则：关闭、提及或回复、名单内成员提及或回复、所有消息、名单内成员所有消息。可管理已发现的群，或通过群 ID、用户名及支持的公开链接添加群；未配置群维持原有提及或回复行为，私聊不受影响。（[#404](https://github.com/xmanrui/dsh-im/pull/404)）
-  Added default and per-group Telegram reply triggers: Off, Mention/reply, Mention/reply from listed senders, All messages, and All messages from listed senders. Manage discovered groups or add groups by ID, username, or supported public links. Unconfigured groups retain mention/reply behavior; private chats are unaffected. ([#404](https://github.com/xmanrui/dsh-im/pull/404))
-
-- 企业微信长任务在流式卡片接近十分钟窗口前自动续接新卡片，静默期间发送进度探测，连续回执拒绝时尝试更换卡片；最终结果发送到最新卡片，续接失败时回退到主动消息。（[#388](https://github.com/xmanrui/dsh-im/pull/388)）
-  WeCom long-running tasks rotate streaming cards before their ten-minute window expires, probe progress during quiet periods, and attempt replacement after consecutive rejected acknowledgments. Final results target the newest card, falling back to an active message if rotation fails. ([#388](https://github.com/xmanrui/dsh-im/pull/388))
-
 ### Fixed / 修复
 
-- 绑定 DS Bot 的会话优先显示 Bot 头像而非渠道图标，支持形状、颜色及安全的图片头像；设置面板在打开或手动刷新时更新名称和头像，侧边栏在返回窗口时刷新，避免逐行请求及定时轮询，并丢弃过期请求结果。（[#415](https://github.com/xmanrui/dsh-im/pull/415)、[#416](https://github.com/xmanrui/dsh-im/pull/416)、[#417](https://github.com/xmanrui/dsh-im/pull/417)、[#418](https://github.com/xmanrui/dsh-im/pull/418)）
-  Bound sessions prioritize DS Bot avatars over channel logos, including shape, color, and safe image avatars. Settings refresh names and avatars on open or manual refresh; the sidebar refreshes on window return without per-row requests or periodic polling. Stale responses are discarded. ([#415](https://github.com/xmanrui/dsh-im/pull/415), [#416](https://github.com/xmanrui/dsh-im/pull/416), [#417](https://github.com/xmanrui/dsh-im/pull/417), [#418](https://github.com/xmanrui/dsh-im/pull/418))
-
-- 飞书提问卡片将选项说明放在选择按钮外并允许换行，改善长选项的显示。（[#407](https://github.com/xmanrui/dsh-im/pull/407)）
-  Feishu question cards place option text outside selection buttons and allow wrapping, improving readability for long options. ([#407](https://github.com/xmanrui/dsh-im/pull/407))
-
+- 企业微信机器人在服务端主动断开后（例如同一凭据在别处建立了新连接：SDK 将该断开视为手动关闭，既不重连也不再发出任何事件）会永久停留在「正在连接」。健康检查循环虽持续调用 `initialize()`，但「正在连接」的运行时总被跳过，机器人只能靠手动重连恢复。现在 `initialize()` 将最近一次状态切换超过宽限期（默认 2 分钟，覆盖 SDK 一整轮重连周期）的「正在连接」视为停滞并自动重启连接；反复被踢的短命连接（存活不足 5 分钟即再次掉线）按 1 分钟起步、最长 10 分钟按 bot 指数退避限速，连接持续稳定 5 分钟后退避清零；连接启动失败沿用同一退避。正常重连过程中的「正在连接」不受影响，手动重连始终立即执行。
+  Enterprise WeChat bots stayed in "connecting" forever after a server-side disconnect (for example when a new connection using the same credential made the server drop this one: the SDK treats that close as manual and neither reconnects nor emits further events). The supervisor-driven health loop kept calling `initialize()`, which always skips a "connecting" runtime, so only a manual reconnect could recover the bot. `initialize()` now treats a "connecting" runtime whose last transition is older than a grace window (2 minutes by default, covering one full SDK retry cycle) as stalled and restarts it automatically. Repeatedly kicked short-lived connections (dropping again within 5 minutes) are rate-limited per bot with exponential backoff from 1 minute up to 10 minutes; the backoff clears after a connection stays healthy for 5 minutes, and connection start failures share the same backoff. Actively reconnecting runtimes are untouched, and a manual reconnect always runs immediately.
+- 企业微信机器人在服务端主动断开后（例如同一凭据在别处建立了新连接：SDK 将该断开视为手动关闭，既不重连也不再发出任何事件）会永久停留在「正在连接」。健康检查循环虽持续调用 `initialize()`，但「正在连接」的运行时总被跳过，机器人只能靠手动重连恢复。现在 `initialize()` 将最近一次状态切换超过宽限期（默认 2 分钟，覆盖 SDK 一整轮重连周期）的「正在连接」视为停滞并自动重启连接；连续自动重启失败按 1 分钟起步、最长 10 分钟按 bot 指数退避，避免与合法持有方互相踢线或形成重连风暴，重启成功后退避清零。正常重连过程中的「正在连接」不受影响。
+  Enterprise WeChat bots stayed in "connecting" forever after a server-side disconnect (for example when a new connection using the same credential made the server drop this one: the SDK treats that close as manual and neither reconnects nor emits further events). The supervisor-driven health loop kept calling `initialize()`, which always skips a "connecting" runtime, so only a manual reconnect could recover the bot. `initialize()` now treats a "connecting" runtime whose last transition is older than a grace window (2 minutes by default, covering one full SDK retry cycle) as stalled and restarts it automatically. Repeated automatic restart failures back off per bot from 1 minute up to 10 minutes, so a bot whose credential is also held elsewhere cannot storm the provider or fight the legitimate holder; a successful start clears the backoff. Actively reconnecting runtimes are untouched.
 - 移除 IM 管理面板的「返回插件详情」按钮及相关导航依赖、样式和翻译，从侧边栏或插件详情进入时统一通过宿主侧边栏切换面板。（[#395](https://github.com/xmanrui/dsh-im/issues/395)）
   Removed the IM management panel's **Back to plugin details** button and its navigation dependency, styles, and translation. Both sidebar and plugin-detail entry points now use the host sidebar to switch panels. ([#395](https://github.com/xmanrui/dsh-im/issues/395))
-
-### Security / 安全
-
-- 将构建锁中的 follow-redirects 从 1.16.0 更新到 1.16.1，并重新生成 Host 产物，纳入跨源重定向凭据头过滤修复（[GHSA-q3jh-wrc6-jgq8](https://github.com/advisories/GHSA-q3jh-wrc6-jgq8)、[GHSA-8r9p-f939-6h3c](https://github.com/advisories/GHSA-8r9p-f939-6h3c)）。已有安装若保留旧的间接依赖锁，仍需刷新依赖解析。
-  Updated build-lock follow-redirects from 1.16.0 to 1.16.1 and rebuilt the Host artifact with cross-origin redirect credential-header filtering fixes ([GHSA-q3jh-wrc6-jgq8](https://github.com/advisories/GHSA-q3jh-wrc6-jgq8), [GHSA-8r9p-f939-6h3c](https://github.com/advisories/GHSA-8r9p-f939-6h3c)). Existing installations retaining older transitive dependency locks must refresh their resolution.
-
-### Notes / 使用说明
-
-- DS Bot 绑定要求当前 Host 已安装并启用 DS Bot，且 IM 已存在私聊；不支持群聊或远程 Harness 绑定。Bot 缺失时不会将消息误送到其他会话。Telegram 群规则只能处理机器人实际收到的消息，不支持通过邀请链接解析群；从管理列表移除群不会删除聊天历史。
-  DS Bot bindings require DS Bot installed and enabled on the current Host and an existing IM private chat; group chats and remote Harness bindings are unsupported. Missing bots do not redirect messages to unrelated sessions. Telegram rules apply only to messages delivered to the bot; invite links cannot resolve groups, and removing a group from the management list does not delete chat history.
-- 依赖声明、Node.js 要求与 DSH 兼容声明保持不变。新增头像素材的第三方许可说明；升级后重启 Host 并刷新管理页面。
-  Dependency declarations, Node.js requirements, and DSH compatibility declarations are unchanged. Added third-party notices for avatar assets. Restart the Host and refresh the management page after upgrading.
 
 ## [5.3.0] - 2026-10-20
 
