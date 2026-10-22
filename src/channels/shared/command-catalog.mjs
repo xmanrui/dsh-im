@@ -37,20 +37,32 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   ], { privateOnly: true }),
   defineCatalogCommand('workspace', '切换工作区', [
     '/workspace 工作区序号或绝对路径  切换工作区',
-  ], { aliases: ['ws'] }),
+  ], { aliases: [{ name: 'ws', menuVisible: false }] }),
   defineCatalogCommand('conv', '设置当前对话专属工作区', [
     '/conv 或 /conversation  查看当前对话工作区',
     '/conv 工作区绝对路径或序号  设置当前对话专属工作区',
     '/conv clear  清除专属工作区，回到 bot 默认工作区',
-  ], { aliases: ['conversation', 'thread'] }),
+  ], {
+    // Aliases stay typeable and stay in /help, but the native Telegram menu
+    // lists each command once; B16 in the command UX audit.
+    aliases: [
+      { name: 'conversation', menuVisible: false },
+      { name: 'thread', menuVisible: false },
+    ],
+  }),
   defineCatalogCommand('workspacelist', '列出工作区绝对路径', [
     '/workspacelist  列出工作区绝对路径',
     '/ws、/wsl、/workspaces  工作区命令别名',
-  ], { aliases: ['workspaces', 'wsl'] }),
+  ], {
+    aliases: [
+      { name: 'workspaces', menuVisible: false },
+      { name: 'wsl', menuVisible: false },
+    ],
+  }),
   defineCatalogCommand('sessionlist', '列出会话 ID 和标题', [
     '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题',
     '/sessionlist --limit N  仅列出当前工作区前 N 个会话',
-  ], { aliases: ['sessions'] }),
+  ], { aliases: [{ name: 'sessions', menuVisible: false }] }),
   defineCatalogCommand('session', '将当前聊天绑定到指定会话', [
     '/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话',
   ]),
@@ -59,7 +71,7 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   ]),
   defineCatalogCommand('reasoninglist', '按序号列出当前模型可用推理等级', [
     '/reasoninglist 或 /reasonings  按序号列出当前模型可用推理等级',
-  ], { aliases: ['reasonings'] }),
+  ], { aliases: [{ name: 'reasonings', menuVisible: false }] }),
   defineCatalogCommand('reasoning', '查看或切换当前推理等级', [
     '/reasoning [序号、等级ID或 --default]  查看或切换当前推理等级',
   ]),
@@ -69,7 +81,7 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   ]),
   defineCatalogCommand('presetlist', '列出可用 Agent Preset', [
     '/presetlist 或 /presets  按序号列出可用 Agent Preset',
-  ], { aliases: ['presets'] }),
+  ], { aliases: [{ name: 'presets', menuVisible: false }] }),
   defineCatalogCommand('preset', '查看或设置新会话 Agent Preset', [
     '/preset [序号或完整ID]  查看或设置当前机器人 Agent Preset',
     '纯数字 ID：/preset id:<ID>',

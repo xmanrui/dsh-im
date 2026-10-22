@@ -14,6 +14,7 @@ import {
   enhanceContextContent,
 } from './context-enhancement.mjs';
 import { runWorkspaceCommand } from './workspace-command.mjs';
+import { runStatusCommand } from './status-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
 import { isClearCommand, runClearCommand } from './clear-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from './history-command.mjs';
@@ -1111,8 +1112,14 @@ export class TextHarnessBridge {
         return;
       }
       if (!hasImages && !hasFiles && command === '/status') {
-        await this.#harness.ensureRunning({ signal: this.#signal });
-        await this.#bot.sendText(target, t('{label}机器人与 DeepSeek Harness 连接正常。', { label: this.#descriptor.label }));
+        const status = await runStatusCommand({
+          descriptor: this.#descriptor,
+          harness: this.#harness,
+          state: this.#state,
+          conversationKey,
+          signal: this.#signal,
+        });
+        await this.#bot.sendText(target, status.message);
         return;
       }
       const workspaceCommand = !hasImages && !hasFiles

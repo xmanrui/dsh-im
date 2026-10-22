@@ -33,6 +33,7 @@ import {
   TELEGRAM_COMMAND_MENU,
   normalizeTelegramUpdate,
   telegramCommandMenu,
+  telegramCommandMenuScopes,
   telegramInboundAllowed,
 } from '../../../src/channels/telegram/telegram-runtime.mjs';
 import { TelegramStateStore } from '../../../src/channels/telegram/state-store.mjs';
@@ -228,10 +229,14 @@ test('Telegram API registers the command menu and commands-type menu button', as
     TELEGRAM_COMMAND_MENU.filter(({ command }) => ['presetlist', 'presets', 'preset'].includes(command)),
     [
       { command: 'presetlist', description: '列出可用 Agent Preset' },
-      { command: 'presets', description: '列出可用 Agent Preset' },
       { command: 'preset', description: '查看或设置新会话 Agent Preset' },
     ],
   );
+  // Aliases stay typeable but leave the native menu (batch 0).
+  for (const alias of ['ws', 'conversation', 'thread', 'workspaces', 'wsl',
+    'sessions', 'reasonings', 'presets']) {
+    assert.equal(TELEGRAM_COMMAND_MENU.some(({ command }) => command === alias), false, alias);
+  }
   assert.match(calls[0].url.pathname, /setMyCommands$/);
   assert.deepEqual(calls[0].body, { commands: TELEGRAM_COMMAND_MENU });
   assert.match(calls[1].url.pathname, /setChatMenuButton$/);
@@ -1507,8 +1512,12 @@ test('Telegram runtime validates webhook state and starts a cancellable long pol
   const fakeApi = {
     getMe: async () => ({ id: 123456789, is_bot: true }),
     getWebhookInfo: async () => ({ url: '' }),
-    setMyCommands: async ({ commands }) => {
-      calls.push({ method: 'setMyCommands', commands });
+    deleteMyCommands: async ({ scope } = {}) => {
+      calls.push(scope ? { method: 'deleteMyCommands', scope } : { method: 'deleteMyCommands' });
+      return true;
+    },
+    setMyCommands: async ({ commands, scope }) => {
+      calls.push({ method: 'setMyCommands', commands, scope });
       return true;
     },
     setChatMenuButton: async ({ menuButton }) => {
@@ -1552,9 +1561,18 @@ test('Telegram runtime validates webhook state and starts a cancellable long pol
   assert.equal(proactiveCall.text, 'proactive-test');
   await runtime.stop();
   assert.equal(runtime.status.ready, false);
-  assert.deepEqual(calls[0], { method: 'setMyCommands', commands: TELEGRAM_COMMAND_MENU });
-  assert.deepEqual(calls[1], { method: 'setChatMenuButton', menuButton: COMMANDS_MENU_BUTTON });
-  assert.deepEqual(calls[2], { method: 'getUpdates', offset: -1, timeout: 0 });
+  const [privateMenu, groupMenu] = telegramCommandMenuScopes();
+  // Scoped lists first, legacy default-scope cleanup last (a failed scoped
+  // write must leave the previous menu in place).
+  assert.deepEqual(calls[0], {
+    method: 'setMyCommands', commands: privateMenu.commands, scope: { type: 'all_private_chats' },
+  });
+  assert.deepEqual(calls[1], {
+    method: 'setMyCommands', commands: groupMenu.commands, scope: { type: 'all_group_chats' },
+  });
+  assert.deepEqual(calls[2], { method: 'deleteMyCommands' });
+  assert.deepEqual(calls[3], { method: 'setChatMenuButton', menuButton: COMMANDS_MENU_BUTTON });
+  assert.deepEqual(calls[4], { method: 'getUpdates', offset: -1, timeout: 0 });
   await rm(directory, { recursive: true, force: true });
 });
 

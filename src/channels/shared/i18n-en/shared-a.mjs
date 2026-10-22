@@ -211,6 +211,15 @@ export default {
   '/help  显示本帮助': '/help  Show this help',
   '{label}机器人与 DeepSeek Harness 连接正常。':
     'The {label} bot is connected to DeepSeek Harness and working normally.',
+  // /status details (shared by every text channel that uses TextHarnessBridge).
+  '绑定会话：{session}': 'Session: {session}',
+  '绑定会话：未绑定（发送消息后自动创建）':
+    'Session: not bound yet (created after you send a message)',
+  '当前模型：暂无（创建会话后显示）':
+    'Current model: not available yet (shown after a Session is created)',
+  'Agent Preset（预设）：{preset}': 'Agent Preset: {preset}',
+  '运行中任务：有（发送 /stop 可停止）':
+    'Running task: yes (send /stop to stop it)',
   '{label}机器人凭据缺失，请移除后重新接入。':
     '{label} bot credentials are missing. Remove the bot and connect it again.',
   '{label}连接未就绪，插件会自动重试。':
