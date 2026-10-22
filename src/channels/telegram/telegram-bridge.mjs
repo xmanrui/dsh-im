@@ -1,5 +1,6 @@
 import { harnessQuestionText } from '../shared/harness-question.mjs';
 import { TextHarnessBridge, createTextBridgeStatus } from '../shared/text-harness-bridge.mjs';
+import { TelegramApprovalCard } from './approval-card.mjs';
 
 export const TELEGRAM_DESCRIPTOR = Object.freeze({
   key: 'telegram',
@@ -73,10 +74,16 @@ export const TELEGRAM_INTERACTION_CARD = Object.freeze({
 
 export class TelegramHarnessBridge extends TextHarnessBridge {
   constructor(options) {
+    // Approval cards are on by default; `approvalCard: null` keeps the
+    // plain-text approval flow for a caller that wants it (tests/tools).
+    // The controller owns the per-conversation nonce registry.
     super({
       descriptor: TELEGRAM_DESCRIPTOR,
       interactionCard: TELEGRAM_INTERACTION_CARD,
       ...options,
+      approvalCard: options && Object.hasOwn(options, 'approvalCard')
+        ? options.approvalCard
+        : new TelegramApprovalCard({ logger: options?.logger }),
     });
   }
 }

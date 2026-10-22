@@ -647,6 +647,11 @@ export function formatThinkingLine(text) {
   return `💭 ${truncateCapped(firstParagraph, THINKING_LINE_LIMIT)}`;
 }
 
+/** Telegram reports an idempotent edit with HTTP 400; treat it as success. */
+function isMessageNotModified(error) {
+  return /message is not modified/iu.test(error?.message ?? '');
+}
+
 export class TelegramBotClient {
   #api;
   #signal;
@@ -699,12 +704,62 @@ export class TelegramBotClient {
 
   /** Replace a delivered card's keyboard in place; an empty keyboard removes it. */
   async updateInteractionCard(target, providerMessageId, { markup } = {}) {
-    await this.#api.editMessageReplyMarkup({
-      chatId: target.chatId,
-      messageId: Number(providerMessageId),
-      replyMarkup: markup,
-      signal: this.#signal,
-    });
+    try {
+      await this.#api.editMessageReplyMarkup({
+        chatId: target.chatId,
+        messageId: Number(providerMessageId),
+        replyMarkup: markup,
+        signal: this.#signal,
+      });
+    } catch (error) {
+      // Clearing a keyboard that is already gone is the desired end state.
+      if (!isMessageNotModified(error)) throw error;
+    }
+  }
+
+  /**
+   * Rewrite a delivered card's text and keyboard in one `editMessageText` call.
+   *
+   * Telegram answers "message is not modified" when the client already holds the
+   * exact payload (a duplicate resolution); that is success, not failure. If a
+   * Bot API deployment refuses the combined text+keyboard edit, degrade to the
+   * two calls this client already supports — the interface stays the same.
+   */
+  async editInteractionCard(target, providerMessageId, { text, markup } = {}) {
+    const messageId = Number(providerMessageId);
+    if (!Number.isSafeInteger(messageId)) {
+      throw new TypeError('Telegram card message id must be a safe integer');
+    }
+    try {
+      return await this.#api.editMessageText({
+        chatId: target.chatId,
+        messageId,
+        text,
+        replyMarkup: markup,
+        signal: this.#signal,
+      });
+    } catch (error) {
+      if (isMessageNotModified(error)) return { unchanged: true };
+      if (error?.code !== 'telegram-400' || markup === undefined) throw error;
+      // Clear the dead keyboard first so a stale card cannot keep submitting.
+      try {
+        await this.#api.editMessageReplyMarkup({
+          chatId: target.chatId,
+          messageId,
+          replyMarkup: markup,
+          signal: this.#signal,
+        });
+      } catch (markupError) {
+        if (!isMessageNotModified(markupError)) throw markupError;
+      }
+      await this.#api.editMessageText({
+        chatId: target.chatId,
+        messageId,
+        text,
+        signal: this.#signal,
+      });
+      return { fallback: true };
+    }
   }
 
   /** Stop the client-side spinner on a pressed button. */

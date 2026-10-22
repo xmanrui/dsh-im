@@ -72,6 +72,7 @@ export function harnessApprovalText(payload, {
   toolCall,
   requiresMention = false,
   maxArgumentsLength = 6_000,
+  hasButtons = false,
 } = {}) {
   if (!validHarnessApproval(payload)) return null;
   const callId = cleanText(payload.callId);
@@ -90,8 +91,13 @@ export function harnessApprovalText(payload, {
   ];
   const reason = printableText(payload.reason);
   if (reason) lines.push(t('原因：{reason}', { reason }));
-  lines.push('', t(APPROVAL_PROMPT));
-  if (requiresMention) lines.push('', t('群聊中请 @机器人 后发送审批决定。'));
+  // A button card carries the intent itself: asking the user to type a decision
+  // (or to @ the bot in a group) would be misleading next to the buttons. The
+  // plain-text path below stays byte-identical to what it has always sent.
+  if (!hasButtons) {
+    lines.push('', t(APPROVAL_PROMPT));
+    if (requiresMention) lines.push('', t('群聊中请 @机器人 后发送审批决定。'));
+  }
   return lines.join('\n');
 }
 
@@ -236,7 +242,9 @@ export class HarnessApprovalQueue {
               return;
             }
             if (!decision) {
-              await send(t(APPROVAL_PROMPT));
+              // A button card already tells the user how to decide; repeating
+              // the type-the-decision prompt would contradict its buttons.
+              if (!pending.interactiveCard) await send(t(APPROVAL_PROMPT));
               return;
             }
             await this.#submit(pending, decision);
@@ -366,6 +374,10 @@ export class HarnessApprovalQueue {
       deliveryCompleted: false,
       replyTail: null,
       submitting: false,
+      // Set by a channel renderer once an interactive card really reached the
+      // user. It means the card owns the decision guidance and the receipt, so
+      // the plain-text prompts/receipts below must stay quiet.
+      interactiveCard: false,
       inactive: false,
       resolving: false,
       closedOutcome: null,
@@ -610,11 +622,16 @@ export class HarnessApprovalQueue {
     // resolved event cannot replace the confirmed result or notify twice.
     pending.resolutionNotified = true;
     const text = approvalOutcomeText(outcome);
+    let deliveredByPresentation = false;
     try {
-      await pending.onResolved?.(text);
+      // A card renderer returns true when it already edited the original message
+      // into the receipt; the separate terminal text would then be a duplicate
+      // (and the pending.send may have been swapped by an interim text reply).
+      deliveredByPresentation = (await pending.onResolved?.(text, outcome)) === true;
     } catch (error) {
       this.#logger.warn?.(`[dsh-im:${this.#label}] failed to update a resolved approval:`, error);
     }
+    if (deliveredByPresentation) return;
     await send(text).catch(() => undefined);
   }
 

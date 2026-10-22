@@ -202,6 +202,9 @@ export class TextHarnessBridge {
   #approvals;
   #batches = new BatchInputManager();
   #interactionCard;
+  // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
+  // render hook). Null keeps every channel's existing plain-text approval flow.
+  #approvalCard;
   #contextHooks = null;
   // Delivery attempts per message id. A failed turn releases its `markSeen` so
   // the next poll can retry, and this counter is what keeps that from becoming
@@ -229,6 +232,8 @@ export class TextHarnessBridge {
     signal,
     keepaliveIntervalMs = 4_000,
     interactionCard = null,
+    approvalCard = null,
+    approvalTimeoutMs,
     contextHooks = null,
     autoSteerSameSender = false,
     autoSteerLimit = 0,
@@ -250,6 +255,7 @@ export class TextHarnessBridge {
     this.#signal = signal;
     this.#keepaliveIntervalMs = keepaliveIntervalMs;
     this.#interactionCard = interactionCard ?? null;
+    this.#approvalCard = approvalCard ?? null;
     // Opt-in follow-up lanes for channels whose groups run on rapid consecutive
     // posts: fold a same sender's burst into one dispatch, and steer that
     // sender's own mid-turn follow-ups into the in-flight turn instead of
@@ -273,6 +279,10 @@ export class TextHarnessBridge {
     this.#approvals = new HarnessApprovalQueue({
       label: descriptor.key,
       logger,
+      // Tests and hosts may shorten the approval deadline; the default stays.
+      ...(Number.isFinite(approvalTimeoutMs) && approvalTimeoutMs > 0
+        ? { approvalTimeoutMs }
+        : {}),
     });
     // A queued message lives only in #queues. If the process dies before its
     // turn runs the user has already been told it is queued, so the persisted
@@ -1804,6 +1814,26 @@ export class TextHarnessBridge {
     if (!conversationId || !senderId || !messageId || callback?.senderIsBot === true) return;
     const kind = callback.kind === 'group' ? 'group' : 'direct';
     const key = `${kind}:${conversationId}`;
+    // Approval cards own their callback namespace; every other press keeps using
+    // the question-card path below. The card acknowledges the press itself (the
+    // ack must be the first round-trip), so this branch runs before any other
+    // work in acceptCallback.
+    if (this.#approvalCard && typeof this.#approvalCard.handlePress === 'function') {
+      const handled = await this.#approvalCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        submit: (approvalId, outcome, options) => (
+          this.#approvals.submitByApprovalId(approvalId, outcome, options)
+        ),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle an approval card press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
     const pending = this.#pendingInteractions.get(key);
     const notice = (text) => this.#answerInteractionCallback(callback, text);
     if (!pending) return notice(t('该问题已处理，无需再次选择。'));
@@ -1884,11 +1914,37 @@ export class TextHarnessBridge {
     requiresMention,
   }) {
     if (interaction?.kind === 'approval') {
+      const send = (text) => this.#bot.sendText(target, text);
+      // Optional interactive-card presentation. The shared queue calls
+      // `render(pending, send)` instead of the plain text when present and
+      // `onResolved(text, outcome)` after any decision (button or typed reply).
+      let cardContext = null;
+      if (this.#approvalCard && typeof this.#approvalCard.createContext === 'function') {
+        try {
+          cardContext = this.#approvalCard.createContext({
+            key,
+            actor,
+            target,
+            send,
+            bot: this.#bot,
+            logger: this.#logger,
+          });
+        } catch (error) {
+          this.#logger.warn?.(
+            `[dsh-im:${this.#descriptor.key}] approval card unavailable; keeping the text approval:`,
+            error?.message ?? error,
+          );
+        }
+      }
       return this.#approvals.handleRequested(interaction, {
         key,
         actor,
         requiresMention,
-        send: (text) => this.#bot.sendText(target, text),
+        send: typeof cardContext?.send === 'function' ? cardContext.send : send,
+        ...(typeof cardContext?.render === 'function' ? { render: cardContext.render } : {}),
+        ...(typeof cardContext?.onResolved === 'function'
+          ? { onResolved: cardContext.onResolved }
+          : {}),
       });
     }
     if (interaction?.kind !== 'question') return;

@@ -1250,3 +1250,85 @@ test('a timeout waits for the previous confirmation before presenting later appr
   assert.deepEqual(responses, [['a', 'allowed-once'], ['b', 'rejected']]);
   assert.equal(queue.hasPending(context.key), true);
 });
+
+test('a card presentation keeps the approval body but drops the type-this-reply prompt', () => {
+  const plain = harnessApprovalText(approval, { toolCall, requiresMention: true });
+  // Invariant: the text fallback stays byte-identical to the pre-card flow.
+  assert.equal(
+    plain,
+    'DeepSeek Harness 需要你的审批：\n\n'
+      + '工具：bash\n'
+      + '操作参数：\n'
+      + '{\n  "command": "printf \'approval-test\\\\n\'"\n}\n'
+      + '原因：测试 IM 审批链路\n\n'
+      + '请精准回复「批准」或「拒绝」（也支持：同意 / 不同意 / yes / no）。\n\n'
+      + '群聊中请 @机器人 后发送审批决定。',
+  );
+
+  const card = harnessApprovalText(approval, {
+    toolCall,
+    requiresMention: true,
+    hasButtons: true,
+  });
+  assert.ok(card);
+  assert.match(card, /工具：bash/u);
+  assert.match(card, /printf/u, 'the tool arguments stay in the card body');
+  assert.match(card, /原因：测试 IM 审批链路/u);
+  assert.doesNotMatch(card, /请精准回复/u, 'a button card never asks the user to type the decision');
+  assert.doesNotMatch(card, /@机器人/u, 'a button press is explicit intent, no mention needed');
+});
+
+test('a resolved approval reports the outcome next to its receipt text', async () => {
+  const queue = new HarnessApprovalQueue({ logger: { warn() {}, error() {} } });
+  const seen = [];
+  const respond = async () => ({ accepted: true });
+  await queue.handleRequested(interaction({ id: 'outcome', toolName: 'bash', respond }), {
+    key: 'direct:actor-a',
+    actor: 'actor-a',
+    send: async () => {},
+    render: async () => {},
+    onResolved: async (text, outcome) => { seen.push([text, outcome]); },
+  });
+  assert.equal(await queue.submitByApprovalId('outcome', 'allowed-once', { actor: 'actor-a' }), true);
+  assert.deepEqual(seen, [['已批准，仅对本次操作有效。', 'allowed-once']]);
+});
+
+test('a presentation that delivered the receipt suppresses the duplicate terminal text', async () => {
+  const queue = new HarnessApprovalQueue({ logger: { warn() {}, error() {} } });
+  const sent = [];
+  const respond = async () => ({ accepted: true });
+  await queue.handleRequested(interaction({ id: 'receipt', toolName: 'bash', respond }), {
+    key: 'direct:actor-a',
+    actor: 'actor-a',
+    send: async (text) => { sent.push(text); },
+    render: async () => {},
+    // The interactive presentation edited the original message into its receipt.
+    onResolved: async () => true,
+  });
+  assert.equal(await queue.submitByApprovalId('receipt', 'allowed-once', { actor: 'actor-a' }), true);
+  assert.deepEqual(sent, [], 'no second terminal text after an interactive receipt');
+});
+
+test('an interactive presentation suppresses the type-a-reply prompt for ordinary text', async () => {
+  const queue = new HarnessApprovalQueue({ logger: { warn() {}, error() {} } });
+  const sent = [];
+  const respond = async () => ({ accepted: true });
+  await queue.handleRequested(interaction({ id: 'interactive', toolName: 'bash', respond }), {
+    key: 'direct:actor-a',
+    actor: 'actor-a',
+    send: async (text) => { sent.push(text); },
+    // Channel marks the pending item once the keyboard really reached the user.
+    render: async (pending) => { pending.interactiveCard = true; },
+  });
+  const reply = queue.claimReply({
+    key: 'direct:actor-a',
+    actor: 'actor-a',
+    text: '随便说一句',
+    addressed: true,
+    send: async (text) => { sent.push(text); },
+  });
+  assert.ok(reply, 'ordinary text is still claimed by the approval route');
+  await reply.process();
+  assert.deepEqual(sent, [], 'a button card must not ask the user to type the decision');
+  assert.equal(queue.hasPending('direct:actor-a'), true, 'no decision was submitted');
+});

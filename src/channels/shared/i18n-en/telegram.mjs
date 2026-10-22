@@ -24,4 +24,18 @@ export default {
     'This Telegram bot already has a Webhook configured. Remove the Webhook from the original service and try again.',
   'Telegram机器人': 'Telegram Bot',
   ' Bot API 长轮询': ' Bot API long polling',
+  // Approval button card (batch 1): buttons, terminal receipts and dead-card
+  // notices. Keys match the literals passed through t() in approval-card.mjs.
+  '✅ 批准一次': '✅ Approve once',
+  '✅ 已批准（仅本次）': '✅ Approved (this time only)',
+  '❌ 已拒绝': '❌ Rejected',
+  '⏰ 已过期': '⏰ Expired',
+  '⛔ 已失效': '⛔ No longer valid',
+  '正在提交审批决定，请稍候。': 'Submitting the approval decision, please wait.',
+  '该审批已处理，无需重复操作。': 'This approval was already handled. No need to act again.',
+  '该审批已过期，已自动拒绝。': 'This approval expired and was rejected automatically.',
+  '该审批已被新提示取代，请使用最新一条。':
+    'This approval was superseded by a newer prompt; use the latest one.',
+  '该审批已失效，请等待新的审批提示。':
+    'This approval is no longer valid; wait for a new approval prompt.',
 };
