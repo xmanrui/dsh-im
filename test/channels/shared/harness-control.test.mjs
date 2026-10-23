@@ -7,6 +7,7 @@ import test from 'node:test';
 import { createBotWorkspaceScope } from '../../../src/channels/shared/bot-workspace-store.mjs';
 import {
   HarnessClient,
+  HarnessRpcError,
   HarnessTurnError,
   consumeDshImInputOrigin,
 } from '../../../src/channels/shared/harness-client.mjs';
@@ -846,4 +847,56 @@ test('workspace session and listModels re-check their scope after an in-flight R
   fixture.removeBot();
   listGate.resolve(CATALOG);
   await assert.rejects(globalListing, (error) => error?.code === 'workspace-bot-not-found');
+});
+
+async function ownedTurn() {
+  const turn = controlledTurn();
+  const control = { owner: {}, key: 'direct:one' };
+  const asking = turn.client.ask(turn.id, 'work', { control, timeoutMs: 2_000 });
+  void asking.catch(() => undefined);
+  await turn.admitted;
+  turn.settle = async () => {
+    turn.failHistory(null);
+    turn.finish();
+    await asking.catch(() => undefined);
+  };
+  return { turn, control };
+}
+
+function failCancel(turn, code) {
+  const rpc = turn.client.rpc;
+  turn.client.rpc = async (method, ...args) => {
+    if (method === 'session.cancel') throw new HarnessRpcError(method, { code });
+    return rpc(method, ...args);
+  };
+}
+
+for (const code of ['session-not-found', 'session/not-found']) {
+  test(`a deleted Session reported as ${code} releases control without a cancel RPC`, async () => {
+    const { turn, control } = await ownedTurn();
+    turn.failHistory(new HarnessRpcError('session.history', { code }));
+    assert.equal(await turn.client.hasActiveTurn(turn.id, control), false);
+    assert.equal(await turn.client.stopActiveTurn(turn.id, control), false);
+    assert.equal(turn.calls.some(({ method }) => method === 'session.cancel'), false);
+    await turn.settle();
+  });
+
+  test(`a Session deleted before cancel (${code}) reports no stopped turn`, async () => {
+    const { turn, control } = await ownedTurn();
+    failCancel(turn, code);
+    assert.equal(await turn.client.stopActiveTurn(turn.id, control), false);
+    await turn.settle();
+  });
+}
+
+test('other history and cancel failures during control still propagate', async () => {
+  const history = await ownedTurn();
+  history.turn.failHistory(new HarnessRpcError('session.history', { code: 'internal' }));
+  await assert.rejects(history.turn.client.stopActiveTurn(history.turn.id, history.control), { code: 'internal' });
+  await history.turn.settle();
+
+  const cancel = await ownedTurn();
+  failCancel(cancel.turn, 'internal');
+  await assert.rejects(cancel.turn.client.stopActiveTurn(cancel.turn.id, cancel.control), { code: 'internal' });
+  await cancel.turn.settle();
 });

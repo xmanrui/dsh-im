@@ -159,7 +159,7 @@ export function createDeferredDeliveryCoordinator({
       return 'delivered';
     } catch (error) {
       if (activeSignal.aborted) return 'none';
-      if (error?.code === 'session-not-found') { await remove(entry); return 'none'; }
+      if (['session-not-found', 'session/not-found'].includes(error?.code)) { await remove(entry); return 'none'; }
       const current = await pending(id);
       if (!current) return 'none';
       if (!sending) {

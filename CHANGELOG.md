@@ -11,6 +11,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 同 Host 插件服务 `dshIm` 新增 `createTarget(botId, target)`，消费插件可把已知的会话路由注册成投递目标，注册后即可用 `targetId` 投递并出现在设置页目标列表；已存在的 `targetId` 以 `target-conflict` 拒绝。
   The same-Host `dshIm` service now exposes `createTarget(botId, target)`, so a consumer plugin can register a known conversation route as a delivery target; the target is then addressable by `targetId` and listed in the settings panel. An existing `targetId` is rejected with `target-conflict`.
 
+### Fixed / 修复
+
+- DSH 0.2.x 以 `session/not-found` 报告会话不存在时，绑定到已删除会话的聊天会在提交前换绑新会话，不再每条消息都以 `INTERNAL_UNKNOWN` 失败；停止回合、刷新回合控制权和延迟交付同样按会话不存在处理，因该错误码失败的消息归类为 `SESSION_NOT_FOUND`。（[#444](https://github.com/xmanrui/dsh-im/issues/444)）
+  When DSH 0.2.x reports a missing Session as `session/not-found`, a chat bound to a deleted Session is rebound to a new Session before submission instead of failing every message with `INTERNAL_UNKNOWN`. Stopping a turn, refreshing turn control, and deferred delivery also treat the code as a missing Session, and a message that fails with it is classified as `SESSION_NOT_FOUND`. ([#444](https://github.com/xmanrui/dsh-im/issues/444))
+
 ## [5.4.0] - 2026-10-21
 
 ### Added / 新增

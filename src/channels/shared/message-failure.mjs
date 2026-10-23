@@ -145,7 +145,7 @@ function failureCode(error, details) {
   if (code === 'model-max-tokens') return 'MODEL_OUTPUT_LIMIT';
   if (code === 'turn-blocked') return 'TURN_BLOCKED';
   if (['turn-interrupted', 'turn-aborted'].includes(code)) return 'TURN_INTERRUPTED';
-  if (code === 'session-not-found') return 'SESSION_NOT_FOUND';
+  if (code === 'session-not-found' || code === 'session/not-found') return 'SESSION_NOT_FOUND';
   if (code === 'session-archived') return 'SESSION_ARCHIVED';
   if (code === 'agent-busy') return 'SESSION_BUSY';
   if (code === 'workspace-session-stale') return 'SESSION_STALE';

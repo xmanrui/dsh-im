@@ -879,6 +879,13 @@ export class HarnessRpcError extends Error {
   }
 }
 
+// DSH 0.2.x reports a missing Session as `session/not-found`; earlier Hosts
+// used `session-not-found`. Both mean the bound Session no longer exists.
+function isSessionNotFound(error) {
+  return error instanceof HarnessRpcError
+    && ['session-not-found', 'session/not-found'].includes(error.code);
+}
+
 export class HarnessTransportError extends Error {
   constructor(code, method, { cause, status } = {}) {
     const statusDetail = Number.isInteger(status) ? `, HTTP ${status}` : '';
@@ -1436,7 +1443,7 @@ export class HarnessClient {
       return true;
     } catch (error) {
       if (error.code === 'session-archived') return true;
-      if (error instanceof HarnessRpcError && error.code === 'session-not-found') return false;
+      if (isSessionNotFound(error)) return false;
       throw error;
     }
   }
@@ -1610,7 +1617,7 @@ export class HarnessClient {
       );
       this.#consumeInteractionOwnerships(sessionId, history.events ?? []);
     } catch (error) {
-      if (!(error instanceof HarnessRpcError) || error.code !== 'session-not-found') throw error;
+      if (!isSessionNotFound(error)) throw error;
       for (const ownership of candidates) {
         ownership.active = false;
         ownership.completed = true;
@@ -1681,7 +1688,7 @@ export class HarnessClient {
       if (this.#activeControlOwnership(sessionId, control) === ownership) {
         ownership.stopRequested = false;
       }
-      if (error instanceof HarnessRpcError && error.code === 'session-not-found') return false;
+      if (isSessionNotFound(error)) return false;
       throw error;
     }
   }

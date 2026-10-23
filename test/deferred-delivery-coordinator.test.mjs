@@ -209,3 +209,19 @@ test('without scoped cancellation, stop does not call session.cancel', async (t)
   await f.coordinator.whenIdle();
   assert.equal(await f.coordinator.stop('chat'), 'unavailable');
 });
+
+for (const code of ['session-not-found', 'session/not-found']) {
+  test(`a deleted Session reported as ${code} drops the row without delivering or polling`, async (t) => {
+    let reads = 0;
+    const f = await fixture(t, { harness: { rpc: async () => {
+      reads++;
+      throw Object.assign(new Error('Session disappeared'), { code });
+    } } });
+    await f.track();
+    await until(() => f.state.deferredEntries().length === 0);
+    const settled = reads;
+    await sleep(60);
+    assert.equal(reads, settled);
+    assert.deepEqual(f.sent, []);
+  });
+}
