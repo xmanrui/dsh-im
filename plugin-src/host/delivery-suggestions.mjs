@@ -10,6 +10,7 @@ const CHANNELS = new Set([
   'discord',
   'whatsapp',
   'imessage',
+  'email',
   'matrix',
 ]);
 
@@ -133,6 +134,18 @@ export function deliverySuggestionFromConversationKey(channel, key) {
         && !/[\u0000-\u001f\u007f]/u.test(chatGuid)
         ? { kind: 'user', route: { chatGuid } } : null;
     }
+    case 'email': {
+      // 邮箱会话按 direct:<地址> 记录，route 只有 address 一个字段，kind 固定为 user。
+      // 旧运行时会连尖括号一起写入键里（direct:<a@b.com>），先剥掉再校验。
+      const raw = afterPrefix(key, 'direct');
+      const address = raw?.replace(/^<|>$/g, '');
+      // QQ 邮件把会话记成 tencent_<32 位十六进制>@qq.com，那是内部 Message-ID，
+      // 不是可收信地址；拿去投递必被拒，前端只显示 delivery-failed。故不生成候选。
+      if (address && /^tencent_[0-9a-f]{32}@qq\.com$/iu.test(address)) return null;
+      return address && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(address)
+        ? { kind: 'user', route: { address: address.toLowerCase() } }
+        : null;
+    }
     case 'matrix':
       return matrixSuggestion(key.replace(/^(direct|group):/, ''));
     default:
@@ -157,6 +170,7 @@ export function privateDeliverySuggestionFromConversationKey(channel, key) {
     discord: 'direct',
     whatsapp: 'direct',
     imessage: 'direct',
+    email: 'direct',
     matrix: 'dm',
   }[channel];
   if (!privatePrefix || prefix !== privatePrefix) return null;

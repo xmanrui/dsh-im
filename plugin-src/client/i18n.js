@@ -1254,6 +1254,7 @@ const EN = Object.freeze({
   'DeepSeek Harness 会读取该邮箱的新邮件作为指令，并在同一邮件线程内回复处理结果。': 'DeepSeek Harness reads new mail in this mailbox as instructions and replies with the result inside the same mail thread.',
   '邮箱服务商': 'Mail provider',
   '邮箱地址': 'Email address',
+  '收件人': 'Recipient',
   '应用密码 / 授权码': 'App password / authorization code',
   'IMAP/SMTP 授权码': 'IMAP/SMTP authorization code',
   '不是邮箱登录密码；请在邮箱设置中单独生成。': 'This is not your login password; generate it separately in your mailbox settings.',

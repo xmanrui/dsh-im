@@ -137,6 +137,15 @@ const CHANNEL_DEFINITIONS = Object.freeze({
     kinds: [{ value: 'user', label: '私聊' }],
     fields: { user: [{ key: 'chatGuid', label: 'Chat GUID', placeholder: 'iMessage;+;chat123' }] },
   },
+  // 邮箱渠道在 Host 侧（delivery-adapter 的 case 'email'）早于投递设置页面支持，
+  // route 只有 address 一个字段，kind 固定为 user，这里补齐表单定义让投递目标可选。
+  email: {
+    label: '邮箱',
+    kinds: [{ value: 'user', label: '收件人' }],
+    fields: {
+      user: [{ key: 'address', label: '邮箱地址', placeholder: 'name@example.com', inputMode: 'email' }],
+    },
+  },
 });
 
 export const DELIVERY_CHANNEL_DEFINITIONS = CHANNEL_DEFINITIONS;

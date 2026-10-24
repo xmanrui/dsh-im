@@ -134,7 +134,7 @@ test('delivery settings define only the ten supported IM channel routes', () => 
   assert.equal(DELIVERY_RPC_CHANNEL, '/dsh-im-delivery');
   assert.deepEqual(Object.keys(DELIVERY_CHANNEL_DEFINITIONS), [
     'weixin', 'feishu', 'dingtalk', 'wecom', 'wecomApp', 'qq',
-    'slack', 'telegram', 'discord', 'whatsapp', 'imessage',
+    'slack', 'telegram', 'discord', 'whatsapp', 'imessage', 'email',
   ]);
   assert.deepEqual(
     DELIVERY_CHANNEL_DEFINITIONS.feishu.fields.user.map((field) => field.key),
@@ -149,7 +149,11 @@ test('delivery settings define only the ten supported IM channel routes', () => 
     ['chatId', 'messageThreadId'],
   );
   assert.equal('office' in DELIVERY_CHANNEL_DEFINITIONS, false);
-  assert.deepEqual(Object.keys(ACCESS_CHANNEL_DEFINITIONS), Object.keys(DELIVERY_CHANNEL_DEFINITIONS));
+  // 邮箱是自聊单用户渠道，访问策略表单不覆盖它，这里只比较两边共有的 IM 渠道。
+  assert.deepEqual(
+    Object.keys(ACCESS_CHANNEL_DEFINITIONS),
+    Object.keys(DELIVERY_CHANNEL_DEFINITIONS).filter((channel) => channel !== 'email'),
+  );
   assert.equal(ACCESS_CHANNEL_DEFINITIONS.weixin.groupSupported, false);
 });
 
