@@ -865,6 +865,9 @@ export class DeliveryService {
       if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
         throw deliveryError('cancelled', 'Request cancelled', { cause: error });
       }
+      // 媒体投递的原始错误码走 publicOperationError 会被压成 delivery-failed，
+      // 这里先留一条诊断，排障时看 dsh web 日志。
+      console.error('[dsh-im] 主动媒体投递失败:', error?.code ?? error?.name ?? 'Error', error?.message ?? '');
       throw publicOperationError(error);
     }
   }
