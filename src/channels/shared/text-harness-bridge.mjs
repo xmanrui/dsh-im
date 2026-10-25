@@ -1067,6 +1067,29 @@ export class TextHarnessBridge {
     return this.#bot.sendText(target, text);
   }
 
+  // 主动投递媒体：与 sendProactiveText 走同一条主动消息通道，供无人值守会话调用。
+  // 渠道没有媒体能力时抛 capability-unavailable，由投递服务统一映射为公开错误码。
+  sendProactiveMedia(target, media, { signal } = {}) {
+    signal?.throwIfAborted();
+    const bytes = media?.bytes;
+    if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+      const error = new Error('media bytes are required');
+      error.code = 'bad-request';
+      throw error;
+    }
+    const fileName = typeof media.fileName === 'string' && media.fileName ? media.fileName : 'file';
+    const isImage = typeof media.mediaType === 'string' && media.mediaType.startsWith('image/');
+    if (isImage && typeof this.#bot.sendImage === 'function') {
+      return this.#bot.sendImage(target, { buffer: bytes });
+    }
+    if (typeof this.#bot.sendFile === 'function') {
+      return this.#bot.sendFile(target, { buffer: bytes }, { fileName });
+    }
+    const error = new Error('media delivery unavailable');
+    error.code = 'capability-unavailable';
+    throw error;
+  }
+
   async #deliverArtifacts(target, replyTo, artifacts = [], baseReceipt) {
     const delivery = await deliverOutboundArtifacts({
       artifacts,

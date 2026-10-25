@@ -1,6 +1,7 @@
 import { createDeliveryRpcHandler, DELIVERY_ENDPOINTS } from './delivery-rpc.mjs';
 
 export const DELIVERY_HTTP_PATH = '/api/dsh-im/delivery/messages';
+export const DELIVERY_MEDIA_HTTP_PATH = '/api/dsh-im/delivery/media';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -12,6 +13,7 @@ const DELIVERY_ERROR_STATUS = Object.freeze({
   'invalid-target': 422,
   'bot-not-connected': 503,
   'target-rejected': 422,
+  'capability-unavailable': 501,
   'delivery-failed': 502,
   cancelled: 408,
 });
@@ -65,7 +67,7 @@ async function readJsonBody(request) {
   }
 }
 
-export function createDeliveryHttpHandler(service) {
+export function createDeliveryHttpHandler(service, endpoint = DELIVERY_ENDPOINTS.send) {
   const dispatch = createDeliveryRpcHandler(service);
   return async (request, response) => {
     if (request.method !== 'POST') {
@@ -90,7 +92,7 @@ export function createDeliveryHttpHandler(service) {
     response.once('close', cancelClosedResponse);
     try {
       const payload = await readJsonBody(request);
-      const result = await dispatch(DELIVERY_ENDPOINTS.send, payload, abort.signal);
+      const result = await dispatch(endpoint, payload, abort.signal);
       if (result.ok) {
         json(response, 200, result.value);
         return;
@@ -120,13 +122,25 @@ export function installDeliveryHttp(ctx, service) {
     || typeof ctx.effect !== 'function') {
     throw new TypeError('DSH Host WebServer is required');
   }
-  const route = {
-    kind: 'exact',
-    path: DELIVERY_HTTP_PATH,
-    handler: createDeliveryHttpHandler(service),
-  };
+  const routes = [
+    {
+      kind: 'exact',
+      path: DELIVERY_HTTP_PATH,
+      handler: createDeliveryHttpHandler(service, DELIVERY_ENDPOINTS.send),
+    },
+    {
+      kind: 'exact',
+      path: DELIVERY_MEDIA_HTTP_PATH,
+      handler: createDeliveryHttpHandler(service, DELIVERY_ENDPOINTS.sendMedia),
+    },
+  ];
   return ctx.effect(
-    () => ctx.webServer.register(route),
-    `dsh-im: ${DELIVERY_HTTP_PATH}`,
+    () => {
+      const disposers = routes.map((route) => ctx.webServer.register(route));
+      return () => {
+        for (const dispose of disposers) if (typeof dispose === 'function') dispose();
+      };
+    },
+    `dsh-im: ${DELIVERY_HTTP_PATH}, ${DELIVERY_MEDIA_HTTP_PATH}`,
   );
 }

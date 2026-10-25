@@ -555,6 +555,14 @@ export function createDeliveryAdapter({
       const result = await coreController.sendProactiveText(botId, normalized, text, options);
       return options.receipt === true ? result : { sent: true };
     },
+    async sendMedia(botId, target, media, options = {}) {
+      const normalized = normalizeDeliveryTarget(channel, targetWithoutSessionSync(target));
+      if (typeof coreController.sendProactiveMedia !== 'function') {
+        throw Object.assign(new Error('capability-unavailable'), { code: 'capability-unavailable' });
+      }
+      await coreController.sendProactiveMedia(botId, normalized, media, options);
+      return { sent: true };
+    },
     async setSessionSync(botId, targetId, enabled) {
       if (typeof workspaces.setDeliveryTargetSessionSync !== 'function') {
         throw sessionSyncUnavailable();
