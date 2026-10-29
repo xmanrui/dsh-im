@@ -114,6 +114,7 @@ export async function qqMenuView(name, harness, state, key, { signal, busy = fal
       t('模式／预设：{preset}', { preset: clean(preset?.label || presetId) || t('跟随 Host 默认') }),
       t('当前模型：{model}', { model: clean(model?.name || catalog?.current?.model) || t('暂不可用') }),
       t('归档会话：{state}', { state: archived ? t('显示') : t('隐藏') }),
+      t('工具通知：{state}', { state: state.includesToolProgressNotices?.() ? t('开启') : t('关闭') }),
       t('任务状态：{state}', { state: busy ? t('处理中') : t('空闲') }),
       results.some((r) => r.status === 'rejected') ? t('部分设置暂未加载，可进入对应列表重试。') : '',
     ].filter(Boolean).join('\n');
@@ -123,6 +124,11 @@ export async function qqMenuView(name, harness, state, key, { signal, busy = fal
         section(t('🧠 模型'), 'models'), command(t('🆕 新会话'), '/new'), section(t('📋 会话列表'), 'sessions'),
         command(t('⏹ 停止'), '/stop'), command(t('📐 压缩'), '/compact'), command(t('🧹 清空上下文'), '/clear'), section(t('💬 补充指令'), 'steer'),
         { label: t('切换归档显示'), action: { kind: 'archive', include: !archived } },
+        // 与 /progress 文字命令同一开关：按钮替用户发那条命令，标签随当前状态翻转。
+        command(
+          state.includesToolProgressNotices?.() ? t('🔕 关闭工具通知') : t('🔔 开启工具通知'),
+          state.includesToolProgressNotices?.() ? '/progress off' : '/progress on',
+        ),
         section(t('📊 状态'), 'status'), section(t('📖 帮助'), 'help'),
       ] };
   }

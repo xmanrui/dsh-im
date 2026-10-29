@@ -104,4 +104,9 @@ export default {
   '用法：/progress on 或 /progress off': 'Usage: /progress on or /progress off',
   '/progress on 或 /progress off  开关执行工具时的额外通知':
     '/progress on or /progress off  toggle the extra tool-execution notices',
+  '🔔 开启工具通知': '🔔 Tool notices on',
+  '🔕 关闭工具通知': '🔕 Tool notices off',
+  '工具通知：{state}': 'Tool notices: {state}',
+  '开启': 'on',
+  '关闭': 'off',
 };

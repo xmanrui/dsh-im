@@ -95,4 +95,9 @@ export default {
   '用法：/progress on 或 /progress off': 'Использование: /progress on или /progress off',
   '/progress on 或 /progress off  开关执行工具时的额外通知':
     '/progress on или /progress off  переключить дополнительные уведомления о вызовах инструментов',
+  '🔔 开启工具通知': '🔔 Уведомления вкл.',
+  '🔕 关闭工具通知': '🔕 Уведомления выкл.',
+  '工具通知：{state}': 'Уведомления: {state}',
+  '开启': 'вкл.',
+  '关闭': 'выкл.',
 };

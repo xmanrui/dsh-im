@@ -1056,6 +1056,11 @@ export class QqHarnessBridge {
       if (isClearCommand(command)) return runClearCommand(command, this.#harness, this.#state, key, options);
       if (isResetCommand(command)) return runResetCommand(command, this.#harness, this.#state, key, options);
       if (command === '/compact') return runCompactCommand(command, this.#harness, this.#state, key, options);
+      // 菜单按钮与直接打字共用命令文本，但这条路不经过 #process：/progress
+      // 必须在此显式处理，否则会落进下面的工作区命令兜底被无声吞掉。
+      if (/^\/progress(?:\s|$)/u.test(command)) {
+        return { message: await this.#runProgressCommand(command) };
+      }
       return runWorkspaceCommand(command, this.#harness, key);
     };
     // Stop/steer must stay available while a slower menu mutation is pending.
