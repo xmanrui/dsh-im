@@ -1182,7 +1182,7 @@ test('QQ group messages suppress every successful progress update', async () => 
   assert.equal(streamCalls, 0);
 });
 
-test('QQ group messages append a stable tool failure notice without exposing provider details', async () => {
+test('QQ group messages hide the tool failure notice by default and never expose provider details', async () => {
   const sent = [];
   const bridge = new QqHarnessBridge({
     bot: {
@@ -1222,19 +1222,18 @@ test('QQ group messages append a stable tool failure notice without exposing pro
     messageId: 'msg-tool-error',
     replyTarget: { scope: 'group', targetId: 'group-error', msgId: 'msg-tool-error' },
   }));
-  assert.deepEqual(sent, [
-    '已存入两套记忆。\n\n---\n\n工具调用「add_observations」未成功，请检查工具配置或稍后重试。',
-  ]);
-  assert.doesNotMatch(sent[0], /Error calling|Status code|404/);
+  // 群聊与默认关闭的开关一致：只给最终答案。
+  assert.deepEqual(sent, ['已存入两套记忆。']);
 });
 
-test('QQ sends neutral completion replies and retains tool failure notices', async () => {
-  for (const toolFailed of [false, true]) {
+test('QQ sends neutral completion replies and hides tool failure notices by default', async () => {
+  for (const notices of [false, true]) {
     const sent = [];
     const status = createQqBridgeStatus();
     status.lastError = 'previous failure';
     status.lastMessageError = { code: 'MODEL_EMPTY_REPLY' };
     const fixture = stateFixture([['c2c:owner-openid', 'session-empty-completed']]);
+    if (notices) await fixture.state.setToolProgressNotices(true);
     const bridge = new QqHarnessBridge({
       bot: { sendText: async (_target, text) => sent.push(text) },
       ownerUserOpenid: 'owner-openid',
@@ -1242,14 +1241,15 @@ test('QQ sends neutral completion replies and retains tool failure notices', asy
       harness: {
         sessionExists: async () => true,
         ask: async (_session, _text, { onUpdate }) => {
-          if (toolFailed) await onUpdate({ type: 'status', toolName: 'bash', error: 'private detail' });
+          await onUpdate({ type: 'status', toolName: 'bash', error: 'private detail' });
           return '本轮处理已结束，没有文本回复。';
         },
       },
       state: fixture.state,
     });
     await bridge.accept(message());
-    assert.deepEqual(sent, [toolFailed
+    // 默认只给中性完成回复；开关打开时才附失败汇总，且仍不暴露 provider 细节。
+    assert.deepEqual(sent, [notices
       ? '本轮处理已结束，没有文本回复。\n\n---\n\n工具调用「bash」未成功，请检查工具配置或稍后重试。'
       : '本轮处理已结束，没有文本回复。']);
     assert.equal(status.messagesReplied, 1);

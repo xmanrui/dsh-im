@@ -133,7 +133,7 @@ function helpText() {
     t('直接发送文字、图片或文件即可继续当前会话。'),
     t('/menu 或 /m  打开可点击的功能菜单'),
     t('/new  开启一个全新会话'),
-    t('/progress on 或 /progress off  开关执行工具时的额外通知'),
+    t('/progress on 或 /progress off  开关工具执行与失败通知'),
     t('/compact  压缩当前会话的较早上下文'),
     t('/clear  清空当前会话上下文（保留 Session 绑定和历史记录）'),
     t('/history [数量]  查看最近历史消息（默认 3 条，最多 5 条）'),
@@ -1205,25 +1205,26 @@ export class QqHarnessBridge {
   }
 
   /**
-   * /progress [on|off] — toggle the mid-turn tool-name notices.
+   * /progress [on|off] — toggle the machine-voiced notices of a turn.
    *
-   * The model's own per-step text is always pushed; this switch only governs the
-   * extra 「🔧 正在执行：X」 line, which is off by default because the text
-   * already says what is happening. State is per bot and survives restarts.
+   * One switch governs both tool-execution lines and the tool-failure summary
+   * appended after the final answer: both are machine noise next to the model's
+   * own per-step text, which is always pushed. State is per bot and survives
+   * restarts.
    */
   async #runProgressCommand(command) {
     const argument = command.split(/\s+/u)[1];
     if (argument === 'on') {
       await this.#state.setToolProgressNotices(true);
-      return t('工具执行通知已开启，我会在执行每个工具时额外发一条消息。');
+      return t('工具通知已开启：执行每个工具时发一条消息，失败时在答案后附汇总。');
     }
     if (argument === 'off') {
       await this.#state.setToolProgressNotices(false);
-      return t('工具执行通知已关闭，我仍会在每一步说明正在做什么。');
+      return t('工具通知已关闭，我仍会在每一步说明正在做什么。');
     }
     return this.#state.includesToolProgressNotices()
-      ? `${t('工具执行通知当前已开启。')}\n${t('用法：/progress on 或 /progress off')}`
-      : `${t('工具执行通知当前已关闭。')}\n${t('用法：/progress on 或 /progress off')}`;
+      ? `${t('工具通知当前已开启。')}\n${t('用法：/progress on 或 /progress off')}`
+      : `${t('工具通知当前已关闭。')}\n${t('用法：/progress on 或 /progress off')}`;
   }
 
   async #deliverArtifacts(target, replyTo, artifacts = [], baseReceipt = null) {
@@ -1510,7 +1511,10 @@ export class QqHarnessBridge {
       }
       this.#signal?.throwIfAborted();
       const answerText = answerTextForDelivery(answer, artifacts);
-      const displayAnswer = toolErrors.length > 0
+      // 工具失败汇总与工具执行通知同属机器噪音，归同一个开关管：默认关闭，
+      // 只给最终答案。失败的固定文案不暴露 provider 细节，这一点在开关打开
+      // 时依然成立。
+      const displayAnswer = toolErrors.length > 0 && this.#state.includesToolProgressNotices?.()
         ? `${answerText}\n\n---\n\n${toolErrors.join('\n\n')}`
         : answerText;
       let textReceipt = null;
