@@ -7,6 +7,7 @@ import { dirname } from 'node:path';
  * explicit: a subclass reads and writes them through extensionState().
  */
 const EXTENSION_KEYS = Object.freeze([
+  'airumoRequests', 'airumoConsumerId',
   'emailBindings', 'mailCursor', 'pendingAuth', 'threadIds', 'rootAnchors',
   'whatsappBotMessageIds',
 ]);

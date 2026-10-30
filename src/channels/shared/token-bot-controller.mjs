@@ -77,7 +77,8 @@ export class TokenBotController {
     if (this.#closed) return this.status();
     for (const config of this.#configStore.list()) {
       await this.#withBotTransition(config.botId, async () => {
-        if (this.#closed || this.#runtimes.get(config.botId)?.status?.ready) return;
+        if (this.#closed || this.#runtimes.get(config.botId)?.status?.ready
+          || this.#runtimes.get(config.botId)?.status?.retryable === false) return;
         try {
           const token = await this.#resolveToken(config.tokenRef);
           if (!token) {

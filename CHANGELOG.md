@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- 新增 AIRumo Bot API 渠道，支持 Token 绑定、独立会话、附件、取消及持久化结果恢复。
+  Added an AIRumo Bot API channel with Token binding, separate sessions, attachments, cancellation and durable result recovery.
+
 ## [5.8.0] - 2026-10-30
 
 ### Added / 新增

@@ -1,3 +1,4 @@
+import { AirumoConfigStore, deriveAirumoBotIdentity } from '../src/channels/airumo/config-store.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -131,4 +132,14 @@ test('sidebar RPC follows channel authority while general settings remain loopba
       assert.equal((await misplacedTtl.json()).result.error.code, 'bad-request');
     });
   }
+});
+
+test('AIRumo-only binding participates in automatic sidebar visibility without opening a connection', async (t) => {
+  const dshHome = await home(t);
+  const store = await new AirumoConfigStore(join(dshHome, 'integrations/dsh-airumo/config.json')).load();
+  const identity = deriveAirumoBotIdentity('fixture-bot');
+  await store.save({ ...identity, platformId: 'fixture-bot', name: 'Fixture Bot' });
+  assert.equal(await hasConfiguredChannel({ dshHome }), true);
+  await store.remove(identity.botId);
+  assert.equal(await hasConfiguredChannel({ dshHome }), false);
 });

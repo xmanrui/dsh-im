@@ -2076,6 +2076,8 @@ export class HarnessClient {
       // `content`: the prompt also carries whatever the user typed, and a
       // message that merely looks like a guidance block is not configuration.
       imSourceGuidance.publish(sessionId, options.sourceGuidance);
+      // Let an inbound adapter persist its execution handle before dispatch.
+      await options.onPrompt?.({ sessionId, promptRpcId, baselineSeq });
       const timeZoneFields = clientTimeZoneFields();
       const sendPrompt = (promptContent) => {
         diagnostic.stage = 'prompt.submit';

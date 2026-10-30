@@ -61,6 +61,10 @@ const COMPOSED = Object.freeze({
 });
 
 const EN = Object.freeze({
+  "填写 AIRumo 机器人设置中的专属 Token": "Enter the dedicated Token from the AIRumo bot settings",
+  "接入 AIRumo 机器人": "Connect an AIRumo bot",
+  "在 AIRumo 创建机器人，将专属 Token 填写到这里。可按需选择 Agent Preset；访问范围和群响应规则在 AIRumo 中配置。当前接口不支持主动提醒推送。": "Create a bot in AIRumo and enter its dedicated Token here. Optionally select an Agent Preset. Configure access and group response rules in AIRumo. The current API does not support proactive reminders.",
+
   ...COMPOSED,
   "私聊对象": "Private chat",
   "选择私聊对象": "Select a private chat",

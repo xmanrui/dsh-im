@@ -61,6 +61,8 @@ function connectionTestNotice(value) {
 export function createTokenChannelSettings(definition) {
   const {
     channel,
+    supportsAccessSettings = true,
+    supportsContextEnhancement = true,
     endpoints,
     api,
     LogoGlyph,
@@ -92,13 +94,13 @@ export function createTokenChannelSettings(definition) {
     return h('article', { className: 'ddt-card dim-botCard', 'data-bot-id': account.botId },
       h('div', { className: 'ddt-cardBody dim-botCardBody' },
         h(CollapsibleAccountSection, {
-          settings: h(BotSettingsButton, {
+          settings: supportsAccessSettings ? h(BotSettingsButton, {
             channel: channel.toLowerCase(),
             botId: account.botId,
             botName: account.bot.name,
             connected: account.connected,
             accessPolicy: account.accessPolicy,
-          }),
+          }) : null,
           id: `tok-settings-${account.botId.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
           header: h('div', { className: 'ddt-accountTop dim-botCardTop' },
             h('div', { className: 'ddt-accountIdentity dim-botIdentity' },
@@ -137,11 +139,11 @@ export function createTokenChannelSettings(definition) {
           disabled: Boolean(busy),
           onSave: onAgentPresetSave,
         }),
-        h(ContextEnhancementEditor, {
+        supportsContextEnhancement ? h(ContextEnhancementEditor, {
           config: account.contextEnhancement,
           disabled: Boolean(busy),
           onSave: onContextEnhancementSave,
-        }),
+        }) : null,
         AccountSettings ? h(AccountSettings, {
           account,
           busy: Boolean(busy),

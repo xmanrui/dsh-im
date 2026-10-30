@@ -5,6 +5,7 @@ import { apply as applyOffice } from './channels/office/index.mjs';
 import { apply as applyFeishu } from './channels/feishu/index.mjs';
 import { apply as applyQq } from './channels/qq/index.mjs';
 import { apply as applySlack } from './channels/slack/index.mjs';
+import { apply as applyAirumo } from './channels/airumo/index.mjs';
 import { apply as applyTelegram } from './channels/telegram/index.mjs';
 import { apply as applyWecom } from './channels/wecom/index.mjs';
 import { apply as applyWecomApp } from './channels/wecom-app/index.mjs';
@@ -78,6 +79,7 @@ export function createImHostPlugin(internals = {}) {
     ['qq', startQq],
     ['slack', startSlack],
     ['telegram', startTelegram],
+    ['airumo', internals.applyAirumo ?? applyAirumo],
     ['discord', startDiscord],
     ['whatsapp', startWhatsapp],
     ['imessage', startIMessage],

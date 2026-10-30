@@ -11,6 +11,7 @@ import { WecomConfigStore } from '../../src/channels/wecom/config-store.mjs';
 import { WecomAppConfigStore } from '../../src/channels/wecom-app/config-store.mjs';
 import { QqConfigStore } from '../../src/channels/qq/config-store.mjs';
 import { SlackConfigStore } from '../../src/channels/slack/config-store.mjs';
+import { AirumoConfigStore } from '../../src/channels/airumo/config-store.mjs';
 import { TelegramConfigStore } from '../../src/channels/telegram/config-store.mjs';
 import { DiscordConfigStore } from '../../src/channels/discord/config-store.mjs';
 import { WhatsappConfigStore } from '../../src/channels/whatsapp/config-store.mjs';
@@ -28,7 +29,7 @@ const CHANNEL_STORES = [
   ['feishu', PluginConfigStore], ['weixin', WeixinConfigStore],
   ['dingtalk', DingtalkConfigStore], ['wecom', WecomConfigStore],
   ['wecomApp', WecomAppConfigStore, 'wecom-app'], ['qq', QqConfigStore],
-  ['slack', SlackConfigStore], ['telegram', TelegramConfigStore],
+  ['slack', SlackConfigStore], ['telegram', TelegramConfigStore], ['airumo', AirumoConfigStore],
   ['discord', DiscordConfigStore], ['whatsapp', WhatsappConfigStore],
   ['imessage', IMessageConfigStore], ['email', EmailConfigStore],
   ['matrix', MatrixConfigStore], ['office', OfficeConfigStore],
