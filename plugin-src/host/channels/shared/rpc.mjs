@@ -1,3 +1,4 @@
+import { t } from '../../../../src/channels/shared/i18n.mjs';
 import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload } from '../../../../src/channels/shared/message-mode.mjs';
 import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from './bot-alias-rpc.mjs';
@@ -137,6 +138,9 @@ function sanitizePublic(value) {
 function operationError(channel, error) {
   const workspaceError = publicWorkspaceError(error);
   if (workspaceError) return workspaceError;
+  if (channel === 'AIRumo' && error?.code === 'BOT_INVALID_TOKEN') {
+    return { code: 'invalid-token', message: t('AIRumo Token 无效，请重新填写。') };
+  }
   if (error?.code === 'webhook-configured') {
     return { code: 'webhook-configured', message: error.message };
   }

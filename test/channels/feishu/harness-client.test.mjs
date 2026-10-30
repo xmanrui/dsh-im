@@ -632,6 +632,7 @@ test('HarnessClient asks do not control file-return tool availability', async ()
   client.ensureRunning = async () => undefined;
   let promptRpcId;
   let prompted = false;
+  let persistedHandle;
   const agent = {
     session: {
       header: { id: 'session-artifact-availability', cwd: '/tmp/dsh-feishu-workspace' },
@@ -642,6 +643,9 @@ test('HarnessClient asks do not control file-return tool availability', async ()
     if (method === 'workspace.list') return { items: [], archivedSessionIds: [] };
     if (method === 'session.history' && !prompted) return { events: [] };
     if (method === 'session.prompt') {
+      assert.equal(persistedHandle.sessionId, 'session-artifact-availability');
+      assert.equal(persistedHandle.promptRpcId, options.rpcId);
+      assert.equal(persistedHandle.baselineSeq, -1);
       prompted = true;
       promptRpcId = options.rpcId;
       agent.session.events = [
@@ -674,6 +678,10 @@ test('HarnessClient asks do not control file-return tool availability', async ()
 
   assert.equal(await client.ask('session-artifact-availability', 'create a file', {
     onArtifact: async () => undefined,
+    onPrompt: async (handle) => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      persistedHandle = handle;
+    },
   }), 'done');
 });
 
@@ -1988,4 +1996,21 @@ test('HarnessClient does not advertise a file consumer without an artifact callb
   };
   assert.equal(await client.ask(session.header.id, 'return the file'), 'Use present.');
   assert.deepEqual(outboundArtifactRegistry.take(session.header.id, 1), []);
+});
+
+test('HarnessClient never dispatches a prompt when durable handle persistence fails', async () => {
+  const client = new HarnessClient({ baseUrl: 'http://127.0.0.1:3080', workspace: '/tmp/handle-test' });
+  client.ensureRunning = async () => undefined;
+  const methods = [];
+  client.rpc = async (method) => {
+    methods.push(method);
+    if (method === 'workspace.list') return { items: [], archivedSessionIds: [] };
+    if (method === 'session.history') return { events: [] };
+    assert.notEqual(method, 'session.prompt');
+    return {};
+  };
+  await assert.rejects(client.ask('session-handle', 'hello', {
+    onPrompt: async () => { throw new Error('disk unavailable'); },
+  }), /disk unavailable/);
+  assert.ok(!methods.includes('session.prompt'));
 });

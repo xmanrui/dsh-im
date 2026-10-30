@@ -16,7 +16,7 @@ const channels = await Promise.all([
   ['weixin', 'WeixinConfigStore'], ['dingtalk', 'DingtalkConfigStore'],
   ['wecom', 'WecomConfigStore'], ['wecom-app', 'WecomAppConfigStore'],
   ['qq', 'QqConfigStore'], ['slack', 'SlackConfigStore'],
-  ['telegram', 'TelegramConfigStore'], ['discord', 'DiscordConfigStore'],
+  ['telegram', 'TelegramConfigStore'], ['airumo', 'AirumoConfigStore'], ['discord', 'DiscordConfigStore'],
   ['whatsapp', 'WhatsappConfigStore'],
   ['matrix', 'MatrixConfigStore', 'matrix-config-store'],
   ['email', 'EmailConfigStore'], ['office', 'OfficeConfigStore'],

@@ -1,3 +1,4 @@
+import airumo from './i18n-ru/airumo.mjs';
 // Russian translations for host-side user-facing text.
 // Keys are the exact Chinese literals passed to t() in src/channels/**.
 // This dictionary is a partial overlay: a key missing here is answered from
@@ -26,6 +27,7 @@ import email from './i18n-ru/email.mjs';
 
 export const RU = Object.freeze(Object.assign(
   {},
+  airumo,
   diagnostics,
   imageInput,
   permission,

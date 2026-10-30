@@ -34,6 +34,8 @@ import { installOfficeStyles } from './channels/office/styles.js';
 import { SLACK_RPC_CHANNEL } from './channels/slack/api.js';
 import { SlackSettingsTab } from './channels/slack/index.js';
 import { installSlackStyles } from './channels/slack/styles.js';
+import { AirumoSettingsTab } from './channels/airumo/index.js';
+import { AirumoLogoGlyph } from './channel-logos.js';
 import { TELEGRAM_RPC_CHANNEL } from './channels/telegram/api.js';
 import { TelegramSettingsTab } from './channels/telegram/index.js';
 import { installTelegramStyles } from './channels/telegram/styles.js';
@@ -109,6 +111,7 @@ const CHANNELS = Object.freeze([
   { id: 'qq', label: 'QQ' },
   { id: 'slack', label: 'Slack' },
   { id: 'telegram', label: 'Telegram' },
+  { id: 'airumo', label: 'AIRumo' },
   { id: 'discord', label: 'Discord' },
   { id: 'whatsapp', label: 'WhatsApp' },
   { id: 'wecomApp', label: '企业微信应用', note: '（实验功能）' },
@@ -193,6 +196,7 @@ function ChannelLogo({ channel }) {
   if (channel === 'wecomApp') return h(WecomAppLogo);
   if (channel === 'qq') return h(QqLogo);
   if (channel === 'slack') return h(SlackLogo);
+  if (channel === 'airumo') return h('span', { className: 'dim-logo', 'aria-hidden': true }, h(AirumoLogoGlyph));
   if (channel === 'telegram') return h(TelegramLogo);
   if (channel === 'discord') return h(DiscordLogo);
   if (channel === 'whatsapp') return h(WhatsappLogo);
@@ -227,6 +231,7 @@ export function IMSettingsTab({
   matrixRpcCall,
   qqRpcCall,
   slackRpcCall,
+  airumoRpcCall,
   telegramRpcCall,
   wecomRpcCall,
   wecomAppRpcCall,
@@ -279,6 +284,7 @@ export function IMSettingsTab({
     feishuRpcCall,
     qqRpcCall,
     slackRpcCall,
+    airumoRpcCall,
     telegramRpcCall,
     wecomRpcCall,
     wecomAppRpcCall,
@@ -308,6 +314,7 @@ export function IMSettingsTab({
     qqRpcCall,
     reportLoopbackRecovery,
     slackRpcCall,
+    airumoRpcCall,
     telegramRpcCall,
     updateRpcCall,
     wecomRpcCall,
@@ -434,6 +441,8 @@ export function IMSettingsTab({
                     ? h(QqSettingsTab, { rpcCall: rpcCalls.qqRpcCall })
                     : active.id === 'slack'
                       ? h(SlackSettingsTab, { rpcCall: rpcCalls.slackRpcCall })
+                      : active.id === 'airumo'
+                        ? h(AirumoSettingsTab, { rpcCall: rpcCalls.airumoRpcCall })
                     : active.id === 'telegram'
                       ? h(TelegramSettingsTab, { rpcCall: rpcCalls.telegramRpcCall })
                       : active.id === 'discord'
@@ -532,6 +541,8 @@ export function apply(ctx) {
     managementRpc(ctx.connection, WECOM_RPC_CHANNEL, endpoint, payload, signal);
   const wecomAppRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, WECOM_APP_RPC_CHANNEL, endpoint, payload, signal);
+  const airumoRpcCall = (endpoint, payload, signal) =>
+    managementRpc(ctx.connection, '/airumo', endpoint, payload, signal);
   const telegramRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, TELEGRAM_RPC_CHANNEL, endpoint, payload, signal);
   const discordRpcCall = (endpoint, payload, signal) =>
@@ -567,6 +578,7 @@ export function apply(ctx) {
     feishuRpcCall,
     qqRpcCall,
     slackRpcCall,
+    airumoRpcCall,
     telegramRpcCall,
     wecomRpcCall,
     wecomAppRpcCall,

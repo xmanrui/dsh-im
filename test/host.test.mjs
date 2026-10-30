@@ -321,6 +321,7 @@ const CHANNELS = [
   ['qq', 'applyQq'],
   ['slack', 'applySlack'],
   ['telegram', 'applyTelegram'],
+  ['airumo', 'applyAirumo'],
   ['discord', 'applyDiscord'],
   ['whatsapp', 'applyWhatsapp'],
   ['imessage', 'applyIMessage'],

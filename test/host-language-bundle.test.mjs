@@ -12,7 +12,7 @@ async function startHost(t, language) {
   t.after(() => rm(dshHome, { recursive: true, force: true }));
   const channels = [
     'Feishu', 'Weixin', 'Dingtalk', 'Wecom', 'WecomApp', 'Qq', 'Slack',
-    'Telegram', 'Discord', 'Whatsapp', 'IMessage', 'Email', 'Matrix', 'Office',
+    'Telegram', 'Airumo', 'Discord', 'Whatsapp', 'IMessage', 'Email', 'Matrix', 'Office',
   ];
   const internals = Object.fromEntries(channels.map((channel) => [
     `apply${channel}`, async () => {},

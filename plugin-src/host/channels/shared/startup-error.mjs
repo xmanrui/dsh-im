@@ -2,11 +2,12 @@ import { t } from '../../../../src/channels/shared/i18n.mjs';
 
 const CHANNEL_NAMES = {
   weixin: '微信', feishu: '飞书', dingtalk: '钉钉', wecom: '企业微信',
-  'wecom-app': '企业微信应用', qq: 'QQ', slack: 'Slack', telegram: 'Telegram',
+  'wecom-app': '企业微信应用', qq: 'QQ', slack: 'Slack', telegram: 'Telegram', airumo: 'AIRumo',
   discord: 'Discord', whatsapp: 'WhatsApp', imessage: 'iMessage',
   email: '邮箱', matrix: 'Matrix', office: 'AI Office',
 };
 const INVALID_CONFIG_MESSAGES = new Set([
+  'dsh-im AIRumo config contains invalid bot data',
   'dsh-weixin config contains invalid account data',
   'dsh-feishu config contains an invalid bot entry',
   'dsh-feishu config contains duplicate bot identities',

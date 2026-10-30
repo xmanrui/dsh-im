@@ -92,6 +92,10 @@ const COMPOSED = Object.freeze({
 });
 
 const CLIENT = Object.freeze({
+  "填写 AIRumo 机器人设置中的专属 Token": "Введите специальный Token из настроек бота AIRumo",
+  "接入 AIRumo 机器人": "Подключить бота AIRumo",
+  "在 AIRumo 创建机器人，将专属 Token 填写到这里。可按需选择 Agent Preset；访问范围和群响应规则在 AIRumo 中配置。当前接口不支持主动提醒推送。": "Создайте бота в AIRumo и введите его специальный Token. При необходимости выберите Agent Preset. Доступ и правила ответов в группах настраиваются в AIRumo. Текущий API не поддерживает инициативные напоминания.",
+
   ...COMPOSED,
   // Settings shell: sidebar entry, group history, group policy, bot aliases.
   '侧边栏入口': 'Пункт в боковой панели',

@@ -80,6 +80,13 @@ export function WecomLogoGlyph({ size } = {}) {
   h('path', { fill: '#3370FF', d: 'M15.25 18.75a.92.92 0 1 1 1.3 1.3.92.92 0 0 1-1.3-1.3Z' }));
 }
 
+export function AirumoLogoGlyph({ size } = {}) {
+  return h('svg', { ...dimensions(size), viewBox: '0 0 24 24', focusable: 'false',
+    'aria-hidden': 'true', 'data-im-channel-logo': 'airumo' },
+    h('path', { fill: '#6e83ff', d: 'M5 2h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z' }),
+    h('path', { fill: '#fff', d: 'm12 5 6 14h-3l-1.1-3H10L9 19H6l6-14Zm0 6-1.2 3h2.4L12 11Z' }));
+}
+
 export function TelegramLogoGlyph({ size } = {}) {
   return h('svg', {
     ...dimensions(size),
