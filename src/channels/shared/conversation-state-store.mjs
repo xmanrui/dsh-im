@@ -1,6 +1,17 @@
 import { deferredStateAccess, normalizeDeferredState } from './deferred-state.mjs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import {
+  appendSessionRing,
+  createEmptySessionRing,
+  dropSessionRingEntry,
+  ensureSessionRingEntry,
+  markSessionRingEntryUserTitled,
+  navigateSessionRing,
+  normalizeSessionRing,
+  renameSessionRingEntry,
+  stepSessionRingTo,
+} from './session-ring.mjs';
 
 /**
  * Additional persisted keys a subclass may own. Kept intentionally small and
@@ -92,6 +103,27 @@ function normalizePendingMessages(value) {
   return value.map(normalizePendingMessage).filter(Boolean).slice(-PENDING_MESSAGE_LIMIT);
 }
 
+function normalizeSessionRings(value) {
+  const rings = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return rings;
+  for (const [key, ring] of Object.entries(value)) {
+    if (typeof key !== 'string' || !key) continue;
+    const normalized = normalizeSessionRing(ring);
+    if (normalized.entries.length > 0 || normalized.visits.length > 0) rings[key] = normalized;
+  }
+  return rings;
+}
+
+function normalizePendingTitles(value) {
+  const titles = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return titles;
+  for (const [key, title] of Object.entries(value)) {
+    if (typeof key !== 'string' || !key || typeof title !== 'string' || !title.trim()) continue;
+    titles[key] = title;
+  }
+  return titles;
+}
+
 function normalizeState(value) {
   if (!value || typeof value !== 'object') return structuredClone(EMPTY_STATE);
   const sessions = {};
@@ -119,6 +151,10 @@ function normalizeState(value) {
       : [],
     cursor: Number.isSafeInteger(value.cursor) && value.cursor >= 0 ? value.cursor : null,
   };
+  const rings = normalizeSessionRings(value.rings);
+  if (Object.keys(rings).length) normalized.rings = rings;
+  const pendingTitles = normalizePendingTitles(value.pendingTitles);
+  if (Object.keys(pendingTitles).length) normalized.pendingTitles = pendingTitles;
   // Channel-specific extensions survive a reload; each is normalized by the
   // subclass that owns it (see extensionKeys()).
   for (const key of EXTENSION_KEYS) {
@@ -239,6 +275,101 @@ export class ConversationStateStore {
   async clearSessions() {
     this.#state.sessions = {};
     await this.#persist();
+  }
+
+  /** Read one conversation's navigation ring (a clone; never the live object). */
+  ringFor(key) {
+    const ring = this.#state.rings?.[key];
+    return ring ? structuredClone(ring) : null;
+  }
+
+  /**
+   * Record that a Session became bound to this conversation. A Session already
+   * in the ring is refreshed; a new one gets the next number. `lastSeenAt` is
+   * the Host's last-activity timestamp when known, otherwise the current time.
+   * Returns { entry, created }.
+   */
+  async ensureSessionRing(key, sessionId, { title, lastSeenAt } = {}) {
+    if (typeof key !== 'string' || !key || typeof sessionId !== 'string' || !sessionId) return null;
+    const rings = this.#state.rings ??= {};
+    const ring = rings[key] ??= createEmptySessionRing();
+    const result = ensureSessionRingEntry(ring, sessionId, { title, now: lastSeenAt });
+    await this.#persist();
+    return result;
+  }
+
+  /** Remove one ring entry by number, leaving a hole. Returns true when dropped. */
+  async dropSessionRing(key, n) {
+    const ring = this.#state.rings?.[key];
+    if (!ring) return false;
+    const removed = dropSessionRingEntry(ring, n);
+    if (removed) await this.#persist();
+    return removed;
+  }
+
+  /** Rename one ring entry in place. Returns the updated entry or null. */
+  async renameSessionRing(key, n, title) {
+    const ring = this.#state.rings?.[key];
+    if (!ring) return null;
+    const entry = renameSessionRingEntry(ring, n, title);
+    if (entry) await this.#persist();
+    return entry ? structuredClone(entry) : null;
+  }
+
+  /** /go navigation: push/jump the visit stack onto entry n. */
+  async navigateRing(key, n) {
+    const ring = this.#state.rings?.[key];
+    if (!ring) return null;
+    navigateSessionRing(ring, n);
+    await this.#persist();
+    return n;
+  }
+
+  /** Commit a /prev or /next step: point the visit cursor at entry n. */
+  async stepRingTo(key, n) {
+    const ring = this.#state.rings?.[key];
+    if (!ring) return -1;
+    const index = stepSessionRingTo(ring, n);
+    await this.#persist();
+    return index;
+  }
+
+  /** Append a fallback jump to the visit history without truncating forward. */
+  async appendRing(key, n) {
+    const ring = this.#state.rings?.[key];
+    if (!ring) return null;
+    appendSessionRing(ring, n);
+    await this.#persist();
+    return n;
+  }
+
+  /** Mark an entry as user-titled so the auto title never overwrites it. */
+  async markSessionRingUserTitled(key, n) {
+    const ring = this.#state.rings?.[key];
+    if (!ring) return null;
+    const entry = markSessionRingEntryUserTitled(ring, n);
+    if (entry) await this.#persist();
+    return entry ? structuredClone(entry) : null;
+  }
+
+  /** Remember a title the user set before a Session was bound yet. */
+  async setPendingTitle(key, title) {
+    if (typeof key !== 'string' || !key || typeof title !== 'string' || !title.trim()) return null;
+    const titles = this.#state.pendingTitles ??= {};
+    titles[key] = title;
+    await this.#persist();
+    return title;
+  }
+
+  /** Read and clear the pending title for one conversation, if any. */
+  async takePendingTitle(key) {
+    const titles = this.#state.pendingTitles;
+    if (!titles || !Object.hasOwn(titles, key)) return null;
+    const title = titles[key];
+    delete titles[key];
+    if (Object.keys(titles).length === 0) delete this.#state.pendingTitles;
+    await this.#persist();
+    return title;
   }
 
   hasSeen(messageId) {

@@ -251,6 +251,9 @@ class ModernHarnessApi {
       rename: (request, signal) => rpcResult(request, () => this.#invoke(
         'session', 'rename', { request: request.payload }, signal,
       )),
+      fork: (request, signal) => rpcResult(request, () => this.#invoke(
+        'session', 'fork', { request: request.payload }, signal,
+      )),
       cancel: (request, signal) => rpcResult(request, () => this.#invoke(
         'session', 'cancel', { request: { sessionId: request.payload.sessionId } }, signal,
       )),

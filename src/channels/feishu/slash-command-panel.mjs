@@ -27,6 +27,7 @@ export const DEFAULT_SLASH_COMMAND_ICON = 'ai-agent_outlined';
 export const SLASH_COMMAND_MANIFEST = Object.freeze([
   { command: 'menu', icon: 'skill_outlined', default: '打开功能菜单', en_us: 'Open the feature menu' },
   { command: 'new', icon: 'ai-deepthink_outlined', default: '开启全新会话', en_us: 'Start a fresh session' },
+  { command: 'fork', icon: 'ai-deepthink_outlined', default: '从当前会话分支一个新会话', en_us: 'Branch a new session from the current one' },
   { command: 'help', icon: 'promptword_outlined', default: '查看帮助', en_us: 'Show help' },
   { command: 'status', icon: 'ai-functions_outlined', default: '查看机器人状态', en_us: 'Show bot status' },
   { command: 'compact', icon: 'ai-block_outlined', default: '压缩当前会话上下文', en_us: 'Compact the current session' },
@@ -41,6 +42,13 @@ export const SLASH_COMMAND_MANIFEST = Object.freeze([
   { command: 'workspace', icon: 'folder_outlined', default: '查看并切换工作区', en_us: 'View and switch workspace' },
   { command: 'conv', icon: 'folder_outlined', default: '设置当前对话专属工作区', en_us: 'Set the workspace for this conversation' },
   { command: 'session', icon: 'chat-ai_outlined', default: '绑定已有会话', en_us: 'Bind an existing session' },
+  { command: 'ls', icon: 'chat-ai_outlined', default: '列出本聊天使用过的会话（按聊天/话题隔离）', en_us: "List this chat's sessions (per chat / per topic)" },
+  { command: 'go', icon: 'chat-ai_outlined', default: '切换到指定编号的会话', en_us: 'Switch to a session by number' },
+  { command: 'prev', icon: 'chat-ai_outlined', default: '回到上一个会话', en_us: 'Go back to the previous session' },
+  { command: 'next', icon: 'chat-ai_outlined', default: '前进到下一个会话', en_us: 'Go forward to the next session' },
+  { command: 'drop', icon: 'chat-ai_outlined', default: '从会话列表移除一条记录', en_us: 'Remove one entry from the session list' },
+  { command: 'title', icon: 'chat-ai_outlined', default: '查看或重命名会话标题', en_us: 'Show or rename a session title' },
+  { command: 'tail', icon: 'chat-ai_outlined', default: '预览或导出会话内容', en_us: 'Preview or export session content' },
   { command: 'models', icon: 'ai-functions_outlined', default: '列出可用模型', en_us: 'List available models' },
   { command: 'model', icon: 'ai-agent_outlined', default: '查看或切换当前模型', en_us: 'Show or switch the current model' },
   { command: 'reasoninglist', icon: 'ai-deepthink_outlined', default: '列出可用推理等级', en_us: 'List available reasoning efforts' },
@@ -152,4 +160,20 @@ export function resolveSlashPanelManifest(config, manifest = SLASH_COMMAND_MANIF
   if (normalized.mode !== SLASH_PANEL_MODES.CUSTOM) return manifest;
   const byName = new Map(manifest.map((entry) => [entry.command, entry]));
   return normalized.order.map((name) => byName.get(name)).filter(Boolean);
+}
+
+/**
+ * The manifest a bot should actually register, narrowed by what the Host and
+ * channel can do: /fork is dropped when the Host cannot fork, and /tail is
+ * described as preview-only when the channel cannot send files.
+ */
+export function feishuSlashManifest({ supportsFork = true, fileSend = false } = {}) {
+  const entries = SLASH_COMMAND_MANIFEST
+    .filter((entry) => entry.command !== 'fork' || supportsFork)
+    .map((entry) => (
+      entry.command === 'tail' && !fileSend
+        ? { ...entry, default: '预览会话内容', en_us: 'Preview session content' }
+        : entry
+    ));
+  return Object.freeze(entries);
 }

@@ -2282,7 +2282,7 @@ export function createBotWorkspaceScope(
         };
       }
       if (property === 'bindWorkspaceSession') {
-        return async (conversationKey, sessionId) => {
+        return async (conversationKey, sessionId, options = {}) => {
           assertNoDsBinding(conversationKey);
           if (typeof conversationKey !== 'string' || !conversationKey
             || typeof sessionId !== 'string' || !sessionId) {
@@ -2360,6 +2360,22 @@ export function createBotWorkspaceScope(
             conversationKey,
             conversationGeneration: bound.conversationGeneration ?? 0,
           });
+          // /session, /go, /prev and /next all bind through this one path, so the
+          // navigation ring records the bind here and stays in sync with the
+          // Session binding itself. Best-effort: a ring write must not fail a bind.
+          // A non-navigation bind (/session adopt) appends the Session as the
+          // ring's current position; /go, /prev and /next manage the visit stack
+          // themselves and pass { navigation: true } to skip this.
+          try {
+            const registered = await state.ensureSessionRing?.(conversationKey, sessionId, {
+              title: typeof adopted.title === 'string' && adopted.title ? adopted.title : undefined,
+            });
+            if (options.navigation !== true && registered?.entry) {
+              await state.appendRing?.(conversationKey, registered.entry.n);
+            }
+          } catch (error) {
+            console.warn('[dsh-im] unable to record the session in the navigation ring:', error?.message ?? error);
+          }
           return {
             ...adopted,
             workspace: bound.workspace,
@@ -2579,6 +2595,26 @@ export function createBotWorkspaceScope(
             return false;
           }
           return target.sessionExists(sessionId, ...args);
+        };
+      }
+      if (property === 'forkSession') {
+        return async (sessionId, options = {}) => {
+          if (!isCurrentScope()) {
+            throw workspaceSessionStale('The bot workspace changed before the fork.');
+          }
+          if (generationIsStale(sessionGenerations.get(sessionId))) {
+            throw workspaceSessionStale('The session is no longer in the current workspace.');
+          }
+          if (typeof target.forkSession !== 'function') {
+            const error = new Error('The Host does not support forking sessions');
+            error.code = 'harness-api-not-found';
+            throw error;
+          }
+          const result = await target.forkSession(sessionId, options);
+          if (!isCurrentScope()) {
+            throw workspaceSessionStale('The bot workspace changed while the fork was running.');
+          }
+          return result;
         };
       }
       if (property === 'ask') {

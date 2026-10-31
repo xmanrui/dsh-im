@@ -9,6 +9,7 @@ import diagnostics from './i18n-en/diagnostics.mjs';
 import sharedA from './i18n-en/shared-a.mjs';
 import sharedB from './i18n-en/shared-b.mjs';
 import sharedC from './i18n-en/shared-c.mjs';
+import sharedD from './i18n-en/shared-d.mjs';
 import feishu from './i18n-en/feishu.mjs';
 import dingtalk from './i18n-en/dingtalk.mjs';
 import wecom from './i18n-en/wecom.mjs';
@@ -31,6 +32,7 @@ export const EN = Object.freeze(Object.assign(
   sharedA,
   sharedB,
   sharedC,
+  sharedD,
   feishu,
   dingtalk,
   wecom,

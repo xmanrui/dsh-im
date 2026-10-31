@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { SHARED_COMMAND_CATALOG, commandHelpLines } from '../../../src/channels/shared/command-catalog.mjs';
+import { SHARED_COMMAND_CATALOG, availableCommandCatalog, commandHelpLines } from '../../../src/channels/shared/command-catalog.mjs';
 import { isHistoryCommand } from '../../../src/channels/shared/history-command.mjs';
 import { getImHostLanguage, setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
 import { isModelCommand } from '../../../src/channels/shared/model-command.mjs';
@@ -15,8 +15,9 @@ import { telegramCommandMenu } from '../../../src/channels/telegram/telegram-run
 // /workspacelist stays typeable and stays in /help, but main already keeps it
 // out of the native menu: /workspace (alias /ws) covers listing and switching.
 const MAIN_MENU_NAMES = [
-  'new', 'compact', 'clear', 'history', 'workspace', 'conv',
-  'sessionlist', 'session', 'models', 'reasoninglist', 'reasoning', 'model',
+  'new', 'fork', 'compact', 'clear', 'history', 'workspace', 'conv',
+  'sessionlist', 'session', 'ls', 'go', 'prev', 'next', 'drop', 'title', 'tail',
+  'models', 'reasoninglist', 'reasoning', 'model',
   'presetlist', 'preset', 'stop', 'steer', 'batch', 'send', 'cancel',
   'status', 'version', 'help',
 ];
@@ -50,13 +51,26 @@ for (const alias of HIDDEN_ALIASES) {
 // still appear there after leaving the native menu.
 const DOCUMENTED_ALIASES = [
   'ws', 'conversation', 'workspaces', 'wsl', 'sessions', 'reasonings', 'presets',
+  'list', 'peek',
 ];
 test('hiding aliases from the native menu leaves the documented /help lines intact', () => {
   const help = commandHelpLines('telegram');
-  assert.equal(help.length, 30);
+  assert.equal(help.length, 41);
   for (const alias of DOCUMENTED_ALIASES) {
     assert.ok(help.some((line) => line.includes(`/${alias}`)), alias);
   }
+});
+
+test('/fork leaves the menu and /help when the facade has no fork primitive', () => {
+  const catalog = availableCommandCatalog(SHARED_COMMAND_CATALOG, { supportsFork: false });
+  const commands = telegramCommandMenu(catalog).map((item) => item.command);
+  assert.ok(commands.includes('new'), '/new stays available');
+  assert.ok(!commands.includes('fork'), '/fork must not be advertised');
+
+  const help = commandHelpLines('telegram', catalog);
+  assert.ok(help.every((line) => !line.includes('/fork')), 'the /fork help line is dropped');
+  assert.equal(commandHelpLines('telegram').some((line) => line.includes('/fork')), true,
+    'the default catalog still documents /fork');
 });
 
 function entry(name, options = {}) {

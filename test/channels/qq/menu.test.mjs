@@ -165,7 +165,7 @@ test('QQ workspace, new session, compact, stop, quick steer and custom steer wor
   await f.send('/steer 自定义测试');
   assert.ok(f.calls.some(([op, text]) => op === 'steer' && text === '自定义测试'));
   await f.send('/m'); await f.pick(5);
-  assert.equal(f.state.sessionFor(key), null);
+  assert.equal(f.state.sessionFor(key), 'session-new', '/new eagerly creates and binds the next session');
 });
 
 test('QQ archive visibility survives reload and never archives a session', async (t) => {
@@ -220,7 +220,7 @@ test('QQ stale context, repeated clicks, and other group members cannot apply an
   await f.send('/m');
   const fresh = f.latestMenu();
   await Promise.all([f.pick(5, fresh), f.pick(5, fresh)]);
-  assert.equal(f.state.sessionFor(f.route), null);
+  assert.equal(f.state.sessionFor(f.route), 'session-new', '/new eagerly creates and binds the next session');
   assert.equal(f.sent.filter((item) => item.text === '已开启新会话。请发送你的问题。').length, 1);
 });
 

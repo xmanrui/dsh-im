@@ -220,7 +220,7 @@ test('commands bind default sessions by id or number and retain them after reloa
     signal: abort.signal,
   });
   await bridge.accept({ messageId: 'reset', senderId: 'user', conversationId: 'chat', kind: 'direct', content: '/new' });
-  assert.equal(state.sessionFor('direct:chat'), null);
+  assert.match(state.sessionFor('direct:chat') ?? '', /^(new-|session-)/u, '/new eagerly creates and binds a session');
   await bridge.accept({ messageId: 'next', senderId: 'user', conversationId: 'chat', kind: 'direct', content: 'new conversation' });
   // The conversation now names the Session before creating it, so the binding is
   // either that planned id or the one the fixture generated.

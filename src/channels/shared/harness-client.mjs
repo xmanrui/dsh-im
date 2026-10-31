@@ -1405,6 +1405,31 @@ export class HarnessClient {
     return this.rpc('session.rename', { sessionId, title }, 30_000, options);
   }
 
+  /**
+   * Branch a Session at the latest completed turn (or atSeq when given). The
+   * Host answers with the child session id; a Session with no completed turn is
+   * reported as fork-unavailable. Throws harness-api-not-found when the Host
+   * has no session.fork primitive.
+   */
+  async forkSession(sessionId, options = {}) {
+    if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
+    const { atSeq, timeoutMs = 30_000, ...rpcOptions } = options;
+    return this.rpc('session.fork', {
+      sessionId,
+      ...(atSeq === undefined ? {} : { atSeq }),
+    }, timeoutMs, rpcOptions);
+  }
+
+  /**
+   * Whether the connected Host can fork sessions. With the host-api transport
+   * this is the facade's sessions.fork member; the http transport reaches the
+   * Host endpoint directly, so a missing member here is not observable.
+   */
+  supportsSessionFork() {
+    if (this.#apiProxy) return typeof this.#apiProxy?.sessions?.fork === 'function';
+    return true;
+  }
+
   async executeCommand(sessionId, line, options = {}) {
     if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
     if (typeof line !== 'string' || !line) throw new TypeError('command line is required');
@@ -1526,6 +1551,15 @@ export class HarnessClient {
       if (error instanceof HarnessRpcError && isSessionNotFound(error.code)) return false;
       throw error;
     }
+  }
+
+  /**
+   * Whether the Session is archived. Unlike sessionExists, this distinguishes
+   * "archived" (still listed, not bindable) from "active"; a Session that does
+   * not exist simply reports false, so callers should check existence first.
+   */
+  async isSessionArchived(sessionId, options = {}) {
+    return this.#isSessionArchived(sessionId, options);
   }
 
   async respondInteraction(rpcId, result, options = {}) {

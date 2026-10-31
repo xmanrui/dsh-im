@@ -263,11 +263,11 @@ test('Telegram API registers the command menu and commands-type menu button', as
 });
 
 test('Telegram command menu follows the host language at runtime', () => {
-  assert.equal(TELEGRAM_COMMAND_MENU[0].description, '开启一个全新会话');
+  assert.equal(TELEGRAM_COMMAND_MENU[0].description, '开启一个全新会话（可带标题）');
   assert.equal(TELEGRAM_COMMAND_MENU.some(({ command }) => command === 'version'), true);
   setImHostLanguage('en');
   try {
-    assert.equal(telegramCommandMenu()[0].description, 'Start a brand-new Session');
+    assert.equal(telegramCommandMenu()[0].description, 'Start a brand-new session (with an optional title)');
   } finally {
     setImHostLanguage('zh');
   }

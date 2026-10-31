@@ -139,7 +139,7 @@ for (const channel of ['discord', 'whatsapp']) {
     await Promise.all([bridge.accept(message('question', 'hello')), bridge.accept(message('new', '/new'))]);
     assert.equal(signal.aborted, false, 'the failure must release the queue before the guard timeout');
     assert.ok(sent.some(text => text.includes('当前模型不存在')));
-    assert.ok(sent.some(text => text.includes('已开启全新 Harness 会话')));
-    assert.equal(binding, null);
+    assert.ok(sent.some(text => text.includes('暂时无法创建新会话')));
+    assert.equal(binding, 'session', 'a failed eager create keeps the previous binding');
   });
 }

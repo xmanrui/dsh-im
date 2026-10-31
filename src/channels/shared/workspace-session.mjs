@@ -169,9 +169,15 @@ export async function askInWorkspaceSession({
           // against a conversation switch that only commits after the bind.
           const conversationGeneration = readConversationGeneration(harness, key);
           session = workspaceSession(harness, sessionId, key);
-          if (initialTitle && typeof session.renameTitle === 'function') {
+          // A title the user set with /title before any Session existed wins over
+          // the one derived from the first message, and is consumed exactly once.
+          const pendingTitle = typeof state.takePendingTitle === 'function'
+            ? await state.takePendingTitle(key).catch(() => null)
+            : null;
+          const effectiveTitle = pendingTitle || initialTitle;
+          if (effectiveTitle && typeof session.renameTitle === 'function') {
             try {
-              await session.renameTitle(initialTitle, renameOptions);
+              await session.renameTitle(effectiveTitle, renameOptions);
             } catch (error) {
               if (error?.code === WORKSPACE_SESSION_STALE || renameOptions?.signal?.aborted) {
                 throw error;
@@ -183,6 +189,17 @@ export async function askInWorkspaceSession({
           // cleared the mapping and must not receive this prompt.
           if (conversationGenerationMoved(harness, key, conversationGeneration)) {
             throw workspaceSessionStaleError();
+          }
+          // Record the newly bound Session in the conversation's navigation ring
+          // so /ls, /go, /prev and /next can find it later. Optional: a state
+          // store without ring support simply skips this.
+          try {
+            const registered = await state.ensureSessionRing?.(key, sessionId, {
+              title: typeof effectiveTitle === 'string' && effectiveTitle ? effectiveTitle : undefined,
+            });
+            if (registered?.entry) await state.appendRing?.(key, registered.entry.n);
+          } catch (error) {
+            console.warn('[dsh-im] unable to record the session in the navigation ring:', error?.message ?? error);
           }
           return { sessionId, session, recovered: replacingUnreadable };
         }

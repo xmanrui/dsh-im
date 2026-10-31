@@ -20,6 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 
 import { parseStringAt } from './i18n-source-literal.mjs';
+import { SHARED_COMMAND_CATALOG } from '../../../src/channels/shared/command-catalog.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
@@ -410,6 +411,26 @@ test('dictionary entries no source string references are reported, not failed', 
       `[i18n] i18n-${language}: ${orphans.length} entr${orphans.length === 1 ? 'y' : 'ies'}`
       + ` no source string references: ${sample.join(', ')}${rest}`,
     );
+  }
+});
+
+test('every shared-d (session navigation) dictionary key is referenced by source or the catalog', async () => {
+  // The merged dictionaries still carry hundreds of client-side settings keys
+  // the t()-scanner cannot see, so the orphan warning above cannot fail. The
+  // session-navigation area is small and host-only: an unused key here is dead
+  // and must be removed, otherwise it comes back. Catalog descriptions/help are
+  // reached through translate(line) at menu-build time, not t('literal'), so
+  // they are allowed explicitly.
+  const catalogKeys = new Set();
+  for (const item of SHARED_COMMAND_CATALOG) {
+    catalogKeys.add(item.description);
+    for (const line of item.help) catalogKeys.add(line);
+  }
+  for (const directory of ['i18n-en', 'i18n-ru']) {
+    const loaded = await import(pathToFileURL(join(sharedDir, directory, 'shared-d.mjs')).href);
+    const orphans = Object.keys(loaded.default)
+      .filter((key) => !referenced.has(key) && !catalogKeys.has(key));
+    assert.deepEqual(orphans, [], `${directory}/shared-d.mjs has unreferenced keys`);
   }
 });
 

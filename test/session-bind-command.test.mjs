@@ -214,7 +214,7 @@ test('all nine channel bridges advertise /session and pass their current convers
     const source = await readFile(new URL(file, import.meta.url), 'utf8');
     if (file.endsWith('/shared/text-harness-bridge.mjs')) {
       // Full rendered help for all four consumers is covered by command-help.test.mjs.
-      assert.match(source, /commandHelpLines\(this\.#descriptor\.key\)/);
+      assert.match(source, /commandHelpLines\(this\.#descriptor\.key, availableCommandCatalog/);
     } else {
       assert.match(source, /\/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话/);
     }
@@ -232,5 +232,20 @@ test('all nine channel bridges advertise /session and pass their current convers
   ]) {
     const source = await readFile(new URL(file, import.meta.url), 'utf8');
     assert.match(source, /extends TextHarnessBridge/);
+  }
+});
+
+test('every non-text bridge lists the session-navigation commands in its help', async () => {
+  const files = [
+    '../src/channels/dingtalk/dingtalk-bridge.mjs',
+    '../src/channels/wecom/wecom-bridge.mjs',
+    '../src/channels/wecom-app/wecom-app-bridge.mjs',
+    '../src/channels/weixin/weixin-bridge.mjs',
+    '../src/channels/qq/qq-bridge.mjs',
+    '../src/channels/feishu/feishu-cards.mjs',
+  ];
+  for (const file of files) {
+    const source = await readFile(new URL(file, import.meta.url), 'utf8');
+    assert.match(source, /SESSION_NAV_HELP_LINES/, `${file} must list the shared nav help lines`);
   }
 });

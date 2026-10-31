@@ -246,6 +246,30 @@ test('in-process RPC preserves IDs, payloads, namespace receivers and errors', a
   await assert.rejects(client.rpc('session.missing'), { code: 'harness-api-not-found' });
 });
 
+test('session.fork routes through apiProxy.sessions.fork and reports a missing primitive', async () => {
+  const calls = [];
+  const client = localClient({
+    sessions: {
+      fork(request, signal) {
+        assert.ok(signal instanceof AbortSignal);
+        calls.push(request.payload);
+        return { rpcId: request.rpcId, result: { ok: true, value: 'child' } };
+      },
+    },
+  });
+
+  assert.equal(client.supportsSessionFork(), true);
+  assert.equal(await client.forkSession('parent'), 'child');
+  assert.deepEqual(calls[0], { sessionId: 'parent' });
+  assert.equal(await client.forkSession('parent', { atSeq: 7 }), 'child');
+  assert.deepEqual(calls[1], { sessionId: 'parent', atSeq: 7 });
+
+  // No sessions.fork member → harness-api-not-found, not a generic failure.
+  const bare = localClient({ sessions: {} });
+  assert.equal(bare.supportsSessionFork(), false);
+  await assert.rejects(bare.forkSession('parent'), (error) => error.code === 'harness-api-not-found');
+});
+
 test('in-process RPC bounds waits without retrying accepted calls or falling back to HTTP', async () => {
   let calls = 0;
   const client = localClient({

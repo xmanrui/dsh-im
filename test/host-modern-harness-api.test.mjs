@@ -431,6 +431,28 @@ test('modern adapter maps the narrow legacy API without changing HarnessClient',
   });
 });
 
+test('sessions.fork forwards session.fork and passes atSeq through only when given', async () => {
+  const calls = [];
+  const { ctx } = fakeContext({
+    async invoke({ namespace, method, args }) {
+      calls.push({ namespace, method, args });
+      assert.equal(namespace, 'session');
+      assert.equal(method, 'fork');
+      return { sessionId: 'child', seq: 5 };
+    },
+    async stream() { throw new Error('unused'); },
+  });
+  const { apiProxy } = harnessConnection(ctx);
+
+  await apiProxy.sessions.fork({ rpcId: 'fork-with-seq', payload: { sessionId: 'parent', atSeq: 9 } });
+  await apiProxy.sessions.fork({ rpcId: 'fork-latest', payload: { sessionId: 'parent' } });
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].args, { request: { sessionId: 'parent', atSeq: 9 } });
+  assert.deepEqual(calls[1].args, { request: { sessionId: 'parent' } });
+  assert.equal(Object.hasOwn(calls[1].args.request, 'atSeq'), false, 'atSeq is omitted when absent');
+});
+
 test('queue and steer omit an unresolved time zone at the in-process gateway boundary', async (t) => {
   t.mock.method(Intl, 'DateTimeFormat', () => ({ resolvedOptions: () => ({ timeZone: undefined }) }));
   const events = [];
