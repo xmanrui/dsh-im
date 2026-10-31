@@ -2,6 +2,7 @@
   "zh": [
     "/new [标题]  开启一个全新会话（可指定标题）",
     "/fork [标题]  从当前会话分支一个新会话（默认沿用父会话标题加“ (fork)”）",
+    "/reset  重置当前会话上下文（保留会话编号，旧会话可 /session 找回）",
     "/compact  压缩当前会话的较早上下文",
     "/clear  清空当前会话上下文（保留 Session 绑定和历史记录）",
     "/history [数量]  查看最近历史消息（默认 3 条，最多 5 条）",
@@ -45,6 +46,7 @@
   "en": [
     "/new [title]  Start a brand-new session (optionally titled)",
     "/fork [title]  Branch a new session from the current one (default: parent title + \" (fork)\")",
+    "/reset  Reset the current session context (keep the number; the old session is reachable via /session)",
     "/compact  Compact the earlier context of the current session",
     "/clear  Clear the current session context (keep the Session binding and history)",
     "/history [count]  Preview recent messages (default 3, maximum 5)",

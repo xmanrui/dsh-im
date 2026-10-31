@@ -17,6 +17,7 @@ import { runWorkspaceCommand, workspaceSwitchFailureText } from './workspace-com
 import { runStatusCommand } from './status-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
 import { isClearCommand, runClearCommand } from './clear-command.mjs';
+import { isResetCommand, runResetCommand } from './reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from './history-command.mjs';
 import {
   isControlCommand,
@@ -475,6 +476,7 @@ export class TextHarnessBridge {
     const collectingBatch = normalized.kind === 'direct'
       && this.#batches.status(key).phase === 'collecting';
     const commandRunner = collectingBatch ? null : isClearCommand(text) ? runClearCommand
+      : isResetCommand(text) ? runResetCommand
       : isHistoryCommand(text) ? runHistoryCommand
       : hasInboundFiles(normalized) ? null : isControlCommand(text)
       ? runControlCommand

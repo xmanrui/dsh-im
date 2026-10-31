@@ -6,6 +6,7 @@ import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../share
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
 import { isClearCommand, runClearCommand } from '../shared/clear-command.mjs';
+import { isResetCommand, runResetCommand } from '../shared/reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
 import {
   isControlCommand,
@@ -665,6 +666,7 @@ export class QqHarnessBridge {
     const commandRunner = explicitMenu || numericMenu
       ? () => this.#runMenuCommand(message, menuInput, key)
       : isClearCommand(commandText) ? runClearCommand
+      : isResetCommand(commandText) ? runResetCommand
       : isHistoryCommand(commandText) ? runHistoryCommand
       : isPermissionCommand(commandText) ? runPermissionCommand
       : hasQqFileAttachments(message) ? null : isControlCommand(commandText)
@@ -1033,6 +1035,7 @@ export class QqHarnessBridge {
         return { message: created.failed ? t('暂时无法创建新会话，请稍后重试。') : t('已开启新会话。请发送你的问题。') };
       });
       if (isClearCommand(command)) return runClearCommand(command, this.#harness, this.#state, key, options);
+      if (isResetCommand(command)) return runResetCommand(command, this.#harness, this.#state, key, options);
       if (command === '/compact') return runCompactCommand(command, this.#harness, this.#state, key, options);
       return runWorkspaceCommand(command, this.#harness, key);
     };
@@ -1283,6 +1286,18 @@ export class QqHarnessBridge {
       });
       if (clearCommand) {
         await this.#bot.sendText(target, clearCommand.message);
+        await markMessageSeen();
+        return;
+      }
+      const resetCommand = await runResetCommand(text, this.#harness, this.#state, key, {
+        signal: this.#signal,
+        hasImages,
+        hasFiles,
+        pendingInteraction: this.#pendingInteractions.has(key) || this.#approvals.hasPending(key),
+        busy: this.#queues.has(key),
+      });
+      if (resetCommand) {
+        await this.#bot.sendText(target, resetCommand.message);
         await markMessageSeen();
         return;
       }

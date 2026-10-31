@@ -96,6 +96,19 @@ export function ensureSessionRingEntry(ring, sessionId, { title, now = Date.now(
   return { entry, created: true };
 }
 
+/**
+ * Replace the Session id of one entry in place: the number, title, and
+ * user-titled flag stay untouched, only lastSeenAt is refreshed. Used by /reset
+ * to keep the same slot while pointing at a fresh Session.
+ */
+export function replaceSessionRingEntry(ring, n, sessionId, { now = Date.now() } = {}) {
+  const entry = sessionRingEntryByNumber(ring, n);
+  if (!entry) return null;
+  entry.sessionId = sessionId;
+  entry.lastSeenAt = finiteTimestamp(now) ?? Date.now();
+  return entry;
+}
+
 /** Remove one entry by number, leaving a hole. Also retires it from visits. */
 export function dropSessionRingEntry(ring, n) {
   const index = ring.entries.findIndex((entry) => entry.n === n);

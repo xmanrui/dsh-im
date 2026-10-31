@@ -18,6 +18,7 @@ import {
 import { HarnessApprovalQueue } from '../shared/harness-approval.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
 import { isClearCommand, runClearCommand } from '../shared/clear-command.mjs';
+import { isResetCommand, runResetCommand } from '../shared/reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
 import {
   isControlCommand,
@@ -728,6 +729,7 @@ export class DingtalkHarnessBridge {
       && !hasInboundFiles(promptMessage) && !hasInboundImages(promptMessage)
       ? async () => { await this.#showMenu(message, key); }
       : isClearCommand(commandText) ? runClearCommand
+      : isResetCommand(commandText) ? runResetCommand
       : isHistoryCommand(commandText) ? runHistoryCommand
       : hasInboundFiles(promptMessage) ? null : isControlCommand(commandText)
       ? runControlCommand
@@ -966,6 +968,7 @@ export class DingtalkHarnessBridge {
     } else {
       result = await runWorkspaceCommand(command, this.#harness, key)
         ?? await runClearCommand(command, this.#harness, this.#state, key, options)
+        ?? await runResetCommand(command, this.#harness, this.#state, key, options)
         ?? await runCompactCommand(command, this.#harness, this.#state, key, options)
         ?? await runControlCommand(command, this.#harness, this.#state, key, options)
         ?? await runHistoryCommand(command, this.#harness, this.#state, key, options)

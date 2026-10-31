@@ -48,6 +48,7 @@ import {
 } from '../shared/batch-input.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
 import { isClearCommand, runClearCommand } from '../shared/clear-command.mjs';
+import { isResetCommand, runResetCommand } from '../shared/reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
 import {
   isControlCommand,
@@ -1960,6 +1961,19 @@ export class FeishuHarnessBridge {
       });
       if (clearCommand) {
         await this.#send(event.message.chat_id, clearCommand.message, { replyTo: event.message.message_id });
+      }
+      return;
+    }
+    if (isResetCommand(rawCommandText)) {
+      const resetCommand = await runResetCommand(rawCommandText, this.#harness, this.#state, key, {
+        signal: this.#signal,
+        hasImages,
+        hasFiles,
+        pendingInteraction: this.#hasPendingInteraction(key),
+        busy: this.#queues.has(key),
+      });
+      if (resetCommand) {
+        await this.#send(event.message.chat_id, resetCommand.message, { replyTo: event.message.message_id });
       }
       return;
     }

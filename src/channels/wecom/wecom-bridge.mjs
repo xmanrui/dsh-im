@@ -24,6 +24,7 @@ import {
 import { runCompactCommand } from '../shared/compact-command.mjs';
 import { isSharedLocalCommand } from '../shared/command-permission.mjs';
 import { isClearCommand, runClearCommand } from '../shared/clear-command.mjs';
+import { isResetCommand, runResetCommand } from '../shared/reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
 import { isPermissionCommand, runPermissionCommand } from '../shared/permission-command.mjs';
 import {
@@ -913,6 +914,7 @@ export class WecomHarnessBridge {
     }
     return await runWorkspaceCommand(text, this.#harness, key)
       ?? await runClearCommand(text, this.#harness, this.#state, key, options)
+      ?? await runResetCommand(text, this.#harness, this.#state, key, options)
       ?? await runCompactCommand(text, this.#harness, this.#state, key, options);
   }
 
@@ -996,6 +998,7 @@ export class WecomHarnessBridge {
       && (parseWecomMenu(commandText) || ['/help', '/status', '/new'].includes(commandText.toLowerCase())
         || this.#cardFrames.has(frame));
     const commandRunner = isClearCommand(commandText) ? runClearCommand
+      : isResetCommand(commandText) ? runResetCommand
       : isPermissionCommand(commandText) ? runPermissionCommand
       : isHistoryCommand(commandText) ? runHistoryCommand
       : hasInboundFiles(commandMessage) ? null : isControlCommand(commandText)

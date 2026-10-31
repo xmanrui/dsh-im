@@ -24,6 +24,7 @@ import {
 } from '../shared/batch-input.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
 import { isClearCommand, runClearCommand } from '../shared/clear-command.mjs';
+import { isResetCommand, runResetCommand } from '../shared/reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
 import {
   isControlCommand,
@@ -469,6 +470,7 @@ export class WeixinHarnessBridge {
       }
     }
     const commandRunner = isClearCommand(commandText) ? runClearCommand
+      : isResetCommand(commandText) ? runResetCommand
       : isHistoryCommand(commandText) ? runHistoryCommand
       : hasWeixinFileItems(message) ? null : isControlCommand(commandText)
       ? runControlCommand

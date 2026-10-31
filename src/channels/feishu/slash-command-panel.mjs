@@ -28,6 +28,7 @@ export const SLASH_COMMAND_MANIFEST = Object.freeze([
   { command: 'menu', icon: 'skill_outlined', default: '打开功能菜单', en_us: 'Open the feature menu' },
   { command: 'new', icon: 'ai-deepthink_outlined', default: '开启全新会话', en_us: 'Start a fresh session' },
   { command: 'fork', icon: 'ai-deepthink_outlined', default: '从当前会话分支一个新会话', en_us: 'Branch a new session from the current one' },
+  { command: 'reset', icon: 'ai-deepthink_outlined', default: '重置当前会话上下文（保留会话编号）', en_us: 'Reset the current session context (keep the number)' },
   { command: 'help', icon: 'promptword_outlined', default: '查看帮助', en_us: 'Show help' },
   { command: 'status', icon: 'ai-functions_outlined', default: '查看机器人状态', en_us: 'Show bot status' },
   { command: 'compact', icon: 'ai-block_outlined', default: '压缩当前会话上下文', en_us: 'Compact the current session' },

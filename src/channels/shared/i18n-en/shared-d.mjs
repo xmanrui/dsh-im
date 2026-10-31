@@ -116,4 +116,21 @@ export default {
   '已从会话 {parent} 分支到会话 {child}：{title}': 'Forked session {parent} into session {child}: {title}',
   '切换后的提问发送失败，请重试。': 'The follow-up question after the switch failed to send. Please try again.',
   '暂时无法创建新会话，请稍后重试。': 'Cannot create a new session right now. Please try again later.',
+  '重置当前会话上下文（保留会话编号）': 'Reset the current session context (keep the number)',
+  '/reset  重置当前会话上下文（保留会话编号，旧会话可 /session 找回）':
+    '/reset  Reset the current session context (keep the number; the old session is reachable via /session)',
+  '用法：/reset（不带参数且不可附带图片或文件）':
+    'Usage: /reset (no arguments, and no images or files)',
+  '当前会话正在生成回复或等待交互，请先完成交互或发送 /stop，再执行 /reset。':
+    'The current session is generating a reply or awaiting an interaction; finish it or send /stop before /reset.',
+  '当前机器人没有可用的会话状态，未重置当前会话。':
+    'This bot has no session state available; the current session was not reset.',
+  '当前 Host 不支持 /reset，当前会话未修改。':
+    'This Host does not support /reset; the current session is unchanged.',
+  '重置当前会话上下文失败，当前会话未修改，请稍后重试。':
+    'Could not reset the current session context; it is unchanged. Please try again later.',
+  '当前会话上下文已重置（编号保持不变）。旧会话 ID：{id}，可用 /session {id} 重新绑定。':
+    'The current session context is reset (the number is unchanged). Old session ID: {id}; rebind it with /session {id}.',
+  '当前聊天还没有会话，已开启全新会话。':
+    'This chat has no session yet, so a new session was started.',
 };

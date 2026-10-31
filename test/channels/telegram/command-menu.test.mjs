@@ -15,7 +15,7 @@ import { telegramCommandMenu } from '../../../src/channels/telegram/telegram-run
 // /workspacelist stays typeable and stays in /help, but main already keeps it
 // out of the native menu: /workspace (alias /ws) covers listing and switching.
 const MAIN_MENU_NAMES = [
-  'new', 'fork', 'compact', 'clear', 'history', 'workspace', 'conv',
+  'new', 'fork', 'reset', 'compact', 'clear', 'history', 'workspace', 'conv',
   'sessionlist', 'session', 'ls', 'go', 'prev', 'next', 'drop', 'title', 'tail',
   'models', 'reasoninglist', 'reasoning', 'model',
   'presetlist', 'preset', 'stop', 'steer', 'batch', 'send', 'cancel',
@@ -55,7 +55,7 @@ const DOCUMENTED_ALIASES = [
 ];
 test('hiding aliases from the native menu leaves the documented /help lines intact', () => {
   const help = commandHelpLines('telegram');
-  assert.equal(help.length, 41);
+  assert.equal(help.length, 42);
   for (const alias of DOCUMENTED_ALIASES) {
     assert.ok(help.some((line) => line.includes(`/${alias}`)), alias);
   }

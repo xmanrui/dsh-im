@@ -10,6 +10,7 @@ import {
   navigateSessionRing,
   normalizeSessionRing,
   renameSessionRingEntry,
+  replaceSessionRingEntry,
   stepSessionRingTo,
 } from './session-ring.mjs';
 
@@ -348,6 +349,15 @@ export class ConversationStateStore {
     const ring = this.#state.rings?.[key];
     if (!ring) return null;
     const entry = markSessionRingEntryUserTitled(ring, n);
+    if (entry) await this.#persist();
+    return entry ? structuredClone(entry) : null;
+  }
+
+  /** Replace one entry's Session id in place (same number, /reset). */
+  async replaceSessionRing(key, n, sessionId, { now } = {}) {
+    const ring = this.#state.rings?.[key];
+    if (!ring) return null;
+    const entry = replaceSessionRingEntry(ring, n, sessionId, { now });
     if (entry) await this.#persist();
     return entry ? structuredClone(entry) : null;
   }

@@ -29,6 +29,9 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   defineCatalogCommand('fork', '从当前会话分支一个新会话', [
     '/fork [标题]  从当前会话分支一个新会话（默认沿用父会话标题加“ (fork)”）',
   ], { requiresSessionFork: true }),
+  defineCatalogCommand('reset', '重置当前会话上下文（保留会话编号）', [
+    '/reset  重置当前会话上下文（保留会话编号，旧会话可 /session 找回）',
+  ]),
   defineCatalogCommand('compact', '压缩当前会话的较早上下文', [
     '/compact  压缩当前会话的较早上下文',
   ]),
@@ -174,6 +177,7 @@ export const SESSION_NAV_HELP_LINES = Object.freeze([
   '/title 新标题  重命名当前会话',
   '/title 会话编号 新标题  重命名指定会话',
   '/fork [标题]  从当前会话分支一个新会话（默认沿用父会话标题加“ (fork)”）',
+  '/reset  重置当前会话上下文（保留会话编号，旧会话可 /session 找回）',
   '/tail 或 /peek [编号] [条数]  预览最近消息（默认 5 条，仅提问与回答）',
 ]);
 
