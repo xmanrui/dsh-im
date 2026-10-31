@@ -8,6 +8,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Fixed / 修复
 
+- 邮件线程在只引用上一封的客户端（如 iOS Mail 只带一条 `References`）里会分裂：回信的 Message-ID 由发信时生成、从未登记，解析线程时认不出它，于是把该封当成新线程另开一个 Harness 会话。现在每次回信都把发信侧 Message-ID 登记回它所回复的线程，同一封邮件的往返始终留在同一个会话里。
+  A mail thread split when the client quoted only the immediate parent (iOS Mail sends a single-entry `References` header): the Message-ID of our own reply is minted on the way out and was never registered, so the thread resolver did not recognise it and opened a new Harness session for that message. Every reply we send now records its own Message-ID against the thread it answers, keeping a mail thread in one session.
+
 - 会话开启 Goal 后，自动续跑的每一轮会在绑定的飞书对话里渲染过程卡：工具调用、流式答案和每轮结果都会推送，不再整轮静默。同一会话的群话题与同步私聊按投递位置分别去重；连接中断漏掉轮次结束、会话改绑等异常下旧轮会先收尾，不会阻塞后续轮次或串写；目标轮次的驱动提示原文（`<goal_round>`）不会外发；目标轮的 `user/message` 不带 `turn` 字段，按紧邻的 `turn/start` 归轮。方案见 `docs/方案/飞书目标自动续跑过程与结果可见方案.md`。
   Turns opened automatically by an active Goal now render into the bound Feishu conversation with the same step card an IM turn uses — tool calls, the streamed answer and each round's result are delivered instead of leaving the chat silent for the whole round. Deduplication happens per delivery surface, so a group topic keeps rendering next to a synced DM; rounds orphaned by a dropped turn-end or a conversation rebind are closed before the next round instead of blocking or writing into the wrong card; the `<goal_round>` driver prompt is never echoed. See `docs/方案/飞书目标自动续跑过程与结果可见方案.md`.
 
