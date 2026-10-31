@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import unittest
 from unittest import mock
 
@@ -446,6 +447,10 @@ class AdditionalSafetyTests(unittest.TestCase):
 
 class ProtocolTests(unittest.TestCase):
     def setUp(self):
+        # Sending is opt-in at the protocol boundary; tests enable it explicitly.
+        self._send_env = mock.patch.dict(os.environ, {"DSH_WECHAT_GROUP_ALLOW_SEND": "1"})
+        self._send_env.start()
+        self.addCleanup(self._send_env.stop)
         self.backend = FakeBackend(messages={"Alpha": []})
         self.adapter = uia.WechatGroupAdapter([group()], self.backend)
         self.protocol = uia.JsonlProtocol(self.adapter)

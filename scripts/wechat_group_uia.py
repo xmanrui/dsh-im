@@ -12,6 +12,7 @@ import copy
 import hashlib
 import importlib.metadata
 import json
+import os
 import sys
 import threading
 import time
@@ -39,6 +40,7 @@ ERROR_MESSAGES = {
     "ui_failure": "The UIA operation failed before a send was attempted.",
     "poll_failed": "A read-only polling cycle failed.",
     "probe_failed": "The read-only UIA probe failed.",
+    "send_disabled": "Sending is disabled until the operator enables it.",
 }
 
 
@@ -148,6 +150,90 @@ def visible_delta(previous: list[RawMessage], current: list[RawMessage]) -> list
     return list(current[overlap:])
 
 
+UNVERIFIED_SENDER_PREFIX = "uia-unverified:"
+
+
+def unverified_sender(sender: str) -> bool:
+    """True when the row exposed no member identity and must stay untrusted."""
+
+    return isinstance(sender, str) and sender.startswith(UNVERIFIED_SENDER_PREFIX)
+
+
+def read_visible_rows_as_messages(
+    rows: Iterable[dict[str, Any]], allow_unverified: bool = False,
+) -> list[RawMessage]:
+    """Read only text rows. Sender stays unverified unless the row proves it.
+
+    WeChat 4.1 message items expose no sender/self child control, so an
+    unverified row cannot name its author. This deliberately returns
+    UNVERIFIED_SENDER_PREFIX rows instead of inventing a member name; callers
+    must therefore treat them as observe-only and never as addressed.
+    """
+
+    if not allow_unverified:
+        raise SafetyError(
+            "message item layout lacks verified sender fields",
+            "message_layout_unverified",
+        )
+    messages: list[RawMessage] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise SafetyError("message row has an unknown shape", "invalid_message_shape")
+        cls = row.get("cls") or ""
+        name = row.get("name") or ""
+        if "ChatTextItemView" not in cls:
+            # Images, time separators and referral items carry no addressable text.
+            continue
+        text = name.strip()
+        if not text:
+            continue
+        messages.append(RawMessage(
+            sender=UNVERIFIED_SENDER_PREFIX + "row",
+            text=text,
+            is_self=False,
+            visible_time="",
+            message_type=1,
+        ))
+    return messages
+
+
+def build_message_event(
+    conversation_id: str, conversation_title: str, item: RawMessage,
+    trigger: str = "/dsh", sent_at: int = 0, addressed: bool | None = None,
+) -> dict[str, Any]:
+    """Assemble one v1 event; unverified senders can never be addressed."""
+
+    trusted = not unverified_sender(item.sender)
+    if addressed is None:
+        parsed, text = parse_trigger(item.text, trigger)
+        addressed = bool(parsed and trusted and text)
+    else:
+        parsed, text = parse_trigger(item.text, trigger)
+        addressed = bool(addressed and trusted)
+    event = {
+        "source": SOURCE,
+        "message_id": "uia-msg-" + hashlib.sha256(
+            (conversation_id + "\0" + item.sender + "\0" + item.text + "\0" + str(sent_at))
+            .encode("utf-8")
+        ).hexdigest()[:32],
+        "message_type": 1,
+        "conversation_type": "group",
+        "conversation_id": conversation_id,
+        "conversation_title": conversation_title,
+        "from_user_id": item.sender,
+        "sender_name": item.sender,
+        "reply_target": conversation_id,
+        "addressed": addressed,
+        "text": text,
+        "raw_text": item.text,
+        "sent_at": int(sent_at),
+        "is_self": bool(item.is_self),
+        "item_list": [{"type": 1, "text_item": {"text": text}}],
+    }
+    validate_message_event(event)
+    return event
+
+
 def validate_message_event(event: dict[str, Any]) -> None:
     """Fail before stdout if an outgoing event does not satisfy the v1 contract."""
 
@@ -171,7 +257,10 @@ def validate_message_event(event: dict[str, Any]) -> None:
             raise ProtocolError("v1 string fields must be non-empty", "invalid_event")
     if event["reply_target"] != event["conversation_id"]:
         raise ProtocolError("reply target must remain the group", "invalid_event")
-    if event["from_user_id"] != "uia-name:" + event["sender_name"]:
+    if not (
+        event["from_user_id"] == "uia-name:" + event["sender_name"]
+        or event["from_user_id"] == UNVERIFIED_SENDER_PREFIX + "row"
+    ):
         raise ProtocolError("member ID must preserve the display-name boundary", "invalid_event")
     if type(event["addressed"]) is not bool or type(event["is_self"]) is not bool:
         raise ProtocolError("addressed and is_self must be booleans", "invalid_event")
@@ -412,7 +501,13 @@ class WechatGroupAdapter:
                 after = list(self.backend.read_messages())
                 self._require_chat(group.title)
                 delta = visible_delta(before, after) or []
-                echoes = [item for item in delta if item.is_self and item.text == text]
+                # Without a sender field the echo cannot be attributed, but a new
+                # row carrying the exact text still proves delivery. Deliberately
+                # reported as unverified, never as a named member reply.
+                if not any(unverified_sender(item.sender) for item in delta):
+                    echoes = [item for item in delta if item.is_self and item.text == text]
+                else:
+                    echoes = [item for item in delta if item.text == text]
                 if len(echoes) > 1:
                     outbound.result = self._send_result(outbound, False, "readback_ambiguous")
                 elif len(echoes) != 1:
@@ -511,6 +606,9 @@ class JsonlProtocol:
                     **health,
                 }]
             if kind == "send_text":
+                if os.environ.get("DSH_WECHAT_GROUP_ALLOW_SEND") != "1":
+                    # Sending is opt-in: an observe-only bridge must never write.
+                    return [self._error("send_disabled", request_id)]
                 if (
                     not isinstance(request_id, str) or not request_id
                     or not isinstance(request.get("chat_id"), str)
@@ -732,9 +830,15 @@ class UiaBackend:
         ]
         if len(items) != 1:
             raise SafetyError("target session item is not unique", "duplicate_group_title")
-        pattern = items[0].GetSelectionItemPattern()
-        if not pattern or not pattern.Select(waitTime=0):
-            raise SafetyError("session item does not support selection", "selection_unsupported")
+        # SelectionItemPattern.Select() reports success on this WeChat build but
+        # does not switch the visible chat, so it cannot be trusted. Focus then
+        # click is the only path proven to change the header, and the caller must
+        # still re-read the title afterwards.
+        item = items[0]
+        item.SetFocus()
+        time.sleep(0.25)
+        item.Click()
+        time.sleep(1.0)
 
     def read_input(self) -> str:
         pattern = self._control("chat_input_field").GetValuePattern()
@@ -755,8 +859,26 @@ class UiaBackend:
         items = self._control("chat_message_list").GetChildren()
         if not items:
             return []
-        # Do not invent sender/self boundaries from concatenated Name text. Probe first.
-        raise SafetyError("message item layout lacks verified sender fields", "message_layout_unverified")
+        rows = [
+            {
+                "cls": _safe_property(item, "ClassName") or "",
+                "name": _safe_property(item, "Name") or "",
+            }
+            for item in items
+        ]
+        # WeChat 4.1 exposes no sender/self child control, so this returns
+        # unverified rows. allow_unverified comes from the environment switch:
+        # absent means strict fail-closed, preserving the earlier contract.
+        allow = self._allow_unverified()
+        return read_visible_rows_as_messages(rows, allow_unverified=allow)
+
+    def _allow_unverified(self) -> bool:
+        """Explicit opt-in: visible rows may carry content but never an identity."""
+        return os.environ.get("DSH_WECHAT_GROUP_ALLOW_UNVERIFIED") == "1"
+
+    def _allow_send(self) -> bool:
+        """Explicit opt-in: an observe-only bridge must never write to the chat."""
+        return os.environ.get("DSH_WECHAT_GROUP_ALLOW_SEND") == "1"
 
     def health(self) -> dict[str, Any]:
         control_status = {}
@@ -770,7 +892,7 @@ class UiaBackend:
             "main_window": self._window.Exists(0, 0),
             "controls": all(control_status.values()),
             "control_status": control_status,
-            "message_parser": "probe_required",
+            "message_parser": "unverified_rows" if self._allow_unverified() else "probe_required",
         }
 
     def close(self) -> None:
