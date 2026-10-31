@@ -885,25 +885,55 @@ class UiaBackend:
         if len(items) != 1:
             raise SafetyError("target session item is not unique", "duplicate_group_title")
         item = items[0]
-        # Prefer the protocol-level Invoke: it asks WeChat itself to activate the
-        # item, so it works while the window is minimised and never moves the
-        # window, steals focus or synthesises input. Measured: the chat panel
-        # appears with the window still minimised. Focus+Click stays as a fallback
-        # because Invoke is optional per control; SelectionItemPattern.Select()
-        # is deliberately unused - it reports success here without switching.
+        # Order of preference, always verified by reading the chat title back:
+        #   1. InvokePattern - protocol-level, works with the window minimised,
+        #      no focus change, no synthetic input. On this build it can return
+        #      True while nothing switches, so success is never assumed.
+        #   2. SetFocus + Click - proven to switch, but needs a visible window.
+        # SelectionItemPattern.Select() stays unused: it lies the same way.
+        # A refused activation falls through; an activation that reports success
+        # is only accepted after the title check proves the chat really changed.
+        for attempt in (self._select_by_invoke, self._select_by_click):
+            if attempt(item, title):
+                return
+        raise SafetyError("target chat could not be activated", "target_title_mismatch")
+
+    def _select_by_invoke(self, item: Any, title: str) -> bool:
+        """Activate through InvokePattern; True only when the title really changed."""
+
         try:
             invoke = item.GetInvokePattern()
         except Exception:
             invoke = None
-        if invoke is not None:
-            if invoke.Invoke(waitTime=0):
-                time.sleep(1.0)
-                return
-            # A refused Invoke is not proof the chat switched; fall through to click.
-        item.SetFocus()
-        time.sleep(0.25)
-        item.Click()
+        if invoke is None:
+            return False
+        try:
+            if not invoke.Invoke(waitTime=0):
+                return False
+        except Exception:
+            return False
         time.sleep(1.0)
+        return self._title_matches(title)
+
+    def _select_by_click(self, item: Any, title: str) -> bool:
+        """Activate with focus+click; the only path proven on a visible window."""
+
+        try:
+            item.SetFocus()
+            time.sleep(0.25)
+            item.Click()
+        except Exception:
+            return False
+        time.sleep(1.0)
+        return self._title_matches(title)
+
+    def _title_matches(self, title: str) -> bool:
+        """True when the open chat's own title proves the switch happened."""
+
+        try:
+            return self.current_chat_title() == title
+        except SafetyError:
+            return False
 
     def ensure_window_restored(self) -> None:
         """Optionally bring the main window on screen; never by default.
