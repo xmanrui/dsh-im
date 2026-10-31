@@ -5,7 +5,10 @@ import { createGoalControl } from '../plugin-src/host/goal-control.mjs';
 
 const PAUSED = Object.freeze({ id: 'goal-1', revision: 2, phase: 'paused', activation: 'disarmed', roundsStarted: 3 });
 
-function fixture({ goals = [], resumeError, resumeErrors = [], evolve = false, unavailable = false } = {}) {
+function fixture({
+  goals = [], resumeError, resumeErrors = [], evolve = false, unavailable = false,
+  resumeUnavailable = false, resumePaused = false,
+} = {}) {
   const lifetime = new AbortController();
   const calls = [];
   const peer = {
@@ -40,6 +43,12 @@ function fixture({ goals = [], resumeError, resumeErrors = [], evolve = false, u
           return remaining[0];
         }
         if (request.method === 'resume') {
+          if (resumeUnavailable) {
+            const error = new Error('typert gateway: goals/resume: no such endpoint');
+            error.name = 'TypertGatewayError';
+            error.code = 'gateway/service-unavailable';
+            throw error;
+          }
           const nextError = resumeErrors.length > 0 ? resumeErrors.shift() : resumeError;
           if (nextError) throw nextError;
           const view = { ...remaining[0], phase: 'active', activation: 'armed', revision: remaining[0].revision + 1 };
@@ -50,15 +59,22 @@ function fixture({ goals = [], resumeError, resumeErrors = [], evolve = false, u
       },
     },
   };
-  const control = createGoalControl(ctx, { logger: { debug() {}, info() {}, warn() {} } });
+  const control = createGoalControl(ctx, {
+    logger: { debug() {}, info() {}, warn() {} },
+    resumePaused,
+  });
   return { control, calls, lifetime };
 }
 
-test('a paused goal is resumed with its current revision', async () => {
-  const { control, calls } = fixture({ goals: [PAUSED] });
-  const outcome = await control.resumeIfPaused('session-1');
+test('an explicit pause is only resumed when the channel opts in', async () => {
+  const off = fixture({ goals: [PAUSED] });
+  assert.equal((await off.control.resumeIfPaused('session-1')).resumed, false);
+  assert.equal(off.calls.filter(call => call.method === 'resume').length, 0);
+
+  const on = fixture({ goals: [PAUSED], resumePaused: true });
+  const outcome = await on.control.resumeIfPaused('session-1');
   assert.equal(outcome.resumed, true);
-  assert.deepEqual(calls, [
+  assert.deepEqual(on.calls, [
     { method: 'get', args: { agentId: 'session-1' } },
     { method: 'resume', args: { agentId: 'session-1', ref: { id: 'goal-1', revision: 2 } } },
   ]);
@@ -87,7 +103,7 @@ test('an armed goal, a blocked goal, and a missing goal are left alone', async (
 
 test('a lost revision race re-reads once and resumes the newer revision', async () => {
   const conflict = Object.assign(new Error('goal revision is stale'), { code: 'goal/stale-revision' });
-  const { control, calls } = fixture({ goals: [PAUSED], resumeErrors: [conflict], evolve: true });
+  const { control, calls } = fixture({ goals: [{ ...PAUSED, phase: 'active' }], resumeErrors: [conflict], evolve: true });
   const outcome = await control.resumeIfPaused('session-1');
   assert.equal(outcome.resumed, true);
   assert.deepEqual(calls.map(call => call.method), ['get', 'resume', 'get', 'resume']);
@@ -96,9 +112,17 @@ test('a lost revision race re-reads once and resumes the newer revision', async 
 
 test('a conflict that does not change the revision is reported, not retried forever', async () => {
   const conflict = Object.assign(new Error('goal revision is stale'), { code: 'goal/stale-revision' });
-  const { control, calls } = fixture({ goals: [PAUSED], resumeError: conflict });
+  const { control, calls } = fixture({ goals: [{ ...PAUSED, phase: 'active' }], resumeError: conflict });
   await assert.rejects(() => control.resumeIfPaused('session-1'), /stale/);
   assert.deepEqual(calls.map(call => call.method), ['get', 'resume', 'get']);
+});
+
+test('a resume the Host cannot serve is not reported as resumed', async () => {
+  const { control, calls } = fixture({ goals: [{ ...PAUSED, phase: 'active' }], resumeUnavailable: true });
+  const outcome = await control.resumeIfPaused('session-1');
+  assert.equal(outcome.resumed, false, 'the goal did not move, so no success')
+  assert.equal(outcome.goal.phase, 'active');
+  assert.deepEqual(calls.map(call => call.method), ['get', 'resume']);
 });
 
 test('a Host without goal endpoints disables control instead of failing every message', async () => {

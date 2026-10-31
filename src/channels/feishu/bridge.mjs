@@ -5518,8 +5518,12 @@ export class FeishuHarnessBridge {
    * 已暂停 in the product UI, so read the goal and bring it back before this
    * turn starts. Never blocks or fails the turn.
    */
-  async #resumeParkedGoal(key) {
+  async #resumeParkedGoal(key, event) {
     if (!this.#goalControl) return false;
+    // Only a human message carries a recovery intent. Feishu lets other bots
+    // through the access check when they @-mention us in a group, and waking a
+    // paused goal because some automation posted a message is not wanted.
+    if (event?.sender?.sender_type !== 'user') return false;
     let sessionId;
     try {
       sessionId = this.#state.sessionFor?.(key);
@@ -5615,7 +5619,7 @@ export class FeishuHarnessBridge {
     }
     // Resuming a parked goal is a state change the user's message asked for, so
     // it leads the turn. Not billable: it is not model work.
-    if (await this.#resumeParkedGoal(key)) {
+    if (await this.#resumeParkedGoal(key, event)) {
       if (streamingCard) {
         await this.#appendStepCardUpdate(
           key, chatId, messageId,
@@ -5932,7 +5936,7 @@ export class FeishuHarnessBridge {
     }
     // The step-push path reports this on the card; every other delivery mode
     // still owes the user a visible confirmation that the goal is running again.
-    if (await this.#resumeParkedGoal(key)) {
+    if (await this.#resumeParkedGoal(key, event)) {
       await this.#send(chatId, t('🔄 目标已恢复自动续跑'), { replyTo: messageId });
     }
     const prompt = await this.#preparePrompt(event, key, message);

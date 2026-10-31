@@ -197,12 +197,14 @@ export async function createProductionController(ctx, config = {}, internals = {
     return matches;
   };
   const commandExecutor = createHarnessCommandExecutor(ctx, internals.commandExecutor);
-  // A goal the Host left parked (explicit pause, or `active` + `disarmed`
-  // after a restart) is resumed before each inbound turn. Opt out per channel
-  // with `goalAutoResume: false`.
-  const goalControl = config.goalAutoResume === false
+  // A goal the Host left parked is resumed before each inbound human turn:
+  // `active` + `disarmed` (a restart) by default, plus explicit human pauses
+  // when the channel asks for them with `goalAutoResume: 'all'`. Opt out with
+  // `goalAutoResume: false`.
+  const goalAutoResume = config.goalAutoResume ?? true;
+  const goalControl = goalAutoResume === false
     ? undefined
-    : createGoalControl(ctx, { logger });
+    : createGoalControl(ctx, { logger, resumePaused: goalAutoResume === 'all' });
   const inboundTtl = internals.inboundTtl ?? getInboundTtlRuntime(ctx, config);
   const inboundTtlService = inboundTtl?.service ?? inboundTtl;
   registerInboundTtlWorkspaces(ctx, inboundTtlService, {
