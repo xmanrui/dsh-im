@@ -122,6 +122,7 @@ export class FeishuRuntime {
   #stepCardPanels;
   #voice = null;
   #sessionSyncTargetsFor;
+  #goalControl = null;
   #ownerOpenIds;
   #harness;
   #state;
@@ -176,6 +177,7 @@ export class FeishuRuntime {
     stepCardPanels,
     voice = null,
     sessionSyncTargetsFor = null,
+    goalControl = null,
     ownerOpenId,
     ownerOpenIds,
     harness,
@@ -227,6 +229,7 @@ export class FeishuRuntime {
     this.#sessionSyncTargetsFor = typeof sessionSyncTargetsFor === 'function'
       ? sessionSyncTargetsFor
       : null;
+    this.#goalControl = goalControl ?? null;
     this.#ownerOpenIds = normalizedOwners;
     this.#harness = harness;
     this.#state = state;
@@ -387,6 +390,7 @@ export class FeishuRuntime {
         stepCardPanels: this.#stepCardPanels,
         voice: this.#voice,
         sessionSyncTargetsFor: this.#sessionSyncTargetsFor,
+        goalControl: this.#goalControl,
         repair: this.#repair,
         requestTimeoutMs: this.#requestTimeoutMs,
         replyTimeoutMs: this.#replyTimeoutMs,

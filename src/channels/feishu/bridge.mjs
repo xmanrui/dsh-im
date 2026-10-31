@@ -741,6 +741,8 @@ export class FeishuHarnessBridge {
   #failedWatchSeqs = new Map();
   /** Host resolver: sessionId -> synced DM targets [{ openId, botId }]. */
   #sessionSyncTargetsFor = null;
+  /** Host goal control; brings a parked goal back before a human turn starts. */
+  #goalControl = null;
   /** Per-turn mirrors and recent delivery receipts, scoped to this bot. */
   #sessionSyncTurns = new Map();
   #sessionSyncCurrentTurns = new Map();
@@ -780,6 +782,7 @@ export class FeishuHarnessBridge {
     replyTimeoutMs = 600_000,
     interactionCards = true,
     sessionSyncTargetsFor = null,
+    goalControl = null,
     logger = console,
     voice = null,
     signal,
@@ -846,6 +849,12 @@ export class FeishuHarnessBridge {
     this.#sessionSyncTargetsFor = typeof sessionSyncTargetsFor === 'function'
       ? sessionSyncTargetsFor
       : null;
+    if (goalControl !== null && goalControl !== undefined
+      && (typeof goalControl !== 'object'
+        || typeof goalControl.resumeIfPaused !== 'function')) {
+      throw new TypeError('Feishu goal control requires a resumeIfPaused function');
+    }
+    this.#goalControl = goalControl ?? null;
     this.#logger = logger;
     this.#approvals = new HarnessApprovalQueue({ label: 'Feishu', logger });
     this.#signal = signal;
@@ -5503,6 +5512,41 @@ export class FeishuHarnessBridge {
   }
 
   /**
+   * A chat message is the only way to continue a goal the Host left parked:
+   * an explicit pause, or the `active` + `disarmed` state a Host restart
+   * leaves behind (continuation eligibility is process-local). Both render as
+   * 已暂停 in the product UI, so read the goal and bring it back before this
+   * turn starts. Never blocks or fails the turn.
+   */
+  async #resumeParkedGoal(key, event) {
+    if (!this.#goalControl) return false;
+    // Only a human message carries a recovery intent. Feishu lets other bots
+    // through the access check when they @-mention us in a group, and waking a
+    // paused goal because some automation posted a message is not wanted.
+    if (event?.sender?.sender_type !== 'user') return false;
+    let sessionId;
+    try {
+      sessionId = this.#state.sessionFor?.(key);
+    } catch {
+      return false;
+    }
+    if (!nonEmptyString(sessionId)) return false;
+    try {
+      const outcome = await this.#goalControl.resumeIfPaused(sessionId);
+      if (outcome?.resumed !== true) return false;
+      this.#logger.info?.('[dsh-feishu] resumed a parked goal', {
+        sessionId,
+        roundsStarted: outcome.goal?.roundsStarted,
+      });
+      return true;
+    } catch (error) {
+      // A goal that cannot be resumed must not cost the user their turn.
+      this.#logger.warn?.('[dsh-feishu] resume parked goal failed:', mirrorErrorText(error));
+      return false;
+    }
+  }
+
+  /**
    * 分步直推：`#answerWithStream` 流式分支在开关开启时的完整替代路径。
    * 过程（工具调用、助手中间说明）与最终答案均以富文本 post 逐条直推
    * （工具参数折叠为代码块）；post 失败走既有纯文本降级。
@@ -5572,6 +5616,25 @@ export class FeishuHarnessBridge {
         await this.#finishStepCard(key);
       }
       this.#ensureStepCard(key, chatId, messageId);
+    }
+    // Resuming a parked goal is a state change the user's message asked for, so
+    // it leads the turn. Not billable: it is not model work.
+    if (await this.#resumeParkedGoal(key, event)) {
+      if (streamingCard) {
+        await this.#appendStepCardUpdate(
+          key, chatId, messageId,
+          { kind: 'message', text: t('🔄 目标已恢复自动续跑') },
+          { billable: false },
+        );
+      } else {
+        await this.#sendStepMessage(
+          chatId, key,
+          [[{ tag: 'text', text: t('🔄 目标已恢复自动续跑') }]],
+          t('🔄 目标已恢复自动续跑'),
+          messageId,
+          { billable: false },
+        );
+      }
     }
     // /stop 打标：回合进行中收到停止请求时，封存为「已停止」而非「已完成」。
     const stepStopFlag = streamingCard ? { requested: false } : null;
@@ -5870,6 +5933,11 @@ export class FeishuHarnessBridge {
     // 零差异（含下方 `!this.#channel?.stream` 纯文本路径）。
     if (this.#stepPush && this.#channel?.stream) {
       return this.#answerWithStepPush(event, key, message, { onAskComplete });
+    }
+    // The step-push path reports this on the card; every other delivery mode
+    // still owes the user a visible confirmation that the goal is running again.
+    if (await this.#resumeParkedGoal(key, event)) {
+      await this.#send(chatId, t('🔄 目标已恢复自动续跑'), { replyTo: messageId });
     }
     const prompt = await this.#preparePrompt(event, key, message);
     const { content, contextEnhanced } = prompt;

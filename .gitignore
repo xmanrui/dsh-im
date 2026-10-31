@@ -8,3 +8,7 @@ coverage/
 .DS_Store
 .idea/
 e2e/
+
+# local verification helpers (personal paths, not part of the package)
+restart-host.sh
+restart-host.log

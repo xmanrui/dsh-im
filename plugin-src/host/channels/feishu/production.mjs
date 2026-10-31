@@ -7,6 +7,7 @@ import { unlink } from 'node:fs/promises';
 import * as Lark from '@larksuiteoapi/node-sdk';
 import HttpsProxyAgent from 'https-proxy-agent';
 import { createConnectionSupervisor } from './connection-supervisor.mjs';
+import { createGoalControl } from '../../goal-control.mjs';
 import { createHarnessCommandExecutor } from '../../harness-command-executor.mjs';
 import { harnessConnection } from '../../harness-connection.mjs';
 import { createHarnessSessionExecutors } from '../../harness-session-coordinator.mjs';
@@ -196,6 +197,14 @@ export async function createProductionController(ctx, config = {}, internals = {
     return matches;
   };
   const commandExecutor = createHarnessCommandExecutor(ctx, internals.commandExecutor);
+  // A parked goal is resumed before each inbound human turn: `paused` (pause
+  // button or an aborted round) and `active` + `disarmed` (Host restart).
+  // `goalAutoResume: 'disarmed'` narrows it to restart leftovers, `false` turns
+  // the whole thing off.
+  const goalAutoResume = config.goalAutoResume ?? true;
+  const goalControl = goalAutoResume === false
+    ? undefined
+    : createGoalControl(ctx, { logger, resumePaused: goalAutoResume !== 'disarmed' });
   const inboundTtl = internals.inboundTtl ?? getInboundTtlRuntime(ctx, config);
   const inboundTtlService = inboundTtl?.service ?? inboundTtl;
   registerInboundTtlWorkspaces(ctx, inboundTtlService, {
@@ -272,6 +281,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         stepCardPanels: botConfig.stepCardPanels,
         voice: voiceSource,
         sessionSyncTargetsFor: sessionSyncTargetsFor,
+        ...(goalControl ? { goalControl } : {}),
         ownerOpenIds: botConfig.ownerOpenIds ?? [botConfig.ownerOpenId],
         harness: workspaceScope.harness,
         state: workspaceScope.state,

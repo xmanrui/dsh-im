@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 飞书收到**真人**消息时会先检查该会话的 Goal：处于「已暂停」或 Host 重启后「未武装」状态的目标会自动恢复（`goals/resume`）后再进入本轮，并在过程首行提示「🔄 目标已恢复自动续跑」。机器人消息不会触发恢复，`blocked`、`complete` 和正在运行的目标不受影响；只有确认恢复成功才会提示。`goalAutoResume: 'disarmed'` 只恢复重启遗留、`false` 关闭。方案见 `docs/方案/飞书入站消息自动恢复暂停目标方案.md`。
+  An inbound **human** Feishu message now checks the conversation's Goal first: a goal that is paused or left disarmed by a Host restart is resumed before the turn starts and reported as the first step (「🔄 目标已恢复自动续跑」). Bot messages never resume, and blocked, complete, or already-running goals are untouched; the note only appears when the resume really happened. Set `goalAutoResume: 'disarmed'` to resume only restart leftovers, or `false` to turn it off. See `docs/方案/飞书入站消息自动恢复暂停目标方案.md`.
+
 ## [5.9.0] - 2026-10-31
 
 ### Added / 新增
