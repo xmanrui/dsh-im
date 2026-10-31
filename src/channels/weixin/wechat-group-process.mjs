@@ -141,6 +141,14 @@ export class WechatGroupProcess extends EventEmitter {
   // not need a restart to pick up an operator decision.
   #adapterEnv() {
     const env = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONUTF8: '1' };
+    // A DSH Host may run with PYTHONHOME/PYTHONPATH pointing at its own bundled
+    // embedded interpreter. Inheriting them makes any other Python fail before
+    // the first statement ('No module named encodings'), which surfaced as a
+    // bare process-exit and made the group bridge retry forever. The adapter
+    // needs a self-contained interpreter, so those are dropped explicitly.
+    for (const name of ['PYTHONHOME', 'PYTHONPATH', 'PYTHONSTARTUP', 'PYTHONEXECUTABLE']) {
+      delete env[name];
+    }
     if (this.#allowUnverifiedRead) env.DSH_WECHAT_GROUP_ALLOW_UNVERIFIED = '1';
     if (this.#allowSend) env.DSH_WECHAT_GROUP_ALLOW_SEND = '1';
     if (this.#allowWindowRestore) env.DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE = '1';

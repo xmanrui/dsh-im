@@ -58,6 +58,12 @@ function makeProcess(t, options = {}) {
   const children = [];
   const spawnCalls = [];
   const logs = [];
+  // Callers may simulate a Host environment by replacing process.env for this run.
+  if (options.env) {
+    const restore = process.env;
+    process.env = { ...options.env };
+    t.after(() => { process.env = restore; });
+  }
   const logger = {
     warn: (...args) => logs.push(args.join(' ')),
     error: (...args) => logs.push(args.join(' ')),
@@ -118,6 +124,18 @@ test('config switches travel into the adapter environment without touching the h
   assert.equal(offEnv.DSH_WECHAT_GROUP_ALLOW_SEND, undefined);
   // Window restore is never granted implicitly: it would steal the user's screen.
   assert.equal(offEnv.DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE, undefined);
+  // A Host may carry its own bundled interpreter's PYTHONHOME/PYTHONPATH; passing
+  // them on makes the adapter die before its first statement, which looked like a
+  // bare process-exit and left the bridge retrying forever.
+  // The test machine usually has none of these, so inject them first: a check that
+  // passes on an empty environment proves nothing about the leak it guards.
+  const poisoned = { ...process.env, PYTHONHOME: 'C:/bad-python', PYTHONPATH: 'C:/bad-path' };
+  const leaked = makeProcess(t, { env: poisoned });
+  await startReady(leaked.groupProcess, leaked.children);
+  const leakedEnv = leaked.spawnCalls[0].options.env;
+  for (const name of ['PYTHONHOME', 'PYTHONPATH', 'PYTHONSTARTUP', 'PYTHONEXECUTABLE']) {
+    assert.equal(leakedEnv[name], undefined, name + ' must not leak into the adapter');
+  }
 
   const on = makeProcess(t, { config: { ...CONFIG, allowUnverifiedRead: true, allowSend: true } });
   await startReady(on.groupProcess, on.children);
