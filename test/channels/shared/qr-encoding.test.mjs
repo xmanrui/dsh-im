@@ -11,10 +11,10 @@ import { createWecomRpcHandler } from '../../../plugin-src/host/channels/wecom/r
 import { createQqRpcHandler } from '../../../plugin-src/host/channels/qq/rpc.mjs';
 import { createWhatsappRpcHandler } from '../../../plugin-src/host/channels/whatsapp/rpc.mjs';
 import { createConnectionDiagnostics } from '../../../src/channels/shared/connection-error.mjs';
-import { normalizeDiagnosticDetails } from '../../../src/channels/shared/diagnostic-details.mjs';
+import { normalizeDiagnosticDetails, safeDiagnosticMessage } from '../../../src/channels/shared/diagnostic-details.mjs';
 import { qrEncodingError } from '../../../src/channels/shared/qr-encoding-error.mjs';
 import { setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
-import { ConnectionError, formatConnectionDiagnostic } from '../../../plugin-src/client/connection-error.js';
+import { ConnectionError, formatConnectionDiagnostic, normalizeConnectionError } from '../../../plugin-src/client/connection-error.js';
 
 const factories = {
   weixin: createWeixinRpcHandler, feishu: createFeishuRpcHandler,
@@ -213,4 +213,48 @@ test('QR diagnostics preserve cancellation and translate the actionable hint', (
     assert.match(result.details.hint, /QR-code image/);
     assert.doesNotMatch(result.details.hint, /[\p{Script=Han}]/u);
   } finally { setImHostLanguage('zh'); }
+});
+
+test('QR diagnostics keep the local library message that identifies the failure', () => {
+  const diagnostics = createConnectionDiagnostics({ channel: 'feishu', logger: { error() {} } });
+  const leaf = Object.assign(new TypeError('QRCode.toDataURL is not a function'), { code: 'ERR_INVALID_ARG_TYPE' });
+  const result = diagnostics.report(qrEncodingError(new Error('QR encode failed', { cause: leaf }))).publicError;
+  assert.equal(result.details.causeMessage, 'QRCode.toDataURL is not a function');
+  assert.equal(result.details.reason, 'ERR_INVALID_ARG_TYPE');
+  assert.deepEqual(result.details.errorTypes, ['Error', 'TypeError']);
+
+  // The message reaches the copyable diagnostics the reporter sends upstream.
+  const text = formatConnectionDiagnostic(normalizeConnectionError(result));
+  assert.match(text, /causeMessage: QRCode\.toDataURL is not a function/);
+});
+
+test('safeDiagnosticMessage admits local library diagnostics only', () => {
+  for (const accepted of [
+    'QRCode.toDataURL is not a function',
+    'PNG.sync.write is not a constructor',
+    'String required as first argument',
+    "Cannot read properties of undefined (reading 'length')",
+    'invalid stored block lengths',
+    'incorrect header check',
+    'padding not multiple of block size',
+  ]) assert.equal(safeDiagnosticMessage(accepted), accepted, accepted);
+
+  for (const rejected of [
+    'private QR url',
+    'failed to open the verification page',
+    'failed to open https://accounts.feishu.cn/page/verify?code=abc',
+    'invalid token abcdef',
+    'auth for user@example.com failed',
+    'A'.repeat(32),
+    '本机二维码图片生成失败',
+    '',
+    undefined,
+    null,
+  ]) assert.equal(safeDiagnosticMessage(rejected), undefined, String(rejected));
+
+  assert.deepEqual(normalizeDiagnosticDetails({ causeMessage: 'https://example.com/secret' }), {});
+  assert.deepEqual(normalizeDiagnosticDetails({ causeMessage: 'private QR url' }), {});
+  assert.deepEqual(normalizeDiagnosticDetails({ causeMessage: 'Invalid data' }), {
+    causeMessage: 'Invalid data',
+  });
 });
