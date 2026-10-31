@@ -1,13 +1,14 @@
 import { harnessPeer } from './harness-peer.mjs';
 
 /**
- * `active` + `disarmed` is what a Host restart leaves behind (continuation
- * eligibility is process-local and is dropped on `agent/created`), and the
- * product UI shows it as 已暂停: the user never asked for that pause, so a
- * message may bring it back. `paused` is an explicit human pause and stays put
- * unless the channel opts in with `resumePaused`.
+ * Parked goal states an inbound message may bring back. The product UI shows
+ * both as 已暂停, and DSH writes `paused` for an aborted round as well as for
+ * the pause button, so a channel cannot tell the two apart afterwards: leaving
+ * `paused` alone would leave the goal that just lost its round parked for good.
+ * Channels that only want restart leftovers set `resumePaused: false`.
  */
-const disarmed = goal => goal?.phase === 'active' && goal?.activation === 'disarmed';
+const resumableGoal = (goal, resumePaused) => (goal?.phase === 'active' && goal?.activation === 'disarmed')
+  || (resumePaused !== false && goal?.phase === 'paused');
 
 /** Gateway rejections that mean this Host cannot serve goal control at all. */
 const UNAVAILABLE_CODES = new Set([
@@ -28,8 +29,8 @@ function unavailable(error) {
  * Returns `undefined` when the Host exposes no Typert gateway; the channel then
  * keeps its previous behaviour instead of failing every inbound message.
  */
-export function createGoalControl(ctx, { logger, resumePaused = false } = {}) {
-  const resumable = goal => disarmed(goal) || (resumePaused === true && goal?.phase === 'paused');
+export function createGoalControl(ctx, { logger, resumePaused = true } = {}) {
+  const resumable = goal => resumableGoal(goal, resumePaused);
   const gateway = ctx?.typertGateway;
   if (!gateway || typeof gateway.invoke !== 'function') return undefined;
   const peer = harnessPeer(ctx);
