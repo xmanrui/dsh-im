@@ -1,4 +1,5 @@
 const GROUP_EVENT_SOURCE = 'uia-wechat-group/v1';
+const UNVERIFIED_SENDER_ID = 'uia-unverified:row';
 
 function runtimeError(code, message) {
   const error = new Error(message);
@@ -210,7 +211,13 @@ export class WechatGroupRuntime {
     const group = this.#groups.get(event.conversation_id);
     if (!group || event.conversation_title !== group.title) return null;
     if (!nonEmptyString(event.from_user_id) || !nonEmptyString(event.sender_name)) return null;
-    if (event.from_user_id !== 'uia-name:' + event.sender_name) return null;
+    // WeChat 4.1 exposes no sender, so the adapter reports one fixed
+    // unverified identity. Accept it only for a group whose owner explicitly
+    // opted in, and never let it borrow a real member id.
+    if (event.from_user_id === UNVERIFIED_SENDER_ID) {
+      if (event.sender_name !== UNVERIFIED_SENDER_ID) return null;
+      if (group.allowUnverifiedTrigger !== true) return null;
+    } else if (event.from_user_id !== 'uia-name:' + event.sender_name) return null;
     if (event.reply_target !== group.id || event.addressed !== true) return null;
     if (!nonEmptyString(event.text) || !nonEmptyString(event.raw_text)) return null;
     if (!Number.isSafeInteger(event.sent_at) || event.sent_at < 0 || typeof event.is_self !== 'boolean') return null;

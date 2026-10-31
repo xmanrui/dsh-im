@@ -197,6 +197,24 @@ test('unknown provider outcome surfaces as an uncertain send error instead of fa
   assert.equal(groupProcess.sends.length, 1);
 });
 
+test('a real unverified UIA row reaches the bridge and keeps its unknown identity', async (t) => {
+  const { runtime, groupProcess, accepted, bridge } = makeRuntime(t, {
+    config: { ...CONFIG, groups: [{ ...CONFIG.groups[0], allowUnverifiedTrigger: true }] },
+  });
+  await runtime.start({ bridge });
+  // WeChat 4.1 exposes no sender, so the adapter reports this exact shape.
+  const unverified = groupEvent({
+    message_id: "real-unverified-row",
+    from_user_id: "uia-unverified:row",
+    sender_name: "uia-unverified:row",
+  });
+  groupProcess.emit("message", unverified);
+  await runtime.waitForIdle();
+  assert.deepEqual(accepted.map((event) => event.message_id), ["real-unverified-row"]);
+  assert.equal(accepted[0].from_user_id, "uia-unverified:row");
+  assert.equal(runtime.status.messagesRejected, 0);
+});
+
 test('only complete addressed v1 events for the exact configured group reach the bridge', async (t) => {
   const { runtime, groupProcess, accepted, logs, bridge } = makeRuntime(t);
   await runtime.start({ bridge });
