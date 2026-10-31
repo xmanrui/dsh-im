@@ -3,6 +3,10 @@ import { t } from '../shared/i18n.mjs';
 import { TextHarnessBridge, createTextBridgeStatus } from '../shared/text-harness-bridge.mjs';
 import { workspaceLabels } from '../shared/workspace-labels.mjs';
 import { TelegramApprovalCard } from './approval-card.mjs';
+import { TelegramPresetCard } from './preset-card.mjs';
+import { TelegramClearCard } from './clear-card.mjs';
+import { TelegramMenuCard } from './menu-card.mjs';
+import { TelegramHelpCard } from './help-card.mjs';
 
 export const TELEGRAM_DESCRIPTOR = Object.freeze({
   key: 'telegram',
@@ -139,6 +143,22 @@ export class TelegramHarnessBridge extends TextHarnessBridge {
       interactionCard: TELEGRAM_INTERACTION_CARD,
       workspaceCard: TELEGRAM_WORKSPACE_CARD,
       ...options,
+      // `presetCard: null` keeps the plain-text command (tests/tools).
+      presetCard: options && Object.hasOwn(options, 'presetCard')
+        ? options.presetCard
+        : new TelegramPresetCard({ logger: options?.logger }),
+      // `clearCard: null` keeps the plain-text command (tests/tools).
+      clearCard: options && Object.hasOwn(options, 'clearCard')
+        ? options.clearCard
+        : new TelegramClearCard({ logger: options?.logger }),
+      // `menuCard: null` keeps the plain-text command (tests/tools).
+      menuCard: options && Object.hasOwn(options, 'menuCard')
+        ? options.menuCard
+        : new TelegramMenuCard({ logger: options?.logger }),
+      // `helpCard: null` keeps the plain-text command (tests/tools).
+      helpCard: options && Object.hasOwn(options, 'helpCard')
+        ? options.helpCard
+        : new TelegramHelpCard({ logger: options?.logger }),
       approvalCard: options && Object.hasOwn(options, 'approvalCard')
         ? options.approvalCard
         : new TelegramApprovalCard({ logger: options?.logger }),

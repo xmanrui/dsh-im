@@ -108,6 +108,26 @@ function settledWithin(operation, timeoutMs) {
  * a bounded signal ({@link STATUS_FIELD_TIMEOUT_MS}) so a frozen Host cannot
  * make the command hang.
  */
+/** The last path segment, used when a full path must not be shown. */
+function workspaceTail(path) {
+  const text = typeof path === 'string' ? path.replace(/[/\\]+$/u, '') : '';
+  if (!text) return '（未知）';
+  const tail = text.slice(Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\')) + 1);
+  return tail || text;
+}
+
+/**
+ * Whether this conversation's details may be shown in full.
+ *
+ * A group chat is a room full of people: the absolute workspace path, the Session
+ * id and the model name describe the *operator's* machine, not the group's
+ * business. So in a group the reply keeps the useful part (is it connected, is
+ * something running) and drops the identifying part.
+ */
+function isSharedConversation(conversationKey) {
+  return typeof conversationKey === 'string' && conversationKey.startsWith('group:');
+}
+
 export async function runStatusCommand({
   descriptor,
   harness,
@@ -129,15 +149,24 @@ export async function runStatusCommand({
   const label = descriptor?.label ?? 'Telegram';
   const lines = [t('{label}机器人与 DeepSeek Harness 连接正常。', { label })];
 
+  const shared = isSharedConversation(conversationKey);
   const workspace = await settled(() => readWorkspace(harness, conversationKey));
-  if (workspace) lines.push(t('工作区：{workspace}', { workspace }));
+  // The absolute path is the operator's filesystem layout: show its last segment
+  // (enough to tell workspaces apart) instead of the full path in a group.
+  if (workspace) {
+    lines.push(shared
+      ? t('工作区：{workspace}（群聊中仅显示末段）', { workspace: workspaceTail(workspace) })
+      : t('工作区：{workspace}', { workspace }));
+  }
 
   const sessionId = await settled(async () => (typeof state?.sessionFor === 'function'
     ? state.sessionFor(conversationKey)
     : null));
   const boundSessionId = typeof sessionId === 'string' && sessionId ? sessionId : null;
   lines.push(boundSessionId
-    ? t('绑定会话：{session}', { session: shortenedSessionId(boundSessionId) })
+    ? t('绑定会话：{session}', {
+      session: shared ? `…${boundSessionId.slice(-6)}` : shortenedSessionId(boundSessionId),
+    })
     : t('绑定会话：未绑定（发送消息后自动创建）'));
 
   const session = boundSessionId
@@ -150,10 +179,26 @@ export async function runStatusCommand({
     settledWithin(() => readPreset(harness, fieldOptions), fieldTimeout),
     session ? settledWithin(() => readRunning(session, fieldOptions), fieldTimeout) : false,
   ]);
-  if (model) lines.push(t('当前模型：{model}', { model }));
+  if (model && !shared) lines.push(t('当前模型：{model}', { model }));
+  else if (model && shared) lines.push(t('当前模型：已设置（群聊中不显示具体名称）'));
   else if (!session) lines.push(t('当前模型：暂无（创建会话后显示）'));
   if (preset) lines.push(t('Agent Preset（预设）：{preset}', { preset }));
   if (running === true) lines.push(t('运行中任务：有（发送 /stop 可停止）'));
 
-  return { message: lines.join('\n') };
+  // `statusSnapshot` is the machine-readable half a channel may render as a card.
+  // It carries the *same* redaction the text got: a card must never leak what the
+  // text path deliberately hid, so `shared` is applied once, here.
+  return {
+    message: lines.join('\n'),
+    statusSnapshot: Object.freeze({
+      label,
+      shared,
+      workspace: workspace ? (shared ? workspaceTail(workspace) : workspace) : null,
+      sessionId: boundSessionId,
+      model: model ? (shared ? null : model) : null,
+      modelHidden: Boolean(model) && shared,
+      preset: preset ?? null,
+      running: running === true,
+    }),
+  };
 }
