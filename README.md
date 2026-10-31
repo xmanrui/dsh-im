@@ -138,8 +138,9 @@ Matrix 加密目前仅供非敏感测试：默认 optional 模式尝试启动加
 
 微信 4.1 的官方 iLink 接口只覆盖单聊，因此本插件在保留单聊的前提下，额外提供一个基于本机 Windows UI 自动化（UIA）的群桥：
 
-- **能读**：读取已配置群的可见消息正文（可选，需设置环境变量 `DSH_WECHAT_GROUP_ALLOW_UNVERIFIED=1`）。
-- **能发**：把回复发回该群（可选，需 `DSH_WECHAT_GROUP_ALLOW_SEND=1`）。
+- **前提**：微信 4.x 的 `mmui` 控件树只在微信启动时系统「屏幕阅读器」标志已置位才构建，见[运行手册](docs/wechat-group-runbook.md)的无障碍标志一节。
+- **能读**：读取已配置群的可见消息正文（可选，`group-chats.json` 里 `"allowUnverifiedRead": true`，或环境变量 `DSH_WECHAT_GROUP_ALLOW_UNVERIFIED=1`）。
+- **能发**：把回复发回该群（可选，`"allowSend": true`，或 `DSH_WECHAT_GROUP_ALLOW_SEND=1`）。
 - **不能证明是谁说的**：微信 4.1 的气泡控件不暴露发送者 / 是否本人，真实 @ 也只渲染为 `@[___]` 占位。
 - 因此群消息一律标记为 `uia-unverified:row`，默认 `addressed=false`，不触发模型、不授予命令权限。
 - 如确有必要，可在**指定的群**上显式设置 `"allowUnverifiedTrigger": true`，让带 `/dsh` 前缀的消息被判定为 addressed，但身份仍是未验证，永不冒充成员或走 owner 豁免。

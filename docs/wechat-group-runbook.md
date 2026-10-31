@@ -43,6 +43,29 @@
 
 只读排障永远安全：`py -3.12 -B scripts/wechat_group_uia.py --probe`（不选群、不输入、不发送）。
 
+### 无障碍标志（微信 4.x 的硬前提）
+
+微信 4.x 的 `mmui::*` 无障碍控件树**只在微信进程启动那一刻系统「屏幕阅读器」标志已置位时才构建**；事后打开读屏、广播 `WM_SETTINGCHANGE`、重启微信以外的任何操作都补不回来。标志未置位时，主窗口在 UIA 里只剩一个空的 `MMUIRenderSubWindowHW` 面板，`mmui::MainWindow` 根本不存在。
+
+置位（一次性，命令行即可，不需要读屏软件常驻）：
+
+```powershell
+# SPI_SETSCREENREADER = 0x47，SPIF_UPDATEINIFILE|SPIF_SENDCHANGE
+py -3.12 -B _uia/enable_reader_flag.py   # 打印 set_ok 1 / flag True
+```
+
+顺序必须是**先置标志、再启动微信**。若微信已在运行，只能先退出再启动（会掉一次登录态，需要扫码）。
+
+### 群桥起不来时的错误码
+
+| 适配器错误码 | 含义 | 处置 |
+|---|---|---|
+| `wechat_logged_out` | 微信停在登录/扫码页 | 扫码登录后再启动群桥 |
+| `main_window_missing` | 没有微信主窗口 | 确认微信已启动且窗口未被最小化到托盘 |
+| `message_layout_unverified` | 未开 `allowUnverifiedRead` | 在 `group-chats.json` 里置 `"allowUnverifiedRead": true` |
+| `send_disabled` | 未开 `allowSend` | 在 `group-chats.json` 里置 `"allowSend": true` |
+| `duplicate_group_title` | 目标群标题不在可见会话列表里（或重名） | 在微信里把目标群**置顶** |
+
 ## 账号级群配置
 
 路径：`integrations/dsh-weixin/accounts/<botId>/group-chats.json`
