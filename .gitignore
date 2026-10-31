@@ -8,3 +8,10 @@ coverage/
 .DS_Store
 .idea/
 e2e/
+
+# Session-generated probes and evidence (kept out of the package)
+_audit/
+_hmr/
+_research/
+_uia/
+@AutomationLog.txt
