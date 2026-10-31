@@ -17,6 +17,50 @@ function defineCatalogCommand(name, description, help, { aliases = [], ...option
   });
 }
 
+/**
+ * Which section of the `/help` card each command belongs to.
+ *
+ * Kept as a separate map on purpose: the catalog entries above pin the exact help
+ * lines a cross-channel regression compares byte for byte, so grouping lives
+ * beside them instead of inside them. A command with no entry falls into
+ * `other`, which means a newly added command can never disappear from the card.
+ */
+export const COMMAND_HELP_GROUPS = Object.freeze({
+  session: 'session',
+  workspace: 'workspace',
+  model: 'model',
+  task: 'task',
+});
+
+const GROUP_BY_COMMAND = Object.freeze({
+  new: COMMAND_HELP_GROUPS.session,
+  clear: COMMAND_HELP_GROUPS.session,
+  compact: COMMAND_HELP_GROUPS.session,
+  history: COMMAND_HELP_GROUPS.session,
+  sessionlist: COMMAND_HELP_GROUPS.session,
+  session: COMMAND_HELP_GROUPS.session,
+  conv: COMMAND_HELP_GROUPS.workspace,
+  workspace: COMMAND_HELP_GROUPS.workspace,
+  workspacelist: COMMAND_HELP_GROUPS.workspace,
+  models: COMMAND_HELP_GROUPS.model,
+  model: COMMAND_HELP_GROUPS.model,
+  reasoninglist: COMMAND_HELP_GROUPS.model,
+  reasoning: COMMAND_HELP_GROUPS.model,
+  presetlist: COMMAND_HELP_GROUPS.model,
+  preset: COMMAND_HELP_GROUPS.model,
+  stop: COMMAND_HELP_GROUPS.task,
+  steer: COMMAND_HELP_GROUPS.task,
+  batch: COMMAND_HELP_GROUPS.task,
+  send: COMMAND_HELP_GROUPS.task,
+  cancel: COMMAND_HELP_GROUPS.task,
+  status: COMMAND_HELP_GROUPS.task,
+});
+
+/** The section a command belongs to; `other` for anything unmapped. */
+export function commandHelpGroup(name) {
+  return GROUP_BY_COMMAND[name] ?? 'other';
+}
+
 // Presentation metadata for TextHarnessBridge commands, in help order.
 // Keep each command's aliases, short description and full usage together here.
 // Handlers still own parsing and authorization; privateOnly is descriptive.
@@ -121,6 +165,24 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
 
 export function commandsForChannel(channel, catalog = SHARED_COMMAND_CATALOG) {
   return catalog.filter((item) => item.enabled !== false && item.channels.includes(channel));
+}
+
+export function commandHelpSections(channel, catalog = SHARED_COMMAND_CATALOG) {
+  const sections = new Map();
+  for (const item of commandsForChannel(channel, catalog)) {
+    if (item.helpVisible === false) continue;
+    const group = commandHelpGroup(item.name);
+    if (!sections.has(group)) sections.set(group, []);
+    sections.get(group).push({
+      name: item.name,
+      description: item.description,
+      lines: item.help,
+    });
+  }
+  const order = ['session', 'workspace', 'model', 'task', 'other'];
+  return order
+    .filter((group) => (sections.get(group)?.length ?? 0) > 0)
+    .map((group) => ({ group, items: sections.get(group) }));
 }
 
 export function commandHelpLines(channel, catalog = SHARED_COMMAND_CATALOG) {
