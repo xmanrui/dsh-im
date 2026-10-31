@@ -1,13 +1,13 @@
 import { harnessPeer } from './harness-peer.mjs';
 
 /**
- * Durable phases that mean "a goal is parked and a human turn can bring it
- * back". `paused` is an explicit human pause; `active` + `disarmed` is what a
- * Host restart leaves behind (continuation eligibility is process-local and is
- * dropped on `agent/created`), and the product UI shows both as 已暂停.
+ * `active` + `disarmed` is what a Host restart leaves behind (continuation
+ * eligibility is process-local and is dropped on `agent/created`), and the
+ * product UI shows it as 已暂停: the user never asked for that pause, so a
+ * message may bring it back. `paused` is an explicit human pause and stays put
+ * unless the channel opts in with `resumePaused`.
  */
-const RESUMABLE = goal => goal?.phase === 'paused'
-  || (goal?.phase === 'active' && goal?.activation === 'disarmed');
+const disarmed = goal => goal?.phase === 'active' && goal?.activation === 'disarmed';
 
 /** Gateway rejections that mean this Host cannot serve goal control at all. */
 const UNAVAILABLE_CODES = new Set([
@@ -28,7 +28,8 @@ function unavailable(error) {
  * Returns `undefined` when the Host exposes no Typert gateway; the channel then
  * keeps its previous behaviour instead of failing every inbound message.
  */
-export function createGoalControl(ctx, { logger } = {}) {
+export function createGoalControl(ctx, { logger, resumePaused = false } = {}) {
+  const resumable = goal => disarmed(goal) || (resumePaused === true && goal?.phase === 'paused');
   const gateway = ctx?.typertGateway;
   if (!gateway || typeof gateway.invoke !== 'function') return undefined;
   const peer = harnessPeer(ctx);
@@ -70,17 +71,22 @@ export function createGoalControl(ctx, { logger } = {}) {
      * `{ resumed, goal }`; never throws for a missing goal or a lost race.
      */
     async resumeIfPaused(sessionId) {
-      let goal = await this.get(sessionId);
-      if (!RESUMABLE(goal)) return { resumed: false, goal };
+      const goal = await this.get(sessionId);
+      if (!resumable(goal)) return { resumed: false, goal };
       try {
-        return { resumed: true, goal: await resume(sessionId, goal) };
+        const resumed = await resume(sessionId, goal);
+        // The gateway answers `undefined` when this Host turned out not to
+        // serve goal control after all: the goal did not move, so do not
+        // report a success the caller would announce to the user.
+        return resumed === undefined ? { resumed: false, goal } : { resumed: true, goal: resumed };
       } catch (error) {
         // Another mutation (a goal round admitting itself, the Web UI) can bump
         // the revision between read and resume. Re-read once and retry only if
         // the goal is still parked under a newer revision.
         const latest = await this.get(sessionId);
-        if (!RESUMABLE(latest) || latest.revision === goal.revision) throw error;
-        return { resumed: true, goal: await resume(sessionId, latest) };
+        if (!resumable(latest) || latest.revision === goal.revision) throw error;
+        const resumed = await resume(sessionId, latest);
+        return resumed === undefined ? { resumed: false, goal: latest } : { resumed: true, goal: resumed };
       }
     },
   });

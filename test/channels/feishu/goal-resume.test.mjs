@@ -32,7 +32,7 @@ function bridgeStatus() {
   };
 }
 
-function fixture(t, { sessionId = 'session-1', resumeIfPaused, stepPush = false } = {}) {
+function fixture(t, { sessionId = 'session-1', resumeIfPaused, stepPush = false, allowed = ['ou_owner'] } = {}) {
   const sent = [];
   const cards = [];
   let sequence = 0;
@@ -107,7 +107,7 @@ function fixture(t, { sessionId = 'session-1', resumeIfPaused, stepPush = false 
     harness,
     state,
     status: bridgeStatus(),
-    allowedSenderOpenIds: new Set(['ou_owner']),
+    allowedSenderOpenIds: new Set(allowed),
     stepPush,
     ...(stepPush ? { stepPushMode: 'streaming_card' } : {}),
     logger: { info() {}, warn() {}, debug() {}, error() {} },
@@ -138,6 +138,16 @@ test('the process card carries the resumed-goal note as its first block', async 
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(sent.length, 0, 'card mode must not fall back to a plain text note');
   assert.equal(cards.some(json => json.includes('目标已恢复自动续跑')), true);
+});
+
+test('a bot message that passes the access check does not resume a goal', async (t) => {
+  const { bridge, sent, resumeCalls } = fixture(t, { allowed: ['ou_owner', 'ou_bot'] });
+  await bridge.accept({
+    ...event('om-1', '部署完成，@DSH Bot 看一下'),
+    sender: { sender_type: 'bot', sender_id: { open_id: 'ou_bot' } },
+  });
+  assert.deepEqual(resumeCalls, [], 'automation has no recovery intent');
+  assert.equal(sent.some(entry => entry.text.includes('目标已恢复自动续跑')), false);
 });
 
 test('a conversation without a bound session never asks the goal service', async (t) => {
