@@ -7,7 +7,7 @@ const PAUSED = Object.freeze({ id: 'goal-1', revision: 2, phase: 'paused', activ
 
 function fixture({
   goals = [], resumeError, resumeErrors = [], evolve = false, unavailable = false,
-  resumeUnavailable = false, resumePaused = false,
+  resumeUnavailable = false, resumePaused = true,
 } = {}) {
   const lifetime = new AbortController();
   const calls = [];
@@ -66,18 +66,18 @@ function fixture({
   return { control, calls, lifetime };
 }
 
-test('an explicit pause is only resumed when the channel opts in', async () => {
-  const off = fixture({ goals: [PAUSED] });
-  assert.equal((await off.control.resumeIfPaused('session-1')).resumed, false);
-  assert.equal(off.calls.filter(call => call.method === 'resume').length, 0);
-
-  const on = fixture({ goals: [PAUSED], resumePaused: true });
+test('a paused goal is resumed, unless the channel only wants restart leftovers', async () => {
+  const on = fixture({ goals: [PAUSED] });
   const outcome = await on.control.resumeIfPaused('session-1');
   assert.equal(outcome.resumed, true);
   assert.deepEqual(on.calls, [
     { method: 'get', args: { agentId: 'session-1' } },
     { method: 'resume', args: { agentId: 'session-1', ref: { id: 'goal-1', revision: 2 } } },
   ]);
+
+  const off = fixture({ goals: [PAUSED], resumePaused: false });
+  assert.equal((await off.control.resumeIfPaused('session-1')).resumed, false);
+  assert.equal(off.calls.filter(call => call.method === 'resume').length, 0);
 });
 
 test('an active but disarmed goal (Host restart) is resumed too', async () => {
