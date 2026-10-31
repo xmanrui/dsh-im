@@ -1998,8 +1998,18 @@ export function createBotWorkspaceScope(
           const binding = dsBinding(key);
           if (!binding) return null;
           if (!dsBot) throw deliveryTargetError('ds-bot-unavailable', 'DS Bot 当前不可用，请检查插件状态。');
-          const bot = await dsBot.resolve(binding.dsBotId);
-          if (!(await target.sessionExists(bot.sessionId))) {
+          let bot = await dsBot.resolve(binding.dsBotId);
+          if (typeof target.isSessionArchived === 'function' && (await target.isSessionArchived(bot.sessionId))) {
+            for (let i = 0; i < 5; i += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              const updated = await dsBot.resolve(binding.dsBotId).catch(() => null);
+              if (updated && updated.sessionId !== bot.sessionId && !(await target.isSessionArchived(updated.sessionId))) {
+                bot = updated;
+                break;
+              }
+            }
+          }
+          if (!(await target.sessionExists(bot.sessionId)) || (typeof target.isSessionArchived === 'function' && (await target.isSessionArchived(bot.sessionId)))) {
             throw deliveryTargetError('ds-bot-not-found', 'DS Bot 的当前会话不可用。');
           }
           assertCurrentBotScope(isCurrentScope);
@@ -2566,7 +2576,22 @@ export function createBotWorkspaceScope(
                   throw workspaceSessionStale('DS Bot changed before this prompt started.');
                 }
               }
-              return target.ask(sessionId, ...args);
+              try {
+                return await target.ask(sessionId, ...args);
+              } catch (askError) {
+                if (dsBotId && (askError?.code === 'session-archived' || askError?.code === 'turn-blocked')) {
+                  let fresh = null;
+                  for (let i = 0; i < 6; i += 1) {
+                    fresh = await dsBot?.resolve(dsBotId).catch(() => null);
+                    if (fresh && fresh.sessionId !== sessionId) break;
+                    await new Promise((resolve) => setTimeout(resolve, 250));
+                  }
+                  if (fresh && fresh.sessionId !== sessionId) {
+                    throw workspaceSessionStale('DS Bot rolled over to a fresh part.');
+                  }
+                }
+                throw askError;
+              }
             },
           });
         };
