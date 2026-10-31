@@ -135,6 +135,83 @@ export function actionCardStateText(status, texts = {}) {
  * `maxEntries` cards are remembered (oldest is evicted first) and a new card in
  * a conversation supersedes the previous live one.
  */
+/** Telegram truncates button labels itself; we never want to rely on that. */
+export const ACTION_CARD_BUTTON_TEXT_MAX = 60;
+
+const UNSAFE_BUTTON_TEXT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
+
+/**
+ * Make arbitrary text safe to put on a button.
+ *
+ * Workspace paths, session titles and preset labels all reach buttons, and any
+ * of them can carry control characters or newlines that would break the layout
+ * (or, for a bidirectional override, reorder what the user reads). Every card did
+ * this slightly differently — one of them skipped the control-character pass —
+ * so it lives here now and all of them call it.
+ */
+export function safeButtonText(value) {
+  if (typeof value !== 'string') return '';
+  return value.replace(UNSAFE_BUTTON_TEXT, ' ').replace(/\s+/gu, ' ').trim();
+}
+
+/** `safeButtonText` plus the ellipsis every button label needs. */
+export function truncateButtonText(value) {
+  const text = safeButtonText(value) || '•';
+  return text.length > ACTION_CARD_BUTTON_TEXT_MAX
+    ? `${text.slice(0, ACTION_CARD_BUTTON_TEXT_MAX - 1)}…`
+    : text;
+}
+
+/**
+ * Longest we will wait for a rate-limited card operation.
+ *
+ * Telegram answers a throttled call with `retry_after` and expects the bot to
+ * come back then. A card edit is cheap and user-initiated (they just pressed a
+ * button), so waiting a few seconds and trying once more is much better than
+ * telling them "could not update, send the command again". Anything longer than
+ * this is not worth holding the turn open: the caller falls back.
+ */
+export const ACTION_CARD_RETRY_MAX_WAIT_MS = 5_000;
+
+/** `retry_after` in milliseconds, read from either spelling Telegram uses. */
+function rateLimitDelayMs(error) {
+  const value = error?.retry_after ?? error?.retryAfter;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  return Math.ceil(seconds * 1_000);
+}
+
+function isRateLimited(error) {
+  const code = Number(error?.providerCode ?? error?.status);
+  return code === 429 || error?.code === 'telegram-429';
+}
+
+/**
+ * Run one Telegram card operation, honouring a 429 exactly once.
+ *
+ * Every card paid for this separately before: a throttled edit surfaced as
+ * "无法更新卡片，请重新发送命令" even though Telegram had just said when to retry.
+ * This helper makes that recovery the default for all cards.
+ *
+ * Returns the operation's result, or rethrows the last error.
+ */
+export async function withActionCardRetry(operation, {
+  maxWaitMs = ACTION_CARD_RETRY_MAX_WAIT_MS,
+} = {}) {
+  try {
+    return await operation();
+  } catch (error) {
+    const delay = isRateLimited(error) ? rateLimitDelayMs(error) : null;
+    // Only a short, explicit, known wait is worth taking; anything else is the
+    // caller's failure to report.
+    if (delay === null || delay > maxWaitMs) throw error;
+    // Deliberately NOT unref'd: a throttled retry is the only thing this call is
+    // waiting for, so the timer must keep the loop alive until it fires.
+    await new Promise((resolve) => { setTimeout(resolve, delay); });
+    return operation();
+  }
+}
+
 export class ActionCardRegistry {
   #ttlMs;
   #maxEntries;
@@ -236,14 +313,13 @@ export class ActionCardRegistry {
   }
 
   /**
-   * Give a claimed card its keyboard back after a submission that failed but is
-   * still retryable (a transient RPC error, a dropped response). Without this a
-   * card stays `claimed` forever and every later press is answered with "still
-   * submitting", so the only recovery is typing the decision as text.
+   * Give a claimed card its keyboard back after an operation that failed but is
+   * still retryable (a transient RPC error, a refused write).
    *
-   * Only a live claim can be released: a card already resolved, expired or
-   * superseded must stay dead, otherwise a stale tap could decide a newer
-   * approval. Returns the released entry, or null when nothing was released.
+   * `settle()` only accepts terminal statuses, so a caller that wants the press
+   * to be available again has no other way back. Only a live claim can be
+   * released: a card already resolved, expired or superseded must stay dead, or
+   * a stale press could act on newer state. Returns the released entry, or null.
    */
   releaseClaim(nonce) {
     const entry = this.#lookup(nonce);
