@@ -130,6 +130,8 @@ export class WeixinRuntime {
   #abortController = null;
   #monitor = null;
   #starting = null;
+  #groupRuntime = null;
+  #groupStatus = null;
 
   constructor({
     api,
@@ -144,6 +146,7 @@ export class WeixinRuntime {
     replyTimeoutMs = 600_000,
     maxMessageChars = DEFAULT_WEIXIN_MAX_MESSAGE_CHARS,
     startRetryDelaysMs,
+    groupRuntime,
   }) {
     if (!api || !config || !token || !harness || !state) {
       throw new TypeError('WeixinRuntime requires API, account, token, Harness, and state');
@@ -160,10 +163,20 @@ export class WeixinRuntime {
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#maxMessageChars = maxMessageChars;
     this.#startRetryDelaysMs = startRetryDelays(startRetryDelaysMs);
+    this.#groupRuntime = groupRuntime ?? null;
+    this.#groupStatus = this.#groupRuntime?.status
+      ? structuredClone(this.#groupRuntime.status)
+      : null;
   }
 
   get status() {
-    return structuredClone(this.#status);
+    const status = structuredClone(this.#status);
+    // Keep the legacy status shape unless a group runtime was explicitly
+    // configured; old consumers must not grow a new field on every account.
+    if (this.#groupRuntime) status.group = this.#groupStatus
+      ? structuredClone(this.#groupStatus)
+      : { ready: false };
+    return status;
   }
 
   async start(context = {}) {
@@ -193,8 +206,11 @@ export class WeixinRuntime {
       await this.#notifyStart();
       this.#abortController = new AbortController();
       const signal = this.#abortController.signal;
+      const bridgeApi = this.#groupRuntime
+        ? { ...this.#api, sendText: (request) => this.#sendTextThroughTransports(request) }
+        : this.#api;
       this.#bridge = new WeixinHarnessBridge({
-        api: this.#api,
+        api: bridgeApi,
         baseUrl: this.#config.baseUrl,
         token: this.#token,
         ownerUserId: this.#config.ownerUserId,
@@ -221,6 +237,7 @@ export class WeixinRuntime {
         this.#status.connectionError = failure.publicError;
         this.#status.lastError = failure.publicError.message;
       });
+      await this.#startGroupRuntime();
       return this.status;
     } catch (error) {
       this.#abortController?.abort();
@@ -230,6 +247,37 @@ export class WeixinRuntime {
       this.#status.weixinConnectionState = 'failed';
       throw error;
     }
+  }
+
+  async #startGroupRuntime() {
+    if (!this.#groupRuntime) return;
+    try {
+      await this.#groupRuntime.start({ bridge: this.#bridge, signal: this.#abortController.signal });
+      this.#groupStatus = this.#groupRuntime.status
+        ? structuredClone(this.#groupRuntime.status)
+        : { ready: true };
+    } catch (error) {
+      // A local UIA failure must not tear down the independent iLink monitor.
+      this.#groupStatus = {
+        ...(this.#groupRuntime.status ? structuredClone(this.#groupRuntime.status) : {}),
+        ready: false,
+        lastError: String(error?.message ?? error),
+      };
+      this.#logger.warn?.('[dsh-weixin] group bridge start failed');
+    }
+  }
+
+  async #stopGroupRuntime() {
+    if (!this.#groupRuntime) return;
+    try {
+      await this.#groupRuntime.stop?.();
+    } catch {
+      this.#logger.warn?.('[dsh-weixin] group bridge stop failed');
+    }
+    this.#groupStatus = {
+      ...(this.#groupRuntime.status ? structuredClone(this.#groupRuntime.status) : {}),
+      ready: false,
+    };
   }
 
   async #notifyStart() {
@@ -314,6 +362,7 @@ export class WeixinRuntime {
     await monitor?.catch(() => undefined);
     await bridge?.waitForIdle();
     this.#bridge = null;
+    await this.#stopGroupRuntime();
     if (wasStarted) {
       try {
         await this.#api.notifyStop({
@@ -351,12 +400,17 @@ export class WeixinRuntime {
     return { sent: true };
   }
 
+  async #sendTextThroughTransports(request) {
+    if (this.#groupRuntime?.handles?.(request.toUserId)) return this.#groupRuntime.sendText(request);
+    return this.#api.sendText(request);
+  }
+
   async #sendTrackedText({ toUserId, text, signal, fullText = text, chunkIndex = 0, chunkCount = 1 }) {
     const sentAt = Date.now();
     const contextToken = this.#state.contextTokenFor?.(toUserId);
     let result;
     try {
-      result = await this.#api.sendText({
+      result = await this.#sendTextThroughTransports({
         baseUrl: this.#config.baseUrl,
         token: this.#token,
         toUserId,
@@ -406,7 +460,8 @@ export class WeixinRuntime {
   async sendProactiveText(target, text, { signal, format = 'plain' } = {}) {
     const toUserId = typeof target?.route?.toUserId === 'string'
       ? target.route.toUserId.trim() : '';
-    if (target?.kind !== 'user' || !toUserId) {
+    const groupTarget = target?.kind === 'group' && this.#groupRuntime?.handles?.(toUserId);
+    if ((target?.kind !== 'user' && !groupTarget) || !toUserId) {
       const error = new TypeError('Invalid Weixin proactive delivery target');
       error.code = 'invalid-target';
       throw error;

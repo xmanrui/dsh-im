@@ -241,6 +241,8 @@ const CLIENT = Object.freeze({
   '填写微信用户 ID': 'Введите ID пользователя WeChat',
   '飞书 Open ID': 'Open ID в Feishu',
   '群成员 Open ID': 'Open ID участника группы',
+  '群成员显示名（UIA）': 'Отображаемое имя участника (UIA)',
+  '填写群成员显示名（UIA 本地标识）': 'Введите отображаемое имя участника (локальный идентификатор UIA)',
   '钉钉用户 ID': 'ID пользователя DingTalk',
   '填写 senderStaffId 或 senderId': 'Введите senderStaffId или senderId',
   '群成员用户 ID': 'ID участника группы',

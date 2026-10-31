@@ -22,6 +22,7 @@ import {
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   configuredAccessPolicy,
+  directAccessPolicy,
 } from '../access-policy-fixture.mjs';
 
 function deferred() {
@@ -2815,4 +2816,429 @@ test('Weixin keeps delivering a message whose send time cannot be read', async (
   assert.match(text, /<dsh_im_source>\{"senderId":"owner-user"\}<\/dsh_im_source>/,
     `only the unreadable field is dropped: ${text}`);
   assert.ok(text.endsWith('时间读不到也要送达'));
+});
+
+function groupMessage(id, text, overrides = {}) {
+  return {
+    source: 'uia-wechat-group/v1',
+    message_id: id,
+    message_type: 1,
+    conversation_type: 'group',
+    conversation_id: 'uia_group_alpha',
+    conversation_title: 'Alpha Group',
+    from_user_id: 'uia-name:Alice',
+    sender_name: 'Alice',
+    reply_target: 'uia_group_alpha',
+    addressed: true,
+    text,
+    raw_text: '/dsh ' + text,
+    sent_at: 1_793_000_000_000,
+    is_self: false,
+    item_list: [{ type: 1, text_item: { text } }],
+    ...overrides,
+  };
+}
+
+function groupAccessPolicy({
+  directMode = 'allowlist',
+  groupMode = 'allowlist',
+  members = ['uia-name:Alice'],
+} = {}) {
+  const policy = directAccessPolicy();
+  const settings = policy.getSettings();
+  settings.direct.mode = directMode;
+  settings.group.mode = groupMode;
+  settings.direct.open.defaultCanExecuteCommands = true;
+  settings.group.open.defaultCanExecuteCommands = true;
+  settings.group.allowlist.users = members.map((id) => ({ id, canExecuteCommands: true }));
+  return policy;
+}
+
+test('Weixin group input fails closed before access, Harness, sends, or dedup writes', async () => {
+  const fixture = stateFixture();
+  let asks = 0;
+  const sent = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async (request) => sent.push(request) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    accessPolicy: groupAccessPolicy({ directMode: 'open', groupMode: 'open' }),
+    harness: {
+      sessionExists: async () => true,
+      createSession: async () => 'session-invalid-group',
+      ask: async () => { asks += 1; return 'must not answer'; },
+    },
+    state: fixture.state,
+  });
+  const invalid = [
+    groupMessage('invalid-source', 'unknown source', { source: 'iLink/group/v1' }),
+    groupMessage('invalid-addressed', 'not addressed', { addressed: false }),
+    groupMessage('invalid-target', 'missing target', { reply_target: '' }),
+    groupMessage('invalid-chat', 'missing chat', { conversation_id: '' }),
+    groupMessage('invalid-member', 'missing member', { from_user_id: '' }),
+  ];
+  for (const event of invalid) await bridge.accept(event);
+  assert.equal(asks, 0);
+  assert.deepEqual(sent, []);
+  assert.equal(fixture.seen.size, 0);
+  assert.equal(fixture.sessions.size, 0);
+});
+
+test('Weixin direct open cannot override a group deny for the same member', async () => {
+  const fixture = stateFixture();
+  const asked = [];
+  const sent = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async (request) => sent.push(request) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    accessPolicy: groupAccessPolicy({ directMode: 'open', members: [] }),
+    harness: {
+      sessionExists: async () => true,
+      createSession: async () => 'session-direct-open',
+      ask: async (_sessionId, text) => { asked.push(text); return 'direct answer'; },
+    },
+    state: fixture.state,
+  });
+  await bridge.accept(groupMessage('group-denied', 'group must stay denied'));
+  assert.deepEqual(asked, []);
+  assert.deepEqual(sent, []);
+  await bridge.accept(message('direct-open', 'direct may pass', {
+    from_user_id: 'uia-name:Alice',
+  }));
+  assert.deepEqual(asked, ['direct may pass']);
+  assert.deepEqual(sent.map(({ toUserId }) => toUserId), ['uia-name:Alice']);
+  assert.equal(fixture.sessions.has('group:uia_group_alpha'), false);
+  assert.equal(fixture.sessions.get('p2p:uia-name:Alice'), 'session-direct-open');
+});
+
+test('Weixin group allow does not open the direct scope for the same member', async () => {
+  const fixture = stateFixture();
+  const asked = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async () => ({ messageId: 'group-scope-answer' }) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    accessPolicy: groupAccessPolicy(),
+    harness: {
+      sessionExists: async () => true,
+      createSession: async () => 'session-group-only',
+      ask: async (_sessionId, text) => { asked.push(text); return 'group answer'; },
+    },
+    state: fixture.state,
+  });
+  await bridge.accept(message('direct-denied', 'direct must stay denied', {
+    from_user_id: 'uia-name:Alice',
+  }));
+  assert.deepEqual(asked, []);
+  await bridge.accept(groupMessage('group-allowed', 'group may pass'));
+  assert.deepEqual(asked, ['group may pass']);
+  assert.equal(fixture.sessions.has('p2p:uia-name:Alice'), false);
+  assert.equal(fixture.sessions.get('group:uia_group_alpha'), 'session-group-only');
+});
+
+test('Weixin group members share one Session, groups stay isolated, and text plus typing target the group', async () => {
+  const fixture = stateFixture();
+  const asked = [];
+  const sent = [];
+  const configTargets = [];
+  const typing = [];
+  let creates = 0;
+  const bridge = new WeixinHarnessBridge({
+    api: {
+      sendText: async (request) => { sent.push(request); return { messageId: 'answer-' + sent.length }; },
+      getConfig: async ({ toUserId }) => { configTargets.push(toUserId); return { typingTicket: 'group-ticket' }; },
+      sendTyping: async (request) => typing.push({ toUserId: request.toUserId, status: request.status }),
+    },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    accessPolicy: groupAccessPolicy({
+      directMode: 'open',
+      members: ['uia-name:Alice', 'uia-name:Bob'],
+    }),
+    harness: {
+      sessionExists: async () => true,
+      createSession: async () => 'session-group-' + ++creates,
+      ask: async (sessionId, text) => { asked.push({ sessionId, text }); return 'answer:' + text; },
+    },
+    state: fixture.state,
+  });
+  await bridge.accept(groupMessage('group-alpha-1', 'first'));
+  await bridge.accept(groupMessage('group-alpha-2', 'second', {
+    from_user_id: 'uia-name:Bob', sender_name: 'Bob',
+  }));
+  await bridge.accept(groupMessage('group-beta-1', 'third', {
+    conversation_id: 'uia_group_beta',
+    conversation_title: 'Beta Group',
+    reply_target: 'uia_group_beta',
+  }));
+  assert.deepEqual(asked, [
+    { sessionId: 'session-group-1', text: 'first' },
+    { sessionId: 'session-group-1', text: 'second' },
+    { sessionId: 'session-group-2', text: 'third' },
+  ]);
+  assert.equal(fixture.sessions.get('group:uia_group_alpha'), 'session-group-1');
+  assert.equal(fixture.sessions.get('group:uia_group_beta'), 'session-group-2');
+  assert.equal(fixture.sessions.has('p2p:uia-name:Alice'), false);
+  assert.deepEqual(sent.map(({ toUserId }) => toUserId), [
+    'uia_group_alpha', 'uia_group_alpha', 'uia_group_beta',
+  ]);
+  assert.deepEqual(configTargets, ['uia_group_alpha']);
+  assert.equal(typing.length > 0, true);
+  assert.equal(typing.every(({ toUserId }) => ['uia_group_alpha', 'uia_group_beta'].includes(toUserId)), true);
+  assert.equal(typing.some(({ toUserId }) => toUserId.includes('uia-name:')), false);
+});
+
+test('Weixin group enhancement uses group scope and preserves actual member metadata', async () => {
+  const fixture = stateFixture();
+  const prompts = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async () => ({ messageId: 'group-context-answer' }) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    accessPolicy: groupAccessPolicy({ directMode: 'open', groupMode: 'open' }),
+    contextEnhancement: {
+      botId: 'wx_group_context',
+      getSettings: () => ({
+        direct: { enabled: false, fields: [], guidance: '' },
+        group: {
+          enabled: true,
+          fields: ['conversationType', 'senderId', 'senderName', 'conversationTitle', 'chatId'],
+          guidance: '',
+        },
+      }),
+    },
+    harness: {
+      sessionExists: async () => true,
+      createSession: async () => 'session-group-context',
+      ask: async (_sessionId, content) => { prompts.push(content); return 'done'; },
+    },
+    state: fixture.state,
+  });
+  await bridge.accept(groupMessage('group-context', 'who sent this?'));
+  const content = promptText(prompts[0]);
+  assert.ok(content.includes('<dsh_im_source>{"conversationType":"group","senderId":"uia-name:Alice","senderName":"Alice","conversationTitle":"Alpha Group","chatId":"uia_group_alpha"}</dsh_im_source>'), content);
+  assert.ok(content.endsWith('who sent this?'));
+});
+
+test('Weixin group safe error replies go to the group rather than the member', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async (request) => sent.push(request) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    accessPolicy: groupAccessPolicy({ directMode: 'open', groupMode: 'open' }),
+    harness: {
+      sessionExists: async () => true,
+      createSession: async () => 'session-group-error',
+      ask: async () => { throw new Error('controlled group failure'); },
+    },
+    state: fixture.state,
+    logger: { error() {} },
+  });
+  await bridge.accept(groupMessage('group-error', 'trigger failure'));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].toUserId, 'uia_group_alpha');
+  assert.match(sent[0].text, /错误码：/);
+});
+
+test('Weixin group quote recovery addresses the group reply target', async () => {
+  let loaded;
+  const event = groupMessage('group-quote', 'explain that answer', {
+    item_list: [{
+      type: 1,
+      text_item: { text: 'explain that answer' },
+      ref_msg: {
+        message_item: { type: 8, create_time_ms: 1_793_000_000_000 },
+      },
+    }],
+  });
+  const inbound = weixinInboundMessage(event, undefined, undefined, {
+    loadReplyContent: async (reference) => {
+      loaded = reference;
+      return { content: 'earlier group answer' };
+    },
+  });
+  const recovered = await inbound.replyTo.load({});
+  assert.equal(loaded.toUserId, 'uia_group_alpha');
+  assert.equal(recovered.content, 'earlier group answer');
+});
+
+test('Weixin deferred group outcomes are delivered to the group reply target', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-weixin-group-deferred-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const state = await new WeixinStateStore(join(root, 'state.json')).load();
+  await state.setSession('group:uia_group_alpha', 'session-group-deferred');
+  const sent = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async (request) => { sent.push(request); return { messageId: 'deferred-' + sent.length }; } },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    accessPolicy: groupAccessPolicy({ directMode: 'open', groupMode: 'open' }),
+    harness: {
+      sessionExists: async () => true,
+      ask: async () => {
+        throw Object.assign(new Error('controlled timeout'), {
+          code: 'harness-reply-timeout',
+          details: {
+            sessionId: 'session-group-deferred', turn: 1,
+            promptRpcId: 'group-deferred-rpc', baselineSeq: 0,
+          },
+        });
+      },
+      rpc: async (method) => {
+        assert.equal(method, 'session.history');
+        return {
+          hasMore: false,
+          events: [
+            { event: { type: 'turn/start', seq: 1, data: { turn: 1 } } },
+            { event: { type: 'user/message', seq: 2, data: { turn: 1, source: { rpcId: 'group-deferred-rpc' } } } },
+            { event: { type: 'assistant/message', seq: 3, data: { turn: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'deferred group answer' }] } } } },
+            { event: { type: 'turn/end', seq: 4, data: { turn: 1, reason: { kind: 'completed' } } } },
+          ],
+        };
+      },
+    },
+    state,
+    logger: { error() {}, warn() {} },
+  });
+  t.after(() => bridge.close());
+  await bridge.accept(groupMessage('group-deferred', 'wait for the answer'));
+  await bridge.waitForIdle();
+  const deferredReply = sent.find(({ text }) => text === 'deferred group answer');
+  assert.ok(deferredReply, 'the completed deferred answer must be delivered');
+  assert.equal(deferredReply.toUserId, 'uia_group_alpha');
+  assert.equal(sent.some(({ toUserId }) => toUserId === 'uia-name:Alice'), false);
+});
+
+test('Weixin automatic steer uses group kind and the actual member while acknowledging the group', async (t) => {
+  const fixture = stateFixture();
+  fixture.sessions.set('group:uia_group_alpha', 'session-group-steer');
+  const releaseAnswer = deferred();
+  t.after(() => releaseAnswer.resolve('finished'));
+  const asks = [];
+  const steers = [];
+  const sent = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async (request) => sent.push(request) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    accessPolicy: groupAccessPolicy({ directMode: 'open', groupMode: 'open' }),
+    contextEnhancement: {
+      botId: 'wx_group_steer',
+      getSettings: () => ({
+        direct: { enabled: false, fields: [], guidance: '' },
+        group: { enabled: true, fields: ['senderId'], guidance: '' },
+      }),
+    },
+    harness: {
+      currentBusyMessageMode: () => 'steer',
+      sessionExists: async () => true,
+      createSession: async () => 'session-group-steer',
+      workspaceSession: (sessionId) => ({
+        sessionExists: async () => true,
+        ask: async (text) => { asks.push(text); return releaseAnswer.promise; },
+        steerActiveTurn: async (text) => {
+          if (asks.length === 0) return false;
+          steers.push(text);
+          return true;
+        },
+      }),
+    },
+    state: fixture.state,
+  });
+  const first = bridge.accept(groupMessage('group-steer-start', 'start a long task'));
+  await eventually(() => asks.length === 1);
+  const correction = bridge.accept(groupMessage('group-steer-correction', 'correct the group task', {
+    from_user_id: 'uia-name:Bob', sender_name: 'Bob',
+  }));
+  await eventually(() => steers.length === 1, 'the group correction did not steer the active turn');
+  await correction;
+  assert.equal(steers.length, 1);
+  assert.match(steers[0], /"senderId":"uia-name:Bob"/);
+  const acknowledgement = sent.find(({ text }) => text.includes('已提交补充指令'));
+  assert.ok(acknowledgement);
+  assert.equal(acknowledgement.toUserId, 'uia_group_alpha');
+  releaseAnswer.resolve('finished');
+  await first;
+  await bridge.waitForIdle();
+});
+
+test('Weixin Harness questions and answers keep the group target and actual member actor', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('group:uia_group_alpha', 'session-group-question');
+  const sent = [];
+  const submitted = deferred();
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async (request) => sent.push(request) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    accessPolicy: groupAccessPolicy({ directMode: 'open', groupMode: 'open' }),
+    harness: {
+      sessionExists: async () => true,
+      createSession: async () => 'session-group-question',
+      ask: async (sessionId, _text, options) => {
+        await options.onInteraction({
+          kind: 'question',
+          interactionId: 'group-question',
+          rpcId: 'group-question',
+          sessionId,
+          payload: {
+            type: 'question/requested', sessionId,
+            questions: [{ id: 'choice', question: 'Choose one', options: [{ label: 'One' }, { label: 'Two' }] }],
+          },
+          respond: async (result) => { submitted.resolve(result); return { accepted: true }; },
+        });
+        await submitted.promise;
+        return 'question complete';
+      },
+    },
+    state: fixture.state,
+  });
+  const first = bridge.accept(groupMessage('group-question-start', 'ask a question'));
+  await eventually(() => sent.some(({ text }) => text.includes('Choose one')));
+  const question = sent.find(({ text }) => text.includes('Choose one'));
+  assert.equal(question.toUserId, 'uia_group_alpha');
+  await bridge.accept(groupMessage('group-question-answer', '2'));
+  assert.deepEqual(await submitted.promise, {
+    ok: true,
+    value: { sessionId: 'session-group-question', answer: { answers: [{ id: 'choice', selected: ['Two'] }] } },
+  });
+  await first;
+  assert.equal(sent.at(-1).toUserId, 'uia_group_alpha');
+  assert.equal(sent.some(({ toUserId }) => toUserId === 'uia-name:Alice'), false);
+});
+
+test('Weixin group never inherits the legacy direct owner fallback without an access policy', async () => {
+  const fixture = stateFixture();
+  let asks = 0;
+  const sent = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async (request) => sent.push(request) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    harness: {
+      sessionExists: async () => true,
+      createSession: async () => 'session-group-no-policy',
+      ask: async () => { asks += 1; return 'must not answer'; },
+    },
+    state: fixture.state,
+  });
+  await bridge.accept(groupMessage('group-without-policy', 'fail closed', {
+    from_user_id: 'owner-user', sender_name: 'Owner',
+  }));
+  assert.equal(asks, 0);
+  assert.deepEqual(sent, []);
+  assert.equal(fixture.sessions.size, 0);
 });

@@ -155,7 +155,8 @@ test('delivery settings define the supported IM and email channel routes', () =>
     Object.keys(ACCESS_CHANNEL_DEFINITIONS),
     Object.keys(DELIVERY_CHANNEL_DEFINITIONS).filter((channel) => channel !== 'email'),
   );
-  assert.equal(ACCESS_CHANNEL_DEFINITIONS.weixin.groupSupported, false);
+  assert.equal(ACCESS_CHANNEL_DEFINITIONS.weixin.groupSupported, undefined);
+  assert.equal(ACCESS_CHANNEL_DEFINITIONS.weixin.groupUserLabel, '群成员显示名（UIA）');
 });
 
 test('robot card settings toggle expands in place and more settings preserves the bot scope', () => {
@@ -764,7 +765,7 @@ test('access settings keep a failed atomic save visible as an error', async (t) 
   assert.equal(feedback.props.role, 'alert');
 });
 
-test('WeChat keeps the shared access page but disables its unsupported group section', async (t) => {
+test('WeChat keeps the shared access page and enables its group section', async (t) => {
   const renderer = await mount(t, {
     channel: 'weixin',
     account: { ...connectedAccount, botId: 'wx_access_01' },
@@ -780,9 +781,9 @@ test('WeChat keeps the shared access page but disables its unsupported group sec
   });
 
   const group = renderer.root.findByProps({ 'data-scene': 'group' });
-  assert.equal(group.props.disabled, true);
-  assert.match(textOf(group), /当前渠道不支持群聊/);
-  assert.equal(group.findAllByType('select').length, 0);
+  assert.equal(group.props.disabled, false);
+  assert.doesNotMatch(textOf(group), /当前渠道不支持群聊/);
+  assert.equal(group.findAllByType('select').length, 2);
   assert.ok(renderer.root.findByProps({ 'data-scene': 'direct' }));
 });
 

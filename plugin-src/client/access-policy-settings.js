@@ -14,7 +14,8 @@ export const ACCESS_CHANNEL_DEFINITIONS = Object.freeze({
   weixin: Object.freeze({
     directUserLabel: '微信用户 ID',
     directPlaceholder: '填写微信用户 ID',
-    groupSupported: false,
+    groupUserLabel: '群成员显示名（UIA）',
+    groupPlaceholder: '填写群成员显示名（UIA 本地标识）',
   }),
   feishu: Object.freeze({
     directUserLabel: '飞书 Open ID',

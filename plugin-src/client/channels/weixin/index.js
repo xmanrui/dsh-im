@@ -275,7 +275,7 @@ export function AccountCard({
       }),
       h(ContextEnhancementEditor, {
         config: account.contextEnhancement,
-        groupSupported: false,
+        groupSupported: true,
         disabled: Boolean(busy),
         onSave: onContextEnhancementSave,
       }),

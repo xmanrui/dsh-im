@@ -266,3 +266,34 @@ test('production preserves workspace/session isolation and reports a committed c
   assert.equal(await readFile(join(dataDir, 'accounts', bots[1].botId, 'state.json'), 'utf8'), secondStateBefore);
   assert.doesNotMatch(JSON.stringify([removed, failedSave, logs]), /test-login|test-owner|second-session/);
 });
+
+test('production injects an optional group event source without creating another account bridge', async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'dsh-weixin-production-group-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const runtimes = [];
+  let controllerOptions;
+  let groupOptions;
+  const groupRuntime = { status: { ready: false } };
+  class ConfigStore { async load() { return this; } list() { return []; } }
+  class StateStore { async load() { return this; } }
+  class Harness { stopManagedProcess() {} }
+  class Runtime { constructor(options) { runtimes.push(options); } }
+  class Controller { constructor(options) { controllerOptions = options; } async close() {} }
+  const production = await createProductionController({
+    credentials: {}, typertGateway: { invoke() {}, stream() {} },
+    logger: () => ({ error() {}, warn() {}, info() {}, debug() {} }),
+  }, { dataDir }, {
+    ConfigStore, StateStore, HarnessClient: Harness, Controller, Runtime, api: {},
+    createConnectionSupervisor: () => ({ ready: Promise.resolve(), start() { return this; }, async close() {} }),
+    createGroupRuntime: async (options) => { groupOptions = options; return groupRuntime; },
+  });
+  await controllerOptions.createRuntime({
+    botId: 'wx_group', config: { botId: 'wx_group' }, token: 'host-only',
+  });
+  assert.equal(runtimes.length, 1);
+  assert.equal(runtimes[0].groupRuntime, groupRuntime);
+  assert.equal(groupOptions.config.botId, 'wx_group');
+  assert.equal(groupOptions.configPath, join(dataDir, 'accounts', 'wx_group', 'group-chats.json'));
+  assert.equal(groupOptions.existingBridge, undefined);
+  await production.close();
+});

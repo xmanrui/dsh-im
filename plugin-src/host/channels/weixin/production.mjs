@@ -36,6 +36,7 @@ import {
   accessPolicyProvider,
   initialAccessPolicyFor,
 } from '../shared/access-policy-production.mjs';
+import { createWechatGroupRuntimeFactory } from './group-source.mjs';
 
 function pluginPaths(config) {
   const dshHome = resolve(config.dshHome ?? process.env.DSH_HOME ?? join(homedir(), '.dsh'));
@@ -84,6 +85,9 @@ export async function createProductionController(ctx, config = {}, internals = {
   const Harness = internals.HarnessClient ?? HarnessClient;
   const Controller = internals.Controller ?? WeixinController;
   const Runtime = internals.Runtime ?? WeixinRuntime;
+  // Constructed after `logger` exists: evaluating the factory here would read a
+  // binding still in its temporal dead zone and break account creation.
+  let defaultCreateGroupRuntime = null;
   let uploadDispatcher;
   const api = internals.api ?? createWeixinApi({
     uploadFetchImpl: (url, options) => {
@@ -97,6 +101,11 @@ export async function createProductionController(ctx, config = {}, internals = {
     ? ctx.logger('dsh-weixin')
     : (ctx.logger ?? console);
   const diagnostics = internals.diagnostics ?? createWeixinDiagnostics({ logger });
+  defaultCreateGroupRuntime = createWechatGroupRuntimeFactory({
+    pluginRoot: resolve(import.meta.dirname, '../../../..'),
+    logger,
+  });
+  const createGroupRuntime = internals.createGroupRuntime ?? ((options) => defaultCreateGroupRuntime(options));
   const agentPresetCatalog = () => listAgentPresetCatalog(ctx);
   const paths = pluginPaths(config);
   const configStore = await new ConfigStore(paths.config).load();
@@ -167,6 +176,19 @@ export async function createProductionController(ctx, config = {}, internals = {
         dsBot: config.deliveryService?.dsBot,
         botId, workspaces, state, agentPresetCatalog,
       });
+      const contextEnhancement = { botId, getSettings: () => workspaces.contextEnhancementFor(botId) };
+      const accessPolicy = accessPolicyProvider(workspaces, botId, {
+        channel: 'weixin', config: accountConfig,
+      });
+      const groupRuntime = await createGroupRuntime({
+        config: accountConfig,
+        configPath: resolve(paths.accounts, botId, 'group-chats.json'),
+        harness: workspaceScope.harness,
+        state: workspaceScope.state,
+        contextEnhancement,
+        accessPolicy,
+        logger,
+      });
       return new Runtime({
         diagnostics,
         api,
@@ -174,10 +196,9 @@ export async function createProductionController(ctx, config = {}, internals = {
         token,
         harness: workspaceScope.harness,
         state: workspaceScope.state,
-        contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
-        accessPolicy: accessPolicyProvider(workspaces, botId, {
-          channel: 'weixin', config: accountConfig,
-        }),
+        contextEnhancement,
+        accessPolicy,
+        groupRuntime,
         replyTimeoutMs: config.replyTimeoutMs ?? 600_000,
         maxMessageChars: config.maxMessageChars ?? DEFAULT_WEIXIN_MAX_MESSAGE_CHARS,
         logger: {

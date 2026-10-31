@@ -774,3 +774,93 @@ test('runtime retries a transient notifyStart failure before reporting the accou
   assert.equal(startCalls, 2);
   await runtime.stop();
 });
+
+function runtimeWithOptionalGroup(groupRuntime, apiOverrides = {}) {
+  return new WeixinRuntime({
+    api: {
+      notifyStart: async () => {},
+      notifyStop: async () => {},
+      sendText: async (request) => apiOverrides.sendText?.(request),
+      getUpdates: async ({ signal }) => new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      }),
+    },
+    config: { botId: 'wx_optional_group', baseUrl: 'https://ilinkai.weixin.qq.com/', ownerUserId: 'owner' },
+    token: 'bot-token',
+    harness: { ensureRunning: async () => true },
+    state: {},
+    groupRuntime,
+    logger: { warn() {}, error() {} },
+  });
+}
+
+test('runtime starts and stops an optional group bridge without changing iLink routing', async () => {
+  const calls = [];
+  const groupRuntime = {
+    status: { ready: true, configuredGroups: 1 },
+    async start() { calls.push('start'); },
+    async stop() { calls.push('stop'); },
+    async waitForIdle() { calls.push('idle'); },
+  };
+  const runtime = runtimeWithOptionalGroup(groupRuntime);
+  const started = await runtime.start();
+  assert.equal(started.ready, true);
+  assert.deepEqual(started.group, { ready: true, configuredGroups: 1 });
+  // start() first drains the previous generation, then starts the new one.
+  assert.deepEqual(calls, ['stop', 'start']);
+  await runtime.stop();
+  assert.deepEqual(calls, ['stop', 'start', 'stop']);
+  assert.equal(runtime.status.group.ready, false);
+});
+
+test('runtime keeps iLink ready when the optional group bridge fails to start', async () => {
+  const groupRuntime = {
+    status: { ready: false, configuredGroups: 1 },
+    async start() { throw new Error('UIA preflight failed'); },
+    async stop() {},
+    async waitForIdle() {},
+  };
+  const runtime = runtimeWithOptionalGroup(groupRuntime);
+  const started = await runtime.start();
+  assert.equal(started.ready, true);
+  assert.equal(started.group.ready, false);
+  assert.match(started.group.lastError, /UIA preflight failed/);
+  await runtime.stop();
+});
+
+test('runtime starts the group source with the shared bridge and routes sends by group ID', async () => {
+  const lifecycle = [];
+  const sent = [];
+  const groupRuntime = {
+    status: { ready: true, configuredGroups: 1 },
+    handles: (chatId) => chatId === 'uia_group_alpha',
+    async start({ bridge }) { lifecycle.push(['start', bridge]); },
+    async stop() { lifecycle.push(['stop']); },
+    async waitForIdle() {},
+    sendText: async (request) => {
+      sent.push(request);
+      return { providerMessageIds: ['uia-out-1'] };
+    },
+  };
+  const runtime = runtimeWithOptionalGroup(groupRuntime, {
+    sendText: async (request) => {
+      sent.push({ ilink: true, ...request });
+      return { providerMessageIds: ['ilink-out-1'] };
+    },
+  });
+  await runtime.start();
+  assert.equal(lifecycle.length, 2);
+  assert.equal(lifecycle[0][0], 'stop');
+  assert.equal(lifecycle[1][0], 'start');
+  assert.equal(typeof lifecycle[1][1].accept, 'function');
+  assert.deepEqual(await runtime.sendProactiveText({
+    kind: 'group', route: { toUserId: 'uia_group_alpha' },
+  }, '群回复'), { sent: true });
+  assert.deepEqual(await runtime.sendProactiveText({
+    kind: 'user', route: { toUserId: 'owner-user' },
+  }, '私聊回复'), { sent: true });
+  assert.equal(sent[0].toUserId, 'uia_group_alpha');
+  assert.equal(sent[1].toUserId, 'owner-user');
+  assert.equal(sent[1].ilink, true);
+  await runtime.stop();
+});

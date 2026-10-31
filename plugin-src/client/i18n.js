@@ -255,6 +255,8 @@ const EN = Object.freeze({
   '填写微信用户 ID': 'Enter a WeChat user ID',
   '飞书 Open ID': 'Feishu Open ID',
   '群成员 Open ID': 'Group member Open ID',
+  '群成员显示名（UIA）': 'Group member display name (UIA)',
+  '填写群成员显示名（UIA 本地标识）': 'Enter the group member display name (local UIA identity)',
   '钉钉用户 ID': 'DingTalk user ID',
   '填写 senderStaffId 或 senderId': 'Enter senderStaffId or senderId',
   '群成员用户 ID': 'Group member user ID',

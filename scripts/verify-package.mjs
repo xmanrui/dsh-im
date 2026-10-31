@@ -62,6 +62,12 @@ const required = [
   'src/channels/matrix/matrix-runtime.mjs',
   'src/channels/matrix/matrix-api.mjs',
   'src/channels/shared/context-enhancement.mjs',
+  'src/channels/weixin/wechat-group-conversation.mjs',
+  'src/channels/weixin/wechat-group-config.mjs',
+  'src/channels/weixin/wechat-group-process.mjs',
+  'src/channels/weixin/wechat-group-runtime.mjs',
+  'scripts/wechat_group_uia.py',
+  'scripts/requirements-wechat-group.txt',
 ];
 await Promise.all(required.map((path) => access(resolve(root, path))));
 
