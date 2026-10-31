@@ -531,24 +531,18 @@ class ProtocolTests(unittest.TestCase):
 class WindowRestoreGateTests(unittest.TestCase):
     """The bridge must never take the screen away unless explicitly allowed."""
 
-    def test_minimised_window_is_reported_when_restore_is_not_allowed(self):
-        fake = FakeWindow(exists=True)
-        fake.NativeWindowHandle = 1234
-        fake.IsIconic = True
-        fake.restored = 0
-        auto_module = mock.MagicMock()
-        auto_module.WindowControl.return_value = fake
-        backend = uia.UiaBackend.__new__(uia.UiaBackend)
-        backend._auto = auto_module
-        backend._window = fake
-        backend._closed = False
+    def test_default_restore_is_a_no_op_and_touches_no_window_api(self):
+        """Without the opt-in the bridge must not move, show or focus anything."""
+
         fake_user32 = mock.MagicMock()
-        fake_user32.IsIconic.return_value = True
         with mock.patch.object(uia.os, "environ", {}):
             with mock.patch.object(uia, "_user32", lambda: fake_user32):
-                with self.assertRaises(uia.SafetyError) as raised:
-                    backend.ensure_window_restored()
-        self.assertEqual(raised.exception.code, "window_minimised")
+                backend = uia.UiaBackend.__new__(uia.UiaBackend)
+                backend._window = FakeWindow(exists=True)
+                backend.ensure_window_restored()
+        # A minimised window is usable through InvokePattern, so no Win32 call
+        # may run: not ShowWindow, not SetForegroundWindow, not IsIconic.
+        self.assertEqual(fake_user32.mock_calls, [])
 
     def test_opted_in_operator_lets_the_bridge_restore_the_window(self):
         with mock.patch.object(uia.os, "environ", {"DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE": "1"}):

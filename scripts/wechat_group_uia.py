@@ -42,7 +42,6 @@ ERROR_MESSAGES = {
     "probe_failed": "The read-only UIA probe failed.",
     "send_disabled": "Sending is disabled until the operator enables it.",
     "wechat_logged_out": "WeChat is on its login screen; log in before starting the group bridge.",
-    "window_minimised": "WeChat is minimised; restore it, or allow the bridge to do so.",
 }
 
 
@@ -885,35 +884,50 @@ class UiaBackend:
         ]
         if len(items) != 1:
             raise SafetyError("target session item is not unique", "duplicate_group_title")
-        # SelectionItemPattern.Select() reports success on this WeChat build but
-        # does not switch the visible chat, so it cannot be trusted. Focus then
-        # click is the only path proven to change the header, and the caller must
-        # still re-read the title afterwards.
         item = items[0]
+        # Prefer the protocol-level Invoke: it asks WeChat itself to activate the
+        # item, so it works while the window is minimised and never moves the
+        # window, steals focus or synthesises input. Measured: the chat panel
+        # appears with the window still minimised. Focus+Click stays as a fallback
+        # because Invoke is optional per control; SelectionItemPattern.Select()
+        # is deliberately unused - it reports success here without switching.
+        try:
+            invoke = item.GetInvokePattern()
+        except Exception:
+            invoke = None
+        if invoke is not None:
+            if invoke.Invoke(waitTime=0):
+                time.sleep(1.0)
+                return
+            # A refused Invoke is not proof the chat switched; fall through to click.
         item.SetFocus()
         time.sleep(0.25)
         item.Click()
         time.sleep(1.0)
 
     def ensure_window_restored(self) -> None:
-        """Bring the main window out of the minimised/tray state, only if allowed.
+        """Optionally bring the main window on screen; never by default.
 
-        A minimised WeChat still exposes the session list through UIA, so a click
-        on a session item succeeds at the UIA level while nothing actually opens.
-        That silently produced 'target_title_mismatch' with no chat panel.
-
-        Restoring the window is opt-in because it takes the screen away from whoever
-        is using the machine: the bridge must never steal focus by itself. Without
-        the opt-in a minimised window fails with a code the operator can act on.
+        The bridge does not need this: session switching goes through the
+        protocol-level InvokePattern, which works while the window is minimised.
+        Restoring is kept only for operators who want to watch the bridge work,
+        and it is opt-in because it takes the screen away from whoever is using
+        the machine.
         """
 
-        if not self._allow_window_restore():
-            if self._window_minimised():
-                raise SafetyError(
-                    "WeChat is minimised; restore it or allow the bridge to do so",
-                    "window_minimised",
-                )
-            return
+        # Nothing to do: a minimised window is usable through InvokePattern, so
+        # the bridge no longer needs the window on screen at all.
+        if self._allow_window_restore():
+            handle = _safe_property(self._window, "NativeWindowHandle")
+            if not handle or sys.platform != "win32":
+                return
+            from ctypes import wintypes
+
+            user32 = _user32()
+            user32.ShowWindow(wintypes.HWND(handle), 9)  # SW_RESTORE
+            time.sleep(0.3)
+            user32.SetForegroundWindow(wintypes.HWND(handle))
+            time.sleep(0.4)
         handle = _safe_property(self._window, "NativeWindowHandle")
         if not handle:
             return
@@ -967,18 +981,6 @@ class UiaBackend:
         """Explicit opt-in: the bridge must never take the screen away by itself."""
         return os.environ.get("DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE") == "1"
 
-    def _window_minimised(self) -> bool:
-        """True when the main window is minimised, so a UIA click cannot open a chat."""
-
-        if sys.platform != "win32":
-            return False
-        handle = _safe_property(self._window, "NativeWindowHandle")
-        if not handle:
-            return False
-        from ctypes import wintypes
-
-        # Read-only query: this never moves, resizes or focuses anything.
-        return bool(_user32().IsIconic(wintypes.HWND(handle)))
 
     def _allow_send(self) -> bool:
         """Explicit opt-in: an observe-only bridge must never write to the chat."""

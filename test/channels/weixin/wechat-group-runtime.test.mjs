@@ -197,6 +197,39 @@ test('unknown provider outcome surfaces as an uncertain send error instead of fa
   assert.equal(groupProcess.sends.length, 1);
 });
 
+test('a failed start re-arms a retry instead of leaving the bridge dead', async (t) => {
+  // The live failure was: WeChat was minimised/logged out at boot, the first start
+  // threw, and nothing ever tried again - so a group message got no answer at all.
+  let attempts = 0;
+  let ready = false;
+  const fakeProcess = new EventEmitter();
+  fakeProcess.sendText = async () => ({ ok: true, providerMessageIds: [] });
+  fakeProcess.stop = async () => {};
+  fakeProcess.start = async () => {
+    attempts += 1;
+    if (!ready) throw Object.assign(new Error('adapter could not start'), { code: 'window_minimised' });
+    fakeProcess.status = { ready: true };
+    fakeProcess.emit('ready');
+    return { ready: true };
+  };
+  fakeProcess.status = { ready: false };
+  const runtime = new WechatGroupRuntime({
+    config: CONFIG,
+    process: fakeProcess,
+    restartDelaysMs: [20],
+    logger: { warn() {}, error() {}, info() {}, debug() {} },
+  });
+  t.after(() => runtime.stop().catch(() => undefined));
+  const bridge = { accept: async () => {} };
+  await assert.rejects(() => runtime.start({ bridge }), (error) => error.code === 'window_minimised');
+  // The retry ladder must keep running after the throw.
+  assert.equal(runtime.status.running, true);
+  await eventually(() => attempts >= 2, 'the runtime never retried after a failed start');
+  // Once the window comes back the retry must actually connect.
+  ready = true;
+  await eventually(() => runtime.status.ready === true, 'the retry never produced a ready bridge');
+});
+
 test('a real unverified UIA row reaches the bridge and keeps its unknown identity', async (t) => {
   const { runtime, groupProcess, accepted, bridge } = makeRuntime(t, {
     config: { ...CONFIG, groups: [{ ...CONFIG.groups[0], allowUnverifiedTrigger: true }] },

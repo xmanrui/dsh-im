@@ -37,6 +37,8 @@ export class WechatGroupRuntime {
   #nextRestartIndex = 0;
   #restartAttempts = 0;
   #restarts = 0;
+  #startRetryLimit = Infinity;
+  #startRetryCount = 0;
   #messagesAccepted = 0;
   #messagesRejected = 0;
   #lastError = null;
@@ -46,7 +48,12 @@ export class WechatGroupRuntime {
     process: groupProcess,
     harness = null,
     logger = console,
-    restartDelaysMs = [250, 1_000, 5_000],
+    // A failed START used to end the bridge permanently: the account kept an
+    // offline runtime and nothing ever retried, so an operator who opened WeChat
+    // after boot got silence forever. These delays keep trying instead; the cap
+    // is 30s so a recovered window is picked up within half a minute.
+    restartDelaysMs = [2_500, 5_000, 10_000, 30_000],
+    startRetryLimit = Infinity,
   }) {
     if (!config || !Array.isArray(config.groups) || config.groups.length === 0) {
       throw new TypeError('WechatGroupRuntime requires configured groups');
@@ -60,11 +67,16 @@ export class WechatGroupRuntime {
       || restartDelaysMs.some((delay) => !Number.isFinite(delay) || delay < 0)) {
       throw new TypeError('restartDelaysMs must contain non-negative delays');
     }
+    if (!(startRetryLimit === Infinity
+      || (Number.isSafeInteger(startRetryLimit) && startRetryLimit >= 0))) {
+      throw new TypeError('startRetryLimit must be a non-negative integer or Infinity');
+    }
     this.#groups = new Map(config.groups.map((group) => [group.id, group]));
     this.#process = groupProcess;
     this.#harness = harness;
     this.#logger = logger;
     this.#restartDelaysMs = [...restartDelaysMs];
+    this.#startRetryLimit = startRetryLimit;
 
     this.#process.on('message', (event) => this.#onMessage(event));
     this.#process.on('ready', () => this.#onReady());
@@ -82,6 +94,7 @@ export class WechatGroupRuntime {
       pending: this.#pending.size,
       restarts: this.#restarts,
       restartAttempts: this.#restartAttempts,
+      startRetries: this.#startRetryCount,
       messagesAccepted: this.#messagesAccepted,
       messagesRejected: this.#messagesRejected,
       lastError: this.#lastError,
@@ -122,10 +135,20 @@ export class WechatGroupRuntime {
       return this.status;
     } catch (error) {
       this.#accepting = false;
-      this.#started = false;
-      this.#lastError = errorCode(error, 'start-failed');
       await this.#process.stop().catch(() => undefined);
       this.#bridge = null;
+      // Keep the runtime started and re-arm a retry instead of going dark: the
+      // usual cause is a transient window state (logged out, minimised, tree
+      // not yet built) that the operator fixes a moment later. Without this the
+      // bridge stayed offline until the whole Host was restarted, which is
+      // exactly why a group message got no answer at all.
+      if (!this.#stopping) {
+        this.#lastError = errorCode(error, 'start-failed');
+        this.#scheduleRestart();
+        this.#restartAttempts = this.#startRetryCount;
+      } else {
+        this.#started = false;
+      }
       throw error;
     }
   }
@@ -164,6 +187,7 @@ export class WechatGroupRuntime {
     this.#restartInProgress = false;
     this.#nextRestartIndex = 0;
     this.#restartAttempts = 0;
+    this.#startRetryCount = 0;
     if (wasRestart) this.#restarts += 1;
     this.#lastError = null;
     // Only ready opens intake. Any message emitted before this point has already
@@ -180,9 +204,15 @@ export class WechatGroupRuntime {
 
   #scheduleRestart() {
     if (this.#restartTimer || this.#restartInProgress || !this.#started || this.#stopping) return;
-    if (this.#nextRestartIndex >= this.#restartDelaysMs.length) return;
-    const delay = this.#restartDelaysMs[this.#nextRestartIndex];
+    // Retry for as long as the account is configured: the operator fixes the
+    // window a moment later, and giving up after three tries is why the bridge
+    // used to stay dead until the Host restarted. Past the ladder, keep the
+    // slowest delay instead of stopping.
+    if (this.#startRetryCount >= this.#startRetryLimit) return;
+    const index = Math.min(this.#nextRestartIndex, this.#restartDelaysMs.length - 1);
+    const delay = this.#restartDelaysMs[index];
     this.#nextRestartIndex += 1;
+    this.#startRetryCount += 1;
     this.#restartTimer = setTimeout(() => {
       this.#restartTimer = null;
       void this.#restart();
