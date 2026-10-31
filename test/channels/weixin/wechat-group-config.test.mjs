@@ -45,9 +45,11 @@ test('valid config preserves IDs and defaults allowSelf to false', async (t) => 
   const loaded = await loadWechatGroupConfig(path);
   assert.deepEqual(loaded, {
     pollIntervalMs: 750,
-    // Root switches default to disabled so a fresh file never reads or sends.
+    // Root switches default to disabled so a fresh file never reads, sends,
+    // or takes the screen away.
     allowUnverifiedRead: false,
     allowSend: false,
+    allowWindowRestore: false,
     groups: [{
       id: 'uia_group_one',
       title: '精确群名',

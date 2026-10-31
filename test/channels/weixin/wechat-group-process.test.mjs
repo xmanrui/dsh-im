@@ -116,6 +116,8 @@ test('config switches travel into the adapter environment without touching the h
   // Default config means observe-safe: the adapter must not be told to read or write.
   assert.equal(offEnv.DSH_WECHAT_GROUP_ALLOW_UNVERIFIED, undefined);
   assert.equal(offEnv.DSH_WECHAT_GROUP_ALLOW_SEND, undefined);
+  // Window restore is never granted implicitly: it would steal the user's screen.
+  assert.equal(offEnv.DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE, undefined);
 
   const on = makeProcess(t, { config: { ...CONFIG, allowUnverifiedRead: true, allowSend: true } });
   await startReady(on.groupProcess, on.children);

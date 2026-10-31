@@ -42,6 +42,7 @@ ERROR_MESSAGES = {
     "probe_failed": "The read-only UIA probe failed.",
     "send_disabled": "Sending is disabled until the operator enables it.",
     "wechat_logged_out": "WeChat is on its login screen; log in before starting the group bridge.",
+    "window_minimised": "WeChat is minimised; restore it, or allow the bridge to do so.",
 }
 
 
@@ -324,11 +325,16 @@ class WechatGroupAdapter:
             raise SafetyError("target title is missing or duplicated", "duplicate_group_title")
 
     def _require_chat(self, title: str) -> None:
+        # A None result means no chat panel is open, which is still 'not the target'.
         if self.backend.current_chat_title() != title:
             raise SafetyError("current chat differs from target", "target_title_mismatch")
 
     def _read_target(self, group: GroupConfig) -> list[RawMessage]:
         self._assert_unique_title(group)
+        # A minimised window reports success for a UIA click but opens nothing.
+        restore = getattr(self.backend, "ensure_window_restored", None)
+        if callable(restore):
+            restore()
         original = self.backend.current_chat_title()
         try:
             if original != group.title:
@@ -340,7 +346,8 @@ class WechatGroupAdapter:
                 raise SafetyError("backend returned an unknown message shape", "invalid_message_shape")
             return messages
         finally:
-            if original != group.title:
+            # Nothing was open before, so there is no prior chat to restore.
+            if original is not None and original != group.title:
                 # Reads restore the prior chat too; no polling cycle steals the user context.
                 self.backend.select_chat(original)
 
@@ -494,8 +501,12 @@ class WechatGroupAdapter:
             original_input = ""
             try:
                 self._assert_unique_title(group)
+                restore = getattr(self.backend, "ensure_window_restored", None)
+                if callable(restore):
+                    restore()
                 original_title = self.backend.current_chat_title()
-                original_input = self.backend.read_input()
+                # read_input() needs an open chat; with none open there is no draft.
+                original_input = self.backend.read_input() if original_title is not None else ""
                 if original_title != group.title:
                     self.backend.select_chat(group.title)
                 self._require_chat(group.title)
@@ -720,6 +731,14 @@ def load_config(path: str | Path) -> tuple[list[GroupConfig], int]:
     return groups, interval
 
 
+def _user32() -> Any:
+    """Resolve the Win32 user32 module; kept separate so tests can inject a fake."""
+
+    import ctypes
+
+    return ctypes.windll.user32
+
+
 def _safe_property(control: Any, name: str) -> Any:
     try:
         value = getattr(control, name)
@@ -824,7 +843,21 @@ class UiaBackend:
                 titles.append(title)
         return titles
 
-    def current_chat_title(self) -> str:
+    def current_chat_title(self) -> str | None:
+        """Return the open chat's title, or None when no chat panel is open.
+
+        A freshly logged-in WeChat shows only the session list; the chat message
+        list and input box do not exist until a chat is opened. None therefore
+        means 'nothing is open', not 'the title is ambiguous': the caller is
+        allowed to select the target first. A panel that IS open must still
+        prove its title through the two independent properties below.
+        """
+
+        try:
+            input_control = self._control("chat_input_field")
+        except SafetyError:
+            # No input control means no chat panel; report that instead of failing.
+            return None
         selected: list[str] = []
         for item in self._control("session_list").GetChildren():
             try:
@@ -836,7 +869,7 @@ class UiaBackend:
                     ))
             except Exception:
                 continue
-        input_title = _safe_property(self._control("chat_input_field"), "Name") or ""
+        input_title = _safe_property(input_control, "Name") or ""
         if len(selected) != 1 or not selected[0] or input_title != selected[0]:
             # Two independent visible properties must agree on the exact title.
             raise SafetyError("selected chat title is not exposed unambiguously", "title_unavailable")
@@ -861,6 +894,38 @@ class UiaBackend:
         time.sleep(0.25)
         item.Click()
         time.sleep(1.0)
+
+    def ensure_window_restored(self) -> None:
+        """Bring the main window out of the minimised/tray state, only if allowed.
+
+        A minimised WeChat still exposes the session list through UIA, so a click
+        on a session item succeeds at the UIA level while nothing actually opens.
+        That silently produced 'target_title_mismatch' with no chat panel.
+
+        Restoring the window is opt-in because it takes the screen away from whoever
+        is using the machine: the bridge must never steal focus by itself. Without
+        the opt-in a minimised window fails with a code the operator can act on.
+        """
+
+        if not self._allow_window_restore():
+            if self._window_minimised():
+                raise SafetyError(
+                    "WeChat is minimised; restore it or allow the bridge to do so",
+                    "window_minimised",
+                )
+            return
+        handle = _safe_property(self._window, "NativeWindowHandle")
+        if not handle:
+            return
+        if sys.platform != "win32":
+            return
+        from ctypes import wintypes
+
+        user32 = _user32()
+        user32.ShowWindow(wintypes.HWND(handle), 9)  # SW_RESTORE
+        time.sleep(0.3)
+        user32.SetForegroundWindow(wintypes.HWND(handle))
+        time.sleep(0.4)
 
     def read_input(self) -> str:
         pattern = self._control("chat_input_field").GetValuePattern()
@@ -897,6 +962,23 @@ class UiaBackend:
     def _allow_unverified(self) -> bool:
         """Explicit opt-in: visible rows may carry content but never an identity."""
         return os.environ.get("DSH_WECHAT_GROUP_ALLOW_UNVERIFIED") == "1"
+
+    def _allow_window_restore(self) -> bool:
+        """Explicit opt-in: the bridge must never take the screen away by itself."""
+        return os.environ.get("DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE") == "1"
+
+    def _window_minimised(self) -> bool:
+        """True when the main window is minimised, so a UIA click cannot open a chat."""
+
+        if sys.platform != "win32":
+            return False
+        handle = _safe_property(self._window, "NativeWindowHandle")
+        if not handle:
+            return False
+        from ctypes import wintypes
+
+        # Read-only query: this never moves, resizes or focuses anything.
+        return bool(_user32().IsIconic(wintypes.HWND(handle)))
 
     def _allow_send(self) -> bool:
         """Explicit opt-in: an observe-only bridge must never write to the chat."""

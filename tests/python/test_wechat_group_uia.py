@@ -528,6 +528,51 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(operations(self.backend, "send"), [])
 
 
+class WindowRestoreGateTests(unittest.TestCase):
+    """The bridge must never take the screen away unless explicitly allowed."""
+
+    def test_minimised_window_is_reported_when_restore_is_not_allowed(self):
+        fake = FakeWindow(exists=True)
+        fake.NativeWindowHandle = 1234
+        fake.IsIconic = True
+        fake.restored = 0
+        auto_module = mock.MagicMock()
+        auto_module.WindowControl.return_value = fake
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._auto = auto_module
+        backend._window = fake
+        backend._closed = False
+        fake_user32 = mock.MagicMock()
+        fake_user32.IsIconic.return_value = True
+        with mock.patch.object(uia.os, "environ", {}):
+            with mock.patch.object(uia, "_user32", lambda: fake_user32):
+                with self.assertRaises(uia.SafetyError) as raised:
+                    backend.ensure_window_restored()
+        self.assertEqual(raised.exception.code, "window_minimised")
+
+    def test_opted_in_operator_lets_the_bridge_restore_the_window(self):
+        with mock.patch.object(uia.os, "environ", {"DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE": "1"}):
+            self.assertTrue(uia.UiaBackend._allow_window_restore(object()))
+
+
+class NoOpenChatTests(unittest.TestCase):
+    """A freshly logged-in WeChat has no chat panel until one is opened."""
+
+    def test_current_chat_title_reports_none_when_nothing_is_open(self):
+        backend = FakeBackend(titles=["Alpha"])
+        backend.current = None
+        self.assertIsNone(backend.current_chat_title())
+
+    def test_reading_a_target_selects_it_when_nothing_was_open(self):
+        backend = FakeBackend(titles=["Alpha", "Beta"], current=None, messages={"Alpha": [raw("old")]})
+        group_config = group()
+        adapter = uia.WechatGroupAdapter([group_config], backend)
+        adapter.start()
+        self.assertEqual(operations(backend, "select")[:1], [("select", "Alpha")])
+        # Nothing was open before, so nothing may be restored afterwards.
+        self.assertEqual(len(operations(backend, "select")), 1)
+
+
 class BackendFailureCodeTests(unittest.TestCase):
     """The adapter must tell an operator WHY the group bridge cannot start."""
 

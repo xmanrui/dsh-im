@@ -3,7 +3,9 @@ import { readFile } from 'node:fs/promises';
 // Two root-level switches replace the earlier process-environment flags: the
 // host process environment cannot be changed without a restart, so an operator
 // must be able to enable read/send for one account from its own config file.
-const ROOT_KEYS = new Set(['version', 'pollIntervalMs', 'groups', 'allowUnverifiedRead', 'allowSend']);
+const ROOT_KEYS = new Set([
+  'version', 'pollIntervalMs', 'groups', 'allowUnverifiedRead', 'allowSend', 'allowWindowRestore',
+]);
 // allowUnverifiedTrigger is the only opt-in that lets an identity-less row
 // become addressed. It is accepted here so an operator can name one exact
 // group; the runtime still refuses it for every other group and never derives
@@ -125,6 +127,11 @@ export async function loadWechatGroupConfig(path) {
   if (root.allowSend !== undefined && typeof root.allowSend !== 'boolean') {
     throw invalid('allowSend must be boolean');
   }
+  // Off by default: restoring WeChat steals the screen from whoever is using it,
+  // so the bridge may only do that when the operator says so explicitly.
+  if (root.allowWindowRestore !== undefined && typeof root.allowWindowRestore !== 'boolean') {
+    throw invalid('allowWindowRestore must be boolean');
+  }
 
   const groups = root.groups.map(normalizeGroup);
   const ids = new Set();
@@ -140,6 +147,7 @@ export async function loadWechatGroupConfig(path) {
     pollIntervalMs: root.pollIntervalMs,
     allowUnverifiedRead: root.allowUnverifiedRead ?? false,
     allowSend: root.allowSend ?? false,
+    allowWindowRestore: root.allowWindowRestore ?? false,
     groups,
   };
 }

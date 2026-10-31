@@ -58,6 +58,7 @@ export class WechatGroupProcess extends EventEmitter {
   #requestIdFactory;
   #allowUnverifiedRead = false;
   #allowSend = false;
+  #allowWindowRestore = false;
   #child = null;
   #buffer = '';
   #decoder = null;
@@ -105,6 +106,7 @@ export class WechatGroupProcess extends EventEmitter {
     // observe-safe: the adapter refuses to read or write until told otherwise.
     this.#allowUnverifiedRead = config.allowUnverifiedRead === true;
     this.#allowSend = config.allowSend === true;
+    this.#allowWindowRestore = config.allowWindowRestore === true;
     this.#scriptPath = scriptPath;
     this.#configPath = configPath;
     this.#spawnImpl = spawnImpl;
@@ -141,6 +143,7 @@ export class WechatGroupProcess extends EventEmitter {
     const env = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONUTF8: '1' };
     if (this.#allowUnverifiedRead) env.DSH_WECHAT_GROUP_ALLOW_UNVERIFIED = '1';
     if (this.#allowSend) env.DSH_WECHAT_GROUP_ALLOW_SEND = '1';
+    if (this.#allowWindowRestore) env.DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE = '1';
     return env;
   }
 

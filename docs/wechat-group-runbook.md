@@ -66,6 +66,19 @@ py -3.12 -B scripts/enable_wechat_uia_flag.py
 | `message_layout_unverified` | 未开 `allowUnverifiedRead` | 在 `group-chats.json` 里置 `"allowUnverifiedRead": true` |
 | `send_disabled` | 未开 `allowSend` | 在 `group-chats.json` 里置 `"allowSend": true` |
 | `duplicate_group_title` | 目标群标题不在可见会话列表里（或重名） | 在微信里把目标群**置顶** |
+| `window_minimised` | 微信被最小化，UIA 点击不生效 | 手动还原微信；或显式允许桥接管 |
+| `control_missing` | 缺少 `session_list` / `chat_*` 控件 | 确认微信已登录且窗口正常 |
+| `target_title_mismatch` | 选群后标题校验不一致 | 通常是窗口未还原或目标群未置顶 |
+
+### 为什么桥不会自己把你的窗口拉回来
+
+还原窗口会把屏幕从正在用电脑的人手里抢走，所以插件**默认不做**：遇到最小化的微信时它抛 `window_minimised` 并保持离线，而不是抢占焦点。确有需要（例如无人值守机）才在账号配置里显式打开：
+
+```json
+{"allowWindowRestore": true}
+```
+
+对应适配器环境变量 `DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE=1`；默认关闭，测试里有一条断言专门守着它不被隐式打开。
 
 ## 账号级群配置
 
@@ -75,6 +88,10 @@ py -3.12 -B scripts/enable_wechat_uia_flag.py
 {
   "version": 1,
   "pollIntervalMs": 750,
+  // 读/发/抢屏三个开关默认全关，按需逐项打开：
+  "allowUnverifiedRead": true,
+  "allowSend": true,
+  "allowWindowRestore": false,
   "groups": [
     {
       "id": "uia_<stable-random-id>",
