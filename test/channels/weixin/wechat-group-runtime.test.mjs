@@ -25,8 +25,8 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-async function eventually(predicate, message = 'condition was not met') {
-  const deadline = Date.now() + 1_000;
+async function eventually(predicate, message = 'condition was not met', budgetMs = 1_000) {
+  const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -230,6 +230,54 @@ test('a failed start re-arms a retry instead of leaving the bridge dead', async 
   await eventually(() => runtime.status.ready === true, 'the retry never produced a ready bridge');
 });
 
+test('a restart after a failed start keeps the account bridge so real rows still arrive', async (t) => {
+  // Measured live failure: the adapter was alive and emitting addressed rows, yet
+  // the group stayed mute because #start() cleared #bridge on failure and
+  // #restart() never restored it. The event was dropped with no log line, so the
+  // healthiest-looking state was the broken one.
+  let attempts = 0;
+  let ready = false;
+  const accepted = [];
+  const fakeProcess = new EventEmitter();
+  fakeProcess.sendText = async () => ({ ok: true, providerMessageIds: [] });
+  fakeProcess.stop = async () => {};
+  fakeProcess.start = async () => {
+    attempts += 1;
+    if (!ready) throw Object.assign(new Error('adapter could not start'), { code: 'window_minimised' });
+    fakeProcess.status = { ready: true };
+    fakeProcess.emit('ready');
+    return { ready: true };
+  };
+  fakeProcess.status = { ready: false };
+  const runtime = new WechatGroupRuntime({
+    config: CONFIG,
+    process: fakeProcess,
+    restartDelaysMs: [20],
+    logger: { warn() {}, error() {}, info() {}, debug() {} },
+  });
+  t.after(() => runtime.stop().catch(() => undefined));
+  const bridge = { accept: async (event) => { accepted.push(event); } };
+  await assert.rejects(() => runtime.start({ bridge }), (error) => error.code === 'window_minimised');
+  ready = true;
+  await eventually(() => runtime.status.ready === true, 'the retry never produced a ready bridge');
+  fakeProcess.emit('message', groupEvent({ message_id: 'after-restart' }));
+  await runtime.waitForIdle();
+  assert.deepEqual(accepted.map((event) => event.message_id), ['after-restart']);
+  assert.equal(runtime.status.messagesRejected, 0);
+});
+
+test('a dropped event names its reason instead of vanishing', async (t) => {
+  const { runtime, groupProcess, logs } = makeRuntime(t);
+  // No bridge was ever attached, so intake cannot open; a silent drop must be
+  // visible in the log rather than looking like a healthy offline state.
+  groupProcess.emit('message', groupEvent());
+  assert.equal(
+    logs.some((line) => line.includes('dropped group event')),
+    true,
+  );
+  assert.equal(runtime.status.messagesRejected, 1);
+});
+
 test('a real unverified UIA row reaches the bridge and keeps its unknown identity', async (t) => {
   const { runtime, groupProcess, accepted, bridge } = makeRuntime(t, {
     config: { ...CONFIG, groups: [{ ...CONFIG.groups[0], allowUnverifiedTrigger: true }] },
@@ -321,8 +369,10 @@ test('repeated restart failure leaves the group runtime offline without replay',
   groupProcess.manualReady = true;
   groupProcess.failStarts = 2;
   groupProcess.emit('exit', { code: 1 });
-  await eventually(() => groupProcess.starts === 3, 'bounded retries did not finish');
-  await eventually(() => runtime.status.restartAttempts === 2, 'retry status was not recorded');
+  // The first bounded retry happens immediately; the failure it hits must still
+  // schedule the next one, so give the ladder room instead of failing at 1s.
+  await eventually(() => groupProcess.starts >= 3, 'bounded retries did not finish', 3_000);
+  await eventually(() => runtime.status.restartAttempts === 2, 'retry status was not recorded', 3_000);
   assert.equal(runtime.status.ready, false);
   assert.equal(runtime.status.lastError, 'start-failed');
   groupProcess.emit('message', groupEvent({ message_id: 'offline-history' }));

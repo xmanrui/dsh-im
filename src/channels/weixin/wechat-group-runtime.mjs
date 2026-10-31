@@ -31,6 +31,8 @@ export class WechatGroupRuntime {
   #stopping = null;
   #started = false;
   #accepting = false;
+  // The account-owned bridge survives start failures; a restart re-attaches it.
+  #startBridge = null;
   #pending = new Set();
   #restartTimer = null;
   #restartInProgress = false;
@@ -127,6 +129,11 @@ export class WechatGroupRuntime {
         throw runtimeError('shared-bridge-required', 'The existing account WeixinHarnessBridge is required');
       }
       this.#bridge = bridge;
+      // Remember the bridge so a later restart can re-attach it. A failed
+      // start used to clear #bridge and #restart() never put it back, so every
+      // message from the adapter was dropped by #onMessage's null guard with no
+      // log line at all: a live adapter looked healthy while the group was mute.
+      this.#startBridge = bridge;
       await this.#harness?.ensureRunning?.();
       await this.#process.start();
       // The real process emits ready before resolving start. The fallback also
@@ -223,6 +230,9 @@ export class WechatGroupRuntime {
     if (!this.#started || this.#stopping) return;
     this.#restartInProgress = true;
     this.#accepting = false;
+    // Re-attach the account bridge that #start() cleared when it failed, and take
+    // the fresh one when the caller re-starts with a different bridge.
+    if (!this.#bridge) this.#bridge = this.#startBridge;
     try {
       await this.#process.start();
       if (this.#process.status?.ready && !this.#accepting) this.#onReady();
@@ -268,7 +278,18 @@ export class WechatGroupRuntime {
   }
 
   #onMessage(event) {
-    if (!this.#accepting || !this.#bridge) return;
+    // Silence here is the worst failure mode: the adapter is demonstrably live,
+    // so a dropped event must name its reason instead of vanishing.
+    if (!this.#accepting) {
+      this.#messagesRejected += 1;
+      this.#logger.warn?.('[dsh-weixin] dropped group event while intake was closed');
+      return;
+    }
+    if (!this.#bridge) {
+      this.#messagesRejected += 1;
+      this.#logger.warn?.('[dsh-weixin] dropped group event: no account bridge attached');
+      return;
+    }
     if (!this.#validEvent(event)) {
       this.#messagesRejected += 1;
       const messageId = nonEmptyString(event?.message_id) ? event.message_id.slice(0, 16) : 'unknown';

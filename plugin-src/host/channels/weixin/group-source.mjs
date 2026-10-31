@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { findAdapterScript } from '../../../../src/channels/weixin/adapter-script.mjs';
 import { WechatGroupRuntime } from '../../../../src/channels/weixin/wechat-group-runtime.mjs';
 import { WechatGroupProcess } from '../../../../src/channels/weixin/wechat-group-process.mjs';
 import { loadWechatGroupConfig } from '../../../../src/channels/weixin/wechat-group-config.mjs';
@@ -11,7 +12,7 @@ import { loadWechatGroupConfig } from '../../../../src/channels/weixin/wechat-gr
  * stop iLink direct messages. Returning null means "no group source configured".
  */
 export function createWechatGroupRuntimeFactory({
-  pluginRoot, spawnImpl = undefined, logger = console,
+  pluginRoot = undefined, spawnImpl = undefined, logger = console,
 } = {}) {
   return async function createGroupRuntime({
     config, configPath, harness, state, contextEnhancement, accessPolicy, logger: providedLogger,
@@ -28,9 +29,17 @@ export function createWechatGroupRuntimeFactory({
     }
     if (!groupConfig) return null;
 
+    // Resolve the adapter by finding the real file instead of trusting a guessed
+    // package root. The same module is consumed both as a bundled lib/index.js
+    // entry and as an unbundled plugin-src module, and a link: install resolves
+    // the entry through a symlink, so a fixed ../../../.. ascent pointed outside
+    // the package and the child interpreter died with "can't open file" before
+    // executing a single Python statement.
+    const scriptPath = findAdapterScript(pluginRoot ?? import.meta.dirname)
+      ?? join(pluginRoot ?? import.meta.dirname, 'scripts', 'wechat_group_uia.py');
     const process = new WechatGroupProcess({
       config: groupConfig,
-      scriptPath: join(pluginRoot, 'scripts', 'wechat_group_uia.py'),
+      scriptPath,
       configPath,
       ...(spawnImpl ? { spawnImpl } : {}),
       logger: activeLogger,

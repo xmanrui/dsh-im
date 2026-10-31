@@ -101,10 +101,11 @@ export async function createProductionController(ctx, config = {}, internals = {
     ? ctx.logger('dsh-weixin')
     : (ctx.logger ?? console);
   const diagnostics = internals.diagnostics ?? createWeixinDiagnostics({ logger });
-  defaultCreateGroupRuntime = createWechatGroupRuntimeFactory({
-    pluginRoot: resolve(import.meta.dirname, '../../../..'),
-    logger,
-  });
+  // No pluginRoot is passed on purpose: `production.mjs` is consumed both as an
+  // unbundled module and as part of the bundled `lib/index.js`, so the package
+  // root cannot be derived by a fixed directory count. group-source.mjs locates
+  // the adapter relative to whichever module actually owns it.
+  defaultCreateGroupRuntime = createWechatGroupRuntimeFactory({ logger });
   const createGroupRuntime = internals.createGroupRuntime ?? ((options) => defaultCreateGroupRuntime(options));
   const agentPresetCatalog = () => listAgentPresetCatalog(ctx);
   const paths = pluginPaths(config);
