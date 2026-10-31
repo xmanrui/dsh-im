@@ -6,15 +6,49 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 飞书收到**真人**消息时会先检查该会话的 Goal：处于「已暂停」或 Host 重启后「未武装」状态的目标会自动恢复（`goals/resume`）后再进入本轮，并在过程首行提示「🔄 目标已恢复自动续跑」。机器人消息不会触发恢复，`blocked`、`complete` 和正在运行的目标不受影响；只有确认恢复成功才会提示。`goalAutoResume: 'disarmed'` 只恢复重启遗留、`false` 关闭。方案见 `docs/方案/飞书入站消息自动恢复暂停目标方案.md`。
+  An inbound **human** Feishu message now checks the conversation's Goal first: a goal that is paused or left disarmed by a Host restart is resumed before the turn starts and reported as the first step (「🔄 目标已恢复自动续跑」). Bot messages never resume, and blocked, complete, or already-running goals are untouched; the note only appears when the resume really happened. Set `goalAutoResume: 'disarmed'` to resume only restart leftovers, or `false` to turn it off. See `docs/方案/飞书入站消息自动恢复暂停目标方案.md`.
+
+## [5.9.0] - 2026-10-31
+
 ### Added / 新增
 
 - 新增默认关闭的 `groupByAgentPreset` 选项，按明确选择的 Agent Preset 为后续新会话创建工作区分组；已有聊天、手动工作区和飞书会话隔离目录保持原路径。
   Added opt-in `groupByAgentPreset` workspace grouping for new sessions with an explicitly selected Agent Preset. Existing chats, manual workspaces and Feishu conversation directories keep their paths.
 
+- Telegram 新增“批准一次 / 拒绝”审批按钮，仅允许任务发起人操作，处理重复点击、提交重试和过期状态；卡片不可用时回退文字审批。（[#430](https://github.com/xmanrui/dsh-im/pull/430)）
+  Added Telegram approve-once/reject buttons restricted to the task initiator, with duplicate-click, retry and expiry handling and text approval fallback. ([#430](https://github.com/xmanrui/dsh-im/pull/430))
+- Telegram 原生命令菜单分别注册私聊与群聊作用域，隐藏别名；`/status` 补充当前工作区、绑定会话、模型、Agent Preset 和运行任务，并限制可选信息读取的等待时间。（[#431](https://github.com/xmanrui/dsh-im/pull/431)）
+  Telegram registers native command menus separately for private and group chats and hides aliases. `/status` now includes the workspace, bound session, model, Agent Preset and running-task state, with bounded waits for optional fields. ([#431](https://github.com/xmanrui/dsh-im/pull/431))
+- 飞书模型卡片支持分页与推理强度选择，选择后在当前页刷新原卡片，避免大型模型列表被截断。（[#491](https://github.com/xmanrui/dsh-im/pull/491)）
+  Feishu model cards support pagination and reasoning-effort selection, refreshing the current card and page without truncating large model catalogs. ([#491](https://github.com/xmanrui/dsh-im/pull/491))
+- Host 新增 IM 会话身份查询（含同步查询）和绑定生命周期事件，供首条提示词及集成读取所属渠道、聊天和话题信息。（[#470](https://github.com/xmanrui/dsh-im/pull/470)）
+  Added Host conversation-identity lookups, including synchronous lookup, and binding lifecycle events for first-prompt construction and channel/chat/thread-aware integrations. ([#470](https://github.com/xmanrui/dsh-im/pull/470))
+
 ### Fixed / 修复
 
-- 飞书收到**真人**消息时会先检查该会话的 Goal：处于「已暂停」或 Host 重启后「未武装」状态的目标会自动恢复（`goals/resume`）后再进入本轮，并在过程首行提示「🔄 目标已恢复自动续跑」。机器人消息不会触发恢复，`blocked`、`complete` 和正在运行的目标不受影响；只有确认恢复成功才会提示。`goalAutoResume: 'disarmed'` 只恢复重启遗留、`false` 关闭。方案见 `docs/方案/飞书入站消息自动恢复暂停目标方案.md`。
-  An inbound **human** Feishu message now checks the conversation's Goal first: a goal that is paused or left disarmed by a Host restart is resumed before the turn starts and reported as the first step (「🔄 目标已恢复自动续跑」). Bot messages never resume, and blocked, complete, or already-running goals are untouched; the note only appears when the resume really happened. Set `goalAutoResume: 'disarmed'` to resume only restart leftovers, or `false` to turn it off. See `docs/方案/飞书入站消息自动恢复暂停目标方案.md`.
+- 邮箱 IMAP 断线后在后续轮询自动重连，旧连接事件不会清除新连接；邮件读取失败会使本次轮询失败，避免游标跳过尚未读取的邮件。（[#493](https://github.com/xmanrui/dsh-im/pull/493)）
+  Email IMAP reconnects on subsequent polls after a disconnect, without letting stale connection events discard a replacement. Failed message reads fail the poll so the cursor cannot skip unread mail. ([#493](https://github.com/xmanrui/dsh-im/pull/493))
+- 飞书已绑定 DS Bot 的会话通过 DS Bot API 切换模型，并补全缺失的本地会话映射与取消处理。（[#490](https://github.com/xmanrui/dsh-im/pull/490)）
+  Feishu conversations bound to a DS Bot switch models through the DS Bot API, with missing local session mappings and cancellation handled correctly. ([#490](https://github.com/xmanrui/dsh-im/pull/490))
+- Agent Preset 分组下的会话列表与会话切换按当前绑定会话的实际工作区解析，避免重启或更换预设后列错工作区。（[#492](https://github.com/xmanrui/dsh-im/pull/492)）
+  Session lists and switching in Agent Preset groups resolve the bound session's actual workspace, including after restarts or preset changes. ([#492](https://github.com/xmanrui/dsh-im/pull/492))
+- 飞书二维码生成失败时显示经过白名单筛选的本地库错误原因，便于区分编码问题，同时避免把凭据或任意异常文本写入诊断。（[#495](https://github.com/xmanrui/dsh-im/pull/495)）
+  Feishu QR-generation diagnostics include allowlisted local-library failure details while excluding credentials and arbitrary exception text. ([#495](https://github.com/xmanrui/dsh-im/pull/495))
+- 绑定不存在的会话 ID 时明确提示“会话不存在”，不再误导用户稍后重试。（[#482](https://github.com/xmanrui/dsh-im/issues/482)）
+  Binding an unknown session ID now reports that the session does not exist instead of suggesting a retry. ([#482](https://github.com/xmanrui/dsh-im/issues/482))
+
+### Security / 安全
+
+- 将构建锁中的 `follow-redirects` 从 1.16.1 更新至 1.16.2 并重新构建 Host，纳入跨 realm `sensitiveHeaders` 数组的凭据保护修复。（[GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p)）
+  Updated build-lock `follow-redirects` from 1.16.1 to 1.16.2 and rebuilt the Host to include the credential-protection fix for cross-realm `sensitiveHeaders` arrays. ([GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p))
+
+### Notes / 使用说明
+
+- Agent Preset 分组需显式开启，仅影响后续新会话；分组共享工作区文件，不构成用户数据隔离边界。依赖声明、Node.js 要求和 DSH 兼容声明保持不变。升级后重启 Host 并刷新管理页面。
+  Agent Preset grouping requires explicit opt-in and applies to subsequent new sessions. Grouped sessions share workspace files; grouping is not a user-data isolation boundary. Dependency declarations, Node.js requirements and DSH compatibility declarations are unchanged. Restart the Host and refresh management pages after upgrading.
 
 ## [5.8.0] - 2026-10-30
 
@@ -2105,7 +2139,8 @@ Thanks to [@Dong09](https://github.com/Dong09) for the Matrix conversation-conte
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v5.8.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v5.9.0...HEAD
+[5.9.0]: https://github.com/xmanrui/dsh-im/compare/v5.8.0...v5.9.0
 [5.8.0]: https://github.com/xmanrui/dsh-im/compare/v5.7.0...v5.8.0
 [5.7.0]: https://github.com/xmanrui/dsh-im/compare/v5.6.0...v5.7.0
 [5.6.0]: https://github.com/xmanrui/dsh-im/compare/v5.5.0...v5.6.0

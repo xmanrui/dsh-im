@@ -59,6 +59,40 @@ export const CONFIG_ISSUE_LABELS = Object.freeze({
 // Map keys are replaced with zero-based positions to avoid exposing identities.
 const CONFIG_FIELD = /^(?:\$|version|accounts(?:\[\d{1,10}\](?:\.(?:accountId|ownerUserId|botId|tokenRef|baseUrl))?)?|(?:workspaces|agentPresets|models)(?:\[\d{1,10}\]\.(?:key|value))?|deliveryTargets(?:\[\d{1,10}\]\.(?:key|targets(?:\[\d{1,10}\])?))?)$/;
 
+// A local-library failure is often only distinguishable by its message:
+// `QRCode.toDataURL is not a function` and `String required as first argument`
+// are different bugs with identical error types and reasons. Free-form text is
+// never forwarded; only messages that already look like a known local-library
+// diagnostic are admitted, so a service error carrying a URL, a credential or a
+// piece of user content stays out of the report entirely.
+const DIAGNOSTIC_MESSAGE_SHAPES = [
+  // `QRCode.toDataURL is not a function`, `PNG.sync.write is not a constructor`
+  /^(?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]* is not a (?:function|constructor)$/u,
+  // node-qrcode validating its argument
+  /^String required as first argument$/u,
+  // property access on undefined inside the encoder
+  /^Cannot read propert(?:y|ies) .{1,100}$/u,
+  // zlib: `invalid stored block lengths`, `incorrect header check`, `Invalid data`
+  /^(?:invalid|incorrect|unexpected|unknown|bad)\s+[A-Za-z][A-Za-z0-9 _-]{2,80}$/iu,
+  // pngjs / buffer: `padding not multiple of block size`, `buffer write failed`
+  /^[A-Za-z][A-Za-z0-9 _-]{2,60}(?: not multiple of block size| failed)$/u,
+];
+const DIAGNOSTIC_MESSAGE_DENY = /(?:token|secret|password|passwd|authorization|bearer|cookie)/iu;
+const DIAGNOSTIC_MESSAGE_URL = /\b(?:[a-z][a-z0-9+.-]*:\/\/)\S*/iu;
+const DIAGNOSTIC_MESSAGE_EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/u;
+const DIAGNOSTIC_MESSAGE_OPAQUE = /\b[A-Za-z0-9_\-+/=]{32,}\b/u;
+
+export function safeDiagnosticMessage(value) {
+  if (typeof value !== 'string') return undefined;
+  const text = value.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim();
+  if (!/^[\x20-\x7e]+$/u.test(text)) return undefined;
+  if (!DIAGNOSTIC_MESSAGE_SHAPES.some(shape => shape.test(text))) return undefined;
+  if (DIAGNOSTIC_MESSAGE_DENY.test(text)) return undefined;
+  if (DIAGNOSTIC_MESSAGE_URL.test(text) || DIAGNOSTIC_MESSAGE_EMAIL.test(text)) return undefined;
+  if (DIAGNOSTIC_MESSAGE_OPAQUE.test(text)) return undefined;
+  return text;
+}
+
 export function normalizeDiagnosticDetails(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const result = {};
@@ -104,6 +138,10 @@ export function normalizeDiagnosticDetails(value) {
   if (typeof value.pluginVersion === 'string' && /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(value.pluginVersion)
     && value.pluginVersion.length <= 64) result.pluginVersion = value.pluginVersion;
   if (['succeeded', 'failed', 'not-attempted', 'unknown'].includes(value.rollback)) result.rollback = value.rollback;
+  if (typeof value.causeMessage === 'string') {
+    const message = safeDiagnosticMessage(value.causeMessage);
+    if (message) result.causeMessage = message;
+  }
   if (typeof value.hint === 'string' && value.hint.trim()) result.hint = value.hint.trim().slice(0, 500);
   return result;
 }

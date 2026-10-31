@@ -37,7 +37,7 @@ export function formatConnectionDiagnostic(value) {
   return [
     localizeText(error.message), details.hint ? localizeText(details.hint) : null,
     localizeText('错误码') + ': ' + error.code,
-    ...['channel', 'operation', 'stage', 'method', 'transport', 'submissionState', 'attempts', 'lastFailureReason', 'reason', 'reasons', 'errorTypes', 'qrEncoder', 'qrRenderer', 'host', 'durationMs', 'timeoutMs', 'nodeVersion', 'dshVersion', 'platform', 'dependencies', 'proxyConfigured', 'truncated', 'httpStatus', 'providerCode', 'resource', 'file', 'field', 'issue', 'referenceId', 'occurredAt', 'rollback', 'pluginVersion']
+    ...['channel', 'operation', 'stage', 'method', 'transport', 'submissionState', 'attempts', 'lastFailureReason', 'reason', 'reasons', 'errorTypes', 'causeMessage', 'qrEncoder', 'qrRenderer', 'host', 'durationMs', 'timeoutMs', 'nodeVersion', 'dshVersion', 'platform', 'dependencies', 'proxyConfigured', 'truncated', 'httpStatus', 'providerCode', 'resource', 'file', 'field', 'issue', 'referenceId', 'occurredAt', 'rollback', 'pluginVersion']
       .filter(field => details[field] !== undefined)
       .map(field => `${field}: ${typeof details[field] === 'object' ? JSON.stringify(details[field]) : details[field]}`),
   ].filter(Boolean).join('\n');
