@@ -146,6 +146,18 @@ test('config switches travel into the adapter environment without touching the h
   assert.equal(process.env.DSH_WECHAT_GROUP_ALLOW_SEND, undefined);
 });
 
+test('an explicit interpreter override wins over the discovered launcher', async (t) => {
+  const saved = process.env.DSH_WECHAT_GROUP_PYTHON;
+  process.env.DSH_WECHAT_GROUP_PYTHON = 'D:/custom/python.exe';
+  const { groupProcess, children, spawnCalls } = makeProcess(t);
+  t.after(() => {
+    if (saved === undefined) delete process.env.DSH_WECHAT_GROUP_PYTHON;
+    else process.env.DSH_WECHAT_GROUP_PYTHON = saved;
+  });
+  await startReady(groupProcess, children);
+  assert.equal(spawnCalls[0].command, 'D:/custom/python.exe');
+});
+
 test('a startup error frame surfaces its own code instead of process-exit', async (t) => {
   const { groupProcess, children } = makeProcess(t);
   const starting = groupProcess.start();
@@ -164,7 +176,9 @@ test('a startup error frame surfaces its own code instead of process-exit', asyn
 test('start uses hidden py -3.12 -B and health correlates request IDs across fragmented JSONL', async (t) => {
   const { groupProcess, children, spawnCalls } = makeProcess(t);
   const child = await startReady(groupProcess, children);
-  assert.equal(spawnCalls[0].command, 'py');
+  // The launcher must be absolute when one is known: a Host's boot-time PATH may
+  // not contain 'py', and a bare name would then fail with a silent exit.
+  assert.match(spawnCalls[0].command, /^(C:\/Windows\/py\.exe|py)$/);
   assert.deepEqual(spawnCalls[0].args, [
     '-3.12', '-B', 'D:/fake/wechat_group_uia.py',
     '--config', 'D:/fake/group-chats.json',

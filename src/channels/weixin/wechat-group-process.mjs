@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
@@ -155,6 +155,16 @@ export class WechatGroupProcess extends EventEmitter {
     return env;
   }
 
+  // Pick the Python launcher once, before any spawn. Order: explicit override,
+  // then the Windows launcher's well-known absolute path, then the bare name so
+  // an unusual machine still has a chance. Only existing files are trusted.
+  #pythonLauncher() {
+    const override = process.env.DSH_WECHAT_GROUP_PYTHON;
+    if (typeof override === 'string' && override.trim()) return override.trim();
+    if (existsSync('C:/Windows/py.exe')) return 'C:/Windows/py.exe';
+    return 'py';
+  }
+
   /** Start a new adapter generation and wait until its baseline emits ready. */
   start() {
     if (this.#running && this.#ready) return Promise.resolve(this.status);
@@ -166,7 +176,12 @@ export class WechatGroupProcess extends EventEmitter {
     const generation = ++this.#generation;
     let child;
     try {
-      child = this.#spawnImpl('py', [
+      // Resolve the launcher to an absolute path first. A Desktop Host records
+      // PATH when it boots, so a bare 'py' can be unresolvable later even though
+      // it works in a terminal - the child then never starts and the failure reads
+      // like a silent process-exit. The override lets an operator pin the exact
+      // interpreter on a machine with several of them.
+      child = this.#spawnImpl(this.#pythonLauncher(), [
         '-3.12', '-B', this.#scriptPath, '--config', this.#configPath,
       ], {
         windowsHide: true,
