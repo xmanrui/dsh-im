@@ -11,6 +11,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 新增默认关闭的 `groupByAgentPreset` 选项，按明确选择的 Agent Preset 为后续新会话创建工作区分组；已有聊天、手动工作区和飞书会话隔离目录保持原路径。
   Added opt-in `groupByAgentPreset` workspace grouping for new sessions with an explicitly selected Agent Preset. Existing chats, manual workspaces and Feishu conversation directories keep their paths.
 
+### Fixed / 修复
+
+- 飞书收到消息时会先检查该会话的 Goal：处于「已暂停」或 Host 重启后「未武装」状态的目标会自动恢复（`goals/resume`）后再进入本轮，并在过程首行提示「🔄 目标已恢复自动续跑」；`blocked`、`complete` 和正在运行的目标不受影响。可在渠道配置里用 `goalAutoResume: false` 关闭。方案见 `docs/方案/飞书入站消息自动恢复暂停目标方案.md`。
+  An inbound Feishu message now checks the conversation's Goal first: a goal that is paused, or left disarmed by a Host restart, is resumed before the turn starts and reported as the first step (「🔄 目标已恢复自动续跑」). Blocked, complete, and already-running goals are untouched. Opt out with `goalAutoResume: false`. See `docs/方案/飞书入站消息自动恢复暂停目标方案.md`.
+
 ## [5.8.0] - 2026-10-30
 
 ### Added / 新增
