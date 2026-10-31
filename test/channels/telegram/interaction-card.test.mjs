@@ -650,3 +650,49 @@ test('typing a number still selects the option at that position', async () => {
   controller.abort(new DOMException('test finished', 'AbortError'));
   await processing.catch(() => {});
 });
+
+// Bot API 10.3 added `InlineKeyboardButton.disabled` (class DisabledButton):
+// "If set, then the button is disabled and does nothing". The spec also says
+// exactly one action field may be present, so `disabled` and `callback_data`
+// must never travel together — the API layer enforces that instead of silently
+// dropping one.
+test('a disabled button is forwarded as DisabledButton with no callback', async () => {
+  const { api, calls } = apiRecorder();
+  await api.sendMessage({
+    chatId: 42,
+    text: 'label',
+    replyMarkup: {
+      inline_keyboard: [[
+        { text: 'DeepSeek', disabled: {} },
+        { text: '2. Pro', callback_data: 'm2|abcd1234EFGH|2' },
+      ]],
+    },
+  });
+  const [markup] = calls;
+  assert.deepEqual(markup.payload.reply_markup.inline_keyboard[0], [
+    { text: 'DeepSeek', disabled: {} },
+    { text: '2. Pro', callback_data: 'm2|abcd1234EFGH|2' },
+  ]);
+});
+
+test('a disabled button that also carries a callback is rejected', async () => {
+  const { api } = apiRecorder();
+  await assert.rejects(
+    api.sendMessage({
+      chatId: 42,
+      text: 'label',
+      replyMarkup: {
+        inline_keyboard: [[{ text: 'x', callback_data: 'a', disabled: {} }]],
+      },
+    }),
+    /must not carry callback_data/u,
+  );
+  await assert.rejects(
+    api.sendMessage({
+      chatId: 42,
+      text: 'label',
+      replyMarkup: { inline_keyboard: [[{ text: 'x', disabled: 'yes' }]] },
+    }),
+    /disabled buttons take an empty object/u,
+  );
+});

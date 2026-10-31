@@ -141,8 +141,26 @@ function inputReplyMarkup(value) {
       }
       return row.map((button) => {
         const text = cleanString(button?.text);
+        if (!text) {
+          throw new TypeError('Telegram inline keyboard buttons require text');
+        }
+        // Bot API 10.3 added `DisabledButton`: a labelled button that does
+        // nothing. The spec allows exactly one action field per button, so a
+        // disabled button must NOT also carry callback_data — that is why the
+        // two are mutually exclusive here instead of simply merged.
+        if (button?.disabled !== undefined) {
+          if (button.disabled !== null && typeof button.disabled !== 'object') {
+            throw new TypeError('Telegram disabled buttons take an empty object');
+          }
+          if (button.callback_data !== undefined) {
+            throw new TypeError(
+              'A disabled Telegram button must not carry callback_data',
+            );
+          }
+          return { text, disabled: {} };
+        }
         const data = cleanString(button?.callback_data);
-        if (!text || !data) {
+        if (!data) {
           throw new TypeError('Telegram inline keyboard buttons require text and callback_data');
         }
         if (Buffer.byteLength(data, 'utf8') > CALLBACK_DATA_MAX_BYTES) {
