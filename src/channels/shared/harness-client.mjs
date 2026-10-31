@@ -1497,6 +1497,10 @@ export class HarnessClient {
     return false;
   }
 
+  async isSessionArchived(sessionId, options = {}) {
+    return this.#isSessionArchived(sessionId, options);
+  }
+
   async sessionExists(sessionId, options = {}) {
     // Archived Sessions still exist. Returning false here would silently bind
     // the conversation to a new Session; reading their active log can also fail.

@@ -375,6 +375,44 @@ test('rollover while preparing a prompt resolves again without sending to the ol
   assert.deepEqual(await f.service.listSessionSyncTargets('session-one'), []);
 });
 
+test('rollover mid-turn when ask fails with turn-blocked re-resolves the fresh part', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  let firstAsk = true;
+  f.scope.harness.ask = async (id, text) => {
+    if (firstAsk) {
+      firstAsk = false;
+      f.setCurrent({ ...bot, sessionId: 'session-two', parts: ['session-one'] });
+      const error = new Error('Turn blocked');
+      error.code = 'turn-blocked';
+      throw error;
+    }
+    f.asks.push({ id, text });
+    return 'answer-from-part-two';
+  };
+  const result = await f.ask('hello');
+  assert.equal(result.sessionId, 'session-two');
+  assert.equal(result.answer, 'answer-from-part-two');
+  assert.deepEqual(f.asks, [{ id: 'session-two', text: 'hello' }]);
+});
+
+test('rollover when old session is archived re-resolves the fresh part without error', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.isSessionArchived = async (id) => id === 'session-one';
+  setTimeout(() => {
+    f.setCurrent({ ...bot, sessionId: 'session-two', parts: ['session-one'] });
+  }, 100);
+  f.scope.harness.ask = async (id, text) => {
+    f.asks.push({ id, text });
+    return 'answer-from-part-two';
+  };
+  const result = await f.ask('hello');
+  assert.equal(result.sessionId, 'session-two');
+  assert.equal(result.answer, 'answer-from-part-two');
+  assert.deepEqual(f.asks, [{ id: 'session-two', text: 'hello' }]);
+});
+
 test('missing DS Bot fails closed, while delivery target CRUD leaves bindings intact', async (t) => {
   const f = await fixture(t);
   await f.service.bindDsBot('im-one', f.key, bot.id);

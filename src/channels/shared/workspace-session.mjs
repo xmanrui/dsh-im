@@ -238,6 +238,17 @@ export async function askInWorkspaceSession({
       };
     } catch (error) {
       const failure = messageDiagnosticError(error, diagnostic);
+      if (dsBotSession && (error?.code === 'session-archived' || error?.code === 'turn-blocked')) {
+        let freshSessionId = null;
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          freshSessionId = await harness.resolveDsBotSession?.(key).catch(() => null);
+          if (freshSessionId && freshSessionId !== binding?.sessionId) break;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        if (freshSessionId && freshSessionId !== binding?.sessionId) {
+          continue;
+        }
+      }
       // Retry once, only with positive evidence that no prompt was submitted.
       // The binding lock rechecks identity so a concurrent /new or workspace
       // switch cannot be overwritten by recovery of the previous Session.
