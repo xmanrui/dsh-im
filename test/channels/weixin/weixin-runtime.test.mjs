@@ -816,7 +816,13 @@ test('runtime starts and stops an optional group bridge without changing iLink r
 test('runtime keeps iLink ready when the optional group bridge fails to start', async () => {
   const groupRuntime = {
     status: { ready: false, configuredGroups: 1 },
-    async start() { throw new Error('UIA preflight failed'); },
+    async start() {
+      // The adapter carries a stable code; operators need it in the log line,
+      // not only the free-text sentence, to tell logged-out from missing-window.
+      const error = new Error('UIA preflight failed');
+      error.code = 'wechat_logged_out';
+      throw error;
+    },
     async stop() {},
     async waitForIdle() {},
   };

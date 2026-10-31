@@ -263,7 +263,10 @@ export class WeixinRuntime {
         ready: false,
         lastError: String(error?.message ?? error),
       };
-      this.#logger.warn?.('[dsh-weixin] group bridge start failed');
+      // Log the adapter's stable code, not just a generic sentence: an operator
+      // needs to tell 'WeChat is logged out' from 'the window is missing'.
+      const code = typeof error?.code === 'string' && error.code ? error.code : 'start-failed';
+      this.#logger.warn?.('[dsh-weixin] group bridge start failed (' + code + ')');
     }
   }
 
