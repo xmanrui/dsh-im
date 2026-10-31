@@ -72,6 +72,7 @@ export class WechatGroupProcess extends EventEmitter {
   #stopping = null;
   #generation = 0;
   #lastError = null;
+  #adapterError = null;
 
   constructor({
     config,
@@ -389,7 +390,13 @@ export class WechatGroupProcess extends EventEmitter {
         if (pending.type === 'send_text') this.#markUnknown(record.request_id, 'adapter-error');
         pending.reject(protocolError('adapter-error', 'WeChat group adapter rejected the request'));
       } else {
-        this.#logger.warn?.('[dsh-weixin] group adapter reported a sanitized error');
+        // A startup failure arrives as a bare error frame before the child
+        // exits. Dropping its code here is what made every real cause surface
+        // as 'process-exit', so keep it and let the exit handler prefer it.
+        const code = nonEmptyCode(record?.error?.code) ?? 'adapter-error';
+        this.#adapterError = code;
+        this.#lastError = code;
+        this.#logger.warn?.('[dsh-weixin] group adapter reported a sanitized error (' + code + ')');
       }
       return;
     }
@@ -576,9 +583,15 @@ export class WechatGroupProcess extends EventEmitter {
     this.#ready = false;
     this.#running = false;
     this.#buffer = '';
+    // Prefer the adapter's own stable code: an exit is only the mechanical
+    // result of it, and 'process-exit' would hide why the bridge could not run.
+    const adapterCode = wasStopping ? null : this.#adapterError;
+    this.#adapterError = null;
     const error = cause
       ? protocolError('process-error', 'WeChat group adapter failed', { cause })
-      : protocolError('process-exit', 'WeChat group adapter exited');
+      : adapterCode
+        ? protocolError(adapterCode, 'WeChat group adapter could not start')
+        : protocolError('process-exit', 'WeChat group adapter exited');
     if (!wasStopping) this.#lastError = error.code;
     this.#rejectStart(error);
     this.#rejectAll(error);

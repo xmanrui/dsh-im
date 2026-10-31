@@ -126,6 +126,21 @@ test('config switches travel into the adapter environment without touching the h
   assert.equal(process.env.DSH_WECHAT_GROUP_ALLOW_SEND, undefined);
 });
 
+test('a startup error frame surfaces its own code instead of process-exit', async (t) => {
+  const { groupProcess, children } = makeProcess(t);
+  const starting = groupProcess.start();
+  const child = children.at(-1);
+  // The real adapter emits this exact shape and then exits; the exit is only
+  // the mechanical result, so the stable code must win.
+  child.emitLine({
+    type: 'error', ok: false,
+    error: { code: 'wechat_logged_out', message: 'WeChat is on its login screen' },
+  });
+  child.emit('close', 1);
+  await assert.rejects(starting, (error) => error.code === 'wechat_logged_out');
+  assert.equal(groupProcess.status.lastError, 'wechat_logged_out');
+});
+
 test('start uses hidden py -3.12 -B and health correlates request IDs across fragmented JSONL', async (t) => {
   const { groupProcess, children, spawnCalls } = makeProcess(t);
   const child = await startReady(groupProcess, children);
