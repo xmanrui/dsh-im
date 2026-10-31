@@ -41,6 +41,7 @@ ERROR_MESSAGES = {
     "poll_failed": "A read-only polling cycle failed.",
     "probe_failed": "The read-only UIA probe failed.",
     "send_disabled": "Sending is disabled until the operator enables it.",
+    "wechat_logged_out": "WeChat is on its login screen; log in before starting the group bridge.",
 }
 
 
@@ -742,6 +743,13 @@ class UiaBackend:
         self._closed = False
         self._window = auto.WindowControl(searchDepth=1, ClassName="mmui::MainWindow")
         if not self._window.Exists(0, 0):
+            # Distinguish the two causes an operator can act on. A login window
+            # means the account is simply signed out; a present main window class
+            # without a widget tree means WeChat started before the screen-reader
+            # flag was set, so its accessibility provider was never built.
+            login = auto.WindowControl(searchDepth=1, ClassName="mmui::LoginWindow")
+            if login.Exists(0, 0):
+                raise SafetyError("WeChat is showing the login window", "wechat_logged_out")
             raise SafetyError("existing WeChat main window was not found", "main_window_missing")
 
     def _control(self, automation_id: str) -> Any:

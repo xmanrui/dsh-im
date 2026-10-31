@@ -63,7 +63,7 @@ function makeProcess(t, options = {}) {
     error: (...args) => logs.push(args.join(' ')),
   };
   const groupProcess = new WechatGroupProcess({
-    config: CONFIG,
+    config: options.config ?? CONFIG,
     scriptPath: 'D:/fake/wechat_group_uia.py',
     configPath: 'D:/fake/group-chats.json',
     healthTimeoutMs: 100,
@@ -108,6 +108,23 @@ async function startReady(groupProcess, children) {
 function requestsOf(children, type) {
   return children.flatMap((child) => child.requests).filter((request) => request.type === type);
 }
+
+test('config switches travel into the adapter environment without touching the host env', async (t) => {
+  const off = makeProcess(t);
+  await startReady(off.groupProcess, off.children);
+  const offEnv = off.spawnCalls[0].options.env;
+  // Default config means observe-safe: the adapter must not be told to read or write.
+  assert.equal(offEnv.DSH_WECHAT_GROUP_ALLOW_UNVERIFIED, undefined);
+  assert.equal(offEnv.DSH_WECHAT_GROUP_ALLOW_SEND, undefined);
+
+  const on = makeProcess(t, { config: { ...CONFIG, allowUnverifiedRead: true, allowSend: true } });
+  await startReady(on.groupProcess, on.children);
+  const onEnv = on.spawnCalls[0].options.env;
+  assert.equal(onEnv.DSH_WECHAT_GROUP_ALLOW_UNVERIFIED, '1');
+  assert.equal(onEnv.DSH_WECHAT_GROUP_ALLOW_SEND, '1');
+  // The switches are passed down, never written into the host process itself.
+  assert.equal(process.env.DSH_WECHAT_GROUP_ALLOW_SEND, undefined);
+});
 
 test('start uses hidden py -3.12 -B and health correlates request IDs across fragmented JSONL', async (t) => {
   const { groupProcess, children, spawnCalls } = makeProcess(t);

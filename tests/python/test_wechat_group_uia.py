@@ -7,6 +7,29 @@ from unittest import mock
 from scripts import wechat_group_uia as uia
 
 
+class FakeWindow:
+    """Stand-in for a uiautomation window control: reports one fixed presence."""
+
+    def __init__(self, exists):
+        self._exists = exists
+
+    def Exists(self, seconds, interval):
+        return self._exists
+
+
+class FakeAuto:
+    """Minimal uiautomation surface, enough to pick the backend failure code."""
+
+    def __init__(self, main, login):
+        self._main = main
+        self._login = login
+
+    def WindowControl(self, searchDepth, ClassName):
+        if ClassName == "mmui::MainWindow":
+            return FakeWindow(self._main)
+        return FakeWindow(self._login)
+
+
 class FakeBackend:
     """In-memory UIA boundary; every mutating method is observable by tests."""
 
@@ -503,6 +526,28 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(operations(self.backend, "select"), [])
         self.assertEqual(operations(self.backend, "set_input"), [])
         self.assertEqual(operations(self.backend, "send"), [])
+
+
+class BackendFailureCodeTests(unittest.TestCase):
+    """The adapter must tell an operator WHY the group bridge cannot start."""
+
+    def _backend(self, main, login):
+        fake = FakeAuto(main=main, login=login)
+        with mock.patch.object(uia.sys, "platform", "win32"):
+            with mock.patch.dict("sys.modules", {"uiautomation": fake}):
+                return uia.UiaBackend()
+
+    def test_login_window_reports_logged_out_not_main_window_missing(self):
+        # A logged-out WeChat needs a human scan; reporting 'main_window_missing'
+        # would send the operator looking for a window-restore bug instead.
+        with self.assertRaises(uia.SafetyError) as raised:
+            self._backend(main=False, login=True)
+        self.assertEqual(raised.exception.code, "wechat_logged_out")
+
+    def test_no_wechat_window_still_reports_main_window_missing(self):
+        with self.assertRaises(uia.SafetyError) as raised:
+            self._backend(main=False, login=False)
+        self.assertEqual(raised.exception.code, "main_window_missing")
 
 
 if __name__ == "__main__":

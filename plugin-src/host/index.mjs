@@ -97,7 +97,12 @@ export function createImHostPlugin(internals = {}) {
         unavailableSessionSyncChannels: unavailableSessionSyncChannels.map((channel) => channel === 'wecomApp' ? 'wecom-app' : channel),
         dsBot: createDsBotClient(ctx),
       });
-      if (typeof ctx?.provide === 'function') {
+      // HMR reloads mount a second fiber before the previous one has disposed.
+      // cordis refuses a second provide of the same service name, which made
+      // every hot reload of this plugin fail. Skip the provide when the service
+      // is already live: the existing registration is the one HMR keeps.
+      const alreadyProvided = typeof ctx?.get === 'function' && ctx.get('dshIm') !== undefined;
+      if (typeof ctx?.provide === 'function' && !alreadyProvided) {
         ctx.provide('dshIm', Object.freeze({
           contractVersion: 1,
           receiptVersion: 1,

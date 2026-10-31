@@ -32,10 +32,14 @@
 
 ## 两个开关（默认均关闭）
 
-| 环境变量 | 作用 | 关闭时行为 |
-|---|---|---|
-| `DSH_WECHAT_GROUP_ALLOW_UNVERIFIED=1` | 允许读取群消息正文（身份标记为未验证） | `read_messages` 抛 `message_layout_unverified`，群保持离线 |
-| `DSH_WECHAT_GROUP_ALLOW_SEND=1` | 允许向已配置群发送 | `send_text` 返回 `send_disabled`，绝不写群 |
+开关有两种等价写法：**账号级配置文件**（推荐，改完下一次启动群桥即生效，不需要重启宿主）或**进程环境变量**（需要重启宿主）。
+
+| 配置文件键（`group-chats.json` 根级） | 环境变量 | 作用 | 关闭时行为 |
+|---|---|---|---|
+| `"allowUnverifiedRead": true` | `DSH_WECHAT_GROUP_ALLOW_UNVERIFIED=1` | 允许读取群消息正文（身份标记为未验证） | `read_messages` 抛 `message_layout_unverified`，群保持离线 |
+| `"allowSend": true` | `DSH_WECHAT_GROUP_ALLOW_SEND=1` | 允许向已配置群发送 | `send_text` 返回 `send_disabled`，绝不写群 |
+
+插件把配置里的两个键翻译成适配器的环境变量再 spawn，宿主自身环境不被改写；两者同时存在时任一为真即可。
 
 只读排障永远安全：`py -3.12 -B scripts/wechat_group_uia.py --probe`（不选群、不输入、不发送）。
 

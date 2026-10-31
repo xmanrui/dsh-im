@@ -45,12 +45,17 @@ test('valid config preserves IDs and defaults allowSelf to false', async (t) => 
   const loaded = await loadWechatGroupConfig(path);
   assert.deepEqual(loaded, {
     pollIntervalMs: 750,
+    // Root switches default to disabled so a fresh file never reads or sends.
+    allowUnverifiedRead: false,
+    allowSend: false,
     groups: [{
       id: 'uia_group_one',
       title: '精确群名',
       commandPrefix: '/dsh',
       mentionMode: 'command',
       allowSelf: false,
+      // Absent in the file, normalized to false so the runtime consults one shape.
+      allowUnverifiedTrigger: false,
     }],
   });
 });
@@ -109,6 +114,8 @@ test('invalid IDs, titles, triggers, mention modes, and allowSelf fail closed', 
     { mentionMode: 'mention' },
     { mentionMode: '' },
     { allowSelf: 'false' },
+    { allowUnverifiedTrigger: 'false' },
+    { allowUnverifiedTrigger: 1 },
   ];
   for (const [index, patch] of groups.entries()) {
     const { path } = await fixture(t);
@@ -117,6 +124,16 @@ test('invalid IDs, titles, triggers, mention modes, and allowSelf fail closed', 
     await writeJson(path, value);
     await assert.rejects(() => loadWechatGroupConfig(path), undefined, 'case ' + index);
   }
+});
+
+test('allowUnverifiedTrigger is an explicit, typed, per-group opt-in', async (t) => {
+  const { path } = await fixture(t);
+  const value = validConfig();
+  value.groups[0].allowUnverifiedTrigger = true;
+  await writeJson(path, value);
+  const loaded = await loadWechatGroupConfig(path);
+  assert.equal(loaded.groups[0].allowUnverifiedTrigger, true);
+  assert.equal(loaded.groups[0].id, 'uia_group_one');
 });
 
 test('unknown top-level and group keys fail closed instead of hiding typos', async (t) => {

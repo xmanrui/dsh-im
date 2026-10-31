@@ -56,6 +56,8 @@ export class WechatGroupProcess extends EventEmitter {
   #stopTimeoutMs;
   #startTimeoutMs;
   #requestIdFactory;
+  #allowUnverifiedRead = false;
+  #allowSend = false;
   #child = null;
   #buffer = '';
   #decoder = null;
@@ -98,6 +100,10 @@ export class WechatGroupProcess extends EventEmitter {
       throw new TypeError('spawnImpl and requestIdFactory must be functions');
     }
     this.#groups = new Map(config.groups.map((group) => [group.id, group]));
+    // Config defaults are false, so a config that omits both switches stays
+    // observe-safe: the adapter refuses to read or write until told otherwise.
+    this.#allowUnverifiedRead = config.allowUnverifiedRead === true;
+    this.#allowSend = config.allowSend === true;
     this.#scriptPath = scriptPath;
     this.#configPath = configPath;
     this.#spawnImpl = spawnImpl;
@@ -126,6 +132,17 @@ export class WechatGroupProcess extends EventEmitter {
     };
   }
 
+  // Translate the account config switches into the adapter's environment.
+  // The Python adapter keeps its own environment gates (an operator may also
+  // set them directly); this only propagates the config so a running host does
+  // not need a restart to pick up an operator decision.
+  #adapterEnv() {
+    const env = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONUTF8: '1' };
+    if (this.#allowUnverifiedRead) env.DSH_WECHAT_GROUP_ALLOW_UNVERIFIED = '1';
+    if (this.#allowSend) env.DSH_WECHAT_GROUP_ALLOW_SEND = '1';
+    return env;
+  }
+
   /** Start a new adapter generation and wait until its baseline emits ready. */
   start() {
     if (this.#running && this.#ready) return Promise.resolve(this.status);
@@ -142,7 +159,7 @@ export class WechatGroupProcess extends EventEmitter {
       ], {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONUTF8: '1' },
+        env: this.#adapterEnv(),
       });
     } catch (cause) {
       const error = protocolError('process-spawn-failed', 'Unable to start WeChat group adapter', { cause });

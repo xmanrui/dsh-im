@@ -1,7 +1,14 @@
 import { readFile } from 'node:fs/promises';
 
-const ROOT_KEYS = new Set(['version', 'pollIntervalMs', 'groups']);
-const GROUP_KEYS = new Set(['id', 'title', 'commandPrefix', 'mentionMode', 'allowSelf']);
+// Two root-level switches replace the earlier process-environment flags: the
+// host process environment cannot be changed without a restart, so an operator
+// must be able to enable read/send for one account from its own config file.
+const ROOT_KEYS = new Set(['version', 'pollIntervalMs', 'groups', 'allowUnverifiedRead', 'allowSend']);
+// allowUnverifiedTrigger is the only opt-in that lets an identity-less row
+// become addressed. It is accepted here so an operator can name one exact
+// group; the runtime still refuses it for every other group and never derives
+// a member identity from it.
+const GROUP_KEYS = new Set(['id', 'title', 'commandPrefix', 'mentionMode', 'allowSelf', 'allowUnverifiedTrigger']);
 const GROUP_ID_PATTERN = /^uia_[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const COMMAND_PREFIX_PATTERN = /^\/[^\s]+$/;
 
@@ -60,6 +67,11 @@ function normalizeGroup(value, index) {
   if (group.allowSelf !== undefined && typeof group.allowSelf !== 'boolean') {
     throw invalid('groups[' + index + '].allowSelf must be boolean');
   }
+  // Strict typing here is deliberate: a truthy string such as "false" must not
+  // silently enable the only path that can address an unverified row.
+  if (group.allowUnverifiedTrigger !== undefined && typeof group.allowUnverifiedTrigger !== 'boolean') {
+    throw invalid('groups[' + index + '].allowUnverifiedTrigger must be boolean');
+  }
 
   return {
     id,
@@ -67,6 +79,7 @@ function normalizeGroup(value, index) {
     commandPrefix,
     mentionMode: 'command',
     allowSelf: group.allowSelf ?? false,
+    allowUnverifiedTrigger: group.allowUnverifiedTrigger ?? false,
   };
 }
 
@@ -104,6 +117,14 @@ export async function loadWechatGroupConfig(path) {
   if (!Array.isArray(root.groups) || root.groups.length === 0) {
     throw invalid('groups must be a non-empty array');
   }
+  // Absent means disabled. Only a literal boolean may switch these on; a
+  // truthy string must not silently widen what the bridge may read or write.
+  if (root.allowUnverifiedRead !== undefined && typeof root.allowUnverifiedRead !== 'boolean') {
+    throw invalid('allowUnverifiedRead must be boolean');
+  }
+  if (root.allowSend !== undefined && typeof root.allowSend !== 'boolean') {
+    throw invalid('allowSend must be boolean');
+  }
 
   const groups = root.groups.map(normalizeGroup);
   const ids = new Set();
@@ -115,5 +136,10 @@ export async function loadWechatGroupConfig(path) {
     titles.add(group.title);
   }
 
-  return { pollIntervalMs: root.pollIntervalMs, groups };
+  return {
+    pollIntervalMs: root.pollIntervalMs,
+    allowUnverifiedRead: root.allowUnverifiedRead ?? false,
+    allowSend: root.allowSend ?? false,
+    groups,
+  };
 }
