@@ -5,6 +5,7 @@ import {
   MAX_SLASH_PANEL_COMMANDS,
   SLASH_COMMAND_MANIFEST,
   SLASH_PANEL_MODES,
+  feishuSlashManifest,
   isCustomSlashPanel,
   isSlashPanelConfig,
   normalizeSlashPanelConfig,
@@ -78,4 +79,21 @@ test('resolveSlashPanelManifest follows the manifest or the configured order', (
     resolveSlashPanelManifest({ mode: SLASH_PANEL_MODES.CUSTOM, order: [] }),
     [],
   );
+});
+
+test('feishuSlashManifest gates /fork by the fork capability', () => {
+  const withFork = feishuSlashManifest({ supportsFork: true });
+  const withoutFork = feishuSlashManifest({ supportsFork: false });
+  assert.ok(withFork.some((entry) => entry.command === 'fork'));
+  assert.ok(!withoutFork.some((entry) => entry.command === 'fork'));
+  assert.ok(withoutFork.some((entry) => entry.command === 'ls'));
+  assert.ok(withoutFork.some((entry) => entry.command === 'go'));
+  assert.ok(withoutFork.some((entry) => entry.command === 'title'));
+});
+
+test('feishuSlashManifest describes /tail honestly per fileSend', () => {
+  const noFiles = feishuSlashManifest({ fileSend: false }).find((entry) => entry.command === 'tail');
+  const withFiles = feishuSlashManifest({ fileSend: true }).find((entry) => entry.command === 'tail');
+  assert.equal(noFiles.default, '预览会话内容');
+  assert.match(withFiles.default, /导出/);
 });

@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { chunkMarkdownText } from '../shared/markdown-chunks.mjs';
 import QRCode from 'qrcode';
 import { waitForFeishuOperation } from './feishu-channel.mjs';
-import { startNewConversation } from '../shared/new-command.mjs';
+import { startNewConversation, isNewCommand, newCommandTitle } from '../shared/new-command.mjs';
 import {
   conversationKey,
   conversationScope,
@@ -69,6 +69,10 @@ import {
   workspacePathSnapshot,
 } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import {
+  isSessionNavCommand,
+  runSessionNavTextCommand,
+} from '../shared/session-nav-command.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import {
   captureContextEnhancement,
@@ -1889,7 +1893,7 @@ export class FeishuHarnessBridge {
       await this.#sendMenuCard(key, event.message.chat_id, { replyTo: event.message.message_id });
       return;
     }
-    if (commandText === '/new') {
+    if (isNewCommand(commandText)) {
       if (this.#queues.has(key) || this.#hasPendingInteraction(key)) {
         await this.#send(
           event.message.chat_id,
@@ -1900,12 +1904,43 @@ export class FeishuHarnessBridge {
       }
       await this.#send(event.message.chat_id, await startNewConversation({
         state: this.#state, harness: this.#harness, key,
+        title: newCommandTitle(commandText),
       }), { replyTo: event.message.message_id });
       await this.#sendMenuCard(key, event.message.chat_id, { replyTo: event.message.message_id });
       return;
     }
     if (commandText === '/status') {
       await this.#showStatusText(key, event.message.chat_id, event.message.message_id);
+      return;
+    }
+    if (isSessionNavCommand(commandText)) {
+      const nav = await runSessionNavTextCommand(commandText, this.#harness, this.#state, key, {
+        signal: this.#signal,
+      });
+      if (nav) {
+        for (const reply of nav.messages ?? [nav.message]) {
+          await this.#send(event.message.chat_id, reply, { replyTo: event.message.message_id });
+        }
+        if (nav.askText) {
+          const followUp = this.#enqueueMessage(
+            {
+              ...event,
+              message: {
+                ...event.message,
+                message_type: 'text',
+                content: JSON.stringify({ text: nav.askText }),
+              },
+            },
+            `${messageId}-ask`,
+            key,
+            null,
+          );
+          followUp.catch((error) => {
+            this.#logger.warn?.(`[dsh-im:feishu] follow-up ask after a nav command failed:`, error?.message ?? error);
+            this.#send(event.message.chat_id, t('切换后的提问发送失败，请重试。'), { replyTo: event.message.message_id }).catch(() => undefined);
+          });
+        }
+      }
       return;
     }
     if (commandText === '/compact') {

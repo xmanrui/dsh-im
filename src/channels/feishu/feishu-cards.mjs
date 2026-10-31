@@ -15,6 +15,7 @@
  */
 
 import { t } from '../shared/i18n.mjs';
+import { SESSION_NAV_HELP_LINES } from '../shared/command-catalog.mjs';
 import { workspaceLabels } from '../shared/workspace-labels.mjs';
 import { normalizeFeishuStepCardPanels } from './step-push-mode.mjs';
 
@@ -597,6 +598,7 @@ export function menuHelpText() {
     '/workspace 工作区序号或绝对路径  切换工作区',
     '/ws、/wsl、/workspaces  工作区命令别名',
     '/new  开启全新会话',
+    ...SESSION_NAV_HELP_LINES.map((line) => t(line)),
     '',
     '📊 状态 / 压缩',
     '/status  连接状态',

@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from './deferred-delivery-coordinator.mjs';
 import { t } from './i18n.mjs';
-import { commandHelpLines } from './command-catalog.mjs';
+import { availableCommandCatalog, commandHelpLines, SHARED_COMMAND_CATALOG } from './command-catalog.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
@@ -76,7 +76,16 @@ import {
 } from './message-failure.mjs';
 import { logDeliveryFailure } from './delivery-failure-log.mjs';
 import { beginStatusReaction } from './status-reaction.mjs';
-import { startNewConversation } from './new-command.mjs';
+import { startNewConversation, isNewCommand, newCommandTitle } from './new-command.mjs';
+import {
+  isSessionNavCommand,
+  runSessionNavCommand,
+} from './session-nav-command.mjs';
+import {
+  documentSendSupported,
+  buttonPreviewSupported,
+} from './channel-capabilities.mjs';
+import { createActionNonce } from './action-card.mjs';
 
 /** Cap and TTL for the in-memory workspace-picker snapshots behind button presses. */
 const MAX_WORKSPACE_CARDS = 50;
@@ -183,6 +192,10 @@ function pendingMessageId(key, messageId) {
 
 const PENDING_RESTART_NOTICE = '排队中的消息在服务重启时被中断。为避免重复执行，未自动重放；如果该消息尚未处理，请重新发送。';
 
+// Callback namespace for the /tail preview "Hide" button: the payload is the
+// nonce of the preview message the bot must delete when pressed.
+const TAIL_HIDE_CALLBACK_PREFIX = 'tailhide|';
+
 export class TextHarnessBridge {
   #descriptor;
   #bot;
@@ -215,6 +228,9 @@ export class TextHarnessBridge {
   #workspaceCards = new Map();
   // Conversation key → the one picker card that is still authoritative there.
   #workspaceCardKeys = new Map();
+  // /tail preview messages by nonce, so the "Hide" press can delete the bot's
+  // own preview message. Keyed by nonce → { target, providerMessageId }.
+  #tailPreviewMessages = new Map();
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
   // render hook). Null keeps every channel's existing plain-text approval flow.
   #approvalCard;
@@ -1131,7 +1147,9 @@ export class TextHarnessBridge {
           t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
           '',
           t('直接发送文字、图片或文件即可继续当前会话。'),
-          ...commandHelpLines(this.#descriptor.key),
+          ...commandHelpLines(this.#descriptor.key, availableCommandCatalog(SHARED_COMMAND_CATALOG, {
+            supportsFork: this.#harness.supportsSessionFork?.() ?? true,
+          })),
         ].join('\n'));
         return;
       }
@@ -1158,8 +1176,13 @@ export class TextHarnessBridge {
         }
         return;
       }
-      if (!hasImages && !hasFiles && command === '/new') {
-        const receipt = await startNewConversation({ state: this.#state, harness: this.#harness, key: conversationKey });
+      if (!hasImages && !hasFiles && isNewCommand(text)) {
+        const receipt = await startNewConversation({
+          state: this.#state,
+          harness: this.#harness,
+          key: conversationKey,
+          title: newCommandTitle(text),
+        });
         if (this.#contextHooks?.onSessionCleared) {
           try {
             await this.#contextHooks.onSessionCleared(conversationKey);
@@ -1169,6 +1192,46 @@ export class TextHarnessBridge {
           }
         }
         await this.#bot.sendText(target, `${receipt}\n${t('请发送你的问题。')}`);
+        return;
+      }
+      if (!hasImages && !hasFiles && isSessionNavCommand(text)) {
+        const result = await runSessionNavCommand(
+          text,
+          this.#harness,
+          this.#state,
+          conversationKey,
+          { signal: this.#signal, isDirect: message.kind === 'direct' },
+        );
+        if (result) {
+          await this.#presentSessionNavResult(target, result);
+          if (result.askText) {
+            // /go N <text>, /prev <text>, /next <text>: switch, then submit the
+            // remainder through the ordinary prompt path. Never await the queued
+            // follow-up here — we are inside the queue's own job, so awaiting the
+            // next job deadlocks. The queue runs it right after this job returns.
+            const followUp = this.#enqueueMessage(
+              {
+                ...message,
+                controlText: result.askText,
+                content: result.askText,
+                images: undefined,
+                files: undefined,
+                replyTo: undefined,
+                batchSubmission: undefined,
+              },
+              `${messageId}-ask`,
+              senderId,
+              conversationKey,
+            );
+            followUp.catch((error) => {
+              this.#logger.warn?.(
+                `[dsh-im:${this.#descriptor.key}] follow-up ask after a nav command failed:`,
+                error?.message ?? error,
+              );
+              this.#bot.sendText(target, t('切换后的提问发送失败，请重试。')).catch(() => undefined);
+            });
+          }
+        }
         return;
       }
       const compactCommand = !hasImages && !hasFiles
@@ -1873,6 +1936,11 @@ export class TextHarnessBridge {
     if (!conversationId || !senderId || !messageId || callback?.senderIsBot === true) return;
     const kind = callback.kind === 'group' ? 'group' : 'direct';
     const key = `${kind}:${conversationId}`;
+    // The /tail preview "Hide" button is a stateless delete of the bot's own
+    // message; route its namespace before any interaction bookkeeping.
+    if (typeof callback?.data === 'string' && callback.data.startsWith(TAIL_HIDE_CALLBACK_PREFIX)) {
+      return this.#handleTailHidePress(callback, callback.data.slice(TAIL_HIDE_CALLBACK_PREFIX.length));
+    }
     // Workspace pickers are stateless cards, not pending questions: route their
     // namespace before the question bookkeeping so a press can never touch it.
     const workspacePress = this.#workspaceCard?.parse?.(callback.data) ?? null;
@@ -1962,6 +2030,81 @@ export class TextHarnessBridge {
       // A failed submission rolls the question back, so let the user press again.
       if (this.#pendingInteractions.get(key) === pending) pending.callbackClaimed = false;
     });
+  }
+
+  /**
+   * Render a session-navigation command result. Text replies are split and sent
+   * as-is; a /tail preview may carry a Hide button on button-capable channels;
+   * a /tail export is delivered as a document on file-capable channels.
+   */
+  async #presentSessionNavResult(target, result) {
+    if (result?.document) {
+      if (documentSendSupported(this.#descriptor.key, this.#bot)) {
+        try {
+          await this.#bot.sendFile(target, {
+            fileName: result.document.fileName,
+            mediaType: result.document.mediaType,
+            bytes: Buffer.from(result.document.content, 'utf8'),
+          });
+          return;
+        } catch (error) {
+          this.#logger.warn?.(
+            `[dsh-im:${this.#descriptor.key}] failed to send the /tail export:`,
+            error?.message ?? error,
+          );
+        }
+      }
+      await this.#bot.sendText(target, t('当前渠道不支持发送文件。'));
+      return;
+    }
+    if (result?.hide === true && buttonPreviewSupported(this.#descriptor.key, this.#bot)) {
+      await this.#sendTailPreviewWithHide(target, result);
+      return;
+    }
+    for (const reply of result?.messages ?? [result?.message]) {
+      if (reply) await this.#bot.sendText(target, reply);
+    }
+  }
+
+  /** Send a /tail preview with a single Hide button, falling back to plain text. */
+  async #sendTailPreviewWithHide(target, result) {
+    const nonce = createActionNonce(6);
+    const markup = {
+      inline_keyboard: [[{ text: t('隐藏消息'), callback_data: `${TAIL_HIDE_CALLBACK_PREFIX}${nonce}` }]],
+    };
+    let sent;
+    try {
+      sent = await this.#bot.sendInteractionCard(target, { text: result.message, markup });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] unable to send the /tail preview card; falling back to text:`,
+        error?.message ?? error,
+      );
+      for (const reply of result.messages ?? [result.message]) {
+        if (reply) await this.#bot.sendText(target, reply);
+      }
+      return;
+    }
+    const messageId = Array.isArray(sent?.providerMessageIds) && sent.providerMessageIds.length > 0
+      ? String(sent.providerMessageIds[0])
+      : undefined;
+    if (messageId) this.#tailPreviewMessages.set(nonce, { target, messageId });
+  }
+
+  /** Hide a /tail preview by deleting the bot's own message. Best-effort. */
+  async #handleTailHidePress(callback, nonce) {
+    const entry = this.#tailPreviewMessages.get(nonce);
+    if (entry) this.#tailPreviewMessages.delete(nonce);
+    await this.#answerInteractionCallback(callback, t('已隐藏。'));
+    if (!entry?.messageId || typeof this.#bot.deleteMessage !== 'function') return;
+    try {
+      await this.#bot.deleteMessage(entry.target, entry.messageId);
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] unable to delete a /tail preview:`,
+        error?.message ?? error,
+      );
+    }
   }
 
   /**

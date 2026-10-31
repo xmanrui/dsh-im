@@ -1603,7 +1603,7 @@ test('all nine channel bridge families advertise and fan out workspace command r
     const source = await readFile(new URL(file, import.meta.url), 'utf8');
     if (file.endsWith('/shared/text-harness-bridge.mjs')) {
       // Full rendered help for all four consumers is covered by command-help.test.mjs.
-      assert.match(source, /commandHelpLines\(this\.#descriptor\.key\)/);
+      assert.match(source, /commandHelpLines\(this\.#descriptor\.key, availableCommandCatalog/);
     } else {
       assert.match(source, /\/workspacelist  列出工作区绝对路径/);
       assert.match(source, /\/sessionlist 或 \/sessions \[工作区序号或绝对路径\]  列出会话 ID 和标题/);

@@ -72,3 +72,14 @@ export function initialSessionTitle({ text, content, files } = {}) {
 }
 
 export const INITIAL_SESSION_TITLE_MAX_BYTES = DEFAULT_MAX_TITLE_BYTES;
+
+/**
+ * Normalize a user-supplied inline title (e.g. `/new <title>`): strip control
+ * characters, collapse whitespace, trim, and truncate to the session-title byte
+ * budget. Returns null when nothing usable remains.
+ */
+export function normalizeSessionTitle(text) {
+  if (typeof text !== 'string') return null;
+  const cleaned = cleanTitleText(text);
+  return cleaned ? truncateTitle(cleaned, DEFAULT_MAX_TITLE_BYTES) : null;
+}

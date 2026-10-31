@@ -23,9 +23,12 @@ function defineCatalogCommand(name, description, help, { aliases = [], ...option
 // enabled: false removes a definition from both consumers; menuVisible: false
 // hides a command (or alias) only from the native menu, leaving help available.
 export const SHARED_COMMAND_CATALOG = Object.freeze([
-  defineCatalogCommand('new', '开启一个全新会话', [
-    '/new  开启一个全新会话',
+  defineCatalogCommand('new', '开启一个全新会话（可带标题）', [
+    '/new [标题]  开启一个全新会话（可指定标题）',
   ]),
+  defineCatalogCommand('fork', '从当前会话分支一个新会话', [
+    '/fork [标题]  从当前会话分支一个新会话（默认沿用父会话标题加“ (fork)”）',
+  ], { requiresSessionFork: true }),
   defineCatalogCommand('compact', '压缩当前会话的较早上下文', [
     '/compact  压缩当前会话的较早上下文',
   ]),
@@ -72,6 +75,30 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   defineCatalogCommand('session', '将当前聊天绑定到指定会话', [
     '/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话',
   ]),
+  defineCatalogCommand('ls', '列出本聊天使用过的会话（按聊天/话题隔离）', [
+    '/ls 或 /list  列出本聊天使用过的会话（● 当前，←/→ 可前后切换，✕ 已失效；列表按聊天隔离，论坛群按话题）',
+  ], { aliases: [{ name: 'list', menuVisible: false }] }),
+  defineCatalogCommand('go', '切换到指定编号的会话', [
+    '/go 会话编号  切换到该会话（编号见 /ls）',
+  ]),
+  defineCatalogCommand('prev', '回到上一个会话', [
+    '/prev  回到上一个会话',
+  ]),
+  defineCatalogCommand('next', '前进到下一个会话', [
+    '/next  前进到下一个会话',
+  ]),
+  defineCatalogCommand('drop', '从会话列表移除一条记录', [
+    '/drop 会话编号  从本聊天会话列表移除该条记录（不删除 Harness 会话）',
+  ]),
+  defineCatalogCommand('title', '查看或重命名会话标题', [
+    '/title  查看当前会话标题',
+    '/title 新标题  重命名当前会话',
+    '/title 会话编号 新标题  重命名指定会话',
+  ]),
+  defineCatalogCommand('tail', '预览或导出会话内容', [
+    '/tail 或 /peek [编号] [条数]  预览最近消息（默认 5 条，仅提问与回答）',
+    '/tail 或 /peek [编号] file  导出整个会话为 Markdown 文件',
+  ], { aliases: [{ name: 'peek', menuVisible: false }] }),
   defineCatalogCommand('models', '按序号列出所有可用模型', [
     '/models  按序号列出所有可用模型',
   ]),
@@ -122,6 +149,33 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
 export function commandsForChannel(channel, catalog = SHARED_COMMAND_CATALOG) {
   return catalog.filter((item) => item.enabled !== false && item.channels.includes(channel));
 }
+
+/**
+ * Drop entries whose required Host capability is absent (e.g. /fork when the
+ * host facade exposes no sessions.fork member), so the menu and /help never
+ * promise a command that always refuses.
+ */
+export function availableCommandCatalog(catalog = SHARED_COMMAND_CATALOG, { supportsFork = true } = {}) {
+  return catalog.filter((item) => item.requiresSessionFork !== true || supportsFork);
+}
+
+/**
+ * The session-navigation help lines every channel that handles them should
+ * list, without the file-export form of /tail (only file-capable channels
+ * document that). Kept here so the non-text bridges cannot drift from /ls.
+ */
+export const SESSION_NAV_HELP_LINES = Object.freeze([
+  '/ls 或 /list  列出本聊天使用过的会话（● 当前，←/→ 可前后切换，✕ 已失效；列表按聊天隔离，论坛群按话题）',
+  '/go 会话编号  切换到该会话（编号见 /ls）',
+  '/prev  回到上一个会话',
+  '/next  前进到下一个会话',
+  '/drop 会话编号  从本聊天会话列表移除该条记录（不删除 Harness 会话）',
+  '/title  查看当前会话标题',
+  '/title 新标题  重命名当前会话',
+  '/title 会话编号 新标题  重命名指定会话',
+  '/fork [标题]  从当前会话分支一个新会话（默认沿用父会话标题加“ (fork)”）',
+  '/tail 或 /peek [编号] [条数]  预览最近消息（默认 5 条，仅提问与回答）',
+]);
 
 export function commandHelpLines(channel, catalog = SHARED_COMMAND_CATALOG) {
   return commandsForChannel(channel, catalog).flatMap((item) => item.help.map((line) => t(line)));

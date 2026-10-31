@@ -98,8 +98,8 @@ test('/preset changes only the sessions created after /new and --default follows
   assert.equal(state.sessionFor(conversationKey), 'session-a');
 
   await bridge.accept(message('message-new', '/new'));
-  assert.equal(state.sessionFor(conversationKey), null);
-  assert.equal(creations.length, 1, '/new itself must not create a session');
+  assert.equal(state.sessionFor(conversationKey), 'session-b', '/new eagerly creates the next session');
+  assert.equal(creations.length, 2, '/new creates the next session');
 
   await bridge.accept(message('message-three', 'first prompt after /new'));
   assert.equal(state.sessionFor(conversationKey), 'session-b');
@@ -199,7 +199,7 @@ test('a missing preset is recoverable by selecting an available preset and start
   assert.equal(sessions.size, 1);
 
   await bridge.accept(message('new', '/new'));
-  assert.equal(state.sessionFor(key), null);
+  assert.equal(state.sessionFor(key), 'session-2', '/new eagerly creates the new session');
   await bridge.accept(message('recovered', 'retry in the new Session'));
   assert.equal(state.sessionFor(key), 'session-2');
   assert.equal(sessions.get('session-2'), 'preset-new');

@@ -739,8 +739,8 @@ for (const recovery of ['unarchive', 'grant-command-permission']) {
       accessPolicy.getSettings().direct.allowlist.users[0].canExecuteCommands = true;
       await send('authorized-new', '/new');
       assert.match(sent.at(-1), /已开启新会话/);
-      assert.equal(fixture.state.sessionFor(key), null);
-      assert.equal(creates, 0, '/new creates the Session lazily on the next prompt');
+      assert.equal(fixture.state.sessionFor(key), 'new-session', '/new eagerly creates and binds the session');
+      assert.equal(creates, 1, '/new creates the Session eagerly');
     }
     await send('recovered-question', 'hello again');
     const expectedSession = recovery === 'unarchive' ? 'archived-session' : 'new-session';
