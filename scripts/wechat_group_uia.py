@@ -71,6 +71,9 @@ class GroupConfig:
     trigger_names: tuple[str, ...] = ()
     command_prefix: str = "/dsh"
     allow_self: bool = False
+    # Per-group opt-in. Only an operator who names this group may accept
+    # unverified command-prefixed rows as addressed; identity stays unverified.
+    allow_unverified_trigger: bool = False
 
 
 @dataclass(frozen=True)
@@ -200,10 +203,13 @@ def read_visible_rows_as_messages(
 def build_message_event(
     conversation_id: str, conversation_title: str, item: RawMessage,
     trigger: str = "/dsh", sent_at: int = 0, addressed: bool | None = None,
+    allow_unverified_trigger: bool = False,
 ) -> dict[str, Any]:
     """Assemble one v1 event; unverified senders can never be addressed."""
 
-    trusted = not unverified_sender(item.sender)
+    # Identity is unverifiable on WeChat 4.1; a named group may still opt in to
+    # accepting the command prefix, but that never verifies who spoke.
+    trusted = (not unverified_sender(item.sender)) or bool(allow_unverified_trigger)
     if addressed is None:
         parsed, text = parse_trigger(item.text, trigger)
         addressed = bool(parsed and trusted and text)
@@ -392,8 +398,14 @@ class WechatGroupAdapter:
                 continue
             if not item.sender or not item.text.strip():
                 continue
-            addressed, text = parse_trigger(item.text, group.command_prefix)
-            if addressed and not text:
+            parsed, text = parse_trigger(item.text, group.command_prefix)
+            # Unverified rows may only become addressed inside a group whose owner
+            # explicitly opted in; the member identity itself stays unverified.
+            addressed = bool(
+                parsed and text and (not unverified_sender(item.sender)
+                                or group.allow_unverified_trigger)
+            )
+            if parsed and not text:
                 continue
             identity = "\0".join((
                 group.id, str(state.cursor), item.sender, item.text, item.visible_time,
@@ -406,7 +418,8 @@ class WechatGroupAdapter:
                 "conversation_type": "group",
                 "conversation_id": group.id,
                 "conversation_title": group.title,
-                "from_user_id": "uia-name:" + item.sender,
+                "from_user_id": (item.sender if unverified_sender(item.sender)
+                               else "uia-name:" + item.sender),
                 "sender_name": item.sender,
                 "reply_target": group.id,
                 "addressed": addressed,
@@ -698,6 +711,7 @@ def load_config(path: str | Path) -> tuple[list[GroupConfig], int]:
             trigger_names=tuple(trigger_names),
             command_prefix=item.get("commandPrefix", "/dsh"),
             allow_self=allow_self,
+            allow_unverified_trigger=bool(item.get("allowUnverifiedTrigger", False)),
         ))
     interval = data.get("pollIntervalMs", 750)
     if type(interval) is not int or interval < 100:
