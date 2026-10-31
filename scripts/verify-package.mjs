@@ -67,6 +67,7 @@ const required = [
   'src/channels/weixin/wechat-group-process.mjs',
   'src/channels/weixin/wechat-group-runtime.mjs',
   'scripts/wechat_group_uia.py',
+  'scripts/enable_wechat_uia_flag.py',
   'scripts/requirements-wechat-group.txt',
 ];
 await Promise.all(required.map((path) => access(resolve(root, path))));

@@ -64,6 +64,7 @@
     "scripts/verify-session-channel-logos.mjs",
     "scripts/verify-session-title-prefix.mjs",
     "scripts/wechat_group_uia.py",
+    "scripts/enable_wechat_uia_flag.py",
     "scripts/requirements-wechat-group.txt",
     "src",
     "PROACTIVE_DELIVERY.md",

@@ -49,9 +49,10 @@
 
 置位（一次性，命令行即可，不需要读屏软件常驻）：
 
-```powershell
-# SPI_SETSCREENREADER = 0x47，SPIF_UPDATEINIFILE|SPIF_SENDCHANGE
-py -3.12 -B _uia/enable_reader_flag.py   # 打印 set_ok 1 / flag True
+```bash
+# 置位并回读；不需要装读屏软件，也不需要它常驻
+py -3.12 -B scripts/enable_wechat_uia_flag.py
+# 只查不改：加 --check；想恢复默认：加 --disable
 ```
 
 顺序必须是**先置标志、再启动微信**。若微信已在运行，只能先退出再启动（会掉一次登录态，需要扫码）。
