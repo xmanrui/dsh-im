@@ -24,11 +24,25 @@ const LIST_SNAPSHOTS = createCommandListSnapshots();
 export const PRESET_LIST_SNAPSHOT_TTL_MS = COMMAND_LIST_TTL_MS;
 export const PRESET_LIST_SNAPSHOT_MAX_ENTRIES = COMMAND_LIST_MAX_ENTRIES;
 
-function commandResult(message) {
+/**
+ * The catalog a picker card renders. `agentPreset` is the bot's current choice
+ * (null = follow the host default) and is carried next to the normalized
+ * catalog so the card can mark the current row without a second RPC.
+ */
+function presetCardCatalog(current) {
+  return {
+    agentPreset: current.agentPreset,
+    defaultId: current.agentPresetCatalog.defaultId,
+    items: current.agentPresetCatalog.items.map((item) => ({ id: item.id, label: item.label })),
+  };
+}
+
+function commandResult(message, extra = null) {
   return {
     handled: true,
     message,
     messages: splitWorkspaceCommandMessage(message),
+    ...(extra ?? {}),
   };
 }
 
@@ -216,7 +230,7 @@ export async function runPresetCommand(text, harness, state, key, options = {}) 
     try {
       const current = await settings(harness, requestOptions);
       LIST_SNAPSHOTS.save(state, key, current.agentPresetCatalog.items.map((item) => item.id));
-      return commandResult(formatList(current));
+      return commandResult(formatList(current), { presetCatalog: presetCardCatalog(current) });
     } catch (error) {
       return commandResult(presetErrorMessage(error, 'list'));
     }
@@ -255,7 +269,10 @@ export async function runPresetCommand(text, harness, state, key, options = {}) 
 
   try {
     return await withSessionBindingLock(state, key, async () => (
-      commandResult(formatUpdated(await update(harness, selected, requestOptions)))
+      // No extra RPC: the command's own result is what the card repaints from.
+      commandResult(formatUpdated(await update(harness, selected, requestOptions)), {
+        presetSelection: { agentPreset: selected },
+      })
     ));
   } catch (error) {
     return commandResult(presetErrorMessage(error, 'update'));

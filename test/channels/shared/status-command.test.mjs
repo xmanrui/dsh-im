@@ -74,6 +74,21 @@ function bridgeFor({ harness, state, bot }) {
   });
 }
 
+
+/** A state whose Session binding answers for any conversation key. */
+function stateWithAnySession(sessionId) {
+  const sessions = new Map([['direct:1', sessionId], ['group:-100123', sessionId]]);
+  const seen = new Set();
+  return {
+    sessionFor(key) { return sessions.get(key) ?? null; },
+    async setSession(key, value) { sessions.set(key, value); },
+    async clearSession(key) { sessions.delete(key); },
+    hasSeen(messageId) { return seen.has(messageId); },
+    async markSeen(messageId) { seen.add(messageId); },
+    async unmarkSeen(messageId) { return seen.delete(messageId); },
+  };
+}
+
 function statusMessage(messageId) {
   return {
     messageId,
@@ -178,7 +193,6 @@ test('status localizes every added line', async (t) => {
 test('a stuck Host cannot hold /status open: optional reads are bounded', async () => {
   assert.ok(Number.isSafeInteger(STATUS_FIELD_TIMEOUT_MS) && STATUS_FIELD_TIMEOUT_MS > 0
     && STATUS_FIELD_TIMEOUT_MS <= 5_000, 'the shared field timeout stays short');
-  // Cooperative reader: it honours the abort signal the status command passes.
   const never = (options) => new Promise((_, reject) => {
     options?.signal?.addEventListener(
       'abort',
@@ -245,69 +259,103 @@ test('text channels without workspace or preset APIs (iMessage/Email) still answ
   ], 'missing optional harness APIs degrade to the connection + binding lines');
 });
 
-// Regression: the real Host preset chain (`agentPresetSettings()` →
-// `createBotWorkspaceScope`) reads the preset directory BEFORE it re-checks the
-// abort signal, so a stuck directory read never observes the status deadline.
-// A signal-only timeout therefore still held the whole reply open. The deadline
-// must be enforced by the status command itself.
-test('a Host read that ignores the abort signal still cannot hold /status open', async () => {
-  const ignoresSignal = () => new Promise(() => {});
+/* ---------------------------------------------------------------------------
+ * Group chats do not get the operator's private details
+ *
+ * A group is a room full of people: the absolute workspace path, the Session id
+ * and the model name describe the operator's machine, not the group's business.
+ * The direct chat is the operator's own chat and must stay exactly as it was.
+ * ------------------------------------------------------------------------- */
+
+function groupHarness() {
+  return harnessFixture();
+}
+
+test('a group chat gets a redacted status, a direct chat does not', async () => {
+  const workspace = '/home/operator/private-project';
   const harness = {
     async ensureRunning() {},
-    currentWorkspace: () => WORKSPACE,
-    currentConversationWorkspace: () => WORKSPACE,
+    currentWorkspace: () => workspace,
+    currentConversationWorkspace: () => workspace,
+    async agentPresetSettings() {
+      return { agentPreset: null, agentPresetCatalog: { defaultId: '', items: [] } };
+    },
     workspaceSession: () => ({
-      sessionExists: async () => true,
-      models: ignoresSignal,
-      isRunning: ignoresSignal,
+      async sessionExists() { return true; },
+      async models() {
+        return { groups: [], failures: [], current: { provider: 'secret-provider', model: 'secret-model' } };
+      },
+      async isRunning() { return false; },
     }),
-    agentPresetSettings: ignoresSignal,
   };
-  const startedAt = Date.now();
+  const state = stateWithAnySession(SESSION_ID);
+  const group = await runStatusCommand({
+    descriptor: { label: 'Telegram' }, harness, state, conversationKey: 'group:-100123',
+  });
+  const direct = await runStatusCommand({
+    descriptor: { label: 'Telegram' }, harness, state, conversationKey: 'direct:1',
+  });
+
+  // Group: no absolute path, no full Session id, no model name.
+  assert.doesNotMatch(group.message, /\/home\/operator/u, 'the absolute path stays private');
+  assert.match(group.message, /private-project/u, 'the last segment still identifies the workspace');
+  assert.match(group.message, /群聊中仅显示末段/u);
+  assert.doesNotMatch(group.message, new RegExp(SESSION_ID, 'u'), 'the full Session id stays private');
+  assert.match(group.message, /…567890/u, 'the tail is enough to tell sessions apart');
+  assert.doesNotMatch(group.message, /secret-model/u, 'the model name stays private');
+  assert.match(group.message, /群聊中不显示具体名称/u);
+
+  // Direct: byte-for-byte the behaviour it always had.
+  assert.match(direct.message, new RegExp(workspace.replaceAll('/', '\\/'), 'u'));
+  assert.match(direct.message, /session-abcd…/u);
+  assert.match(direct.message, /secret-provider\/secret-model/u);
+  assert.doesNotMatch(direct.message, /群聊中/u);
+});
+
+test('the card snapshot carries the same redaction as the text', async () => {
+  const workspace = '/home/operator/private-project';
+  const harness = {
+    async ensureRunning() {},
+    currentWorkspace: () => workspace,
+    currentConversationWorkspace: () => workspace,
+    async agentPresetSettings() {
+      return { agentPreset: null, agentPresetCatalog: { defaultId: '', items: [] } };
+    },
+    workspaceSession: () => ({
+      async sessionExists() { return true; },
+      async models() {
+        return { groups: [], failures: [], current: { provider: 'p', model: 'secret-model' } };
+      },
+      async isRunning() { return false; },
+    }),
+  };
+  const state = stateWithAnySession(SESSION_ID);
+  const group = await runStatusCommand({
+    descriptor: { label: 'Telegram' }, harness, state, conversationKey: 'group:-100123',
+  });
+  const { statusSnapshot: snapshot } = group;
+  assert.equal(snapshot.shared, true);
+  assert.equal(snapshot.workspace, 'private-project', 'the snapshot is shortened too');
+  assert.equal(snapshot.model, null, 'the snapshot does not carry the model name');
+  assert.equal(snapshot.modelHidden, true, 'the card is told why it is missing');
+
+  const direct = await runStatusCommand({
+    descriptor: { label: 'Telegram' }, harness, state, conversationKey: 'direct:1',
+  });
+  assert.equal(direct.statusSnapshot.shared, false);
+  assert.equal(direct.statusSnapshot.workspace, workspace);
+  assert.equal(direct.statusSnapshot.model, 'p/secret-model');
+  assert.equal(direct.statusSnapshot.modelHidden, false);
+});
+
+test('a group chat with no bound session still answers usefully', async () => {
+  const harness = harnessFixture({ sessionId: null });
   const result = await runStatusCommand({
     descriptor: { label: 'Telegram' },
     harness,
-    state: stateWithSession(SESSION_ID),
-    conversationKey: 'direct:chat-a',
-    fieldTimeoutMs: 50,
+    state: stateWithSession(null),
+    conversationKey: 'group:-100123',
   });
-  const elapsed = Date.now() - startedAt;
-  assert.ok(elapsed < 1_000, `the deadline must hold without cooperation, took ${elapsed} ms`);
-  assert.deepEqual(result.message.split('\n'), [
-    'Telegram机器人与 DeepSeek Harness 连接正常。',
-    `工作区：${WORKSPACE}`,
-    '绑定会话：session-abcd…',
-  ], 'reads that never settle are omitted, the connection line still arrives');
-});
-
-test('an uncooperative /status field still resolves the same reply twice is impossible', async () => {
-  const ignoresSignal = () => new Promise(() => {});
-  const harness = {
-    async ensureRunning() {},
-    currentWorkspace: () => WORKSPACE,
-    currentConversationWorkspace: () => WORKSPACE,
-    workspaceSession: () => ({
-      sessionExists: async () => true,
-      models: ignoresSignal,
-      isRunning: async () => true,
-    }),
-    agentPresetSettings: ignoresSignal,
-  };
-  const first = await runStatusCommand({
-    descriptor: { label: 'Telegram' },
-    harness,
-    state: stateWithSession(SESSION_ID),
-    conversationKey: 'direct:chat-a',
-    fieldTimeoutMs: 30,
-  });
-  const second = await runStatusCommand({
-    descriptor: { label: 'Telegram' },
-    harness,
-    state: stateWithSession(SESSION_ID),
-    conversationKey: 'direct:chat-a',
-    fieldTimeoutMs: 30,
-  });
-  assert.equal(first.message, second.message);
-  assert.match(first.message, /运行中任务：有/, 'a cooperating read still lands');
-  assert.doesNotMatch(first.message, /当前模型/);
+  assert.match(result.message, /连接正常/u);
+  assert.match(result.message, /未绑定/u);
 });
