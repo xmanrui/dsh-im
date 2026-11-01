@@ -79,7 +79,10 @@ export class WechatGroupRuntime {
     // exactly the behaviour this objective flagged as a defect. Ten minutes
     // between probes still picks a reopened window up promptly while emitting
     // almost nothing.
-    surfaceLossRestartDelaysMs = [30_000, 120_000, 600_000],
+    // Capped at two minutes: the bridge only notices a fixed WeChat on its next
+    // retry, so a longer top rung buys silence with an outage the operator cannot
+    // explain. 30s/1m/2m is still ~160x quieter than the 750ms flood it replaced.
+    surfaceLossRestartDelaysMs = [30_000, 60_000, 120_000],
     startRetryLimit = Infinity,
   }) {
     if (!config || !Array.isArray(config.groups) || config.groups.length === 0) {
@@ -134,6 +137,9 @@ export class WechatGroupRuntime {
       // Which ladder is driving the pending retry, and how long until it fires.
       surfaceLoss: this.#surfaceLoss,
       restartDelayMs: this.#pendingDelayMs,
+      // The configured slow ladder, exposed so its ceiling is checkable without
+      // waiting three minutes to observe it.
+      surfaceLossLadderMs: [...this.#surfaceLossDelaysMs],
     };
   }
 

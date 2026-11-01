@@ -454,6 +454,19 @@ test('surface-loss exits retry on the slow ladder, other failures on the fast on
   await eventually(() => transient.starts === 3, 'second transient retry missing');
   assert.equal(fast.runtime.status.restartDelayMs, 5, 'transient ladder must not widen to slow');
 });
+test('the default surface-loss ladder caps its wait at two minutes', async (t) => {
+  // The ceiling is what an operator pays after they fix WeChat: the bridge only
+  // notices on the next retry, so a ten-minute rung means ten silent minutes
+  // where the group looks dead even though the panel is back. Two minutes is
+  // still far quieter than the 750ms flood this replaced, and short enough to
+  // feel live. Asserted through status rather than by waiting out the ladder,
+  // because a test that slept three minutes would not be run.
+  const { runtime } = makeRuntime(t);
+  assert.ok(Array.isArray(runtime.status.surfaceLossLadderMs), 'ladder not exposed');
+  assert.equal(runtime.status.surfaceLossLadderMs[0], 30_000);
+  assert.equal(Math.max(...runtime.status.surfaceLossLadderMs), 120_000,
+    'surface-loss retries must never wait longer than two minutes');
+});
 test('a visible panel with no accessibility tree also retries slowly', async (t) => {
   // Same reason as the closed panel: only restarting WeChat fixes it, and that
   // is human-scale work. The code is new, so the JS set must stay in step with
