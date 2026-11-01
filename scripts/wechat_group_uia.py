@@ -46,8 +46,19 @@ ERROR_MESSAGES = {
     # A remembered account, not a lost one. Do not restart WeChat: that is how a
     # live session gets thrown away. Confirming the login is all that is needed.
     "wechat_login_confirmation": "WeChat is asking to confirm the remembered account; open WeChat and press 登录 there.",
-    "wechat_panel_closed": "WeChat's panel was closed; reopen it, and keep it visible rather than minimised so the bridge can work head-lessly.",
-    "wechat_accessibility_unavailable": "WeChat's panel is on screen but exposes no accessibility tree; restart WeChat to restore it.",
+    # Measured: X-closing the panel leaves the process alive but destroys the tree,
+    # and MINIMISING destroys it too on this build - so the earlier advice to
+    # 'keep it minimised' was wrong and cost the operator his only working session.
+    # Say only what is true: reopen it and leave it as opened.
+    "wechat_panel_closed": "WeChat's panel was closed; reopen it and leave it open.",
+    # The missing provider is decided by Qt at process start from QT_ACCESSIBILITY,
+    # so a plain restart reproduces the same provider-less state and the message has
+    # to name the variable. WM_GETOBJECT answering 0 on a visible 1477x880 panel is
+    # the measured signature of this state.
+    "wechat_accessibility_unavailable": "WeChat's panel is on screen but exposes no "
+        "accessibility tree (WM_GETOBJECT returns 0). Set QT_ACCESSIBILITY=1 in the "
+        "user environment, then restart WeChat - Qt attaches the provider only at "
+        "process start, so a restart without it reproduces the same state.",
     "main_window_missing": "No WeChat window was found; start WeChat and log in.",
     "focus_not_on_target": "Keyboard focus could not be proven to be on the WeChat input; nothing was typed.",
     # Not a lost surface: respawning the child cannot expand a sidebar the operator
@@ -1071,19 +1082,32 @@ def _login_window_offers_confirmation(auto: Any) -> bool:
 def classify_missing_main_window(auto: Any) -> str:
     """Decide why there is no mmui::MainWindow, in order of operator action.
 
-    WeChat 4.x has three very different 'no main window' states that used to all
+    WeChat 4.x has several very different 'no main window' states that used to all
     collapse into main_window_missing, sending operators hunting the wrong fix:
 
-    - mmui::LoginWindow present  -> the account is signed out; scan the QR.
-    - a titled 微信 shell window (Qt51514*, no mmui subtree) -> the panel was
-      CLOSED with the X button. The process lives but its accessibility tree is
-      gone, so nothing can be read or sent. The fix is to REOPEN the panel (or,
-      next time, just minimise it: minimise keeps mmui::MainWindow and the bridge
-      keeps working head-lessly through InvokePattern).
-    - neither -> WeChat is not running at all.
+    - mmui::LoginWindow with a real 登录 ButtonControl -> the account is remembered
+      and only needs confirming (wechat_login_confirmation). This is NOT a signed-out
+      state; telling the operator to log in again invites a client restart, and
+      restarting a logged-in WeChat is how a live session gets destroyed.
+    - mmui::LoginWindow with 扫码登录 / 二维码 -> genuinely signed out; needs the
+      operator's phone (wechat_logged_out).
+    - a titled 微信 shell window (Qt51514*, no mmui subtree), offscreen or
+      tray-sized -> the panel was CLOSED with the X button. The process lives but
+      the tree is gone, so nothing can be read or sent (wechat_panel_closed).
+      RETRACTED, and it cost a session to learn: minimising does NOT preserve the
+      tree on this build either (measured - after SW_SHOWMINNOACTIVE the window was
+      still non-iconic yet UIA found zero mmui controls desktop-wide). Never
+      advise minimising.
+    - a 微信 shell window that is large and on screen, still with no mmui subtree
+      -> the panel is visible to the operator and only the accessibility PROVIDER
+      is missing; WM_GETOBJECT answers 0 (wechat_accessibility_unavailable). Qt
+      attaches that provider once, at process start, from QT_ACCESSIBILITY, so the
+      actionable fix is the environment variable plus a restart - a restart alone
+      reproduces the same provider-less state.
+    - neither -> WeChat is not running at all (main_window_missing).
 
-    Returns one of: wechat_logged_out, wechat_accessibility_unavailable,
-    wechat_panel_closed, main_window_missing.
+    Returns one of: wechat_logged_out, wechat_login_confirmation,
+    wechat_accessibility_unavailable, wechat_panel_closed, main_window_missing.
     """
 
     def exists(class_name: str) -> bool:

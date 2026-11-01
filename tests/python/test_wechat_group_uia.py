@@ -2313,6 +2313,33 @@ class ClassifierFakeAuto:
         return ClassifierFakeRoot(children)
 
 
+class ProviderMessageTests(unittest.TestCase):
+    """The accessibility diagnosis must name the cause an operator can change.
+
+    Root cause measured on this machine: a WeChat panel that is fully visible yet
+    answers WM_GETOBJECT with 0 has no accessibility provider attached, and Qt
+    decides that once, at process start, from QT_ACCESSIBILITY. That user
+    environment variable was absent here (HKCU Environment, read at 22:56), which
+    is why every instance started from the taskbar pin had zero automation ids
+    while every instance started with the variable present had a working tree.
+    "Restart WeChat" on its own is not actionable: without the variable a restart
+    reproduces exactly the same provider-less state.
+    """
+
+    def test_message_names_the_environment_variable(self):
+        message = uia.ERROR_MESSAGES["wechat_accessibility_unavailable"]
+        self.assertIn("QT_ACCESSIBILITY", message)
+        # And it must still say to restart, because Qt reads the variable only at
+        # process start; a running process cannot be talked into attaching later.
+        self.assertIn("restart", message.lower())
+
+    def test_panel_closed_message_does_not_advice_minimising(self):
+        # Pinned again because this wording once sent an operator to minimise the
+        # window, and minimise destroys the tree on this build.
+        message = uia.ERROR_MESSAGES["wechat_panel_closed"]
+        self.assertNotIn("minimis", message.lower())
+        self.assertNotIn("minimiz", message.lower())
+
 class LoginWindowKindTests(unittest.TestCase):
     """A login window is not proof of being signed out.
 
@@ -2446,9 +2473,17 @@ class PanelClosedClassifierTests(unittest.TestCase):
         self.assertEqual(uia.classify_missing_main_window(fake), "main_window_missing")
 
     def test_panel_closed_message_names_the_headless_fix(self):
-        # Tell the operator to minimise (which keeps the bridge alive), not just
-        # that something is missing.
-        self.assertIn("minimise", uia.ERROR_MESSAGES["wechat_panel_closed"].lower())
+        # RETRACTED, and this assertion used to enforce the retracted advice: it
+        # demanded the message say 'minimise' because a note from earlier today
+        # claimed minimising keeps the accessibility tree. Measured instead: after
+        # SW_SHOWMINNOACTIVE the window was still non-iconic and UIA found zero
+        # mmui controls desktop-wide, so minimise destroys the tree too. Following
+        # that wording is what left the operator with a visible panel and no bridge.
+        # The message may only say what is true: reopen the panel and leave it open.
+        message = uia.ERROR_MESSAGES["wechat_panel_closed"].lower()
+        self.assertIn("reopen", message)
+        self.assertNotIn("minimis", message)
+        self.assertNotIn("minimiz", message)
 
     def test_missing_window_message_says_start_wechat(self):
         self.assertIn("start", uia.ERROR_MESSAGES["main_window_missing"].lower())
