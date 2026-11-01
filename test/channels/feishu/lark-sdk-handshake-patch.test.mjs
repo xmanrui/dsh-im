@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
+
+import { createEsbuildScratchDirectory } from '../../helpers/esbuild-scratch.mjs';
 
 import {
   larkSdkHandshakePatch,
@@ -56,8 +57,10 @@ test('Lark SDK handshake patch fails closed when the reviewed vendor shape chang
   );
 });
 
-test('patched real SDK survives handshake timeout and close without uncaught or zombie reconnects', async () => {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'dsh-lark-sdk-test-'));
+test('patched real SDK survives handshake timeout and close without uncaught or zombie reconnects', async (t) => {
+  // esbuild is a native child process; on some Windows hosts it cannot write to
+  // os.tmpdir() even though Node can (see helpers/esbuild-scratch.mjs).
+  const temporaryDirectory = await createEsbuildScratchDirectory(t, 'dsh-lark-sdk-test-');
   const outputPath = join(temporaryDirectory, 'scenario.mjs');
 
   try {
@@ -120,6 +123,8 @@ test('patched real SDK survives handshake timeout and close without uncaught or 
     assert.equal(stderr, '');
   }
   finally {
-    await rm(temporaryDirectory, { recursive: true, force: true });
+    // Cleanup stays here too: t.after runs after the test but the directory must
+    // disappear even when an assertion threw before the child was executed.
+    await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
   }
 });
