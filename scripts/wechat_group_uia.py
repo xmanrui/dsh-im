@@ -42,6 +42,8 @@ ERROR_MESSAGES = {
     "probe_failed": "The read-only UIA probe failed.",
     "send_disabled": "Sending is disabled until the operator enables it.",
     "wechat_logged_out": "WeChat is on its login screen; log in before starting the group bridge.",
+    "wechat_panel_closed": "WeChat's panel was closed; minimise it instead so the bridge keeps working head-lessly.",
+    "main_window_missing": "No WeChat window was found; start WeChat and log in.",
     "focus_not_on_target": "Keyboard focus could not be proven to be on the WeChat input; nothing was typed.",
 }
 
@@ -748,6 +750,51 @@ def _safe_property(control: Any, name: str) -> Any:
         return None
 
 
+def classify_missing_main_window(auto: Any) -> str:
+    """Decide why there is no mmui::MainWindow, in order of operator action.
+
+    WeChat 4.x has three very different 'no main window' states that used to all
+    collapse into main_window_missing, sending operators hunting the wrong fix:
+
+    - mmui::LoginWindow present  -> the account is signed out; scan the QR.
+    - a titled 微信 shell window (Qt51514*, no mmui subtree) -> the panel was
+      CLOSED with the X button. The process lives but its accessibility tree is
+      gone, so nothing can be read or sent. The fix is to REOPEN the panel (or,
+      next time, just minimise it: minimise keeps mmui::MainWindow and the bridge
+      keeps working head-lessly through InvokePattern).
+    - neither -> WeChat is not running at all.
+
+    Returns one of: wechat_logged_out, wechat_panel_closed, main_window_missing.
+    """
+
+    def exists(class_name: str) -> bool:
+        try:
+            return bool(auto.WindowControl(searchDepth=1, ClassName=class_name).Exists(0, 0))
+        except Exception:
+            return False
+
+    if exists("mmui::LoginWindow"):
+        return "wechat_logged_out"
+    # The tray/shell window WeChat leaves behind after the panel is X-closed: it
+    # carries the Qt window class, not an mmui one, and has no widget subtree.
+    shell = None
+    try:
+        for win in auto.GetRootControl().GetChildren():
+            try:
+                cls = str(win.ClassName or "")
+                name = str(win.Name or "")
+            except Exception:
+                continue
+            if cls.startswith("Qt") and ("微信" in name or name in ("Weixin", "WeChat")):
+                shell = win
+                break
+    except Exception:
+        shell = None
+    if shell is not None:
+        return "wechat_panel_closed"
+    return "main_window_missing"
+
+
 class UiaBackend:
     """Windows-only UIA boundary using verified uiautomation 2.0.29 APIs."""
 
@@ -762,14 +809,13 @@ class UiaBackend:
         self._closed = False
         self._window = auto.WindowControl(searchDepth=1, ClassName="mmui::MainWindow")
         if not self._window.Exists(0, 0):
-            # Distinguish the two causes an operator can act on. A login window
-            # means the account is simply signed out; a present main window class
-            # without a widget tree means WeChat started before the screen-reader
-            # flag was set, so its accessibility provider was never built.
-            login = auto.WindowControl(searchDepth=1, ClassName="mmui::LoginWindow")
-            if login.Exists(0, 0):
-                raise SafetyError("WeChat is showing the login window", "wechat_logged_out")
-            raise SafetyError("existing WeChat main window was not found", "main_window_missing")
+            # Three distinct causes, each with a different operator fix, used to
+            # all collapse into main_window_missing. classify_missing_main_window
+            # separates them so the log says what to do, not just that it failed:
+            # signed out, panel closed with the X (process alive, a11y tree gone),
+            # or WeChat not running at all.
+            code = classify_missing_main_window(auto)
+            raise SafetyError("WeChat main window is unavailable", code)
 
     def _control(self, automation_id: str) -> Any:
         if self._closed:

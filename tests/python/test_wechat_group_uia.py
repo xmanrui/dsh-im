@@ -809,5 +809,72 @@ class BackendFailureCodeTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "main_window_missing")
 
 
+class ClassifierFakeWin:
+    def __init__(self, exists, class_name="", name=""):
+        self._exists = exists
+        self.ClassName = class_name
+        self.Name = name
+
+    def Exists(self, seconds, interval):
+        return self._exists
+
+
+class ClassifierFakeRoot:
+    def __init__(self, children):
+        self._children = children
+
+    def GetChildren(self):
+        return self._children
+
+
+class ClassifierFakeAuto:
+    """uiautomation surface for classify_missing_main_window only."""
+
+    def __init__(self, main=False, login=False, shell=False):
+        self._main = main
+        self._login = login
+        self._shell = shell
+
+    def WindowControl(self, searchDepth, ClassName):
+        if ClassName == "mmui::MainWindow":
+            return ClassifierFakeWin(self._main)
+        if ClassName == "mmui::LoginWindow":
+            return ClassifierFakeWin(self._login)
+        return ClassifierFakeWin(False)
+
+    def GetRootControl(self):
+        children = []
+        if self._shell:
+            children.append(ClassifierFakeWin(True, "Qt51514QWindowIcon", "微信"))
+        return ClassifierFakeRoot(children)
+
+
+class PanelClosedClassifierTests(unittest.TestCase):
+    """classify_missing_main_window separates signed-out, closed-panel, absent."""
+
+    def test_login_screen_wins_over_shell(self):
+        # With both a login window and a leftover shell, the actionable truth is
+        # the login prompt, so wechat_logged_out must be checked first.
+        fake = ClassifierFakeAuto(main=False, login=True, shell=True)
+        self.assertEqual(uia.classify_missing_main_window(fake), "wechat_logged_out")
+
+    def test_shell_without_mmui_tree_is_panel_closed(self):
+        fake = ClassifierFakeAuto(main=False, login=False, shell=True)
+        self.assertEqual(uia.classify_missing_main_window(fake), "wechat_panel_closed")
+
+    def test_nothing_running_is_main_window_missing(self):
+        fake = ClassifierFakeAuto(main=False, login=False, shell=False)
+        self.assertEqual(uia.classify_missing_main_window(fake), "main_window_missing")
+
+    def test_panel_closed_message_names_the_headless_fix(self):
+        # Tell the operator to minimise (which keeps the bridge alive), not just
+        # that something is missing.
+        self.assertIn("minimise", uia.ERROR_MESSAGES["wechat_panel_closed"].lower())
+
+    def test_missing_window_message_says_start_wechat(self):
+        self.assertIn("start", uia.ERROR_MESSAGES["main_window_missing"].lower())
+
+
 if __name__ == "__main__":
     unittest.main()
+
