@@ -57,7 +57,7 @@ py -3.12 -B scripts/enable_wechat_uia_flag.py
 
 顺序必须是**先置标志、再启动微信**。若微信已在运行，只能先退出再启动（会掉一次登录态，需要扫码）。
 
-### 后台运行的正确姿势：最小化，不是关闭（微信 4.x 实测）
+### 树与窗口不等价：微信 4.x 实测纠正（2026-11-01 晚）
 
 只读取证（`_audit/weixin-close-window-setting.md`，DLL `2b3677c3`）：微信 4.2.0.12 里
 3.x 的「设置→通用→关闭主面板时→最小化到通知栏」**已被整体删除**——配置层明文
@@ -65,53 +65,64 @@ grep 零命中、44 个 db 里 42 个是 SQLCipher、MMKV 配置带 CRC 加密�
 `--minimized/--tray`。DLL 里写死的是 `quitOnLastWindowClosed` +
 `MainWindowWillClose → 退出`。所以在本版本：
 
-- **X 关闭面板 = 进程退出**，`mmui` 无障碍子树随之销毁，UIA 群桥读不到也发不出，
-  重开面板只能靠人点任务栏（UIA 枚举不到可 Invoke 的任务栏项，非代码可无头绕过）。
-- **最小化 = 树保留**（`session_list` 等控件仍可枚举），因此「切群」在无头态可行；
-  但**「发送」在无头态尚未证实**：Enter 走的是全局键盘注入，而键盘一次只属于一个窗口，
-  拿到它就必须把微信带到前台（正是本目标禁止的行为）。实测（自有窗口）：
-  `SetFocus` 在最小化窗口上**返回 false 且不激活**（`operator_kept_focus=true`），
-  即最小化态无法把键盘交给微信；定向 `PostMessage`(WM_CHAR/WM_KEYDOWN) 投给**未聚焦**
-  的标准 EDIT/最小化窗口也**不生效**（`delivered_without_focus=false`）。
-  ⇒ 无头发送只剩一条真正不需键盘的通路：InvokePattern 直接触发微信自己的「发送」控件
-  （`send_by_invoke`，已实现为 press_enter 的首选），其成败需面板重开后活体复验。
-- **X 关闭 ≠ 后台运行**：见上，树已销毁，任何通路都读不到。
+- **X 关闭面板 ≠ 进程退出**（实测：5 个 Weixin 进程仍在、壳窗口可见）。销毁的是
+  `mmui::MainWindow` 及其无障碍子树，群桥随即读不到也发不出。
+- **最小化同样会毁树**（实测：18:27 树在、`main: true`、10 个会话；我对面板做过
+  `SW_SHOWMINNOACTIVE` 之后，窗口仍可见非图标化，UIA 全桌面 0 个 mmui 控件）。
+  ⇒ 早前写的「最小化 = 树保留」是错的，已撤回。**结论：既不要 X 关也不要最小化，
+  让面板保持展开**，这是群桥唯一的可用形态。
+- **窗口可见 ≠ 树存在**（实测：截图上面板开着，UIA 只有 2 个 PaneControl；
+  `WM_GETOBJECT` 对 6 个句柄全部返回 0，即该实例根本没注册无障碍 provider）。
+  重播 `SPI_SETSCREENREADER` 也救不回（flag 前后都 true，树仍 0 节点）。
+- **唯一实测有效的恢复动作**：重启微信客户端并走完一次登录流程（本机账号已记住，
+  登录窗显示「当前登录用户大肥鱼」+「登录」按钮，无需扫码）。实测状态序列：
+  `需在手机上完成登录 → 正在进入 → MAIN`，随后 `session_list` 10 项、目标群在列。
+  注意该按钮的 UIA `Invoke()` 会**返回 true 而什么都不做**（同 `select_chat` 的撒谎
+  行为），必须用真实点击。
+关于「不抢屏也能发送」，实测把可选通路一条条排除：
 
-因此桥自带一个开关，让它自己把窗口收进最小化、且绝不抢焦点：
+- Enter 走的是全局键盘注入，而键盘一次只属于一个窗口；`SetFocus` 在最小化窗口上
+  **返回 false 且不激活**（自有窗口实验 `operator_kept_focus=true`），所以隐藏态
+  根本拿不到键盘。
+- 定向 `PostMessage`(WM_CHAR / WM_KEYDOWN) 投给**未聚焦**的标准 EDIT 也不生效
+  （`delivered_without_focus=false`，且已带消息泵，排除假阴性）。
+- ⇒ 真正不需键盘的通路只剩 InvokePattern 触发微信自己的「发送」控件
+  （`send_by_invoke`，现为 `press_enter` 首选）。它是否被本 build 接受，需在树存在时
+  活体复验（`--probe` 的 `send_candidates` 字段就是为此准备的只读探针）。
 
-```json
-{ "autoMinimize": true }
-```
+因此**桥绝不主动最小化**：`autoMinimize` 保留为根级开关（默认 false），但按上面的实测
+它会让群桥失去树，属于「无人值守机专用、且明知会断桥」的选项，日常必须保持关闭。
+本机 `group-chats.json` 已实测把它写回 `false`。
 
-`autoMinimize`（根级，默认 false）用 `SW_SHOWMINNOACTIVE`(7) 最小化，实测证明
-它只把目标窗口图标化、键盘焦点纹丝不动（两窗口自含实验：`minimise_did_not_steal_focus=true`）。
-选 7 不选 6(`SW_MINIMIZE`) 正因为 6 会激活抢焦点。默认关：连「收起一个窗口」都算
-动画面，须操作者显式同意。开桥前需微信已登录且面板处于可最小化状态。
 
-两条活体待验（诚实边界，别当已通）：
 
-1. 焦点守卫放宽到「焦点 = 微信主窗口句柄 或 automation id 命中」，但本机 Tk 实测
-   `GetFocusedControl` 会返回一个中间面板（`TkChild`，句柄既非顶层也非子控件）。
-   mmui 真机上焦点被报成什么尚未活体复验：本轮微信面板处于被关状态（`wechat_panel_closed`），
-   无头重开面板经 4 路实测均不可行（DLL 无开关 / 明文配置无 / 重拉只弹第二个登录窗 /
-   任务栏项 DoDefaultAction 返回 ok 但 mmui 树不重建）。故「最小化态发送」在守卫落地后
-   还没在真群再跑通一次——重开面板后需补一条 `/dsh` 活体回执才算闭环。
-   守卫本身按 #37 保守：证明不了焦点在微信内就拒发（宁可少发一条，也不把回车注入
-   操作者正在用的程序），这是「不控屏」优先级高于「必发出去」的有意取舍。
-2. 部署时序：`autoMinimize` 这个配置键要等宿主重启加载新 JS 后才认。当前运行的宿主
-   是 14:58 启动、校验器尚不认识该键，若此刻往 `group-chats.json` 写 `autoMinimize:true`，
-   老校验器会 fail-closed 判 `invalid-group-config`，反而让整个群桥离线。因此本轮
-   **刻意不写这个键**（脚本/配置保持无 autoMinimize），等下次宿主重启装上新包后由
-   复核会话再开。Python 侧每次 spawn 现读，已生效；缺的只是 JS 传 env 那一段。
-错误码现在区分三种「没有主窗口」：`wechat_logged_out`（扫码）、`wechat_panel_closed`
-（面板被 X 关，进程还在但树没了 → 提示去重开或改最小化）、`main_window_missing`（没开微信）。
+已闭环的部分：宿主已于 17:29 重启装上新 JS（`autoMinimize` 键已实测被校验器接受，
+写入 false 无 `invalid-group-config`）；`poll_failed` 洪水已变成每次一条真实错误码 +
+慢梯退避（生产实测 30s → 2m → 10m，日志 15 分钟仅 4 行）。
+
+仍待活体复验（诚实边界，别当已通）：
+
+1. **焦点守卫的真机形态**：守卫按「进程归属」判定（`GetFocusedControl().ProcessId`
+   与微信主窗口 pid 相同）。该 API 本机可用性与语义已实测（前台 Chrome 的
+   `OmniboxViewViews` EditControl 报 `hwnd=0` + 可用 pid，与 mmui 子控件同形），
+   但 **mmui 真机上焦点被报成什么仍未活体复验**，因为树在复验前就没了。
+2. **`send_by_invoke` 是否被本 build 接受**：同样待复验；`--probe` 现在会输出
+   `send_candidates`，树一恢复就能一次读出，不必再猜。
+3. 守卫按 #37 保守：证明不了键盘在微信内就拒发（宁可少发一条，也不把回车注入
+   操作者正在用的程序）。这是「不控屏」优先于「必发出去」的有意取舍。
+
+错误码现在区分四种「没有主窗口」：`wechat_logged_out`（扫码/点登录）、
+`wechat_accessibility_unavailable`（面板可见但树没了 → 只能重启微信）、
+`wechat_panel_closed`（壳窗被推到屏外/托盘尺寸 → 重开面板，别最小化）、
+`main_window_missing`（没开微信）。
 ### 群桥起不来时的错误码
 
 | 适配器错误码 | 含义 | 处置 |
 |---|---|---|
 | `wechat_logged_out` | 微信停在登录/扫码页 | 扫码登录后再启动群桥 |
 | `main_window_missing` | 微信进程没在跑 | 启动微信并登录 |
-| `wechat_panel_closed` | 面板被 X 关闭：进程还在但 mmui 树已销毁 | 重开面板；想长期后台就开 `autoMinimize` 用最小化 |
+| `wechat_panel_closed` | 面板被 X 关闭：进程还在但 mmui 树已销毁 | 重开面板；**不要最小化**（实测同样毁树） |
+| `wechat_accessibility_unavailable` | 面板可见但整个无障碍树不存在（provider 未注册） | 重启微信并走完一次登录 |
 | `message_layout_unverified` | 未开 `allowUnverifiedRead` | 在 `group-chats.json` 里置 `"allowUnverifiedRead": true` |
 | `send_disabled` | 未开 `allowSend` | 在 `group-chats.json` 里置 `"allowSend": true` |
 | `duplicate_group_title` | 目标群标题不在可见会话列表里（或重名） | 在微信里把目标群**置顶** |
