@@ -180,7 +180,14 @@ export class WechatGroupRuntime {
       // bridge stayed offline until the whole Host was restarted, which is
       // exactly why a group message got no answer at all.
       if (!this.#stopping) {
-        this.#lastError = errorCode(error, 'start-failed');
+        const code = errorCode(error, 'start-failed');
+        this.#lastError = code;
+        // Classify here too, not only in #onExit. The usual failure on this
+        // machine is a start against a closed panel: the child reports the code
+        // and exits, but a start rejection can arrive without any exit event,
+        // and keying the slow ladder on the exit alone left that path probing
+        // every 30s - the flood this objective exists to kill.
+        this.#surfaceLoss = SURFACE_LOSS_CODES.has(code);
         this.#scheduleRestart();
         this.#restartAttempts = this.#startRetryCount;
       } else {

@@ -72,8 +72,9 @@ class FakeGroupProcess extends EventEmitter {
     if (this.failStarts > 0) {
       this.failStarts -= 1;
       this.status = { running: false, ready: false, pid: null };
-      const error = new Error('start-failed');
-      error.code = 'start-failed';
+      const code = this.failCode || 'start-failed';
+      const error = new Error(code);
+      error.code = code;
       throw error;
     }
     this.status = { running: true, ready: false, pid: 5100 + this.starts };
@@ -452,6 +453,25 @@ test('surface-loss exits retry on the slow ladder, other failures on the fast on
   assert.equal(fast.runtime.status.surfaceLoss, false);
   await eventually(() => transient.starts === 3, 'second transient retry missing');
   assert.equal(fast.runtime.status.restartDelayMs, 5, 'transient ladder must not widen to slow');
+});
+test('a cold start that loses the surface retries on the slow ladder', async (t) => {
+  // The first start is the common path on this machine: the Host boots while
+  // WeChat’s panel is closed, start() rejects with the adapter’s code, and
+  // there is no exit event for the classification to ride on because the child
+  // never reached the poll loop. Keying only on #onExit left that case on the
+  // fast ladder, which probes every 30s and is the noise this objective called
+  // a defect; the same surface check must therefore run on the start failure.
+  const groupProcess = new FakeGroupProcess();
+  groupProcess.failStarts = 99;
+  groupProcess.failCode = 'wechat_panel_closed';
+  const { runtime } = makeRuntime(t, {
+    groupProcess,
+    restartDelaysMs: [5, 5],
+    surfaceLossRestartDelaysMs: [7, 20, 40],
+  });
+  await assert.rejects(() => runtime.start({ bridge: { accept: async () => {}, waitForIdle: async () => {}, close: async () => {} } }));
+  assert.equal(runtime.status.surfaceLoss, true, 'cold surface loss not classified');
+  assert.equal(runtime.status.restartDelayMs, 7, 'cold loss must use the slow ladder head');
 });
 test('events emitted before the first ready baseline are rejected', async (t) => {
   const groupProcess = new FakeGroupProcess();
