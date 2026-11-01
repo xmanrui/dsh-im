@@ -1,18 +1,7 @@
 import { installGroupHistoryTools } from '../../src/channels/shared/group-history-access.mjs';
-import { apply as applyDingtalk } from './channels/dingtalk/index.mjs';
-import { apply as applyDiscord } from './channels/discord/index.mjs';
-import { apply as applyOffice } from './channels/office/index.mjs';
-import { apply as applyFeishu } from './channels/feishu/index.mjs';
-import { apply as applyQq } from './channels/qq/index.mjs';
-import { apply as applySlack } from './channels/slack/index.mjs';
-import { apply as applyTelegram } from './channels/telegram/index.mjs';
-import { apply as applyWecom } from './channels/wecom/index.mjs';
-import { apply as applyWecomApp } from './channels/wecom-app/index.mjs';
-import { apply as applyWeixin } from './channels/weixin/index.mjs';
-import { apply as applyWhatsapp } from './channels/whatsapp/index.mjs';
-import { apply as applyIMessage } from './channels/imessage/index.mjs';
-import { apply as applyEmail } from './channels/email/index.mjs';
-import { apply as applyMatrix } from './channels/matrix/index.mjs';
+// 渠道清单不再在本文件里逐条 import：HOST_CHANNELS 是唯一登记处（见 channel-registry.mjs 的
+// 存在理由与字段契约）。新增渠道 = 在注册表加一条 + 建渠道目录，本文件零改动。
+import { HOST_CHANNELS, deliveryKeyOf } from './channel-registry.mjs';
 import { installOutboundArtifactTool } from '../../src/channels/shared/semantic/artifact.mjs';
 import { installHostLanguage } from './host-language.mjs';
 import { installHostLanguageRpc } from './host-language-rpc.mjs';
@@ -35,12 +24,25 @@ export const inject = [
   'typertGateway',
 ];
 
-function channelConfig(config, name, deliveryService) {
-  const channel = { ...(config.dshHome ? { dshHome: config.dshHome } : {}), ...config[name] };
+/**
+ * Build the config slice for one registry entry.
+ *
+ * 三条规则都在这一处生效：① dshHome 只在显式配置时下发（渠道各自决定默认目录）；
+ * ② rpcAuthority 若插件级给出则统一下发；③ AI Office 连接器不共享投递服务
+ * （它的产物经 office-transport 自己回投），由注册表的 withoutDeliveryService 声明，
+ * 而不是在这里用渠道名硬编码 'office'。
+ */
+function channelConfig(config, entry, deliveryService) {
+  const channel = {
+    ...(config.dshHome ? { dshHome: config.dshHome } : {}),
+    ...config[entry.configKey],
+  };
   const withAuthority = config.rpcAuthority === undefined
     ? channel
     : { ...channel, rpcAuthority: config.rpcAuthority };
-  return name === 'office' ? withAuthority : { ...withAuthority, deliveryService };
+  return entry.withoutDeliveryService
+    ? withAuthority
+    : { ...withAuthority, deliveryService };
 }
 
 export function createImHostPlugin(internals = {}) {
@@ -55,46 +57,24 @@ export function createImHostPlugin(internals = {}) {
   const startSessionSync = internals.installSessionSyncCoordinator
     ?? installSessionSyncCoordinator;
   const makeDeliveryService = internals.createDeliveryService ?? createDeliveryService;
-  const startFeishu = internals.applyFeishu ?? applyFeishu;
-  const startWeixin = internals.applyWeixin ?? applyWeixin;
-  const startDingtalk = internals.applyDingtalk ?? applyDingtalk;
-  const startWecom = internals.applyWecom ?? applyWecom;
-  const startWecomApp = internals.applyWecomApp ?? applyWecomApp;
-  const startQq = internals.applyQq ?? applyQq;
-  const startSlack = internals.applySlack ?? applySlack;
-  const startTelegram = internals.applyTelegram ?? applyTelegram;
-  const startDiscord = internals.applyDiscord ?? applyDiscord;
-  const startOffice = internals.applyOffice ?? applyOffice;
-  const startWhatsapp = internals.applyWhatsapp ?? applyWhatsapp;
-  const startIMessage = internals.applyIMessage ?? applyIMessage;
-  const startEmail = internals.applyEmail ?? applyEmail;
-  const startMatrix = internals.applyMatrix ?? applyMatrix;
-  const channels = [
-    ['feishu', startFeishu],
-    ['weixin', startWeixin],
-    ['dingtalk', startDingtalk],
-    ['wecom', startWecom],
-    ['wecomApp', startWecomApp],
-    ['qq', startQq],
-    ['slack', startSlack],
-    ['telegram', startTelegram],
-    ['discord', startDiscord],
-    ['whatsapp', startWhatsapp],
-    ['imessage', startIMessage],
-    ['email', startEmail],
-    ['matrix', startMatrix],
-    ['office', startOffice],
-  ];
+  // 每个渠道的激活函数 = 测试注入的覆盖项 ?? 注册表里的生产实现。
+  // 14 条 `const startXxx =` 与 14 条数组项在这里塌缩成一次遍历；注册表是唯一的顺序与集合来源。
+  const channels = HOST_CHANNELS.map((entry) => ({
+    ...entry,
+    start: internals[entry.applyName] ?? entry.apply,
+  }));
+  const sessionSyncChannels = channels.filter((entry) => !entry.withoutDeliveryService);
   return Object.freeze({
     name,
     inject,
     async apply(ctx, config = {}) {
-      const unavailableSessionSyncChannels = channels
-        .map(([channel]) => channel)
-        .filter((channel) => channel !== 'office'
-          && config[channel]?.harnessBaseUrl !== undefined);
+      // harnessBaseUrl 由渠道配置显式指定时，该渠道的 Session 同步走对端，
+      // 投递服务需要知道哪些渠道「不能同步会话」才能正确降级。
+      const unavailableSessionSyncChannels = sessionSyncChannels
+        .filter((entry) => config[entry.configKey]?.harnessBaseUrl !== undefined)
+        .map((entry) => deliveryKeyOf(entry));
       const deliveryService = makeDeliveryService({
-        unavailableSessionSyncChannels: unavailableSessionSyncChannels.map((channel) => channel === 'wecomApp' ? 'wecom-app' : channel),
+        unavailableSessionSyncChannels,
         dsBot: createDsBotClient(ctx),
       });
       // HMR reloads mount a second fiber before the previous one has disposed.
@@ -207,12 +187,13 @@ export function createImHostPlugin(internals = {}) {
     const failures = [];
     // Each channel mounts its management RPC before awaiting initialization.
     // Start them together so a slow channel cannot leave later routes absent.
-    await Promise.all(channels.map(async ([channel, start]) => {
+    await Promise.all(channels.map(async (entry) => {
       try {
-        await start(ctx, channelConfig(config, channel, deliveryService));
+        // 顺序由注册表决定；并发启动，慢渠道不会让后面的 RPC 缺位。
+        await entry.start(ctx, channelConfig(config, entry, deliveryService));
       } catch (error) {
         failures.push(error);
-        logger.error?.(`[dsh-im] failed to activate ${channel}; continuing with the remaining channels`, error);
+        logger.error?.(`[dsh-im] failed to activate ${entry.configKey}; continuing with the remaining channels`, error);
       }
     }));
     if (failures.length === channels.length) {

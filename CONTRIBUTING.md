@@ -58,7 +58,10 @@ node scripts/verify-benchmark-report.mjs       # 对标报告八维齐全
 
 1. `src/channels/<name>/`：实现 api / runtime / bridge / controller / config-store / state-store；
 2. `plugin-src/host/channels/<name>/{index,production,rpc}.mjs`：生产装配；
-3. `plugin-src/host/index.mjs`：加入 import 与 `channels` 数组（这一步目前是手动的，见 3.2 M1）；
+3. `plugin-src/host/channel-registry.mjs`：**加一条注册项**（`configKey` / `applyName` / `apply`，
+   投递名与配置名不一致时才加 `deliveryKey`，不共享投递服务才加 `withoutDeliveryService`）。
+   `plugin-src/host/index.mjs` 不再逐渠道 import —— 它只遍历注册表；
+   `test/channel-registry.test.mjs` 会在「有目录无注册项」或「有注册项无目录」时直接判红。
 4. `plugin-src/client/channels/<name>/{index,api,styles}.js`：设置页卡片；
 5. `test/channels/<name>/`：至少覆盖入站规范化、出站分片、错误降级三类。
 
