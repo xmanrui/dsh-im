@@ -1,5 +1,39 @@
 const GROUP_EVENT_SOURCE = 'uia-wechat-group/v1';
 const UNVERIFIED_SENDER_ID = 'uia-unverified:row';
+// Mirrors MENTION_TOKEN_RE / MASKED_MENTION_NAME in scripts/wechat_group_uia.py.
+// A real @ renders as "@[name]" in the accessibility text and the bracket is only
+// produced by picking from the @ list, so the shape is the signal; the name inside
+// is erased to ___ on this build.
+const MENTION_TOKEN_RE = /^@\[([^\]\n]*)\]/;
+const MASKED_MENTION_NAME = '___';
+
+/**
+ * Strip leading mention tokens exactly as the adapter does.
+ *
+ * Returns { matched, remainder }. matched is true only when a token addressed the
+ * bot: a masked token counts only under the group's own opt-in (it proves somebody
+ * was @-ed, never whom), and a readable token counts only when it names the bot.
+ * A leading token that names someone else stops the scan, because "@小李 …" is not
+ * an address of us no matter what follows. Keeping this rule identical to the
+ * adapter's is the point: the runtime re-derives the trigger from raw_text to
+ * reject forged or stale events, so a divergent rule would either reject real
+ * mentions or accept invented ones.
+ */
+function stripMentionTokens(text, triggerNames, allowMasked) {
+  let remainder = text.replace(/^\s+/, '');
+  let matched = false;
+  const names = new Set(Array.isArray(triggerNames) ? triggerNames : []);
+  for (;;) {
+    const token = MENTION_TOKEN_RE.exec(remainder);
+    if (token === null) break;
+    const name = token[1].trim();
+    const honoured = name === MASKED_MENTION_NAME ? allowMasked === true : names.has(name);
+    if (!honoured) return { matched: false, remainder: text };
+    matched = true;
+    remainder = remainder.slice(token[0].length).replace(/^\s+/, '');
+  }
+  return { matched, remainder };
+}
 // Codes that mean the WeChat surface itself is gone rather than the bridge being
 // broken. Mirror of SURFACE_LOST_CODES in scripts/wechat_group_uia.py: the adapter
 // exits once on any of them, and that exit is what lets this layer slow down.
@@ -330,13 +364,50 @@ export class WechatGroupRuntime {
     const item = event.item_list[0];
     if (item?.type !== 1 || item?.text_item?.text !== event.text) return null;
     // addressed=true is meaningful only when the raw body still proves the
-    // configured command trigger. This blocks forged or stale adapter events.
-    const candidate = event.raw_text.trimStart();
-    if (!candidate.startsWith(group.commandPrefix)) return null;
-    const remainder = candidate.slice(group.commandPrefix.length);
-    // A prefix must be a complete command token: /dsh正文 is not /dsh 正文.
-    if (!remainder || !/^\s/.test(remainder)) return null;
-    const triggeredText = remainder.trim();
+    // configured trigger. This blocks forged or stale adapter events.
+    const mode = group.mentionMode || 'command';
+    const allowMention = mode === 'mention' || mode === 'mention-or-command';
+    const allowCommand = mode === 'command' || mode === 'mention-or-command';
+    let body = event.raw_text;
+    let mentioned = false;
+    if (allowMention) {
+      const scan = stripMentionTokens(body, group.triggerNames, group.allowUnverifiedTrigger);
+      mentioned = scan.matched;
+      body = scan.remainder;
+      if (!mentioned && mode === 'mention') return null;
+    } else if (MENTION_TOKEN_RE.test(event.raw_text.trimStart())) {
+      // Command mode ignores mentions entirely, and a mention-shaped body never
+      // satisfies the prefix proof below. Reject it here so the reason stays
+      // honest rather than falling through to a prefix mismatch.
+      return null;
+    }
+    // Compute the command remainder once, and reuse it: the earlier version
+    // re-located the prefix with indexOf when building the body, so two rules
+    // had to stay in step and could drift apart silently.
+    let commandBody = null;
+    if (allowCommand) {
+      const candidate = body.trimStart();
+      if (candidate.startsWith(group.commandPrefix)) {
+        const remainder = candidate.slice(group.commandPrefix.length);
+        // A prefix must be a complete command token: /dsh正文 is not /dsh 正文.
+        if (remainder && /^\s/.test(remainder)) commandBody = remainder.trim();
+      }
+    }
+    let triggeredText;
+    if (mode === 'mention') {
+      // Only a mention counts, and the prefix must not have been consumed.
+      if (!mentioned) return null;
+      triggeredText = body.trim();
+    } else if (commandBody !== null) {
+      triggeredText = commandBody;
+    } else if (mode === 'mention-or-command' && mentioned) {
+      // Mention carried the row with no prefix present.
+      triggeredText = body.trim();
+    } else {
+      return null;
+    }
+    // The stripped body the adapter reports must be exactly what the raw text
+    // proves, so an event cannot claim a body its own raw_text does not support.
     if (!triggeredText || triggeredText !== event.text) return null;
     return group;
   }

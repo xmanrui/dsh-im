@@ -59,6 +59,9 @@ test('valid config preserves IDs and defaults allowSelf to false', async (t) => 
       allowSelf: false,
       // Absent in the file, normalized to false so the runtime consults one shape.
       allowUnverifiedTrigger: false,
+      // Same for triggerNames: an absent list normalizes to empty so the mention
+      // matcher has one shape to read instead of distinguishing two cases.
+      triggerNames: [],
     }],
   });
 });
@@ -84,6 +87,74 @@ test('autoMinimize must be a boolean', async (t) => {
       continue;
     }
     await assert.rejects(() => loadWechatGroupConfig(path), (error) => error.code === 'invalid-group-config');
+  }
+});
+
+test('mention modes are accepted and normalized', async (t) => {
+  // The adapter honours a leading @[...] token when the operator asks for it,
+  // so the config layer has to accept the mode rather than reject the file.
+  for (const mode of ['mention', 'mention-or-command']) {
+    const { path } = await fixture(t);
+    await writeJson(path, validConfig({
+      groups: [{
+        id: 'uia_group_one', title: '精确群名', commandPrefix: '/dsh',
+        mentionMode: mode, allowUnverifiedTrigger: true,
+      }],
+    }));
+    const loaded = await loadWechatGroupConfig(path);
+    assert.equal(loaded.groups[0].mentionMode, mode);
+  }
+});
+
+test('a mode that can never fire is refused', async (t) => {
+  // Measured: every group row is uia-unverified:row, so a mention mode with
+  // neither the masked-token opt-in nor any trigger name is a config the
+  // operator believes is live but that stays mute forever.
+  for (const mode of ['mention', 'mention-or-command']) {
+    const { path } = await fixture(t);
+    await writeJson(path, validConfig({
+      groups: [{
+        id: 'uia_group_one', title: '精确群名', commandPrefix: '/dsh',
+        mentionMode: mode, allowUnverifiedTrigger: false,
+      }],
+    }));
+    await assert.rejects(() => loadWechatGroupConfig(path),
+      (error) => error.code === 'invalid-group-config');
+  }
+});
+
+test('triggerNames is accepted as a string array', async (t) => {
+  // A readable mention name is a name match, not an identity claim, so it can
+  // authorise a mention without the unverified opt-in. The Python side already
+  // reads this key; rejecting it here would make the two validators disagree.
+  const { path } = await fixture(t);
+  await writeJson(path, validConfig({
+    groups: [{
+      id: 'uia_group_one', title: '精确群名', commandPrefix: '/dsh',
+      mentionMode: 'mention', triggerNames: ['大肥鱼'],
+    }],
+  }));
+  const loaded = await loadWechatGroupConfig(path);
+  assert.deepEqual(loaded.groups[0].triggerNames, ['大肥鱼']);
+});
+
+test('unknown mention modes and malformed triggerNames still fail closed', async (t) => {
+  const cases = [
+    { mentionMode: 'mentions', allowUnverifiedTrigger: true },
+    { mentionMode: 'COMMAND', allowUnverifiedTrigger: true },
+    { mentionMode: 1, allowUnverifiedTrigger: true },
+    { mentionMode: 'mention', allowUnverifiedTrigger: true, triggerNames: '大肥鱼' },
+    { mentionMode: 'mention', allowUnverifiedTrigger: true, triggerNames: [7] },
+  ];
+  for (const patch of cases) {
+    const { path } = await fixture(t);
+    await writeJson(path, validConfig({
+      groups: [{
+        id: 'uia_group_one', title: '精确群名', commandPrefix: '/dsh', ...patch,
+      }],
+    }));
+    await assert.rejects(() => loadWechatGroupConfig(path),
+      (error) => error.code === 'invalid-group-config', JSON.stringify(patch));
   }
 });
 

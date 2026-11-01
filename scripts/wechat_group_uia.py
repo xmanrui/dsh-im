@@ -13,6 +13,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -69,6 +70,18 @@ class ProtocolError(BridgeError):
     pass
 
 
+# How a group row becomes an address. command keeps today's behaviour and is the
+# default; mention honours only a leading @ token; mention-or-command takes both.
+MENTION_MODES = frozenset(("command", "mention", "mention-or-command"))
+# A real @ renders as the literal token "@[...]" inside the message text, and the
+# bracket is produced only by picking a member from the @ list. Hand-typed
+# "@name" has no such shape, so the shape is what makes a token count.
+MENTION_TOKEN_RE = re.compile(r"^@\[([^\]\n]*)\]")
+# WeChat erases the mentioned name to "___" in the accessibility text, which is
+# what makes a token provable-but-anonymous.
+MASKED_MENTION_NAME = "___"
+
+
 @dataclass(frozen=True)
 class GroupConfig:
     id: str
@@ -79,6 +92,7 @@ class GroupConfig:
     # Per-group opt-in. Only an operator who names this group may accept
     # unverified command-prefixed rows as addressed; identity stays unverified.
     allow_unverified_trigger: bool = False
+    mention_mode: str = "command"
 
 
 @dataclass(frozen=True)
@@ -109,21 +123,100 @@ class _Outbound:
     result: dict[str, Any] | None = None
 
 
-def parse_trigger(text: str, command_prefix: str) -> tuple[bool, str]:
-    """Strip a complete command token; never infer mentions from @ text."""
+def split_mention_tokens(
+    text: str, trigger_names: tuple[str, ...], allow_masked: bool,
+) -> tuple[bool, str]:
+    """Strip leading @ tokens; report whether one of them addressed the bot.
 
-    if not command_prefix:
+    Returns (matched, remainder). matched is True only when at least one stripped
+    token named the bot. Leading tokens that name somebody else stop the scan and
+    yield False, because a message that starts "@小李" is not an address of us
+    however many later tokens mention us.
+
+    Two measured shapes are handled differently:
+    - "@[___]" - the name is erased by WeChat, so the token proves "a member was
+      picked from the @ list" but never proves WHO. It counts only when the
+      operator opted this group in (allow_masked), and never when trigger_names
+      are configured, because then a name we cannot read cannot be checked.
+    - "@[大肥鱼]" - a readable name. It counts only when it is in trigger_names,
+      which is a name match rather than an identity claim, so it needs no opt-in.
+    """
+
+    remainder = text.lstrip()
+    matched = False
+    while True:
+        token = MENTION_TOKEN_RE.match(remainder)
+        if token is None:
+            break
+        name = token.group(1).strip()
+        if name == MASKED_MENTION_NAME:
+            # The erased placeholder proves only that a member was picked, so it
+            # counts exactly when the operator opted this group in. Configured
+            # trigger_names do NOT disable it: they belong to the readable-name
+            # branch below, and a build that hides names hides them for every row.
+            honoured = bool(allow_masked)
+        else:
+            honoured = name in set(trigger_names)
+        if not honoured:
+            # A foreign or unreadable mention owns the message; stop, do not skip.
+            return False, text
+        matched = True
+        remainder = remainder[token.end():].lstrip()
+    return matched, remainder
+
+
+def parse_trigger(
+    text: str, command_prefix: str, mention_mode: str = "command",
+    trigger_names: tuple[str, ...] = (), allow_masked_mention: bool = False,
+) -> tuple[bool, str]:
+    """Decide whether a row addresses the bot, and strip the trigger tokens.
+
+    The three modes differ only in which token is honoured; the returned body is
+    always the text with every trigger token removed, so the agent never sees
+    "@[___]" or "/dsh" in what it is asked to act on.
+
+    An unknown mode is treated as "command": a value that never passed a
+    validator must not hand out the new capability.
+    """
+
+    mode = mention_mode if mention_mode in MENTION_MODES else "command"
+    allow_mention = mode in ("mention", "mention-or-command")
+    allow_command = mode in ("command", "mention-or-command")
+
+    body = text
+    mentioned = False
+    if allow_mention:
+        mentioned, body = split_mention_tokens(body, trigger_names, allow_masked_mention)
+        if not mentioned:
+            # split_mention_tokens returns the original text when it declines the
+            # row; a leading foreign mention must not be rescued by the prefix.
+            if mode == "mention":
+                return False, text
+
+    command_hit = False
+    if allow_command and command_prefix:
+        candidate = body.lstrip()
+        if candidate == command_prefix:
+            command_hit, body = True, ""
+        elif candidate.startswith(command_prefix):
+            remainder = candidate[len(command_prefix):]
+            if remainder and remainder[0].isspace():
+                # Only whitespace between the command and body is discarded.
+                command_hit, body = True, remainder.strip()
+    elif allow_command and not command_prefix:
         # An empty prefix would otherwise mark every message as addressed.
         return False, text
-    candidate = text.lstrip()
-    if candidate == command_prefix:
-        return True, ""
-    if candidate.startswith(command_prefix):
-        remainder = candidate[len(command_prefix):]
-        if remainder and remainder[0].isspace():
-            # Only whitespace between the command and body is discarded.
-            return True, remainder.strip()
-    return False, text
+
+    if mode == "command":
+        return command_hit, (body if command_hit else text)
+    if mode == "mention":
+        return mentioned, (body.strip() if mentioned else text)
+    # mention-or-command: either token qualifies, and both may appear together.
+    if mentioned and command_hit:
+        return True, body
+    if mentioned:
+        return True, body.strip()
+    return command_hit, (body if command_hit else text)
 
 
 def session_title(automation_id: str, name: str) -> str:
@@ -208,18 +301,25 @@ def read_visible_rows_as_messages(
 def build_message_event(
     conversation_id: str, conversation_title: str, item: RawMessage,
     trigger: str = "/dsh", sent_at: int = 0, addressed: bool | None = None,
-    allow_unverified_trigger: bool = False,
+    allow_unverified_trigger: bool = False, mention_mode: str = "command",
+    trigger_names: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Assemble one v1 event; unverified senders can never be addressed."""
 
     # Identity is unverifiable on WeChat 4.1; a named group may still opt in to
     # accepting the command prefix, but that never verifies who spoke.
     trusted = (not unverified_sender(item.sender)) or bool(allow_unverified_trigger)
+    # Same rule as WechatGroupAdapter._observe: two addressed paths that disagree
+    # would let a row be judged one way in tests and another way in production.
+    # A masked @ token is only honoured under the same per-group opt-in, because
+    # the erased name cannot prove the bot was the one addressed.
+    parsed, text = parse_trigger(
+        item.text, trigger, mention_mode=mention_mode, trigger_names=trigger_names,
+        allow_masked_mention=bool(allow_unverified_trigger),
+    )
     if addressed is None:
-        parsed, text = parse_trigger(item.text, trigger)
         addressed = bool(parsed and trusted and text)
     else:
-        parsed, text = parse_trigger(item.text, trigger)
         addressed = bool(addressed and trusted)
     event = {
         "source": SOURCE,
@@ -316,6 +416,29 @@ class WechatGroupAdapter:
                 raise ConfigError("duplicate group IDs or titles are ambiguous", "duplicate_group_title")
             if not isinstance(group.command_prefix, str) or type(group.allow_self) is not bool:
                 raise ConfigError("group trigger configuration is invalid", "invalid_config")
+            # mention_mode is a capability switch, so an unvalidated value must
+            # not be tolerated even though parse_trigger would degrade it safely:
+            # an operator who typed "mentions" deserves to hear about it.
+            if group.mention_mode not in MENTION_MODES:
+                raise ConfigError("group mention_mode is invalid", "invalid_config")
+            if any(not isinstance(name, str) or not name.strip()
+                   for name in group.trigger_names):
+                raise ConfigError("group trigger_names must be non-empty strings",
+                                  "invalid_config")
+            # Measured: every group row arrives as uia-unverified:row, so a
+            # mention-only mode in a group that never opted in can literally
+            # never fire. Refuse that pairing instead of accepting a config the
+            # operator believes is live.
+            if (group.mention_mode != "command"
+                    and type(group.allow_unverified_trigger) is not bool):
+                raise ConfigError("allow_unverified_trigger must be boolean",
+                                  "invalid_config")
+            if (group.mention_mode != "command" and not group.allow_unverified_trigger
+                    and not group.trigger_names):
+                raise ConfigError(
+                    "mention modes need allowUnverifiedTrigger or triggerNames",
+                    "invalid_config",
+                )
             ids.add(group.id)
             titles.add(group.title)
         if len(self._by_id) != len(self.groups):
@@ -371,7 +494,16 @@ class WechatGroupAdapter:
             self._started = True
 
     def _consume_bridge_echo(self, chat_id: str, item: RawMessage) -> bool:
-        if not item.is_self:
+        # Two shapes have to be handled, and only one of them carries a flag.
+        # A verified row tells us directly whether we sent it (is_self). On
+        # WeChat 4.2.0.12 every group row arrives as uia-unverified:row with
+        # is_self permanently False, so that flag cannot gate anything there and
+        # the only available proof is an exact text match against an outbound we
+        # actually attempted and have not yet echoed. Without this branch the
+        # bridge would read its own reply as a fresh mention and answer itself,
+        # which is a real reply loop the moment mentions become triggers.
+        attributable = item.is_self or unverified_sender(item.sender)
+        if not attributable:
             return False
         for outbound in self._outbounds.values():
             if (
@@ -409,7 +541,11 @@ class WechatGroupAdapter:
                 continue
             if not item.sender or not item.text.strip():
                 continue
-            parsed, text = parse_trigger(item.text, group.command_prefix)
+            parsed, text = parse_trigger(
+                item.text, group.command_prefix, mention_mode=group.mention_mode,
+                trigger_names=group.trigger_names,
+                allow_masked_mention=bool(group.allow_unverified_trigger),
+            )
             # Unverified rows may only become addressed inside a group whose owner
             # explicitly opted in; the member identity itself stays unverified.
             addressed = bool(
@@ -575,7 +711,12 @@ class WechatGroupAdapter:
                 "ready": self._started and not self._closed,
                 "groups": [group.id for group in self.groups],
                 "overlap_resets": self._overlap_resets,
-                "mention_routing": False,
+                # Report the truth: mention routing is live for any group whose
+                # mode honours it. A hardcoded False contradicted the operator's
+                # own configuration file.
+                "mention_routing": any(
+                    group.mention_mode != "command" for group in self.groups
+                ),
                 "backend": evidence,
             }
 
@@ -775,13 +916,34 @@ def load_config(path: str | Path) -> tuple[list[GroupConfig], int]:
         allow_self = item.get("allowSelf", False)
         if type(allow_self) is not bool:
             raise ConfigError("allowSelf must be boolean", "invalid_config")
+        # Same strictness as allowSelf: the string "false" is truthy in Python,
+        # so coercing it would silently grant the mention capability to a group
+        # whose operator wrote it off.
+        opt_in = item.get("allowUnverifiedTrigger", False)
+        if type(opt_in) is not bool:
+            raise ConfigError("allowUnverifiedTrigger must be boolean", "invalid_config")
+        mention_mode = item.get("mentionMode", "command")
+        if mention_mode not in MENTION_MODES:
+            raise ConfigError("mentionMode must be command, mention or "
+                              "mention-or-command", "invalid_config")
+        # load_config never reaches WechatGroupAdapter._validate_groups, so the
+        # same cross-check has to be applied here too: a mode that can never fire
+        # (no opt-in for masked tokens, and no names to match readable ones) is a
+        # misconfiguration, and accepting it would leave the operator with a group
+        # that looks enabled and stays mute forever.
+        if mention_mode != "command" and not opt_in and not trigger_names:
+            raise ConfigError(
+                "mentionMode needs allowUnverifiedTrigger or triggerNames",
+                "invalid_config",
+            )
         groups.append(GroupConfig(
             id=item.get("id", ""),
             title=item.get("title", ""),
             trigger_names=tuple(trigger_names),
             command_prefix=item.get("commandPrefix", "/dsh"),
             allow_self=allow_self,
-            allow_unverified_trigger=bool(item.get("allowUnverifiedTrigger", False)),
+            allow_unverified_trigger=opt_in,
+            mention_mode=mention_mode,
         ))
     interval = data.get("pollIntervalMs", 750)
     if type(interval) is not int or interval < 100:

@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import tempfile
 import unittest
 from unittest import mock
 
@@ -105,13 +106,17 @@ class FakeBackend:
         self.operations.append(("close",))
 
 
-def group(chat_id="uia_g1", title="Alpha", allow_self=False, prefix="/dsh"):
+def group(chat_id="uia_g1", title="Alpha", allow_self=False, prefix="/dsh",
+          mention_mode="command", allow_unverified_trigger=False,
+          trigger_names=("Nickname",)):
     return uia.GroupConfig(
         id=chat_id,
         title=title,
-        trigger_names=("Nickname",),
+        trigger_names=trigger_names,
         command_prefix=prefix,
         allow_self=allow_self,
+        mention_mode=mention_mode,
+        allow_unverified_trigger=allow_unverified_trigger,
     )
 
 
@@ -140,6 +145,410 @@ class TriggerTests(unittest.TestCase):
     def test_empty_prefix_never_marks_everything_addressed(self):
         self.assertEqual(uia.parse_trigger("hello", ""), (False, "hello"))
 
+
+class MentionTriggerTests(unittest.TestCase):
+    """Direct @ mention as an address, with no command prefix.
+
+    Measured facts this class is built on: WeChat 4.2.0.12 renders a real @ as
+    the literal token "@[___]" inside the message text, and a group row carries
+    no author at all (sender is always "uia-unverified:row"). The placeholder is
+    only produced by picking a member from the @ list, so the *shape* is a
+    usable signal even though the *name* inside it is not. A hand-typed
+    "@大肥鱼" has no such shape and must stay unaddressed.
+    """
+
+    MASKED = "@[___] 帮我下单"
+
+    def test_masked_mention_is_an_address_only_when_the_group_opts_in(self):
+        # POSITIVE CONTROL for the mention branch: delete the branch and this
+        # assertion is the first thing that goes RED.
+        self.assertEqual(
+            uia.parse_trigger(self.MASKED, "/dsh", mention_mode="mention",
+                              allow_masked_mention=True),
+            (True, "帮我下单"),
+        )
+
+    def test_masked_mention_without_opt_in_is_not_an_address(self):
+        # The name inside the placeholder is erased, so a masked token proves
+        # "someone was @-ed", not "the bot was @-ed". Without the operator
+        # naming this group, it must not fire.
+        self.assertEqual(
+            uia.parse_trigger(self.MASKED, "/dsh", mention_mode="mention",
+                              allow_masked_mention=False),
+            (False, self.MASKED),
+        )
+
+    def test_hand_typed_at_name_is_still_not_a_mention(self):
+        # Negative control with the opposite polarity: the token must have the
+        # placeholder shape, so ordinary text that merely starts with @ stays
+        # unaddressed even for a fully opted-in group.
+        for text in ("@大肥鱼 帮我下单", "@ 大肥鱼 帮我下单", "@[]", "@[] 帮我下单"):
+            self.assertEqual(
+                uia.parse_trigger(text, "/dsh", mention_mode="mention",
+                                  allow_masked_mention=True),
+                (False, text),
+                text,
+            )
+
+    def test_command_mode_is_unaffected_by_the_new_argument_defaults(self):
+        # Backward compatibility: every existing call site passes no
+        # mention_mode, so both the prefix path and the @ path behave exactly
+        # as they did before this feature existed.
+        self.assertEqual(uia.parse_trigger("/dsh 正文", "/dsh"), (True, "正文"))
+        self.assertEqual(uia.parse_trigger(self.MASKED, "/dsh"), (False, self.MASKED))
+        self.assertEqual(
+            uia.parse_trigger(self.MASKED, "/dsh", mention_mode="command",
+                              allow_masked_mention=True),
+            (False, self.MASKED),
+        )
+
+    def test_mention_or_command_accepts_both_forms(self):
+        self.assertEqual(
+            uia.parse_trigger("/dsh 下单", "/dsh", mention_mode="mention-or-command",
+                              allow_masked_mention=True),
+            (True, "下单"),
+        )
+        self.assertEqual(
+            uia.parse_trigger(self.MASKED, "/dsh", mention_mode="mention-or-command",
+                              allow_masked_mention=True),
+            (True, "帮我下单"),
+        )
+
+    def test_mention_mode_alone_never_honours_the_prefix(self):
+        self.assertEqual(
+            uia.parse_trigger("/dsh 下单", "/dsh", mention_mode="mention",
+                              allow_masked_mention=True),
+            (False, "/dsh 下单"),
+        )
+
+    def test_readable_mention_name_must_match_the_configured_trigger_names(self):
+        # If a future build exposes the real name, the name decides everything:
+        # an @ of another member is not an address of the bot, and the
+        # unverified opt-in is not consulted at all.
+        self.assertEqual(
+            uia.parse_trigger("@[小李] 帮我下单", "/dsh", mention_mode="mention",
+                              trigger_names=("大肥鱼",), allow_masked_mention=False),
+            (False, "@[小李] 帮我下单"),
+        )
+        self.assertEqual(
+            uia.parse_trigger("@[大肥鱼] 帮我下单", "/dsh", mention_mode="mention",
+                              trigger_names=("大肥鱼",), allow_masked_mention=False),
+            (True, "帮我下单"),
+        )
+
+    def test_readable_name_without_configured_names_fails_closed(self):
+        # No triggerNames configured means nothing can prove the bot was the
+        # one @-ed, so the row stays unaddressed even with the opt-in on.
+        self.assertEqual(
+            uia.parse_trigger("@[大肥鱼] 帮我下单", "/dsh", mention_mode="mention",
+                              allow_masked_mention=True),
+            (False, "@[大肥鱼] 帮我下单"),
+        )
+
+    def test_leading_mention_tokens_are_all_stripped_but_a_foreign_one_stops(self):
+        self.assertEqual(
+            uia.parse_trigger("@[___] @[___] 帮我下单", "/dsh", mention_mode="mention",
+                              allow_masked_mention=True),
+            (True, "帮我下单"),
+        )
+        self.assertEqual(
+            uia.parse_trigger("@[小李] @[___] 帮我下单", "/dsh", mention_mode="mention",
+                              trigger_names=("大肥鱼",), allow_masked_mention=True),
+            (False, "@[小李] @[___] 帮我下单"),
+        )
+
+    def test_mention_must_be_leading_and_a_bare_mention_has_no_body(self):
+        self.assertEqual(
+            uia.parse_trigger("帮我下单 @[___]", "/dsh", mention_mode="mention",
+                              allow_masked_mention=True),
+            (False, "帮我下单 @[___]"),
+        )
+        self.assertEqual(
+            uia.parse_trigger("@[___]   ", "/dsh", mention_mode="mention",
+                              allow_masked_mention=True),
+            (True, ""),
+        )
+
+    def test_mention_after_the_prefix_is_stripped_too(self):
+        self.assertEqual(
+            uia.parse_trigger("@[___] /dsh 下单", "/dsh",
+                              mention_mode="mention-or-command",
+                              allow_masked_mention=True),
+            (True, "下单"),
+        )
+
+    def test_unknown_mention_mode_falls_back_to_command_only(self):
+        # Fail closed: a mode nobody validated must never grant new power.
+        self.assertEqual(
+            uia.parse_trigger(self.MASKED, "/dsh", mention_mode="mentions",
+                              allow_masked_mention=True),
+            (False, self.MASKED),
+        )
+        self.assertEqual(
+            uia.parse_trigger("/dsh 正文", "/dsh", mention_mode="mentions"),
+            (True, "正文"),
+        )
+
+
+class MentionAdapterTests(unittest.TestCase):
+    """The adapter and the JS runtime must agree on one rule, on real rows."""
+
+    def unverified_group(self, mode="mention", opt_in=True, **kwargs):
+        return group(mention_mode=mode, allow_unverified_trigger=opt_in, **kwargs)
+
+    def row(self, text):
+        # Exactly what UIA yields today: text present, author absent.
+        return uia.read_visible_rows_as_messages(
+            [{"cls": "mmui::ChatTextItemView", "name": text}], allow_unverified=True,
+        )[0]
+
+    def poll_one(self, text, config):
+        backend = FakeBackend(messages={"Alpha": []})
+        adapter = uia.WechatGroupAdapter([config], backend, clock=lambda: 7)
+        adapter.start()
+        backend.messages["Alpha"].append(self.row(text))
+        return adapter.poll()
+
+    def test_opted_in_group_answers_a_direct_mention(self):
+        events = self.poll_one("@[___] 帮我下单", self.unverified_group())
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertTrue(event["addressed"])
+        # The agent must not see the placeholder.
+        self.assertEqual(event["text"], "帮我下单")
+        self.assertEqual(event["raw_text"], "@[___] 帮我下单")
+        self.assertEqual(event["item_list"],
+                         [{"type": 1, "text_item": {"text": "帮我下单"}}])
+        self.assertTrue(uia.unverified_sender(event["from_user_id"]))
+        uia.validate_message_event(event)
+
+    def test_command_group_still_ignores_a_direct_mention(self):
+        # Unaddressed rows are still observed - that is shipped behaviour, pinned
+        # by test_unaddressed_message_is_observational_only - but addressed must
+        # be False, because that flag is the only entry ticket to the agent.
+        events = self.poll_one("@[___] 帮我下单", self.unverified_group(mode="command"))
+        self.assertEqual(len(events), 1)
+        self.assertFalse(events[0]["addressed"])
+        # Nothing was treated as a trigger, so the text stays whole.
+        self.assertEqual(events[0]["text"], "@[___] 帮我下单")
+
+    def test_mention_mode_with_nothing_to_match_cannot_be_constructed(self):
+        # A config that can never fire is refused at load time instead of being
+        # accepted and then silently mute. "Nothing to match" means neither the
+        # masked-token opt-in nor any readable trigger name; the sibling
+        # test_verified_sender_with_readable_name_needs_no_unverified_opt_in pins
+        # the other half, where a configured name is sufficient on its own.
+        backend = FakeBackend(messages={"Alpha": []})
+        with self.assertRaises(uia.ConfigError):
+            uia.WechatGroupAdapter(
+                [self.unverified_group(opt_in=False, trigger_names=())], backend)
+        self.assertEqual(operations(backend, "select"), [])
+
+    def test_bare_mention_emits_nothing(self):
+        self.assertEqual(self.poll_one("@[___]", self.unverified_group()), [])
+
+    def test_prefix_still_works_in_mention_or_command(self):
+        events = self.poll_one("/dsh 下单",
+                               self.unverified_group(mode="mention-or-command"))
+        self.assertEqual([event["text"] for event in events], ["下单"])
+        self.assertTrue(events[0]["addressed"])
+
+    def test_verified_sender_with_readable_name_needs_no_unverified_opt_in(self):
+        # The other half of the measured compromise: when the row DOES carry an
+        # author and the mention carries a name, the name alone decides.
+        backend = FakeBackend(messages={"Alpha": []})
+        adapter = uia.WechatGroupAdapter(
+            [group(mention_mode="mention", allow_unverified_trigger=False,
+                   trigger_names=("大肥鱼",))], backend, clock=lambda: 8,
+        )
+        adapter.start()
+        backend.messages["Alpha"].append(raw("@[大肥鱼] 帮我下单"))
+        events = adapter.poll()
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0]["addressed"])
+        self.assertEqual(events[0]["text"], "帮我下单")
+
+    def test_verified_sender_masked_mention_is_not_an_address(self):
+        # allow_unverified_trigger only ever unlocks unverified rows; a named
+        # sender plus a nameless placeholder still proves nothing about who was
+        # @-ed.
+        backend = FakeBackend(messages={"Alpha": []})
+        adapter = uia.WechatGroupAdapter(
+            [group(mention_mode="mention", allow_unverified_trigger=False)],
+            backend, clock=lambda: 9,
+        )
+        adapter.start()
+        backend.messages["Alpha"].append(raw("@[___] 帮我下单"))
+        events = adapter.poll()
+        self.assertEqual(len(events), 1)
+        self.assertFalse(events[0]["addressed"])
+
+    def echo_backend(self):
+        """Backend double whose echo arrives as an unverified row, like live UIA.
+
+        FakeBackend.press_enter tags the echo is_self=True, but the measured
+        adapter cannot see is_self at all; this double reproduces the real
+        (harder) shape so the loop test below proves something.
+        """
+        backend = FakeBackend(messages={"Alpha": []})
+
+        def echo_as_unverified():
+            text = backend.inputs.get(backend.current, "")
+            backend.operations.append(("send", backend.current, text))
+            backend.messages.setdefault(backend.current, []).append(
+                uia.RawMessage("uia-unverified:row", text, False, ""),
+            )
+            backend.inputs[backend.current] = ""
+
+        backend.press_enter = echo_as_unverified
+        return backend
+
+    def test_bridge_reply_containing_the_mention_token_does_not_retrigger(self):
+        # The loop the objective warns about: the bot answers into the same
+        # group, and every inbound row -- including its own -- arrives
+        # unverified with is_self False, so the old is_self echo gate is empty.
+        backend = self.echo_backend()
+        adapter = uia.WechatGroupAdapter(
+            [self.unverified_group(mode="mention-or-command")], backend,
+            clock=lambda: 10,
+        )
+        adapter.start()
+        result = adapter.send_text("r-mention-echo", "uia_g1", "@[___] 收到")
+        self.assertTrue(result["ok"])
+        self.assertEqual(adapter.drain_events(), [])
+
+    def test_the_echo_guard_is_one_shot_not_a_mention_ban(self):
+        # Same group, the same text arriving again as a genuinely new row: it
+        # must fire, proving the suppression above consumed one echo rather
+        # than switching the feature off.
+        backend = self.echo_backend()
+        adapter = uia.WechatGroupAdapter(
+            [self.unverified_group(mode="mention-or-command")], backend,
+            clock=lambda: 11,
+        )
+        adapter.start()
+        self.assertTrue(adapter.send_text("r-echo-2", "uia_g1", "@[___] 收到")["ok"])
+        self.assertEqual(adapter.drain_events(), [])
+        backend.messages["Alpha"].append(self.row("@[___] 收到"))
+        events = adapter.poll()
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0]["addressed"])
+
+    def test_health_reports_mention_routing_when_it_is_live(self):
+        # The flag used to be a hardcoded False, which contradicted whatever the
+        # operator had configured; it now reflects the groups actually loaded.
+        backend = FakeBackend(messages={"Alpha": []})
+        command_only = uia.WechatGroupAdapter([group()], backend, clock=lambda: 12)
+        self.assertFalse(command_only.health()["mention_routing"])
+        mention = uia.WechatGroupAdapter([self.unverified_group()], backend,
+                                         clock=lambda: 13)
+        self.assertTrue(mention.health()["mention_routing"])
+
+    def test_unknown_mention_mode_is_rejected_before_any_ui_access(self):
+        backend = FakeBackend(messages={"Alpha": []})
+        with self.assertRaises(uia.ConfigError):
+            uia.WechatGroupAdapter([group(mention_mode="all")], backend)
+        with self.assertRaises(uia.ConfigError):
+            uia.WechatGroupAdapter([group(mention_mode=1)], backend)
+        self.assertEqual(operations(backend, "select"), [])
+
+    def test_trigger_names_must_be_strings(self):
+        backend = FakeBackend(messages={"Alpha": []})
+        with self.assertRaises(uia.ConfigError):
+            uia.WechatGroupAdapter([group(trigger_names=("大肥鱼", 7))], backend)
+
+
+class BuildMessageEventMentionTests(unittest.TestCase):
+    """build_message_event is the second addressed path; it must not diverge."""
+
+    def row(self, text):
+        return uia.read_visible_rows_as_messages(
+            [{"cls": "mmui::ChatTextItemView", "name": text}], allow_unverified=True,
+        )[0]
+
+    def test_opted_in_masked_mention_is_addressed_here_too(self):
+        event = uia.build_message_event(
+            "uia_g1", "Alpha", self.row("@[___] 帮我下单"), trigger="/dsh", sent_at=1,
+            allow_unverified_trigger=True, mention_mode="mention",
+        )
+        self.assertTrue(event["addressed"])
+        self.assertEqual(event["text"], "帮我下单")
+
+    def test_masked_mention_without_opt_in_stays_unaddressed(self):
+        event = uia.build_message_event(
+            "uia_g1", "Alpha", self.row("@[___] 帮我下单"), trigger="/dsh", sent_at=1,
+            allow_unverified_trigger=False, mention_mode="mention",
+        )
+        self.assertFalse(event["addressed"])
+        self.assertEqual(event["text"], "@[___] 帮我下单")
+
+    def test_existing_callers_keep_their_behaviour(self):
+        event = uia.build_message_event(
+            "uia_g1", "Alpha", self.row("/dsh 执行"), trigger="/dsh", sent_at=1,
+        )
+        self.assertFalse(event["addressed"])
+        event = uia.build_message_event(
+            "uia_g1", "Alpha", self.row("/dsh 执行"), trigger="/dsh", sent_at=1,
+            allow_unverified_trigger=True,
+        )
+        self.assertTrue(event["addressed"])
+        self.assertEqual(event["text"], "执行")
+
+
+class LoadConfigMentionModeTests(unittest.TestCase):
+    """group-chats.json is the operator surface; the validator stays strict."""
+
+    def load(self, groups):
+        payload = {"version": 1, "pollIntervalMs": 750, "groups": groups}
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "group-chats.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+            return uia.load_config(path)
+
+    def base(self, **patch):
+        item = {"id": "uia_g1", "title": "Alpha", "commandPrefix": "/dsh",
+                "allowUnverifiedTrigger": True}
+        item.update(patch)
+        return item
+
+    def test_mention_mode_defaults_to_command(self):
+        groups, _interval = self.load([self.base()])
+        self.assertEqual(groups[0].mention_mode, "command")
+
+    def test_new_modes_are_read_through(self):
+        for mode in ("mention", "mention-or-command"):
+            groups, _interval = self.load([self.base(mentionMode=mode)])
+            self.assertEqual(groups[0].mention_mode, mode)
+
+    def test_unknown_mode_fails_closed(self):
+        for mode in ("mentions", "all", "", "COMMAND", 1):
+            with self.assertRaises(uia.ConfigError, msg=repr(mode)):
+                self.load([self.base(mentionMode=mode)])
+
+    def test_mode_without_the_unverified_opt_in_fails_closed(self):
+        for mode in ("mention", "mention-or-command"):
+            with self.assertRaises(uia.ConfigError, msg=mode):
+                self.load([self.base(mentionMode=mode,
+                                      allowUnverifiedTrigger=False)])
+            with self.assertRaises(uia.ConfigError, msg=mode):
+                self.load([dict(self.base(), mentionMode=mode,
+                                allowUnverifiedTrigger="false")])
+
+    def test_trigger_names_are_read_and_validated(self):
+        groups, _interval = self.load([self.base(mentionMode="mention",
+                                                 triggerNames=["大肥鱼"])])
+        self.assertEqual(groups[0].trigger_names, ("大肥鱼",))
+        with self.assertRaises(uia.ConfigError):
+            self.load([self.base(triggerNames="大肥鱼")])
+        with self.assertRaises(uia.ConfigError):
+            self.load([self.base(triggerNames=[7])])
+
+    def test_command_mode_needs_no_opt_in(self):
+        groups, _interval = self.load([dict(self.base(),
+                                            allowUnverifiedTrigger=False)])
+        self.assertEqual(groups[0].mention_mode, "command")
+        self.assertFalse(groups[0].allow_unverified_trigger)
 
 class AdapterEventTests(unittest.TestCase):
     def setUp(self):

@@ -322,6 +322,77 @@ test('only complete addressed v1 events for the exact configured group reach the
   assert.equal(logs.join('\n').includes('complete-secret-body'), false);
 });
 
+const MENTION_CONFIG = {
+  pollIntervalMs: 750,
+  groups: [{
+    id: 'uia_group_one',
+    title: '精确群名',
+    commandPrefix: '/dsh',
+    mentionMode: 'mention',
+    allowSelf: false,
+    // Measured: rows carry no sender, so a mention group must opt in explicitly.
+    allowUnverifiedTrigger: true,
+  }],
+};
+
+test('a leading mention token is a valid trigger and the body is stripped', async (t) => {
+  // The adapter strips @[___] before emitting, so the second proof here has to
+  // re-derive the same rule: raw_text must start with a mention token and the
+  // remainder must equal text. Without it an adapter bug or a forged event could
+  // claim addressed=true on an ordinary message.
+  const groupProcess = new FakeGroupProcess();
+  const { runtime, accepted, bridge } = makeRuntime(t, {
+    groupProcess, config: MENTION_CONFIG,
+  });
+  await runtime.start({ bridge });
+  groupProcess.emit('message', groupEvent({
+    message_id: 'mention-1', from_user_id: 'uia-unverified:row',
+    sender_name: 'uia-unverified:row', raw_text: '@[___] 正文', text: '正文',
+  }));
+  await runtime.waitForIdle();
+  assert.deepEqual(accepted.map((event) => event.message_id), ['mention-1']);
+  // The agent sees the request, never the placeholder.
+  assert.equal(accepted[0].text, '正文');
+  assert.equal(runtime.status.messagesRejected, 0);
+});
+
+test('mention mode rejects a body that does not carry the token', async (t) => {
+  const groupProcess = new FakeGroupProcess();
+  const { runtime, accepted, bridge } = makeRuntime(t, {
+    groupProcess, config: MENTION_CONFIG,
+  });
+  await runtime.start({ bridge });
+  const rejected = [
+    // Prefix-shaped raw text is not a mention.
+    groupEvent({ message_id: 'prefix-only', from_user_id: 'uia-unverified:row',
+      sender_name: 'uia-unverified:row', raw_text: '/dsh 正文', text: '正文' }),
+    // Hand-typed @name has no bracket shape and must not pass.
+    groupEvent({ message_id: 'typed-at', from_user_id: 'uia-unverified:row',
+      sender_name: 'uia-unverified:row', raw_text: '@成员甲 正文', text: '正文' }),
+    // Mention present but the body kept the token: strip rule violated.
+    groupEvent({ message_id: 'unstripped', from_user_id: 'uia-unverified:row',
+      sender_name: 'uia-unverified:row', raw_text: '@[___] 正文', text: '@[___] 正文' }),
+    // A mention of somebody else is not an address of the bot.
+    groupEvent({ message_id: 'foreign', from_user_id: 'uia-unverified:row',
+      sender_name: 'uia-unverified:row', raw_text: '@[小李] 正文', text: '正文' }),
+  ];
+  for (const event of rejected) groupProcess.emit('message', event);
+  await runtime.waitForIdle();
+  assert.deepEqual(accepted, []);
+  assert.equal(runtime.status.messagesRejected, rejected.length);
+});
+
+test('command mode still refuses a mention-shaped event', async (t) => {
+  // Backward compatibility gate: today's default config must keep ignoring @.
+  const { runtime, groupProcess, accepted, bridge } = makeRuntime(t);
+  await runtime.start({ bridge });
+  groupProcess.emit('message', groupEvent({
+    message_id: 'mention-in-command', raw_text: '@[___] 正文', text: '正文',
+  }));
+  await runtime.waitForIdle();
+  assert.deepEqual(accepted, []);
+  assert.equal(runtime.status.messagesRejected, 1);
+});
 test('stop drains accepted work and stops the child without closing the shared bridge', async (t) => {
   const fixture = makeRuntime(t);
   const { runtime, groupProcess, order, setAcceptImpl, bridge } = fixture;

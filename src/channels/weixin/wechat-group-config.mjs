@@ -11,7 +11,11 @@ const ROOT_KEYS = new Set([
 // become addressed. It is accepted here so an operator can name one exact
 // group; the runtime still refuses it for every other group and never derives
 // a member identity from it.
-const GROUP_KEYS = new Set(['id', 'title', 'commandPrefix', 'mentionMode', 'allowSelf', 'allowUnverifiedTrigger']);
+const GROUP_KEYS = new Set(['id', 'title', 'commandPrefix', 'mentionMode', 'allowSelf',
+  'allowUnverifiedTrigger', 'triggerNames']);
+// Mirrors MENTION_MODES in scripts/wechat_group_uia.py. command keeps today's
+// behaviour; the other two let a leading @[...] token address the bot.
+const MENTION_MODES = new Set(['command', 'mention', 'mention-or-command']);
 const GROUP_ID_PATTERN = /^uia_[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const COMMAND_PREFIX_PATTERN = /^\/[^\s]+$/;
 
@@ -64,8 +68,27 @@ function normalizeGroup(value, index) {
   if (!COMMAND_PREFIX_PATTERN.test(commandPrefix)) {
     throw invalid('groups[' + index + '].commandPrefix must be one command token');
   }
-  if (group.mentionMode !== 'command') {
-    throw invalid('groups[' + index + '].mentionMode must be command');
+  const mentionMode = group.mentionMode ?? 'command';
+  if (!MENTION_MODES.has(mentionMode)) {
+    throw invalid('groups[' + index + '].mentionMode must be command, mention or mention-or-command');
+  }
+  // triggerNames is the readable-name path: if a future build exposes the name
+  // inside @[...], matching this list is a name comparison, not an identity
+  // claim, so it can authorise a mention on its own.
+  let triggerNames = [];
+  if (group.triggerNames !== undefined) {
+    if (!Array.isArray(group.triggerNames)
+      || group.triggerNames.some((name) => typeof name !== 'string' || !name.trim())) {
+      throw invalid('groups[' + index + '].triggerNames must be an array of non-empty strings');
+    }
+    triggerNames = group.triggerNames;
+  }
+  // Measured on the live machine: every group row arrives as uia-unverified:row
+  // and the mentioned name is erased to ___ , so a mention mode with neither the
+  // masked opt-in nor a single readable name can never fire. Refuse that pairing
+  // rather than accepting a config the operator believes is live.
+  if (mentionMode !== 'command' && group.allowUnverifiedTrigger !== true && triggerNames.length === 0) {
+    throw invalid('groups[' + index + '].mentionMode needs allowUnverifiedTrigger or triggerNames');
   }
   if (group.allowSelf !== undefined && typeof group.allowSelf !== 'boolean') {
     throw invalid('groups[' + index + '].allowSelf must be boolean');
@@ -80,7 +103,8 @@ function normalizeGroup(value, index) {
     id,
     title,
     commandPrefix,
-    mentionMode: 'command',
+    mentionMode,
+    triggerNames,
     allowSelf: group.allowSelf ?? false,
     allowUnverifiedTrigger: group.allowUnverifiedTrigger ?? false,
   };
