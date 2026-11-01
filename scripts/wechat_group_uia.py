@@ -607,6 +607,12 @@ class WechatGroupAdapter:
         # idle: no read, no select, no window call. See _read_target.
         self._waiting: set[str] = set()
         self._outbounds: dict[str, _Outbound] = {}
+        # Every configured trigger name, across all groups, for the echo check that
+        # decides whether a read-back row is OUR reply wearing an @ prefix. The check
+        # is per-chat, so one merged set is enough and avoids threading a group
+        # through _consume_bridge_echo.
+        self._echo_trigger_names: tuple[str, ...] = tuple(
+            name for group in self.groups for name in group.trigger_names)
         self._pending_events: list[dict[str, Any]] = []
         self._lock = threading.RLock()
         self._started = False
@@ -759,15 +765,25 @@ class WechatGroupAdapter:
         if not attributable:
             return False
         for outbound in self._outbounds.values():
-            if (
-                outbound.chat_id == chat_id
-                and outbound.attempted
-                and outbound.echo_pending
-                and outbound.text == item.text
-            ):
-                # Consume one occurrence only; a later identical manual message remains distinct.
+            if not (outbound.chat_id == chat_id and outbound.attempted and outbound.echo_pending):
+                continue
+            if outbound.text == item.text:
+                # Consume one occurrence only; a later identical manual message
+                # remains distinct.
                 outbound.echo_pending = False
                 return True
+            # A reply whose text we ALSO prefixed with an @ comes back glued to it by
+            # merge_mention_rows, so the read-back row is "@bot <our text>" while the
+            # outbound recorded only "<our text>". Measured 2026-11-02: the bridge's
+            # own queue receipt reappeared as "@大肥鱼 已排队，等待前序消息处理。" and
+            # parsed as a fresh mention of itself - a real reply loop, not a
+            # theoretical one. Suffix matching catches that shape while staying
+            # exact: the row must still END with everything we sent.
+            if item.text.endswith(outbound.text) and item.text != outbound.text:
+                prefix = item.text[: len(item.text) - len(outbound.text)]
+                if _has_mention_token(prefix, self._echo_trigger_names, True):
+                    outbound.echo_pending = False
+                    return True
         return False
 
     def _observe(self, group: GroupConfig, current: list[RawMessage]) -> None:

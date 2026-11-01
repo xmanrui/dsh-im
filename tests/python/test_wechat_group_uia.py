@@ -3251,3 +3251,68 @@ class TransientTitleFailureTests(unittest.TestCase):
         with self.assertRaises(uia.SafetyError) as caught:
             adapter.poll()
         self.assertEqual(caught.exception.code, "wechat_panel_closed")
+
+
+class ReplyEchoWithMentionPrefixTests(unittest.TestCase):
+    """The bridge must not answer its own reply when that reply carried an @.
+
+    Measured 2026-11-02 in the live group, right after the bare-@ change went live:
+
+        row 6  '@大肥鱼\u2005'
+        row 7  '已排队，等待前序消息处理。'
+
+    Rows 6 and 7 are ONE message the bridge itself had just sent (a queue receipt
+    that mentions the operator). merge_mention_rows joined them into
+    '@大肥鱼\u2005已排队…', parse_trigger called it addressed, and the bridge would
+    have answered itself - a real reply loop, observed rather than imagined.
+
+    _consume_bridge_echo compared exact text, so '<our text>' never matched
+    '@bot <our text>'. It now also accepts a row that ENDS with everything we sent,
+    provided the part before it is an @ token we recognise.
+    """
+
+    def adapter_with_outbound(self, sent_text, trigger_names=("\u5927\u80a5\u9c7c",)):
+        backend = FakeBackend(messages={"Alpha": []})
+        cfg = uia.GroupConfig(
+            id="uia_g1", title="Alpha", trigger_names=trigger_names,
+            command_prefix="/dsh", mention_mode="mention-or-command",
+            allow_unverified_trigger=True,
+        )
+        adapter = uia.WechatGroupAdapter([cfg], backend, clock=lambda: 9)
+        adapter.start()
+        # Register the outbound exactly as a real send would, without performing one.
+        outbound = uia._Outbound(
+            request_id="r1", chat_id="uia_g1", text=sent_text, provider_id="p1",
+            attempted=True, echo_pending=True,
+        )
+        adapter._outbounds["r1"] = outbound
+        return adapter, outbound
+
+    def test_our_reply_wearing_an_at_prefix_is_not_a_new_mention(self):
+        adapter, outbound = self.adapter_with_outbound("\u5df2\u6392\u961f")
+        echoed = uia.RawMessage(
+            sender="uia-unverified:row",
+            text="@\u5927\u80a5\u9c7c\u2005\u5df2\u6392\u961f",
+        )
+        self.assertTrue(adapter._consume_bridge_echo("uia_g1", echoed),
+                        "our own reply must be recognised")
+        self.assertFalse(outbound.echo_pending, "one echo only")
+
+    def test_an_unrelated_at_message_is_not_swallowed_as_an_echo(self):
+        # Negative control: suffix matching must not become a way to drop real
+        # messages. A row that merely CONTAINS our text in the middle is not an echo.
+        adapter, _outbound = self.adapter_with_outbound("\u5df2\u6392\u961f")
+        genuine = uia.RawMessage(
+            sender="uia-unverified:row",
+            text="/dsh \u4e3a\u4ec0\u4e48\u5df2\u6392\u961f",
+        )
+        self.assertFalse(adapter._consume_bridge_echo("uia_g1", genuine))
+
+    def test_an_echo_without_a_recognised_at_prefix_is_not_consumed(self):
+        # The prefix must be an @ we honour; arbitrary leading text is not enough.
+        adapter, _outbound = self.adapter_with_outbound("\u5df2\u6392\u961f")
+        strange = uia.RawMessage(
+            sender="uia-unverified:row",
+            text="\u522b\u4eba\u8bf4\u5df2\u6392\u961f",
+        )
+        self.assertFalse(adapter._consume_bridge_echo("uia_g1", strange))
