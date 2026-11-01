@@ -364,6 +364,7 @@ Startup configuration validation failures also include `file`, `field`, and `iss
 
 ## Design
 
+- Layering, the message lifecycle, the channel-adapter contract and known trade-offs are documented in [ARCHITECTURE.md](ARCHITECTURE.md); the authoritative design record is [ADR-0001](docs/adr/0001-semantic-core-native-channel-adapters.md).
 - Registers one top-level **IM Bot** settings page containing the built-in IM channels and one AI Office Connector.
 - Maintains the Host, client, and runtime sources for the built-in channels and the Office Connector in this repository without external standalone plugins.
 - Follows the DeepSeek Harness language preference and switches the settings UI live between Chinese and English. Bot chat messages, command help, and the Telegram command menu follow the same interface language and switch live, with Chinese always as the fallback so untranslated text is sent verbatim.

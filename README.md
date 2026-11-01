@@ -380,6 +380,7 @@ Web 与机器人可同时处理同一审批，先提交的「批准一次」或�
 
 ## 设计
 
+- 分层结构、消息生命周期、渠道适配器契约与已知取舍见 [ARCHITECTURE.md](ARCHITECTURE.md)；架构取舍的权威记录是 [ADR-0001](docs/adr/0001-semantic-core-native-channel-adapters.md)；
 - Harness 一级设置菜单中只注册一个「IM机器人」设置页，其中包含内置 IM 渠道和一个 AI Office Connector；
 - 内置渠道及 Office Connector 的 Host、客户端与运行时源码都在本仓库维护，不依赖外部独立插件；
 - 设置页跟随 DeepSeek Harness 的语言选择，在中文和 English 之间即时切换；机器人发出的聊天消息、命令帮助和 Telegram 命令菜单同样跟随该界面语言并即时切换，中文始终为兜底，未收录的文案原样输出；
