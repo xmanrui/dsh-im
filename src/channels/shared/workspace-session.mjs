@@ -5,6 +5,14 @@ import { t } from './i18n.mjs';
 
 export const WORKSPACE_SESSION_STALE = 'workspace-session-stale';
 
+/**
+ * How many times one message may be re-bound after `state.setSession` refused to
+ * persist. A workspace switch that raced the binding needs exactly one retry;
+ * anything beyond that is a store that will not accept, and each attempt would
+ * leave a freshly created Session behind.
+ */
+const MAX_REFUSED_PERSISTS = 2;
+
 function workspaceSessionStaleError() {
   const error = new Error('The conversation workspace changed before the prompt was sent.');
   error.code = WORKSPACE_SESSION_STALE;
@@ -162,6 +170,11 @@ export async function askInWorkspaceSession({
   let replacedSessionId;
   let replacementReason;
   const canCreateSession = typeof harness?.createSession === 'function';
+  // `state.setSession` can refuse to persist (a stale bot scope or a workspace
+  // generation that moved) and the lock reports that as null. One retry is useful
+  // -- the rebind lands in the new workspace -- but a store that never accepts must
+  // not be able to create one orphaned Session per pass.
+  let refusedPersists = 0;
   while (true) {
     const diagnostic = { stage: 'session.prepare', submissionState: 'not-submitted' };
     let dsBotSession = false;
@@ -208,7 +221,20 @@ export async function askInWorkspaceSession({
         }
         return { sessionId, session };
       });
-      if (!binding) continue;
+      if (!binding) {
+        // A refused persist normally means the workspace moved under the lock, so
+        // retrying once is the point (the retry binds in the new workspace). A store
+        // that keeps refusing, however, must not create a Session per pass forever --
+        // and an error here would be swallowed by the retry branch below, so the
+        // limit is counted instead of raised.
+        refusedPersists += 1;
+        if (refusedPersists > MAX_REFUSED_PERSISTS) {
+          throw Object.assign(new Error('The conversation binding could not be saved.'), {
+            code: 'session-binding-refused',
+          });
+        }
+        continue;
+      }
       diagnostic.sessionId = binding.sessionId;
       if (binding.recovered === 'corrupt') {
         await onNotice?.(t('绑定会话的日志已损坏，已切换到新会话并继续处理本条消息。原会话记录已保留，历史上下文不会自动带入。'));

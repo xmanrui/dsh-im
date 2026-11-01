@@ -118,6 +118,24 @@ test('an archived binding fails without replacement when the Harness cannot crea
   assert.equal(bound, SESSION, 'an unrepairable binding is never silently rewritten');
 });
 
+test('a refused persist ends the message instead of creating a Session per retry', async () => {
+  // state.setSession returning false (a stale bot scope, or a workspace generation
+  // that moved) used to fall into `continue`, which created another Session on every
+  // pass and never returned. One Session, one failure, no loop.
+  const f = fixture(); f.archived = true;
+  let created = 0;
+  await assert.rejects(askInWorkspaceSession({
+    harness: f.client,
+    state: { sessionFor: () => SESSION, setSession: async () => false },
+    key: 'direct:owner', text: 'hello',
+  }), { code: 'session-binding-refused' });
+  created = f.created ?? 0;
+  // The point is that the count is bounded, not that it is one: a workspace switch
+  // that raced the bind legitimately needs a retry, so the limit is small but > 1.
+  assert.ok(created >= 1 && created <= 3, `binding retries must be bounded, got ${created}`);
+  assert.equal(f.calls.filter((method) => method === 'session.prompt').length, 0,
+    'no prompt is submitted when the binding cannot be saved');
+});
 test('an archive discovered after the prompt was accepted is reported, never replayed into a second Session', async () => {
   const f = fixture();
   f.onPrompt = () => { f.archived = true; };
