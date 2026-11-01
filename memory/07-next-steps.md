@@ -364,3 +364,81 @@
 - [ ] 真实微信群发消息验证（需受控授权）。
 - [ ] 投递失败仍带错误码（仓内契约，见第十四轮说明）。
 - [ ] 设置界面 / RPC 未做；其余 12 渠道未接。
+
+## 已闭环（2026-11-02 第十六轮：M5/M3/M4/H4.1 + 报告自身四处过期读数更正）
+
+- [x] **M5 语音链去平台依赖** → `ac397eea`：feishu `createVoice` 暴露 `runFfmpeg` 注入位
+      （与 telegram 侧既有 `createTelegramVoiceTranscriber({ runFfmpeg })` 同形态，非新发明），
+      测试注入「node 跑跨平台替身 `fixtures/ffmpeg-stub.mjs`」的真子进程 runner；
+      `test/helpers/ffmpeg-binary.mjs` 定向定位本机可用 ffmpeg（PATH 无，imageio_ffmpeg wheel 自带 v7.1）。
+      读数：feishu voice 13 pass/**0 skip**、telegram voice 18 pass/**0 skip**、全量 skipped **8→2**。
+      负控三条：替身退非 0⇒reject(`stub exit 1`)、`.sh` 交生产 runner⇒`EFTYPE`、假路径⇒`ENOENT`。
+      余下 2 条 skip 需要真实微信群环境 / POSIX chmod 语义，不是夹具能替的，保留并注明成因。
+- [x] **M3 渠道热路径基准** → `bc27b224`：`scripts/benchmark-channels.mjs` 六条纯 CPU 热路径
+      （固定种子 LCG 语料 + warmup + nearest-rank 中位数），下限 = 标定值 ÷ 20。
+      标定读数 [本机 win32 node v24.16.0 2026-11-02T06:52+08:00]：extractText 3.04M /
+      splitText 1.03M / matrix normalize 308k / planOutbound 19.0k / strip+flatten 12.7k /
+      decideObserved 6.75M ops/s。`test/benchmark-floor.test.mjs` 9 条契约。CI job 为警告态
+      （`continue-on-error`），因为免费 runner 算力抖动不该把 PR 判红。
+- [x] **M4 覆盖率入 CI** → `62f89f45`：`scripts/coverage-report.mjs` 解析 lcov，只算 src/+plugin-src/。
+      首次标定 **lines=89.97%** functions=83.89% branches=81.14%（471 文件，全程 40s），阈值取 85%。
+      这张表立刻暴露人看不见的盲区：`wecom-app-controller.mjs` **25.05%**、`matrix-controller.mjs`
+      **26.39%**（≥300 行大文件低覆盖 Top2）—— 登记为 M4.2 的具体靶子。
+      负控三条 exit 码直测：95%→1、空 lcov→1、85%→0（不经管道，管道会把退出码换成 tail 的）。
+- [x] **H4.1 治理/覆盖率/基准各自成 CI job** → `66f8078c`：ci.yml 5 job（PyYAML 解析验过结构）；
+      `test/ci-workflow.test.mjs` 5 条本地判据钉住 job 存在性、阻断/警告态分工、各 job 跑自己的
+      判据命令、coverage job 必装 ffmpeg（M5 的另一半），以及**每条 uses 必须是 40 位提交 SHA**。
+- [x] **产物同笔重建** → `80657a05`：package.json 的 files 加两个新脚本 ⇒ manifest 编进 bundle，
+      守卫正确判红（`BUILT_ARTIFACTS_DRIFT`）。提交前实测归因：他人未提交的
+      `wechat_group_uia.py` 独有标识符（visible_delta / _overlap_length / sent-as-image / no-fallback）
+      在新旧 bundle 里**都是 0 次命中** ⇒ 没把别人代码扫进我的产物（R328 纪律）。
+- [x] **报告自身四处过期读数更正 + §8** → `aa0b15dd`：这轮最该记的一条。
+      ① 能力渗透率 3/3/6 → **2/2/4**（分卷 02 写在 matcher 收窄之前，收窄未回改；总格数 56
+         两边一致 ⇒ 只看总数发现不了）；② `nonebot/message.py` 被写成「消息段模型」，
+         实测是事件总线（578 行、`class MessageSegment` 命中 0），段模型在
+         `nonebot/internal/adapter/message.py`（12,695 B/434 行）；③ `gateway.go` 19,673→**20,347 B/674 行**、
+         `bridge.go` 3,030→**3,165 B/135 行**；④ LangBot `ARCHITECTURE.md` 在**仓库根**不是 docs/，
+         README 是 **6** 语言不是 5。§1/§2 的本仓现状列同步 18 处（H4/注册表/基准/覆盖率/
+         ARCHITECTURE 都已在盘却仍写「缺失/建议」，文档分值 6/10→8/10）。
+      实施顺序刻意是「**先让判据报红再改文档**」：给 `verify-benchmark-report.mjs` 加判据二
+      （报告行首 `| 语音 | N/M |` 必须等于 `collectChannelMatrix()` 实测），第一次跑就输出
+      `BENCHMARK_REPORT_MATRIX_MISMATCH: 语音: report=3/14 matrix=2/14 | …` 三处全抓。
+- [x] **上游复现两件落地**（补 §5.8 的第①②项）：matterbridge 全量 clone + 284 行 JS 复现
+      12/12 绿（`_research/bench2/repro-matterbridge-gateway-thin-api/`）；NoneBot2 因本机
+      GitHub 443 被代理阻断未能 clone，按退路降级 `gh api contents` 取原文 + 125 行复现 10/10 绿。
+      两条新建议入报告 §8.2：**N1** 注册条目补 `capabilities`（上游把能力放第二张表 ⇒ harmony
+      的 typing 代码不可达，我已独立复核：`grep -rn UserTypingSupport gateway/bridgemap/*.go`
+      只有 discord/slack/定义三行）；**N2** 投递能力声明 1/14 → 14/14。
+- [x] 门禁终读数（2026-11-02 07:2x+08:00）：`npm run check` **exit 0**
+      `4959 tests / 4957 pass / 0 fail / skipped 2`、`BUILT_ARTIFACTS_OK 2 files match HEAD`、
+      `CAPABILITY_MATRIX_OK 14 channels, 2 document(s)`、
+      `BENCHMARK_REPORT_OK dimensions=8 sections=4 tables=123 numbers=1038 capabilityClaimsChecked=yes`、
+      `GOVERNANCE_OK 7 files, cross-references intact`。
+- [x] 部署面读回：profile 符号链接 `~/.dsh/profiles/desktop/node_modules/@xmanrui/dsh-im`
+      → `D:/codex/DSH-IM/rv5.8.0`，实测安装件与工作树 `lib/index.js` md5 同为
+      `74d2dd2d1e40f5c2ec3a2d49b63b9077` = HEAD blob；适配器进程 3092 正跑该仓库路径。
+      只读线上验证：`verify-adapter-resolution.mjs` PASS、`verify-wechat-group-live.mjs` PASS。
+
+## 未闭环（第十六轮）
+
+- [ ] **推送被本机网络卡住**：`git push fork feat/wechat-groups` 三次全红，实录
+      `Failed to connect to github.com:443 over proxy 127.0.0.1 after 0 ms` ⇒ 与子代理 clone
+      受阻是同一个环境事实，不是凭据或权限问题（`gh auth status` 仍显示已登录）。
+      后果：PR #516 的 head 停在 `fbdf0773`，本轮 7 笔提交（HEAD `80657a05`）只在本地。
+      下一步：网络恢复后原样重推即可（幂等，fast-forward）；本地已用 `npm run check` 代替 CI。
+- [ ] **宿主未重启**（老大本轮明令「禁止自杀重启」）：新 bundle 已在盘并经 md5 读回，
+      但 ESM 模块不被热换（`cordis.patch.yml:353` 有 2026-11-02 04:21 的实测记录：
+      touch patch 只重挂补丁层，插件 bundle 仍在宿主模块缓存里）。
+      待老大允许重启时一次生效；本轮不擅自重启宿主。
+- [ ] **上游 issue 未提交**：四条候选缺陷的**源码事实**我都已独立复核（详卷第 7 节），
+      但 nonebot 两条（telegram `pop`/`get`、feishu `to_post` 就地改名）的触发证据只到
+      「按源码求值顺序推导 + 标准库复刻」，未端到端跑过真实 `bot.send()`；本机 443 不通
+      也无法验证。按「证据不足不冒充完成」留待可联网机器坐实后再提。
+- [ ] Koishi / LangBot 两篇五节笔记：⏳ 在办（首轮子代理读完未落盘，第二轮重派；
+      `koishi-adapter-di.md` 当前 366 B 是骨架，`langbot-domain-layering.md` 尚未创建
+      —— 但其分类脚本 37,996 B 与 `outputs/domain-mapping.md` 17,847 B 已在盘）。
+- [ ] **M2 `shared/` 二级分层**未动：与本轮语音/基准改动写面重叠，按「同文件先串后派」推迟。
+- [ ] M3.2 基准 `Infinity` 边界**刻意未修**：改判定会让刚写回的下限标定与 CI 首次读数
+      失去可比性；已钉成测试 `known edge…recorded on purpose`，防止将来被顺手改掉而无人察觉。
+- [ ] 分支覆盖阈值未设（81.14%，只给行覆盖设了 85%，避免一拍就红）。
+- [ ] 真实微信群未发消息验证（需受控授权）；设置界面 / RPC 未做；其余 12 渠道未接记忆与拟人。
