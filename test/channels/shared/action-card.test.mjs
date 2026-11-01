@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  ACTION_CARD_BUTTON_TEXT_MAX,
   ACTION_CARD_CALLBACK_MAX_BYTES,
   ACTION_CARD_STATUS,
   ActionCardRegistry,
   actionCardStateText,
   createActionNonce,
   createCallbackNamespace,
+  truncateButtonText,
 } from '../../../src/channels/shared/action-card.mjs';
 
 function fakeClock(start = 1_000_000) {
@@ -232,4 +234,35 @@ test('a released claim never revives a dead card', () => {
   clock.advance(50);
   assert.equal(clocked.releaseClaim('nonce-ttl'), null, 'an expired card stays expired');
   assert.equal(clocked.claim('nonce-ttl').status, ACTION_CARD_STATUS.EXPIRED);
+});
+
+/* ---------------------------------------------------------------------------
+ * Button labels are the last place arbitrary text touches the UI
+ *
+ * Workspace paths, session titles and preset labels all end up on a button.
+ * A control character breaks the layout; a bidirectional override reorders what
+ * the reader sees — next to a "✓ current" marker that is actively misleading.
+ * Every card used to do this slightly differently, and two of them skipped the
+ * control-character pass entirely.
+ * ------------------------------------------------------------------------- */
+
+test('a button label never carries control or bidi characters', () => {
+  const dirty = '/home/op/proj\u0000ect\u202e\u0007';
+  const label = truncateButtonText(dirty);
+  assert.doesNotMatch(label, /[\u0000-\u0008\u202a-\u202e]/u, JSON.stringify(label));
+  // The visible part survives: sanitising must not blank the label.
+  assert.match(label, /home\/op\/proj/u, label);
+});
+
+test('an empty or non-string label still yields one visible character', () => {
+  assert.equal(truncateButtonText(''), '•');
+  assert.equal(truncateButtonText(null), '•');
+  assert.equal(truncateButtonText(undefined), '•');
+  assert.equal(truncateButtonText('\u0000\u0007'), '•', 'only control chars leaves the placeholder');
+});
+
+test('a long label is cut at the budget with an ellipsis', () => {
+  const label = truncateButtonText('x'.repeat(200));
+  assert.equal(label.length, ACTION_CARD_BUTTON_TEXT_MAX);
+  assert.ok(label.endsWith('…'), label.slice(-4));
 });
