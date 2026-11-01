@@ -856,6 +856,33 @@ class PressEnterFocusGuardTests(unittest.TestCase):
         backend.press_enter()
         self.assertEqual(target.typed, ["{Enter}"])
 
+    def test_focus_reported_as_the_main_window_still_sends(self):
+        # Second live-machine shape: while the panel is minimised, UIA often
+        # reports the focused element as the top-level window rather than the
+        # child edit. Requiring the child's automation id there would refuse a
+        # send that is provably safe, because the keyboard belongs to WeChat.
+        target = self.Input(handle=0, automation_id="chat_input_field")
+        target.ClassName = "mmui::ChatInputField"
+        top = self.Input(handle=44565750, automation_id="")
+        top.ClassName = "mmui::MainWindow"
+        backend = self.build(target, focused=top)
+        backend._window = self.Input(handle=44565750)
+        backend.press_enter()
+        self.assertEqual(target.typed, ["{Enter}"])
+
+    def test_focus_in_another_apps_top_level_is_refused(self):
+        # The same shape must not accept a foreign window handle: that Enter
+        # would land in the operator's foreground app.
+        target = self.Input(handle=0, automation_id="chat_input_field")
+        target.ClassName = "mmui::ChatInputField"
+        foreign = self.Input(handle=264128, automation_id="")
+        foreign.ClassName = "Chrome_WidgetWin_1"
+        backend = self.build(target, focused=foreign)
+        backend._window = self.Input(handle=44565750)
+        with self.assertRaises(uia.SafetyError) as ctx:
+            backend.press_enter()
+        self.assertEqual(ctx.exception.code, "focus_not_on_target")
+        self.assertEqual(target.typed, [])
     def test_same_automation_id_in_a_foreign_class_is_refused(self):
         # Another app could expose an element named chat_input_field; the mmui
         # class is what makes the match specific to WeChat.

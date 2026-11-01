@@ -1205,11 +1205,20 @@ class UiaBackend:
             return False
         if focused is None:
             return False
+        focused_handle = _safe_property(focused, "NativeWindowHandle")
+        # A minimised panel often reports its top-level window, not the child
+        # edit, as the focused element. The keyboard then belongs to WeChat for
+        # certain, so the Enter cannot leak into another app: compare against the
+        # handle of the very main window this backend attached to.
+        window = getattr(self, "_window", None)
+        main_handle = _safe_property(window, "NativeWindowHandle") if window else None
+        if main_handle and focused_handle:
+            if int(focused_handle) == int(main_handle):
+                return True
         target_id = _safe_property(control, "AutomationId")
         if not target_id or _safe_property(focused, "AutomationId") != target_id:
             return False
         handle = _safe_property(control, "NativeWindowHandle")
-        focused_handle = _safe_property(focused, "NativeWindowHandle")
         if handle and focused_handle:
             return int(handle) == int(focused_handle)
         if not handle and not focused_handle:
