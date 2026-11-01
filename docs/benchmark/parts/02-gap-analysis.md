@@ -12,16 +12,16 @@
 
 | 能力 | 覆盖 | 缺口渠道 | 上游对照 |
 | --- | --- | --- | --- |
-| 语音 | 3/14（feishu, telegram, weixin 之外） | — | chatgpt-on-wechat 47,732★ 在微信侧原生支持语音消息双向往返；本仓语音只到「转写 + 合成」且在 feishu 侧有 `transcribeIncoming`/`synthesize` 显式能力对象（`src/channels/feishu/bridge.mjs` 第 682-816 行） |
-| 卡片/按钮 | 3/14 | — | 上游普遍仅 Slack/Telegram 具备原生交互卡；本仓已有 Feishu 卡片 + Telegram `sendInteractionCard`，属同档 |
-| 流式/编辑 | 6/14 | — | matterbridge（Go）不做流式编辑，本仓在此维度领先 |
+| 语音 | **2/14**（feishu、telegram）｜旧值 3/14 含 weixin，系 matcher 收窄前读数，2026-11-02 第二轮按 `collectChannelMatrix()` 复算更正 | — | chatgpt-on-wechat 47,732★ 在微信侧原生支持语音消息双向往返；本仓语音只到「转写 + 合成」且在 feishu 侧有 `transcribeIncoming`/`synthesize` 显式能力对象（`src/channels/feishu/bridge.mjs` 第 682-816 行） |
+| 卡片/按钮 | **2/14**（feishu、telegram）｜旧值 3/14 同上复算更正 | — | 上游普遍仅 Slack/Telegram 具备原生交互卡；本仓已有 Feishu 卡片 + Telegram `sendInteractionCard`，属同档 |
+| 流式/编辑 | **4/14**（discord、feishu、slack、telegram）｜旧值 6/14 同上复算更正 | — | matterbridge（Go）不做流式编辑，本仓在此维度领先 |
 
 **特色功能（本仓独有，上游没有对应物）**：
 1. **统一语义层 + 主动投递**：`plugin-src/host/delivery-service.mjs` / `delivery-adapter.mjs`，把产物按 `target kind`（user/group/room/thread/dm/chat/topic/conversation）路由到各渠道；上游没有任何一个项目有「跨渠道统一产物投递」。
 2. **会话工作区绑定**：`src/channels/shared/conversation/` + `bot-workspace-store.mjs`（2,838 行），每个 IM 机器人各自绑定 DSH 工作区。
 3. **群历史与群文件**（`group-history-store.mjs` + `group-history.mjs` + `docs/group-history.md` 15 KB）：把群消息落 SQLite 并可回查。
 
-**结论**：功能覆盖在本档位（14 渠道）不落后于任何上游；差距在**扩展功能的渠道渗透率**（语音 3/14、卡片 3/14）和**特色功能的可发现性**（这三个特色在 README 里是散句，没有独立章节与示意图）。
+**结论**：功能覆盖在本档位（14 渠道）不落后于任何上游；差距在**扩展功能的渠道渗透率**（语音 2/14、卡片 2/14、流式 4/14 —— 三值均为 2026-11-02 第二轮 `collectChannelMatrix()` 复算，旧值 3/3/6 系 `017e3ae` matcher 收窄前的读数且未回改分卷，详见 §8）和**特色功能的可发现性**（这三个特色在 README 里是散句，没有独立章节与示意图）。
 
 ### 2.2 技术架构设计
 
@@ -58,7 +58,7 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 - 单点性能修复：`4fe8b1d` 把微信群发送按钮查找从 34.5 s → **156 ms**（提交标题与 body 记录）；
 - 构建确定性：两次 `npm run build` 产物 sha256 相同（改造 ② 的判据前提）。
 
-**差距**：本仓**没有任何吞吐/延迟基准脚本**。上游 matterbridge 是 Go 单进程网关（`gateway.go` 19,673 B）、wechaty 以事件循环承载多会话；这些都没有可直接对标的「消息/秒」数字，但它们的发布流程有基准记录，本仓没有。这是最大的一块量化空白，改进项 H3 提出先建最小基准脚本。
+**差距**：本仓**没有任何吞吐/延迟基准脚本**。上游 matterbridge 是 Go 单进程网关（`gateway.go` 20,347 B / 674 行）、wechaty 以事件循环承载多会话；这些都没有可直接对标的「消息/秒」数字，但它们的发布流程有基准记录，本仓没有。这是最大的一块量化空白，改进项 H3 提出先建最小基准脚本。
 
 ### 2.5 可扩展性
 
@@ -87,7 +87,7 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 | 变更日志 | `CHANGELOG.md` 312 KB | 2/2 | `wc -c` |
 | 示例/架构 | ADR 1 篇；无 `ARCHITECTURE.md` | 1/2 | `ls docs/adr` |
 
-合计 **6/10**。上游 LangBot 有 `ARCHITECTURE.md` 31,138 B + CONTRIBUTING + CLA + 5 语言 README。
+合计 **6/10**。上游 LangBot 有仓库根 `ARCHITECTURE.md` 31,138 B + `CONTRIBUTING.md` 2,183 B + `CLA.md` 12,158 B + 6 语言 README（README/CN/ES/FR/JP/KO，各 10.7–13.1 KB 实测）。
 
 ### 2.8 适用场景
 

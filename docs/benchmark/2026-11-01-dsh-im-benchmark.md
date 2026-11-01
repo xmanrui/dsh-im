@@ -44,11 +44,11 @@
 | --- | --- | --- | --- | --- |
 | 1 | 功能模块覆盖 | 14 个渠道目录，9 类能力矩阵由源码生成（见 §1.2） | LangBot 18,658★，Python，单仓覆盖 QQ/微信/飞书/钉钉/Discord/Telegram/Slack，`src/langbot/pkg` 分 agent/api/box/cloud/command/config/core/discover/entity/i18n/operation_trace 十余个域 | **渠道数相当（14 vs ~8），域分层落后**：本仓 `src/channels/shared` 83 个平铺文件无二级分层 |
 | 2 | 技术架构设计 | 统一语义核心 + 渠道原生适配（ADR-0001），`shared` 24,638 行占 src 30.29% | Koishi 6,309★，`packages/core/src` 只有 bot/session/context/middleware/command 等 13 个文件，`bot.ts` 仅 1,803 B | **本仓核心抽象未收敛**：上游把 Adapter 契约压到 1.8 KB 的 `bot.ts`，本仓同类逻辑散在 83 个文件里 |
-| 3 | 实现方式 | 289 个 mjs（279 src + 10 tests）、ESM、无 TS、无 lint 配置、无贡献指南 | NoneBot2 7,777★ 有 `nonebot/plugin/__init__.py` 8,030 B 的插件加载器 + 类型标注（`py.typed`）；LangBot 有 `CONTRIBUTING.md`、`.pre-commit-config.yaml`、`golangci` 级等价门禁 | **规范层缺失**：本仓无 CONTRIBUTING / SECURITY / ISSUE 模板 / lint/format 配置（`ls` 实测） |
-| 4 | 性能表现 | 全量 4,752 用例 25 s 左右；`wechat_group_uia.py` 找按钮 156 ms（commit 4fe8b1d 实测 34.5 s → 156 ms） | matterbridge 用 Go 单进程多协议（`gateway.go` 19,673 B），wechaty 23,461★ 以 puppeteer 事件循环承载 | **无可比基准**：本仓无吞吐/延迟基准脚本，性能证据只有单点修复记录（这是最大量化空白） |
-| 5 | 可扩展性 | 新增渠道 = 新建 `src/channels/<name>/` + `plugin-src/host/channels/<name>/index.mjs` + `plugin-src/client/channels/<name>/`，三处手工接线（`plugin-src/host/index.mjs` 第 2-15 行 import、第 60-75 行 channels 数组） | Koishi 的插件即包（`packages/*`），服务由 `ctx.get()` 注入；NoneBot2 的适配器目录 `nonebot/adapters` 为可外部安装的独立包 | **接线仍手工**：本仓 14 个渠道在 host 里是 14 条 import + 14 条数组项，无注册表/自动发现 |
+| 3 | 实现方式 | 289 个 mjs（279 src + 10 tests）、ESM、无 TS、无 lint/format 配置；**贡献与安全治理骨架已落地**（`f3ad28e`：CONTRIBUTING/SECURITY/CODE_OF_CONDUCT/issue与PR 模板 + `verify-governance.mjs` 判据） | NoneBot2 7,777★ 有 `nonebot/plugin/__init__.py` 8,030 B 的插件加载器 + 类型标注（`py.typed`）；LangBot 有 `CONTRIBUTING.md`、`.pre-commit-config.yaml`、`golangci` 级等价门禁 | **规范层缺失**：本仓无 CONTRIBUTING / SECURITY / ISSUE 模板 / lint/format 配置（`ls` 实测） |
+| 4 | 性能表现 | 全量 4,752 用例 25 s 左右；`wechat_group_uia.py` 找按钮 156 ms（commit 4fe8b1d 实测 34.5 s → 156 ms） | matterbridge 用 Go 单进程多协议（`gateway.go` 20,347 B），wechaty 23,461★ 以 puppeteer 事件循环承载 | **基准已建立**（`bc27b224`）：`scripts/benchmark-channels.mjs` 六条热路径，固定种子语料 + 下限判据 + CI 警告态 job；跨项目仍无同口径 msg/s 可比数 |
+| 5 | 可扩展性 | 新增渠道 = 新建 `src/channels/<name>/` + `plugin-src/host/channels/<name>/index.mjs` + `plugin-src/client/channels/<name>/`，三处手工接线（`plugin-src/host/index.mjs` 第 2-15 行 import、第 60-75 行 channels 数组） | Koishi 的插件即包（`packages/*`），服务由 `ctx.get()` 注入；NoneBot2 的适配器目录 `nonebot/adapters` 为可外部安装的独立包 | **注册表已落地**（`f192d382`）：`plugin-src/host/channel-registry.mjs`（62 行）成为渠道集合与顺序唯一来源，`index.mjs:63-66` 只剩一次 `map()`；**新缺口是注册条目里没有能力声明**（见 §8 建议 N1） |
 | 6 | 维护状态 | 3,045★ / 86 open issues / 最近推送 2026-11-01T13:07:26Z / 单分支主力 `feat/wechat-groups` | LangBot 最近推送 2026-11-01T15:55:19Z（同日）、open 127；chatgpt-on-wechat 47,732★ 最近推送 2026-11-01T07:33:51Z | **活跃度同档**；但本仓 CI 只覆盖 `test/*.test.mjs` + 两条 Windows 专题，无 lint/覆盖率/发布流水线 |
-| 7 | 文档完善程度 | README 80 KB + 英文版 + `docs/` 98 个 md + ADR 1 篇 + 12 篇 Issue 方案记录；缺 CONTRIBUTING/SECURITY/API 参考 | LangBot 有 `ARCHITECTURE.md`（31,138 B）+ `CONTRIBUTING.md` + `CLA.md` + 5 语言 README（README/CN/ES/FR…） | **体系化文档落后**：本仓有大量「事后记录」但缺「架构总览 + 贡献流程」两块骨架 |
+| 7 | 文档完善程度 | README 80 KB + 英文版 + `docs/` 98 个 md + ADR 1 篇 + 12 篇 Issue 方案记录 + `ARCHITECTURE.md`（356 行/8 章）+ 治理七件套；**仍缺独立 API 参考** | LangBot 有仓库根 `ARCHITECTURE.md`（31,138 B）+ `CONTRIBUTING.md` + `CLA.md` + 6 语言 README（README/CN/ES/FR/JP/KO） | **体系化文档落后**：本仓有大量「事后记录」但缺「架构总览 + 贡献流程」两块骨架 |
 | 8 | 适用场景 | 必须宿主为 DeepSeek Harness（`dsh.compatibility.dsh` 钉 `0.2.1-rc.2`），一装即得 14 渠道 + 会话隔离 + 产物回投 | LangBot/chatgpt-on-wechat 可独立部署为机器人服务；matterbridge 可独立网关 | **场景窄但粘性高**：本仓不是通用框架，是 DSH 的 IM 面；兼容面仅声明 2 个宿主版本 |
 
 ### 1.2 渠道 × 能力（本仓实测，由源码生成，见 `README.md` 同名表）
@@ -60,9 +60,9 @@
 | 指标 | 本仓 | 上游/参照 | 差距 | 证据 |
 | --- | --- | --- | --- | --- |
 | 核心抽象单文件体积 | `src/channels/shared` 83 文件 / 24,638 行 | Koishi `packages/core/src/bot.ts` 1,803 B | 核心契约未收敛（上游一个文件的量级，本仓是一层目录） | 分卷 05 §2.5；`gh api` bot.ts `.size` |
-| 单文件最大 | `src/channels/feishu/bridge.mjs` 6,695 行 | matterbridge `gateway.go` 19,673 B（≈500 行 Go） | 本仓单文件超上游整模块 | 分卷 05 §2.4 |
+| 单文件最大 | `src/channels/feishu/bridge.mjs` 6,695 行 | matterbridge `gateway.go` 20,347 B（674 行 Go；旧注「≈500 行」是按字节估算的，实测该估法不可用：steam.go 2,189 B 实为 95 行、mattermost.go 4,839 B 实为 194 行） | 本仓单文件超上游整模块 | 分卷 05 §2.4 |
 | 测试/源码行比 | 1.586（129,003 / 81,354） | 无上游同口径读数 | — | 分卷 05 §2.3 |
-| 治理文件 | 0（无 CONTRIBUTING/SECURITY/模板） | LangBot：`CONTRIBUTING.md` + `CLA.md` + `.pre-commit-config.yaml` | 完全缺失 | `gh api` 目录列举；本仓 `ls` |
+| 治理文件 | 7（`f3ad28e`，交叉引用有判据） | LangBot：`CONTRIBUTING.md` + `CLA.md` + `.pre-commit-config.yaml` | 已闭合，仍缺 CLA 与 pre-commit | `node scripts/verify-governance.mjs` |
 | CI 覆盖 | 2 job（ubuntu `npm run check` + windows 8 个专项） | 无同口径，但上游有 release/lint 流水线 | 缺 lint / 覆盖率 / 发布流水线 | `.github/workflows/ci.yml` 55 行 |
 | 入库构建产物 | 11,923,866 B（2 文件） | LangBot/matterbridge 不入库产物 | 体积与漂移风险 | 分卷 05 §2.2；改造 ② 已加漂移守卫 |
 | 入站能力盲区 | skip 8 / 4,736 = 0.17%，其中 6 条依赖 POSIX ffmpeg | — | 语音/媒体链路本机永不执行 | 分卷 05 §3.2 |
@@ -83,16 +83,16 @@
 
 | 能力 | 覆盖 | 缺口渠道 | 上游对照 |
 | --- | --- | --- | --- |
-| 语音 | 3/14（feishu, telegram, weixin 之外） | — | chatgpt-on-wechat 47,732★ 在微信侧原生支持语音消息双向往返；本仓语音只到「转写 + 合成」且在 feishu 侧有 `transcribeIncoming`/`synthesize` 显式能力对象（`src/channels/feishu/bridge.mjs` 第 682-816 行） |
-| 卡片/按钮 | 3/14 | — | 上游普遍仅 Slack/Telegram 具备原生交互卡；本仓已有 Feishu 卡片 + Telegram `sendInteractionCard`，属同档 |
-| 流式/编辑 | 6/14 | — | matterbridge（Go）不做流式编辑，本仓在此维度领先 |
+| 语音 | **2/14**（feishu、telegram）｜旧值 3/14 含 weixin，系 matcher 收窄前读数，2026-11-02 第二轮按 `collectChannelMatrix()` 复算更正 | — | chatgpt-on-wechat 47,732★ 在微信侧原生支持语音消息双向往返；本仓语音只到「转写 + 合成」且在 feishu 侧有 `transcribeIncoming`/`synthesize` 显式能力对象（`src/channels/feishu/bridge.mjs` 第 682-816 行） |
+| 卡片/按钮 | **2/14**（feishu、telegram）｜旧值 3/14 同上复算更正 | — | 上游普遍仅 Slack/Telegram 具备原生交互卡；本仓已有 Feishu 卡片 + Telegram `sendInteractionCard`，属同档 |
+| 流式/编辑 | **4/14**（discord、feishu、slack、telegram）｜旧值 6/14 同上复算更正 | — | matterbridge（Go）不做流式编辑，本仓在此维度领先 |
 
 **特色功能（本仓独有，上游没有对应物）**：
 1. **统一语义层 + 主动投递**：`plugin-src/host/delivery-service.mjs` / `delivery-adapter.mjs`，把产物按 `target kind`（user/group/room/thread/dm/chat/topic/conversation）路由到各渠道；上游没有任何一个项目有「跨渠道统一产物投递」。
 2. **会话工作区绑定**：`src/channels/shared/conversation/` + `bot-workspace-store.mjs`（2,838 行），每个 IM 机器人各自绑定 DSH 工作区。
 3. **群历史与群文件**（`group-history-store.mjs` + `group-history.mjs` + `docs/group-history.md` 15 KB）：把群消息落 SQLite 并可回查。
 
-**结论**：功能覆盖在本档位（14 渠道）不落后于任何上游；差距在**扩展功能的渠道渗透率**（语音 3/14、卡片 3/14）和**特色功能的可发现性**（这三个特色在 README 里是散句，没有独立章节与示意图）。
+**结论**：功能覆盖在本档位（14 渠道）不落后于任何上游；差距在**扩展功能的渠道渗透率**（语音 2/14、卡片 2/14、流式 4/14 —— 三值均为 2026-11-02 第二轮 `collectChannelMatrix()` 复算，旧值 3/3/6 系 `017e3ae` matcher 收窄前的读数且未回改分卷，详见 §8）和**特色功能的可发现性**（这三个特色在 README 里是散句，没有独立章节与示意图）。
 
 ### 2.2 技术架构设计
 
@@ -116,10 +116,10 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 
 | 项 | 本仓 | 上游 | 差距 |
 | --- | --- | --- | --- |
-| 语言/类型 | 纯 JS（ESM），无 `tsc`、无 `jsconfig` 类型检查 | Koishi/Python 系全部带类型（`py.typed`、TS） | 无静态类型检查 |
+| 语言/类型 | 纯 JS（ESM），无 `tsc`、无 `jsconfig` 类型检查（**未闭合**） | Koishi/Python 系全部带类型（`py.typed`、TS） | 无静态类型检查 |
 | 格式/lint | 无 `.editorconfig` / `.eslintrc` / `.prettierrc`（`ls -a` 实测） | LangBot 有 `.pre-commit-config.yaml`；matterbridge 有 `.golangci.yaml` | 无 Lint 门禁 |
-| 测试形态 | `node:test`，289 个 mjs，4,752 用例，无覆盖率上报 | 上游有覆盖率/CI 矩阵 | 覆盖率未采集 |
-| 贡献流程 | 无 CONTRIBUTING / CODE_OF_CONDUCT / SECURITY / ISSUE 模板 / PR 模板 | LangBot：`CONTRIBUTING.md` + `CLA.md` | 完全缺失 |
+| 测试形态 | `node:test`，296 个 mjs，4,954 用例；**覆盖率已入 CI**（`62f89f45`：lcov → `src`+`plugin-src` 行覆盖 89.97%，阈值 85%） | 上游有覆盖率/CI 矩阵 | 已闭合（分支覆盖仍未设阈值） |
+| 贡献流程 | **已落地**：CONTRIBUTING / CODE_OF_CONDUCT / SECURITY / 3 个 issue 模板 / PR 模板，且 `verify-governance.mjs` 判交叉引用（`f3ad28e`） | LangBot：`CONTRIBUTING.md` + `CLA.md` + `.pre-commit-config.yaml` | 仍缺 CLA 与 pre-commit |
 | 构建产物 | `lib/index.js` 10.1 MB + `lib/client.js` 1.82 MB 入库 | 上游不入库产物 | 漂移风险（改造 ② 已加守卫） |
 
 ### 2.4 性能表现
@@ -129,11 +129,11 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 - 单点性能修复：`4fe8b1d` 把微信群发送按钮查找从 34.5 s → **156 ms**（提交标题与 body 记录）；
 - 构建确定性：两次 `npm run build` 产物 sha256 相同（改造 ② 的判据前提）。
 
-**差距**：本仓**没有任何吞吐/延迟基准脚本**。上游 matterbridge 是 Go 单进程网关（`gateway.go` 19,673 B）、wechaty 以事件循环承载多会话；这些都没有可直接对标的「消息/秒」数字，但它们的发布流程有基准记录，本仓没有。这是最大的一块量化空白，改进项 H3 提出先建最小基准脚本。
+**差距**：本仓**没有任何吞吐/延迟基准脚本**。上游 matterbridge 是 Go 单进程网关（`gateway.go` 20,347 B）、wechaty 以事件循环承载多会话；这些都没有可直接对标的「消息/秒」数字，但它们的发布流程有基准记录，本仓没有。这是最大的一块量化空白，改进项 H3 提出先建最小基准脚本。
 
 ### 2.5 可扩展性
 
-- **架构扩展性**：新增渠道需要改 3 处手工接线（见 2.2），且 `shared/` 无分层，新增能力容易再堆文件。
+- **架构扩展性**：新增渠道的 host 侧接线已由 `channel-registry.mjs` 收敛到 1 处（`f192d382`）；`plugin-src/client/` 三件套与 `src/channels/<name>/` 仍需新建，且注册条目**不含能力声明**（⇒ 建议 N1）。`shared/` 仍无二级分层（M2 未动）。
 - **功能扩展机制**：命令由 `src/channels/shared/command-catalog.mjs` 统一登记，这一块已收敛（好）。
 - **第三方集成**：`package.json` 的 `dsh.client.inject` 列出 5 个宿主包依赖；`dsh.compatibility.dsh` 只声明 `0.2.0-rc.2`/`0.2.1-rc.2` 两个宿主版本 —— 兼容面窄，但声明是诚实的（不承诺未验证版本）。
 
@@ -154,11 +154,11 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 | --- | --- | --- | --- |
 | API 文档 | 无独立 API 参考；`docs/client-integration.md` 12 KB 是唯一接口文档 | 1/2 | `ls docs` |
 | 使用教程 | README 80 KB 安装/配置/命令/故障全覆盖 + 12 篇 Issue 方案 | 2/2 | README 一级标题 15 个 |
-| 贡献指南 | **无** | 0/2 | `ls CONTRIBUTING*` 失败 |
+| 贡献指南 | CONTRIBUTING + SECURITY + CODE_OF_CONDUCT + issue/PR 模板，且有 `verify-governance.mjs` 判据 | 2/2 | `node scripts/verify-governance.mjs` → `GOVERNANCE_OK 7 files` |
 | 变更日志 | `CHANGELOG.md` 312 KB | 2/2 | `wc -c` |
-| 示例/架构 | ADR 1 篇；无 `ARCHITECTURE.md` | 1/2 | `ls docs/adr` |
+| 示例/架构 | ADR 1 篇 + `ARCHITECTURE.md`（356 行 / 8 个一级章节，引用路径 40 条实测存在） | 2/2 | `ls ARCHITECTURE.md docs/adr` |
 
-合计 **6/10**。上游 LangBot 有 `ARCHITECTURE.md` 31,138 B + CONTRIBUTING + CLA + 5 语言 README。
+合计 **8/10**（本轮两项各 +1：贡献指南 0→2、示例/架构 1→2）。上游 LangBot 有仓库根 `ARCHITECTURE.md` 31,138 B + `CONTRIBUTING.md` 2,183 B + `CLA.md` 12,158 B + 6 语言 README（README/CN/ES/FR/JP/KO，各 10.7–13.1 KB 实测）。
 
 ### 2.8 适用场景
 
@@ -268,14 +268,14 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 ### 5.2 NoneBot2（nonebot/nonebot2，7,777★，Python）
 
 - **结构**：`nonebot/{adapters,drivers,plugin,matcher,message,permission,rule,params}` —— **按「机制」而不是按「渠道」分文件**，渠道是可外部安装的适配器包。
-- **核心代码**：`nonebot/plugin/__init__.py` 8,030 B（插件加载/依赖检查/生命周期），`nonebot/message.py` 15,911 B（消息段模型）。
+- **核心代码**：`nonebot/plugin/__init__.py` 8,030 B（插件加载/依赖检查/生命周期），`nonebot/message.py` 15,911 B / 578 行是**事件总线**（`event_preprocessor`、`check_and_run_matcher`），不含 `class MessageSegment`；消息段模型在 `nonebot/internal/adapter/message.py` 12,695 B / 434 行（`class MessageSegment` 在第 25 行、`class Message` 在第 101 行）。旧文本把两者混为一处，2026-11-02 第二轮按 `gh api .../contents/<path>` 逐文件复算更正 —— 照旧指针去读会学错一整块。
 - **设计决策**：**消息段（MessageSegment）作为跨渠道通用表达**。任何渠道只要能把原生消息映射成消息段数组，就自动获得全部上层能力。
 - **可借鉴**：本仓已做了同类的事（统一语义层 `src/channels/shared/semantic/` 里 `artifact.mjs`/`delivery.mjs`/`reply-reference.mjs`），但**没有为「能力」本身建模**：本仓能表达「发一个产物」，却不能表达「这个渠道能不能发语音」。改造 ③ 的能力矩阵是这条差距的最小可行补丁。
 - **我的盲区**：`nonebot/dependencies` 的参数解析（依赖注入式 handler 参数）我没细读；本仓对应的是命令处理器参数解析。
 
 ### 5.3 LangBot（langbot-app/LangBot，18,658★，Python）
 
-- **结构**：`src/langbot/pkg/{agent,api,box,cloud,command,config,core,discover,entity,i18n,operation_trace,...}` —— 十余个域目录，docs 有 `ARCHITECTURE.md` 31,138 B。
+- **结构**：`src/langbot/pkg/{agent,api,box,cloud,command,config,core,discover,entity,i18n,operation_trace,...}` —— 十余个域目录，`ARCHITECTURE.md` 31,138 B（在**仓库根**，不在 docs/ 下；旧写法路径错，2026-11-02 第二轮按 gh api contents 复算更正）。
 - **核心代码**：`ARCHITECTURE.md` 是最有价值的一手材料：它把「一个 IM 消息如何变成 agent 轮次」画成流水线，比读代码更快。
 - **设计决策**：**域目录 + 架构文档先行**。与 Koishi 的插件化不同，LangBot 选择「单体分层」，用目录边界换可控性。
 - **可借鉴**：本仓 `src/channels/shared` 83 个文件平铺，本质是「没有域目录」。M2 的拆分方案直接来自这里。
@@ -290,7 +290,7 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 
 ### 5.5 matterbridge（42wim/matterbridge，7,609★，Go · 最后推送 2024-12）
 
-- **结构**：`bridge/` 下每个协议一个目录 + `bridge.go` 3,030 B 的**唯一接口**；`gateway/gateway.go` 19,673 B 负责路由与消息翻译。
+- **结构**：`bridge/` 下每个协议一个目录 + `bridge.go` 3,165 B / 135 行的**唯一接口**（`Bridger` 仅 4 个方法）；`gateway/gateway.go` 20,347 B 负责路由与消息翻译。
 - **设计决策**：**接口极薄、路由极厚**。所有协议实现 `Bridge` 接口的少数方法，翻译逻辑集中在 gateway —— 新增协议的成本是「实现接口」，不是「改路由」。
 - **可借鉴**：本仓相反（接口散、路由散）。如果要做 M1 的注册表，matterbridge 的 `bridge.go` 是最干净的模板参考。
 - **我的盲区**：Go 的接口是隐式实现，我没验证它是否有「能力声明」（应该是没有，因为 2024 年后未更新）。
@@ -415,3 +415,79 @@ EXIT=0
 
 副作用声明：本报告编写过程中**没有**修改任何上游项目文件、没有向其提 issue/PR、没有向任何仓库推送。
 
+
+---
+
+## 8. 第二轮更正与新增（2026-11-02 · 轮2）
+
+> 详卷：`docs/benchmark/parts/08-round2-corrections.md`（改造记录/新增建议/盲区闭合/未闭环登记）。
+> 本章只做两件事：**登记本轮落地的四项改造**，以及**把正文里已被复算证伪的数字就地
+> 更正并留痕**。它不改写第 1–7 章的历史读数。
+
+权威件最危险的失败不是写错，而是「代码演进了而文档没说」。本轮 §1/§2/§5 有四处正是
+这种状态 —— 人读两边各自都像真的，只有把两个来源放一起比才会现形（已做成判据，见 8.4）。
+
+### 8.1 本轮落地的四项改造（优先级高→低）
+
+| 序 | ID | 改造 | 提交 | 完成判据 | 负向对照 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | M5 | 语音/媒体链路去平台依赖 | `ac397eea` | feishu voice 13 pass/**0 skip**、telegram 18 pass/**0 skip**、全量 skipped **8→2** | 替身退非 0⇒reject、`.sh` 交生产 runner⇒`EFTYPE`、假路径⇒`ENOENT`（三条各证一类断言有牙） |
+| 2 | M3 | 渠道热路径吞吐/延迟基准 | `bc27b224` | `npm run benchmark`→`BENCHMARK_OK suites=6`；floor 契约测试 9 pass | 下限与 suite 必须恰好配对；`NaN/-1/0/-Infinity` 判红；缺 suite 判红；逐轮 checksum 非零 |
+| 3 | M4 | 覆盖率入 CI | `62f89f45` | `npm run coverage`→`COVERAGE_OK lines=89.97%`（阈值 85%） | 阈值 95→**exit 1**；空 lcov→exit 1；85→exit 0（exit 码直测不经管道） |
+| 4 | H4.1 | 治理/覆盖率/基准各自成 CI job | `66f8078c` | `test/ci-workflow.test.mjs` 5 pass；PyYAML 解析 5 job，benchmark 为警告态 | 每条 `uses` 必须 40 位 SHA；本轮我凭记忆写的 SHA 是编的，`gh api` 实查 `ea165f8d…`(v4.6.2) 才修正 |
+
+### 8.2 新增两条建议（来自上游复现）
+
+- **N1 给 `channel-registry.mjs` 的注册条目加 `capabilities`**。依据：matterbridge 把能力
+  放在第二张表 `bridgemap.UserTypingSupport`，与实现脱钩 ⇒ 穷举 20 个协议目录，
+  `EventUserTyping` 在 discord/harmony/slack 三处出现，注册表只登记 discord 与 slack，
+  **harmony 的 typing 代码不可达**（`gateway/bridgemap/bharmony.go` 全文只有一行 `FullMap`）。
+  本仓注册表（62 行）同样不含能力位。结论：**光有注册表不够，能力声明必须住在注册条目里**。
+- **N2 把投递能力声明从 1 个渠道扩到 14 个**。`grep -rln describeDeliveryAccount src/ plugin-src/`
+  → 只有 feishu 一家；而 `delivery-service.mjs:579,583` 是**硬读** capabilities（不含
+  `proactive-text-checked` 直接拒发）。机制已比上游完整，缺的是覆盖面。
+
+### 8.3 报告自身被证伪并更正的四处
+
+| # | 旧读数 | 复算值 | 根因 |
+| --- | --- | --- | --- |
+| 1 | 语音 3/14、卡片 3/14、流式 6/14 | **2/2/4** | 分卷 02 写在 matcher 收窄（`017e3ae`/`0ef3a36`）之前，收窄未回改分卷；总格数 56 两边一致，只看总数发现不了 |
+| 2 | `nonebot/message.py` 15,911 B 是消息段模型 | 它是**事件总线**（578 行，`class MessageSegment` 命中 0）；段模型在 `nonebot/internal/adapter/message.py`（12,695 B / 434 行） | 只按目录名与字节推断，没打开文件 |
+| 3 | `gateway.go` 19,673 B、`bridge.go` 3,030 B | **20,347 B / 674 行**、**3,165 B / 135 行** | 旧值取自更早快照；本轮改用本地全量 clone `wc` |
+| 4 | LangBot `ARCHITECTURE.md` 在 `docs/`、5 语言 README | 在**仓库根**（31,138 B 对）；README 实为 **6** 语言 | 路径凭印象；语言数按「常见五语」估 |
+
+附带一条方法论更正：**按字节估行数不可用**（steam.go 2,189 B 估 48 行、实为 95；
+mattermost.go 4,839 B 估 107 行、实为 194）。凡行数量级一律 `wc -l`。
+
+### 8.4 判据升级：让 8.3 那类漂移无法再次发生
+
+`scripts/verify-benchmark-report.mjs` 新增判据二 —— 报告里形如 `| 语音 | N/M |` 的行首主张
+必须等于 `collectChannelMatrix()` 实测值。实施顺序刻意是「**先让判据报红，再改文档**」，
+第一次跑的输出：
+
+```
+BENCHMARK_REPORT_MATRIX_MISMATCH: 语音: report=3/14 matrix=2/14 | 流式/编辑: report=6/14 matrix=4/14 | 卡片/按钮: report=3/14 matrix=2/14
+```
+
+只认「行首第一格就是能力名」：正文里顺带出现的 `3/14` 不算主张，否则任何巧合都误伤。
+少写一条不判红，写错一条必判红。
+
+### 8.5 §5.8 共同盲区闭合情况
+
+| 原盲区 | 状态 | 说明 |
+| --- | --- | --- |
+| ① 未 clone 运行上游 | **部分闭合** | matterbridge 全量 clone（HEAD `c4157a4`）+ 284 行 JS 复现 12/12 绿；NoneBot2 **未能 clone**（本机 GitHub 443 被代理阻断，实录 `Failed to connect to github.com:443 over proxy 127.0.0.1`；tarball HTTP 415），按退路降级为 `gh api contents` 取 master 原文 + 125 行复现 10/10 绿 |
+| ② 未做跨框架同消息对照 | **部分闭合** | 同一份意图段 `[quote,text,image,voice,bold]` 喂三个适配器替身 ⇒ 三种调用序列，且投递函数体内零渠道分支 |
+| ③ 未建吞吐基准 | **闭合** | 见 8.1 第 2 项 |
+| §5.5 能力声明盲区 | **闭合且结论是缺陷** | 见 8.2 N1 |
+| §5.4 去重/回声抑制盲区 | **闭合** | 不是一处 dedup 而是三种互不重叠机制：路由层自回声门（`gateway.go:441-450`）、平台重推去重（`rocketchat/handlers.go:65-69`）、桥身份标记（`mattermost/helpers.go:136/164` 写、`:176/:224` 读并跳过） |
+
+### 8.6 本轮仍未闭环（如实登记）
+
+- Koishi / LangBot 两篇五节笔记：⏳ 在办（首轮子代理读完未落盘，已重派）。
+- M2 `shared/` 二级分层：⛔ 未动 —— 与本轮语音/基准改动写面重叠，按「同文件先串后派」推迟。
+- 上游 issue 提交：⛔ 未做 —— 四条候选缺陷的**源码事实**均已独立复核（详卷第 7 节），但 nonebot 两条的触发证据只到「按源码求值顺序推导 + 标准库复刻」，未端到端跑过真实 `bot.send()`，本机 443 也不通，无法坐实。按「证据不足不冒充完成」留待可联网机器。
+- M3.2 基准 Infinity 边界：⛔ 刻意未修 —— 改判定会让刚写回的下限标定与 CI 首次读数失去可比性，已钉成测试。
+- 分支覆盖阈值：⛔ 未设（分支 81.14%，只给行覆盖设了 85%）。
+
+副作用声明：本轮同样**没有**修改任何上游项目文件，没有向任何仓库提 issue/PR 或推送。

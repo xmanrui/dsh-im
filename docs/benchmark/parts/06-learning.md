@@ -13,14 +13,14 @@
 ### 5.2 NoneBot2（nonebot/nonebot2，7,777★，Python）
 
 - **结构**：`nonebot/{adapters,drivers,plugin,matcher,message,permission,rule,params}` —— **按「机制」而不是按「渠道」分文件**，渠道是可外部安装的适配器包。
-- **核心代码**：`nonebot/plugin/__init__.py` 8,030 B（插件加载/依赖检查/生命周期），`nonebot/message.py` 15,911 B（消息段模型）。
+- **核心代码**：`nonebot/plugin/__init__.py` 8,030 B（插件加载/依赖检查/生命周期），`nonebot/message.py` 15,911 B / 578 行是**事件总线**（`event_preprocessor`、`check_and_run_matcher`），不含 `class MessageSegment`；消息段模型在 `nonebot/internal/adapter/message.py` 12,695 B / 434 行（`class MessageSegment` 在第 25 行、`class Message` 在第 101 行）。旧文本把两者混为一处，2026-11-02 第二轮按 `gh api .../contents/<path>` 逐文件复算更正 —— 照旧指针去读会学错一整块。
 - **设计决策**：**消息段（MessageSegment）作为跨渠道通用表达**。任何渠道只要能把原生消息映射成消息段数组，就自动获得全部上层能力。
 - **可借鉴**：本仓已做了同类的事（统一语义层 `src/channels/shared/semantic/` 里 `artifact.mjs`/`delivery.mjs`/`reply-reference.mjs`），但**没有为「能力」本身建模**：本仓能表达「发一个产物」，却不能表达「这个渠道能不能发语音」。改造 ③ 的能力矩阵是这条差距的最小可行补丁。
 - **我的盲区**：`nonebot/dependencies` 的参数解析（依赖注入式 handler 参数）我没细读；本仓对应的是命令处理器参数解析。
 
 ### 5.3 LangBot（langbot-app/LangBot，18,658★，Python）
 
-- **结构**：`src/langbot/pkg/{agent,api,box,cloud,command,config,core,discover,entity,i18n,operation_trace,...}` —— 十余个域目录，docs 有 `ARCHITECTURE.md` 31,138 B。
+- **结构**：`src/langbot/pkg/{agent,api,box,cloud,command,config,core,discover,entity,i18n,operation_trace,...}` —— 十余个域目录，`ARCHITECTURE.md` 31,138 B（在**仓库根**，不在 docs/ 下；旧写法路径错，2026-11-02 第二轮按 gh api contents 复算更正）。
 - **核心代码**：`ARCHITECTURE.md` 是最有价值的一手材料：它把「一个 IM 消息如何变成 agent 轮次」画成流水线，比读代码更快。
 - **设计决策**：**域目录 + 架构文档先行**。与 Koishi 的插件化不同，LangBot 选择「单体分层」，用目录边界换可控性。
 - **可借鉴**：本仓 `src/channels/shared` 83 个文件平铺，本质是「没有域目录」。M2 的拆分方案直接来自这里。
@@ -35,7 +35,7 @@
 
 ### 5.5 matterbridge（42wim/matterbridge，7,609★，Go · 最后推送 2024-12）
 
-- **结构**：`bridge/` 下每个协议一个目录 + `bridge.go` 3,030 B 的**唯一接口**；`gateway/gateway.go` 19,673 B 负责路由与消息翻译。
+- **结构**：`bridge/` 下每个协议一个目录 + `bridge.go` 3,165 B / 135 行的**唯一接口**（`Bridger` 仅 4 个方法）；`gateway/gateway.go` 20,347 B 负责路由与消息翻译。
 - **设计决策**：**接口极薄、路由极厚**。所有协议实现 `Bridge` 接口的少数方法，翻译逻辑集中在 gateway —— 新增协议的成本是「实现接口」，不是「改路由」。
 - **可借鉴**：本仓相反（接口散、路由散）。如果要做 M1 的注册表，matterbridge 的 `bridge.go` 是最干净的模板参考。
 - **我的盲区**：Go 的接口是隐式实现，我没验证它是否有「能力声明」（应该是没有，因为 2024 年后未更新）。
