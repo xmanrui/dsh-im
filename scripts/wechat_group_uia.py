@@ -663,22 +663,44 @@ class WechatGroupAdapter:
     def _assert_unique_title(self, group: GroupConfig) -> None:
         try:
             titles = self.backend.list_session_titles()
-        except SafetyError:
-            # Collapsed sidebar: the list is not available to count. Fall back to
-            # the open chat header, which is weaker evidence (one property, and it
-            # says nothing about OTHER chats), so it is accepted only when the
-            # named group is the chat already on screen. A send still re-checks the
-            # title around every mutation, and switching chats is impossible without
-            # the list, so this can never read or write a different conversation.
-            if self.backend.current_chat_title() == group.title:
-                return
-            # Say what is actually wrong. duplicate_group_title means "two chats
-            # share this name", which is not what happened and would send the
-            # operator looking for a rename. The list is gone, so the bridge cannot
-            # switch chats at all; the fix is to expand the sidebar or keep the
-            # target group on screen.
-            raise SafetyError("session list unavailable and the open chat is not "
-                              "the target", "sidebar_collapsed")
+        except SafetyError as exc:
+            # Only a genuinely absent/duplicated session_list means "collapsed
+            # sidebar". `control_missing` is also what a transient WalkControl
+            # failure raises while WeChat is mid-render -- measured 2026-11-02:
+            # 15 `sidebar_collapsed` reports on a healthy tree where the window
+            # was not minimized, the list had 10 rows, and every control
+            # resolved a second later. Reporting the collapsed-sidebar text for
+            # that sends the operator to expand a sidebar that is already open,
+            # and the adapter exits instead of retrying, so the bridge goes down
+            # over a hiccup.
+            if exc.code != "control_missing":
+                raise
+            # A transient miss is retried once before it is believed. If the
+            # second read succeeds, nothing was wrong and nothing is reported.
+            try:
+                titles = self.backend.list_session_titles()
+            except SafetyError as retry:
+                # A different code on the retry is real information: report it
+                # rather than swallowing it as "still collapsed".
+                if retry.code != 'control_missing':
+                    raise
+                titles = None
+            if titles is None:
+                # Fall back to the open chat header, which is weaker evidence
+                # (one property, and it says nothing about OTHER chats), so it
+                # is accepted only when the named group is the chat already on
+                # screen. A send still re-checks the title around every
+                # mutation, and switching chats is impossible without the list,
+                # so this can never read or write a different conversation.
+                if self.backend.current_chat_title() == group.title:
+                    return
+                # Say what is actually wrong. duplicate_group_title means "two
+                # chats share this name", which is not what happened and would
+                # send the operator looking for a rename. The list is gone, so the
+                # bridge cannot switch chats at all; the fix is to expand the
+                # sidebar or keep the target group on screen.
+                raise SafetyError("session list unavailable and the open chat is "
+                                  "not the target", "sidebar_collapsed")
         if titles.count(group.title) != 1:
             # Selecting by a duplicated visible name could read or write another group.
             raise SafetyError("target title is missing or duplicated", "duplicate_group_title")

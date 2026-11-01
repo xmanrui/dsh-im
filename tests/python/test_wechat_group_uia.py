@@ -2488,6 +2488,38 @@ class CollapsedSidebarTests(unittest.TestCase):
         # The configured title matches the open chat header, so reading is safe.
         adapter._assert_unique_title(group())
 
+    def test_a_transient_control_miss_is_retried_before_it_is_reported(self):
+        # Measured 2026-11-02: 15 `sidebar_collapsed` reports on a healthy tree
+        # -- window not minimized, list had 10 rows, every control resolved a
+        # second later. A single WalkControl hiccup while WeChat re-renders used
+        # to be reported as a collapsed sidebar, and the adapter EXITS on that,
+        # so a sub-frame race took the bridge down. One retry must absorb it.
+        backend, _ = self.backend("Alpha", list_available=True)
+        adapter = uia.WechatGroupAdapter([group()], backend)
+        calls = {"n": 0}
+
+        def flaky():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise uia.SafetyError("missing", "control_missing")
+            return ["Alpha"]
+
+        backend.list_session_titles = flaky
+        # The retry succeeds, so the target is confirmed and nothing is raised.
+        adapter._assert_unique_title(group())
+        self.assertEqual(calls["n"], 2)
+
+    def test_a_persistent_control_miss_is_still_reported(self):
+        # Two failures in a row is a real condition, not a hiccup: the caller
+        # still needs to hear about it rather than reading a half-tree.
+        # A list that never recovers, with a different chat on screen: the session
+        # list really is unavailable, so the collapsed-sidebar diagnosis stands.
+        backend, _ = self.backend("Other Group", list_available=False)
+        adapter = uia.WechatGroupAdapter([group()], backend)
+        with self.assertRaises(uia.SafetyError) as ctx:
+            adapter._assert_unique_title(group())
+        self.assertEqual(ctx.exception.code, "sidebar_collapsed")
+
     def test_a_duplicated_title_in_an_available_list_is_still_ambiguous(self):
         # The list IS available and names the target twice: reading or writing by
         # that visible name could hit the wrong conversation, so it stays a
