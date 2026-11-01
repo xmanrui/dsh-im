@@ -1,6 +1,6 @@
 # DSH-IM 开源项目对标报告（2026-11-01）
 
-> 对标对象：@xmanrui/dsh-im v5.8.0（本机仓 D:/codex/DSH-IM/rv5.8.0，分支 feat/wechat-groups）。
+> 对标对象：@xmanrui/dsh-im v5.8.0（本机仓 D:/codex/DSH-IM/rv5.8.0，分支 feat/wechat-groups，HEAD f3ad28e）。
 > 取数时刻：2026-11-02T00:2x–00:5x +08:00；上游数字全部来自 `gh api` 当日现值，本仓数字来自分卷 05 的实测命令。
 > 证据等级：[一手] 命令原文/上游源码/官方文档；[本机实测] 本次跑出的输出；[未取证] 明确没拿到。
 > 分卷：`docs/benchmark/parts/` 下 00 scope / 01 总览 / 02 差距 / 03 建议 / 04 路线图 / 05 基线盘点 / 06 学习记录 / 07 改造执行。
@@ -370,7 +370,7 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 - **预期目标**：让第一次 PR 有明确入口与自查清单；让安全问题有私下通道。
 - **完成标准**：`node scripts/verify-governance.mjs` → `GOVERNANCE_OK 7 files, cross-references intact`（7 个文件 + 每条必须引用对方，缺引用即红）。
 - **负向对照**：把 CONTRIBUTING 里的 `SECURITY.md` 换成杜撰文件名 → 判据报 `GOVERNANCE_DANGLING: CONTRIBUTING.md -> SECURITY.md` 并退出 1；删除文件 → 报 `GOVERNANCE_MISSING`。
-- **提交**：见本轮治理提交（7 个治理文件 + 2 个判据脚本）。
+- **提交**：`f3ad28e`（7 个治理文件 + `verify-governance.mjs` + `test/governance.test.mjs`；产物随 `57392f6` 重建提交）。
 
 ### 7.5 四项改造的完成顺序与可追溯性
 
@@ -382,3 +382,36 @@ H4 治理骨架   （本轮最后一笔）
 ```
 
 每一项都在 `npm run check` 里有对应判据，且判据本身做过负向对照 —— 也就是说，**门禁绿不是「看起来绿」，是「删掉这一项会变红」**。
+
+最终门禁读数（`npm run check`，2026-11-02T00:53+08:00）：
+
+```
+ℹ tests 4761 / pass 4753 / fail 0
+Verified dsh-im package artifacts.
+BUILT_ARTIFACTS_OK 2 files match HEAD
+CAPABILITY_MATRIX_OK 14 channels, 2 document(s)
+BENCHMARK_REPORT_OK dimensions=8 sections=4 tables=98 numbers=724
+GOVERNANCE_OK 7 files, cross-references intact
+EXIT=0
+```
+
+### 7.6 分工与未收产出登记（诚实记录）
+
+本轮按「并行优先」派了 4 个子代理（Koishi/NoneBot2 生态、LangBot/chatgpt-on-wechat 渠道矩阵、matterbridge/wechaty 桥接性能、本仓基线盘点）。
+
+| 子代理 | 结果 |
+| --- | --- |
+| A4 本仓基线盘点 | ✅ 交付 `parts/05-baseline-inventory.md`（194 行；每个数字带可复跑的 C 编号命令） |
+| A1 生态与可扩展性 | ❌ **未落盘**：约定路径 `parts/01-plugin-ecosystem.md` 在收尾时不存在 |
+| A2 渠道功能覆盖 | ❌ **未落盘**：约定路径 `parts/02-channel-coverage.md` 不存在 |
+| A3 桥接/性能/维护 | ❌ **未落盘**：约定路径 `parts/03-bridge-perf-maint.md` 不存在 |
+
+**处置**：这 3 项的内容由 Lead 自采补齐（`gh api` 拉上游目录结构与文件字节、在本仓上跑 matcher 校准），
+落在 `parts/01-overview.md`（功能/架构/性能/维护/文档/场景）、`parts/02-gap-analysis.md`、
+`parts/06-learning.md`（逐项目阅读记录）。**证据等级随之下调**：这三块结论是「源码与文档阅读」，
+不是「子代理独立复核」，报告正文已按 [一手]/[本机实测]/[未取证] 逐条标注，未把未复核的结论写成已复核。
+
+另有 3 项在本轮**未取证**，已写进 §5.8 与 §3 的建议项，不冒充已完成：① 未 clone 运行任何上游项目（只有源码/文档/GitHub API 阅读）；② 未做跨框架同一消息的行为对照实验；③ 未建吞吐基准（M3）。
+
+副作用声明：本报告编写过程中**没有**修改任何上游项目文件、没有向其提 issue/PR、没有向任何仓库推送。
+
