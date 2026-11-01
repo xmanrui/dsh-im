@@ -48,15 +48,15 @@ export const CAPABILITIES = Object.freeze([
   // - `group|room` 会把 iMessage 记成支持群聊：适配器只做一对一，故要求会话标识或群发送函数。
   // 这里宁可漏（写成 —）也不误报（写成 ✅）：漏掉的会被下游人工复核补，误报会直接变成对外承诺。
   // 文本的出站实现点在各渠道形状不同：sendText / im.v1.message.create / sendEvent(roomId, ...)。
-  { key: 'text', label: '文本', patterns: [/sendText\(|sendMessage\(|sendEvent\(|im\.v1\.message\.create\(/u] },
-  { key: 'image', label: '图片', patterns: [/sendImage\(|sendPhoto\(|uploadMedia\(/u] },
-  { key: 'file', label: '文件', patterns: [/sendFile\(|sendDocument\(|sendAttachment\(/u] },
-  { key: 'voice', label: '语音', patterns: [/sendVoice\(|sendAudio\(|transcribeIncoming\(|telegramVoiceSource\(/u] },
-  { key: 'quote', label: '引用回复', patterns: [/replyToMessageId|replyReference|quoteReply|repliedMessage/u] },
-  { key: 'group', label: '群聊', patterns: [/sendGroupMessage\(|groupRoom|openConversationId|roomId|chatId/u] },
-  { key: 'stream', label: '流式/编辑', patterns: [/editMessage\(|updateMessage\(|sendRichMessageDraft\(|liveCot|streamingCard/u] },
-  { key: 'card', label: '卡片/按钮', patterns: [/sendInteractionCard\(|sendCard\(|interactiveCard|cardAction/u] },
-  { key: 'markdown', label: '富文本', patterns: [/renderMarkdown|richText|markdownReply|markdownTo/u] },
+  { key: 'text', label: '文本', labelEn: 'Text', patterns: [/sendText\(|sendMessage\(|sendEvent\(|im\.v1\.message\.create\(/u] },
+  { key: 'image', label: '图片', labelEn: 'Image', patterns: [/sendImage\(|sendPhoto\(|uploadMedia\(/u] },
+  { key: 'file', label: '文件', labelEn: 'File', patterns: [/sendFile\(|sendDocument\(|sendAttachment\(/u] },
+  { key: 'voice', label: '语音', labelEn: 'Voice', patterns: [/sendVoice\(|sendAudio\(|transcribeIncoming\(|telegramVoiceSource\(/u] },
+  { key: 'quote', label: '引用回复', labelEn: 'Quote', patterns: [/replyToMessageId|replyReference|quoteReply|repliedMessage/u] },
+  { key: 'group', label: '群聊', labelEn: 'Group', patterns: [/sendGroupMessage\(|groupRoom|openConversationId|roomId|chatId/u] },
+  { key: 'stream', label: '流式/编辑', labelEn: 'Stream', patterns: [/editMessage\(|updateMessage\(|sendRichMessageDraft\(|liveCot|streamingCard/u] },
+  { key: 'card', label: '卡片/按钮', labelEn: 'Card', patterns: [/sendInteractionCard\(|sendCard\(|interactiveCard|cardAction/u] },
+  { key: 'markdown', label: '富文本', labelEn: 'Rich text', patterns: [/renderMarkdown|richText|markdownReply|markdownTo/u] },
 ]);
 
 /**
@@ -106,24 +106,52 @@ export async function collectChannelMatrix() {
   return channels;
 }
 
-/** Render the matrix as a Markdown table with a one-line legend. */
-export function renderMatrix(channels) {
-  const header = ['渠道', ...CAPABILITIES.map((capability) => capability.label), '源码字节'];
+/** 渲染语言：中文 README 与英文 README 共用同一份数据，只换标签与图例。 */
+export const LOCALES = Object.freeze(['zh', 'en']);
+
+/** 两个 README 的渲染文案；改一处即可同时改两种语言。 */
+const TEXT = Object.freeze({
+  zh: {
+    channelLabel: '渠道',
+    legend: [
+      '> 本表由 `scripts/channel-capability-matrix.mjs` 从 `src/channels/*/` 源码生成，',
+      '> 不手写、可复跑：`node scripts/channel-capability-matrix.mjs`。',
+      '> ✅ = 该渠道目录内存在承载此能力的实现文件；— = 未找到实现，属于明确降级（ADR-0001）。',
+    ],
+  },
+  en: {
+    channelLabel: 'Channel',
+    legend: [
+      '> This table is generated from `src/channels/*/` by `scripts/channel-capability-matrix.mjs`;',
+      '> it is not hand-written: run `node scripts/channel-capability-matrix.mjs` to reproduce it.',
+      '> ✅ = the channel directory contains an implementation for this capability;',
+      '> — = no implementation found, i.e. an explicit degradation (ADR-0001).',
+    ],
+  },
+});
+
+/**
+ * Render the matrix for one locale.
+ *
+ * 只把「渠道集合 + 能力格」纳入受检契约：源码字节数会随任何一次 src 编辑变动，
+ * 放进表里会让 --check 对别的会话的每一次改动恒红，那不是能力漂移。
+ *
+ * @param {Array} channels Output of collectChannelMatrix().
+ * @param {'zh'|'en'} [locale] Label language.
+ */
+export function renderMatrix(channels, locale = 'zh') {
+  const text = TEXT[locale] ?? TEXT.zh;
+  const header = [text.channelLabel, ...CAPABILITIES.map((capability) => (
+    locale === 'en' ? (capability.labelEn ?? capability.label) : capability.label
+  ))];
   const separator = header.map(() => '---');
   const rows = channels.map((channel) => [
-    '\`' + channel.channel + '\`',
+    '`' + channel.channel + '`',
     ...CAPABILITIES.map((capability) => (channel.supported[capability.key] ? '✅' : '—')),
-    String(channel.files),
   ]);
-  const legend = [
-    '> 本表由 `scripts/channel-capability-matrix.mjs` 从 `src/channels/*/` 源码生成，',
-    '> 不手写、可复跑：`node scripts/channel-capability-matrix.mjs`。',
-    '> ✅ = 该渠道目录内存在承载此能力的实现文件；— = 未找到实现，属于明确降级（ADR-0001）。',
-    '> 「源码字节」是参与检测的 `.mjs` 内容总字节数，用于说明证据面大小，不是渠道权重。',
-  ];
   return [
     BLOCK_START,
-    ...legend,
+    ...text.legend,
     '',
     table([header, separator, ...rows]),
     BLOCK_END,
@@ -150,41 +178,56 @@ export function replaceBlock(document, block) {
   return { document: document.slice(0, start) + block + document.slice(tail), replaced: true };
 }
 
+/** README targets: each document carries its own locale of the same data. */
+const DOCUMENTS = Object.freeze([
+  { path: 'README.md', locale: 'zh' },
+  { path: 'README.en.md', locale: 'en' },
+]);
+
 async function main() {
   const channels = await collectChannelMatrix();
-  const block = renderMatrix(channels);
 
   if (process.argv.includes('--write')) {
-    const document = await readFile(readmePath, 'utf8');
-    const { document: next, replaced } = replaceBlock(document, block);
-    if (!replaced) {
-      console.error('README.md has no ' + BLOCK_START + ' / ' + BLOCK_END + ' fence');
-      process.exitCode = 1;
-      return;
+    let changed = 0;
+    for (const document of DOCUMENTS) {
+      const path = resolve(root, document.path);
+      const current = await readFile(path, 'utf8');
+      const { document: next, replaced } = replaceBlock(current, renderMatrix(channels, document.locale));
+      if (!replaced) {
+        console.error(document.path + ' has no ' + BLOCK_START + ' / ' + BLOCK_END + ' fence');
+        process.exitCode = 1;
+        continue;
+      }
+      if (next !== current) {
+        const { writeFile } = await import('node:fs/promises');
+        await writeFile(path, next);
+        changed += 1;
+      }
     }
-    if (next !== document) {
-      const { writeFile } = await import('node:fs/promises');
-      await writeFile(readmePath, next);
-      console.log('CAPABILITY_MATRIX_WRITTEN ' + channels.length + ' channels');
-    } else {
-      console.log('CAPABILITY_MATRIX_UNCHANGED ' + channels.length + ' channels');
-    }
+    console.log('CAPABILITY_MATRIX_WRITTEN ' + channels.length + ' channels, ' + changed + ' document(s)');
     return;
   }
 
   if (process.argv.includes('--check')) {
-    const document = await readFile(readmePath, 'utf8');
-    const { document: next, replaced } = replaceBlock(document, block);
-    if (!replaced || next !== document) {
-      console.error('CAPABILITY_MATRIX_STALE: run node scripts/channel-capability-matrix.mjs --write');
+    const stale = [];
+    for (const document of DOCUMENTS) {
+      const current = await readFile(resolve(root, document.path), 'utf8');
+      const { document: next, replaced } = replaceBlock(current, renderMatrix(channels, document.locale));
+      if (!replaced || next !== current) stale.push(document.path);
+    }
+    if (stale.length > 0) {
+      console.error('CAPABILITY_MATRIX_STALE (' + stale.join(', ') + '): run node scripts/channel-capability-matrix.mjs --write');
       process.exitCode = 1;
       return;
     }
-    console.log('CAPABILITY_MATRIX_OK ' + channels.length + ' channels');
+    console.log('CAPABILITY_MATRIX_OK ' + channels.length + ' channels, ' + DOCUMENTS.length + ' document(s)');
     return;
   }
 
-  console.log(block);
+  // 打印时默认输出中文版；--locale en 输出英文版。
+  const localeFlag = process.argv.indexOf('--locale');
+  const locale = localeFlag === -1 ? 'zh' : process.argv[localeFlag + 1];
+  console.log(renderMatrix(channels, locale === 'en' ? 'en' : 'zh'));
 }
 
 // Windows-safe "is this the entry module" check: comparing URL strings fails
