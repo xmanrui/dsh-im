@@ -586,12 +586,30 @@ class WechatGroupAdapter:
             self.backend.close()
 
 
+# Codes that mean the UIA surface itself is gone rather than one poll failing.
+# Retrying them at 750ms produces a flood with no new information: the window,
+# panel or login state has to change first. The adapter says the real code once
+# and exits, so the JS supervisor runs its normal back-off restart ladder
+# (2.5s..30s) instead of burning CPU and log volume on a dead transport.
+SURFACE_LOST_CODES = frozenset({
+    "control_missing", "main_window_missing", "wechat_panel_closed",
+    "wechat_logged_out", "backend_closed", "unsupported_platform", "dependency_missing",
+})
+
+# Distinct exit code so the supervisor and the log can tell a surface loss apart
+# from any other child death.
+SURFACE_LOST_EXIT_CODE = 4
+
+
 class JsonlProtocol:
     """Request/response boundary; business safety remains in WechatGroupAdapter."""
 
-    def __init__(self, adapter: WechatGroupAdapter):
+    def __init__(self, adapter: WechatGroupAdapter, exit_impl: Callable[[int], None] | None = None):
         self.adapter = adapter
         self.stopped = threading.Event()
+        self.fatal_code: str | None = None
+        # Injected so tests can observe the exit instead of killing the runner.
+        self._exit_impl = exit_impl or (lambda code: os._exit(code))
         self._write_lock = threading.Lock()
 
     def start(self) -> dict[str, Any]:
@@ -663,9 +681,31 @@ class JsonlProtocol:
             return [self._error("invalid_request", request_id)]
 
     def poll_frames(self) -> list[dict[str, Any]]:
+        # Measured live: with the panel closed this emitted 'poll_failed' every
+        # 750ms, 80 lines an hour, and the generic code hid the one thing an
+        # operator can act on. A surface-level loss now keeps its real code,
+        # is reported once, and makes the child exit so the JS supervisor runs
+        # its back-off ladder instead of hammering a dead transport.
         try:
             return [{"type": "message", "message": event} for event in self.adapter.poll()]
+        except SafetyError as exc:
+            if exc.code in SURFACE_LOST_CODES:
+                self.fatal_code = exc.code
+            return [self._error(exc.code)]
         except Exception:
+            # uiautomation raises plain COM errors when the window is gone, so
+            # ask the backend directly why the surface is missing before
+            # flattening to poll_failed.
+            probe = getattr(self.adapter.backend, "surface_state", None)
+            state = None
+            if callable(probe):
+                try:
+                    state = probe()
+                except Exception:
+                    state = None
+            if state in SURFACE_LOST_CODES:
+                self.fatal_code = state
+                return [self._error(state)]
             return [self._error("poll_failed")]
 
     @staticmethod
@@ -682,6 +722,11 @@ class JsonlProtocol:
                 with self._write_lock:
                     for frame in frames:
                         self._write(stdout, frame)
+                if self.fatal_code is not None:
+                    # The frame is already flushed, so exiting cannot lose the
+                    # diagnosis. Exit the process: the supervisor restarts it.
+                    self.stopped.set()
+                    self._exit_impl(SURFACE_LOST_EXIT_CODE)
 
         worker = threading.Thread(target=poll_loop, name="wechat-uia-poll", daemon=True)
         worker.start()
@@ -816,6 +861,26 @@ class UiaBackend:
             # or WeChat not running at all.
             code = classify_missing_main_window(auto)
             raise SafetyError("WeChat main window is unavailable", code)
+
+    def surface_state(self) -> str | None:
+        """Classify a poll failure that came from raw COM errors.
+
+        uiautomation raises plain COMError (not SafetyError) once the window is
+        gone, so the generic 'poll_failed' would otherwise swallow the only
+        actionable fact. Returns a surface-lost code when the main window is no
+        longer there, and None when it still is (a one-off glitch must never
+        tear the bridge down).
+        """
+
+        if self._closed:
+            return "backend_closed"
+        try:
+            if self._window.Exists(0, 0):
+                return None
+        except Exception:
+            # Even Exists() can throw COM errors while the surface dies around it.
+            pass
+        return classify_missing_main_window(self._auto)
 
     def _control(self, automation_id: str) -> Any:
         if self._closed:
