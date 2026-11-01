@@ -655,6 +655,120 @@ class SelectChatScreenGateTests(unittest.TestCase):
         self.assertEqual((item.focus, item.clicks), (0, 0))
 
 
+class PressEnterFocusGuardTests(unittest.TestCase):
+    """A background bridge must never inject a keystroke into another app.
+
+    Control.SendKeys() is SetFocus() plus a GLOBAL keyboard inject: when the
+    focus does not land on the WeChat input, the Enter goes to whatever window
+    the operator is using and can submit their form. press_enter() therefore has
+    to prove focus first and refuse without typing when it cannot.
+    """
+
+    class Input:
+        """UIA control stand-in; SetFocus only succeeds when `takes_focus`."""
+
+        def __init__(self, handle=111, automation_id="chat_input_field",
+                     offscreen=False, takes_focus=True):
+            self.NativeWindowHandle = handle
+            self.AutomationId = automation_id
+            self.IsOffscreen = offscreen
+            self.focus = 0
+            self.typed = []
+            self.auto = None
+            self.takes_focus = takes_focus
+
+        def SetFocus(self):
+            self.focus += 1
+            if self.auto is not None and self.takes_focus:
+                self.auto.note_focus(self)
+
+        def SendKeys(self, text, waitTime=0):
+            # Real SendKeys injects globally; record that it was asked to.
+            self.typed.append(text)
+
+    class Auto:
+        """uiautomation stand-in: focus moves only when SetFocus actually runs.
+
+        This models the real ordering so the recovery path is exercised through
+        production code rather than by patching the method under test.
+        """
+
+        def __init__(self, focused=None, accept_focus=None):
+            self._focused = focused
+            self._accept_focus = accept_focus
+
+        def GetFocusedControl(self):
+            return self._focused
+
+        def note_focus(self, control):
+            if self._accept_focus is None or control is self._accept_focus:
+                self._focused = control
+
+    def build(self, target, focused):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._auto = self.Auto(focused)
+        backend._control = lambda automation_id: target
+        return backend
+
+    def test_refuses_to_type_when_focus_is_elsewhere(self):
+        target = self.Input()
+        stranger = self.Input(handle=999, automation_id="something_else")
+        backend = self.build(target, focused=stranger)
+        with self.assertRaises(uia.SafetyError) as ctx:
+            backend.press_enter()
+        self.assertEqual(ctx.exception.code, "focus_not_on_target")
+        # The whole point: no global keystroke was injected anywhere.
+        self.assertEqual(target.typed, [])
+
+    def test_types_once_when_focus_is_already_on_target(self):
+        target = self.Input()
+        backend = self.build(target, focused=target)
+        backend.press_enter()
+        self.assertEqual(target.typed, ["{Enter}"])
+        # Already focused, so no extra SetFocus (which would raise the window).
+        self.assertEqual(target.focus, 0)
+
+    def test_recovers_via_one_setfocus_when_not_yet_focused(self):
+        # Focus starts elsewhere; the guard's SetFocus attempt must actually move
+        # it before any keystroke is injected.
+        target = self.Input()
+        auto = self.Auto(focused=None)
+        target.auto = auto
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._auto = auto
+        backend._control = lambda automation_id: target
+        backend.press_enter()
+        self.assertEqual(target.focus, 1)
+        self.assertEqual(target.typed, ["{Enter}"])
+
+    def test_still_refuses_when_setfocus_does_not_move_focus(self):
+        # Real controls can silently fail to take focus; the keystroke must not
+        # then be injected into the operator's foreground app.
+        target = self.Input(takes_focus=False)
+        auto = self.Auto(focused=None)
+        target.auto = auto
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._auto = auto
+        backend._control = lambda automation_id: target
+        with self.assertRaises(uia.SafetyError) as ctx:
+            backend.press_enter()
+        self.assertEqual(ctx.exception.code, "focus_not_on_target")
+        self.assertEqual(target.typed, [])
+
+    def test_a_same_handle_but_different_control_is_not_enough(self):
+        # Focus on another element of the same window must still refuse: the
+        # keystroke would land outside the input box.
+        target = self.Input()
+        sibling = self.Input(handle=111, automation_id="chat_message_list")
+        backend = self.build(target, focused=sibling)
+        with self.assertRaises(uia.SafetyError):
+            backend.press_enter()
+        self.assertEqual(target.typed, [])
+
+
 class NoOpenChatTests(unittest.TestCase):
     """A freshly logged-in WeChat has no chat panel until one is opened."""
 

@@ -42,6 +42,7 @@ ERROR_MESSAGES = {
     "probe_failed": "The read-only UIA probe failed.",
     "send_disabled": "Sending is disabled until the operator enables it.",
     "wechat_logged_out": "WeChat is on its login screen; log in before starting the group bridge.",
+    "focus_not_on_target": "Keyboard focus could not be proven to be on the WeChat input; nothing was typed.",
 }
 
 
@@ -992,8 +993,57 @@ class UiaBackend:
             raise SafetyError("chat input ValuePattern rejected text", "input_unsupported")
 
     def press_enter(self) -> None:
-        # Control.SendKeys sets focus only; it does not move, show or create a window.
-        self._control("chat_input_field").SendKeys("{Enter}", waitTime=0)
+        """Press Enter only after proving the keystroke lands in WeChat's input box.
+
+        Control.SendKeys() is SetFocus() plus a global keyboard inject, so if the
+        focus does not actually move to the target the keypress goes to whatever
+        window the operator is using: an Enter inside someone else's app, possibly
+        submitting their form. The claim in the old comment that SendKeys 'only
+        sets focus' is wrong, and it is exactly the kind of screen control the
+        operator must not get from a background bridge.
+
+        So verify focus before injecting, re-verify once after a single SetFocus
+        attempt, and otherwise raise without typing anything: an unverifiable
+        target is refused, not risked.
+        """
+
+        control = self._control("chat_input_field")
+        if self._focus_is_target(control):
+            control.SendKeys("{Enter}", waitTime=0)
+            return
+        try:
+            control.SetFocus()
+        except Exception:
+            pass
+        if not self._focus_is_target(control):
+            raise SafetyError(
+                "keyboard focus is not provably on the WeChat input",
+                "focus_not_on_target",
+            )
+        control.SendKeys("{Enter}", waitTime=0)
+
+    def _focus_is_target(self, control: Any) -> bool:
+        """True only when the OS focused element is this very control.
+
+        Compares the native window handle and the automation id so a focus hit on
+        some other WeChat sub-window cannot pass the check.
+        """
+
+        auto = self._auto
+        get_focused = getattr(auto, "GetFocusedControl", None)
+        if get_focused is None:
+            return False
+        try:
+            focused = get_focused()
+        except Exception:
+            return False
+        if focused is None:
+            return False
+        handle = _safe_property(control, "NativeWindowHandle")
+        focused_handle = _safe_property(focused, "NativeWindowHandle")
+        if not handle or focused_handle != handle:
+            return False
+        return _safe_property(focused, "AutomationId") == _safe_property(control, "AutomationId")
 
     def read_messages(self) -> list[RawMessage]:
         items = self._control("chat_message_list").GetChildren()
