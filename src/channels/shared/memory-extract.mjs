@@ -28,23 +28,33 @@ const CAPTURE_MAX = 40;
  * order and the first match per kind wins, so a message cannot produce two
  * identity facts from the same sentence.
  */
+// One character IS a complete object in Chinese: 茶, 猫, 冷 are all things a
+// person states about themselves ("我喜欢茶"). The capture minimum was two, which
+// silently dropped exactly those -- measured: 我喜欢茶, 我养猫 and 我怕冷 all
+// produced nothing. The verb is what makes a statement a fact; its object needs
+// no minimum length.
 const RULES = Object.freeze([
   // "记住 X" is an explicit instruction and outranks every inference below.
-  { kind: 'note', label: 'explicit', pattern: /(?:^|[，,。\s])(?:请)?记住[：:，,]?\s*([^。！？!?\n]{2,40})/u },
+  { kind: 'note', label: 'explicit', pattern: /(?:^|[，,。\s])(?:请)?记住[：:，,]?\s*([^。！？!?\n]{1,40})/u },
   // Self-description: name, job, location. Stored as identity.
   { kind: 'identity', label: 'name', pattern: /我(?:叫|是|的名字(?:是|叫))\s*([^，,。！？!?\s]{1,20})/u },
-  { kind: 'identity', label: 'work', pattern: /我在\s*([^，,。！？!?\s]{2,20}?)(?:工作|上班|读书|上学)/u },
-  { kind: 'identity', label: 'home', pattern: /我(?:住在|家在|来自)\s*([^，,。！？!?\s]{2,20})/u },
-  { kind: 'preference', label: 'like', pattern: /我(?:很|超|最|挺)?(?:喜欢|爱|偏好|中意)\s*([^。！？!?\n]{2,40})/u },
-  { kind: 'dislike', label: 'dislike', pattern: /我(?:很|超|最|挺)?(?:讨厌|不喜欢|受不了|烦)\s*([^。！？!?\n]{2,40})/u },
-  { kind: 'plan', label: 'plan', pattern: /我(?:们)?\s*(?:要|准备|打算|计划|想)\s*([^。！？!?\n]{2,40})/u },
+  { kind: 'identity', label: 'work', pattern: /我在\s*([^，,。！？!?\s]{1,20}?)(?:工作|上班|读书|上学)/u },
+  { kind: 'identity', label: 'home', pattern: /我(?:住在|家在|来自)\s*([^，,。！？!?\s]{1,20})/u },
+  { kind: 'preference', label: 'like', pattern: /我(?:很|超|最|挺)?(?:喜欢|爱|偏好|中意)\s*([^。！？!?\n]{1,40})/u },
+  { kind: 'dislike', label: 'dislike', pattern: /我(?:很|超|最|挺)?(?:讨厌|不喜欢|受不了|烦)\s*([^。！？!?\n]{1,40})/u },
+  { kind: 'plan', label: 'plan', pattern: /我(?:们)?\s*(?:要|准备|打算|计划|想)\s*([^。！？!?\n]{1,40})/u },
   // What somebody has, and what they are up to lately. These are the things a
   // group actually remembers about each other ("老王养了只猫"), and both stay
   // anchored on 我 so an offhand remark about the weather never becomes a fact
   // about a member. A measure word is optional but a verb is not: bare 我有
   // captures nothing on its own.
-  { kind: 'possession', label: 'has', pattern: /我(?:养了|养着|有)(?:[一几]?[只条个台辆棵盆])?\s*([^。！？!?\n]{2,40})/u },
-  { kind: 'activity', label: 'doing', pattern: /我(?:最近一直在|最近在|近来在|这阵子在|现在在|最近)\s*([^。！？!?\n]{2,40})/u },
+  // `养` in every form a person uses it: 养 / 养了 / 养着, with an optional
+  // measure word (一只 / 几盆) before the object.
+  // An aspect particle must stay with its verb, or "我养了" would capture 了 as the
+  // object. The verb therefore requires an object after any 了/着, and a bare 养
+  // only counts when something follows it.
+  { kind: 'possession', label: 'has', pattern: /我(?:养(?:了|着)?|有)(?:[一几]?[只条个台辆棵盆])?\s*([^。！？!?\n了着]{1,40})/u },
+  { kind: 'activity', label: 'doing', pattern: /我(?:最近一直在|最近在|近来在|这阵子在|现在在|最近)\s*([^。！？!?\n]{1,40})/u },
 ]);
 
 /** Trim one captured span and drop the trailing particles chat text leaves. */
@@ -74,7 +84,8 @@ export function extractMemoryCandidates(text, { speaker = '' } = {}) {
     const match = rule.pattern.exec(body);
     if (!match) continue;
     const object = tidy(match[1]);
-    if (!object || object.length < 2) continue;
+    // No length floor: see the note above RULES.
+    if (!object) continue;
     // An explicit "记住 X" captures the whole instruction, so nothing else is
     // inferred from the same message: the note already says what to remember,
     // and re-reading it for a possession ("我有例会") would store half of it as a

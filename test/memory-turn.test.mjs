@@ -39,9 +39,15 @@ test('renderCandidate 有名有姓用「名字：内容」，没名字用群口�
   assert.equal(renderCandidate({ object: '' }), '');
 });
 
-test('scope 由渠道+bot+会话拼成，非白名单字符被替换', () => {
-  assert.equal(memoryScope({ channel: 'weixin', botId: 'wx_ab', conversationKey: 'g1' }), 'weixin:wx_ab:g1');
-  assert.equal(memoryScope({ channel: 'weixin', botId: 'wx_ab', conversationKey: 'a b/c' }), 'weixin:wx_ab:a_b_c');
+test('scope 由渠道+bot+会话拼成，非白名单字符按可逆编码处理', () => {
+  // `_` is the escape character, so it doubles: wx_ab -> wx__ab. Same scope for the
+  // same input, and two different inputs can never share it.
+  assert.equal(memoryScope({ channel: 'weixin', botId: 'wx_ab', conversationKey: 'g1' }), 'weixin:wx__ab:g1');
+  // 不是简单替换成 _（那会把 group:x:y 与 group:x_y 撞成一个 scope），
+  // 而是 _ + 十六进制码点，保证单射；详见 test/memory-scope.test.mjs。
+  const encoded = memoryScope({ channel: 'weixin', botId: 'wx_ab', conversationKey: 'a b/c' });
+  assert.match(encoded, /^[A-Za-z0-9_.:-]+$/u);
+  assert.notEqual(encoded, memoryScope({ channel: 'weixin', botId: 'wx_ab', conversationKey: 'a_b_c' }));
   assert.equal(memoryScope({ channel: 'weixin', botId: '', conversationKey: 'g1' }), null);
   assert.equal(memoryScope({}), null);
 });

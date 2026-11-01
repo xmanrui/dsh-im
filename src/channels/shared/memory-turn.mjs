@@ -80,12 +80,35 @@ const MEMORY_USAGE_NOTE = '这些是你还记得的事。像群里的人一样�
  * @param conversationKey - the channel's own conversation identity.
  * @returns a scope string the store accepts, or null when any part is unusable.
  */
+/**
+ * Encode one scope part so the joined result is injective.
+ *
+ * The naive version replaced every disallowed character with `_`, which is not
+ * injective: `group:x:y` and `group:x_y` both became `group_x_y` and therefore
+ * shared ONE memory scope -- two different conversations reading each other's
+ * facts. Measured: a group id and a user id that differed only by `:` versus `_`
+ * collided.
+ *
+ * `_` is the escape character, so it must be doubled first; then anything outside
+ * the store's allowed set becomes `_` plus its code point in hex. Every output
+ * character stays inside `[A-Za-z0-9_.:-]`, and the mapping is reversible.
+ *
+ * @param part - one already-trimmed scope component.
+ * @returns the encoded component.
+ */
+function encodeScopePart(part) {
+  return part.replaceAll('_', '__').replace(/[^A-Za-z0-9_.-]/gu, (character) => (
+    '_' + character.codePointAt(0).toString(16).padStart(2, '0')
+  ));
+}
+
 export function memoryScope({ channel, botId, conversationKey } = {}) {
   const parts = [channel, botId, conversationKey];
   if (parts.some((part) => typeof part !== 'string' || !part.trim())) return null;
-  // The store allows [A-Za-z0-9_:.-]{1,256}; a channel key can carry characters
-  // outside that set, so anything else is replaced rather than rejected.
-  const scope = parts.map((part) => part.trim().replace(/[^A-Za-z0-9_.-]/g, '_')).join(':');
+  // The store allows [A-Za-z0-9_:.-]{1,256}; the encoder keeps every character
+  // inside that set while staying reversible, so two different conversations can
+  // never land on one scope.
+  const scope = parts.map((part) => encodeScopePart(part.trim())).join(':');
   return scope.length <= 256 ? scope : null;
 }
 

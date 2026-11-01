@@ -61,3 +61,20 @@ test('没有显式记住时，正常句子仍可给出多条不同类型的事�
   const rows = extractMemoryCandidates('我叫小李，我最近在学吉他', { speaker: ANON });
   assert.deepEqual(rows.map((c) => c.kind).sort(), ['activity', 'identity']);
 });
+
+test('单个汉字也是完整的宾语：中文里「茶」「猫」就是东西本身', () => {
+  // 实测：两字的捕获下限把最自然的说法整条丢掉（我喜欢茶 / 我养猫 / 我怕冷）。
+  assert.deepEqual(objectsOf('我喜欢茶'), ['群里有人喜欢茶']);
+  assert.deepEqual(objectsOf('我养猫'), ['群里有人有猫']);
+  assert.deepEqual(objectsOf('我有猫'), ['群里有人有猫']);
+});
+
+test('放宽字数后仍然一句闲聊都不多抽', () => {
+  assert.deepEqual(objectsOf('今天天气不错'), []);
+  assert.deepEqual(objectsOf('这个功能挺好用的'), []);
+  assert.deepEqual(objectsOf('他养了只猫'), []);
+  assert.deepEqual(objectsOf('她说她怕冷'), []);
+  // 只有动词没有宾语，什么都不记。
+  assert.deepEqual(objectsOf('我喜欢'), []);
+  assert.deepEqual(objectsOf('我有'), []);
+});
