@@ -1178,10 +1178,21 @@ class UiaBackend:
         control.SendKeys("{Enter}", waitTime=0)
 
     def _focus_is_target(self, control: Any) -> bool:
-        """True only when the OS focused element is this very control.
+        """True only when the OS focused element really is this WeChat control.
 
-        Compares the native window handle and the automation id so a focus hit on
-        some other WeChat sub-window cannot pass the check.
+        Two window shapes have to be matched, and getting this wrong once broke
+        background sending outright: the first version demanded equal native
+        handles, but measured on the live machine every mmui child reports
+        NativeWindowHandle == 0 (only the top-level 微信 window owns a handle),
+        so that guard refused EVERY real send with focus_not_on_target.
+
+        So the automation id is the primary key (chat_input_field is unique to
+        this app inside the WeChat window), then:
+        - both sides expose real handles: they must agree, so an identically
+          named control in another window cannot pass;
+        - both sides are handle-less mmui children: require the focused class to
+          start with mmui::, which no foreign app uses;
+        - one handle and one not: mismatch, refuse.
         """
 
         auto = self._auto
@@ -1194,11 +1205,16 @@ class UiaBackend:
             return False
         if focused is None:
             return False
+        target_id = _safe_property(control, "AutomationId")
+        if not target_id or _safe_property(focused, "AutomationId") != target_id:
+            return False
         handle = _safe_property(control, "NativeWindowHandle")
         focused_handle = _safe_property(focused, "NativeWindowHandle")
-        if not handle or focused_handle != handle:
-            return False
-        return _safe_property(focused, "AutomationId") == _safe_property(control, "AutomationId")
+        if handle and focused_handle:
+            return int(handle) == int(focused_handle)
+        if not handle and not focused_handle:
+            return str(_safe_property(focused, "ClassName") or "").startswith("mmui::")
+        return False
 
     def read_messages(self) -> list[RawMessage]:
         items = self._control("chat_message_list").GetChildren()

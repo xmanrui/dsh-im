@@ -842,6 +842,32 @@ class PressEnterFocusGuardTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "focus_not_on_target")
         self.assertEqual(target.typed, [])
 
+    def test_real_mmui_shape_has_zero_handles_must_still_send(self):
+        # Measured on the live machine: mmui child controls report
+        # NativeWindowHandle == 0 (only the top-level window has a real handle),
+        # so a guard that demanded equal handles would refuse EVERY real WeChat
+        # send and silently break background operation. Match on the app-unique
+        # automation id plus the mmui class name instead.
+        target = self.Input(handle=0, automation_id="chat_input_field")
+        target.ClassName = "mmui::ChatInputField"
+        focused = self.Input(handle=0, automation_id="chat_input_field")
+        focused.ClassName = "mmui::ChatInputField"
+        backend = self.build(target, focused=focused)
+        backend.press_enter()
+        self.assertEqual(target.typed, ["{Enter}"])
+
+    def test_same_automation_id_in_a_foreign_class_is_refused(self):
+        # Another app could expose an element named chat_input_field; the mmui
+        # class is what makes the match specific to WeChat.
+        target = self.Input(handle=0, automation_id="chat_input_field")
+        target.ClassName = "mmui::ChatInputField"
+        stranger = self.Input(handle=0, automation_id="chat_input_field")
+        stranger.ClassName = "Chrome_WidgetWin_1"
+        backend = self.build(target, focused=stranger)
+        with self.assertRaises(uia.SafetyError) as ctx:
+            backend.press_enter()
+        self.assertEqual(ctx.exception.code, "focus_not_on_target")
+        self.assertEqual(target.typed, [])
     def test_a_same_handle_but_different_control_is_not_enough(self):
         # Focus on another element of the same window must still refuse: the
         # keystroke would land outside the input box.
