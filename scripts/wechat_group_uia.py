@@ -1093,6 +1093,15 @@ class UiaBackend:
             "uiautomation_version": importlib.metadata.version("uiautomation"),
             "window": self._describe(self._window),
             "controls": controls,
+            # Whether a keyboard-free send is even possible on this build. Listed
+            # read-only: a probe must not invoke anything. A healthy build shows
+            # the 发送 control here, which is what send_by_invoke targets; an empty
+            # list means the only remaining route needs the keyboard (and the
+            # operator's focus), so that fact is worth knowing before shipping.
+            "send_candidates": [
+                self._describe(control) for control in self._all_controls()
+                if self._looks_like_send(control)
+            ],
         }
 
     def list_session_titles(self) -> list[str]:
@@ -1271,12 +1280,25 @@ class UiaBackend:
         """
 
         control = self._control("chat_input_field")
-        # Preferred route: the app's own send control. Invoke is a UIA message to
-        # one control and needs no keyboard at all, so nothing about the
-        # operator's foreground window changes. Only when WeChat exposes no such
-        # affordance (or refuses the invoke) do we fall back to a keystroke, and
-        # that path keeps its focus proof because it can affect other apps.
+        # Route 1: the app's own send control. Invoke is a UIA message to one
+        # control and needs no keyboard at all, so nothing about the operator's
+        # foreground window changes.
         if self.send_by_invoke():
+            return
+        # Route 2: keyboard, but only when WeChat provably owns it. This is the
+        # reliable route, so it is taken before the experimental one: a route
+        # that might deliver AND a fallback that might deliver could send twice.
+        if self._focus_is_contained(control):
+            control.SendKeys("{Enter}", waitTime=0)
+            return
+        # Route 3: one Enter posted into WeChat's own message queue. PostMessage
+        # targets a single window handle in a single thread queue, so by
+        # construction it cannot reach another application, and Qt delivers it to
+        # whichever widget holds the app's INTERNAL focus - which is why this may
+        # work while WeChat is hidden. Whether this build honours it is NOT
+        # verified (its panel was X-closed and unrecoverable), so it is only
+        # trusted when the draft is re-read and provably gone.
+        if self._posted_enter_delivered():
             return
         # Containment first: if WeChat's own process already owns the keyboard,
         # the chat that receives Enter is inside WeChat, so typing is safe
@@ -1286,12 +1308,12 @@ class UiaBackend:
         if self._focus_is_contained(control):
             control.SendKeys("{Enter}", waitTime=0)
             return
-        # The recovery below is itself a screen takeover: SetFocus on a control
-        # in a background window ACTIVATES that window to move the caret, raising
-        # WeChat over whatever the operator is using. Measured, it also fails
-        # silently while minimised, so it buys nothing in the state that matters
-        # and steals the screen in every other state. Gated by the same opt-in as
-        # the click fallback, so one switch governs every takeover path.
+        # Route 4: the recovery below is itself a screen takeover. SetFocus on a
+        # control in a background window ACTIVATES that window to move the caret,
+        # raising WeChat over whatever the operator is using; measured, it also
+        # fails silently while minimised, so it buys nothing in the state that
+        # matters and steals the screen in every other state. Gated by the same
+        # opt-in as the click fallback, so one switch governs every takeover path.
         if self._allow_window_restore():
             try:
                 control.SetFocus()
@@ -1304,6 +1326,68 @@ class UiaBackend:
             )
         control.SendKeys("{Enter}", waitTime=0)
 
+    # Virtual-key code and message ids for the posted-Enter route. Spelled out
+    # rather than imported so the intent is readable without a Win32 header.
+    VK_RETURN = 0x0D
+    WM_KEYDOWN = 0x0100
+    WM_KEYUP = 0x0101
+
+    def _draft_text(self):
+        """Current draft, or None when it cannot be read.
+
+        None is not empty: it means the post cannot be verified, and an
+        unverifiable post that a keyboard fallback also retried could send the
+        same message twice. Callers must treat None as "do not trust".
+        """
+
+        try:
+            return str(self.read_input())
+        except Exception:
+            return None
+
+    def _posted_enter_delivered(self) -> bool:
+        """Post Enter into the app message queue and prove it was consumed.
+
+        Returns True only when the draft was readable before AND empty after, so
+        a send is never reported on the strength of a PostMessage return value
+        alone. Any doubt returns False and the caller decides.
+        """
+
+        # getattr, not indexing: a backend built without a window (older test
+        # doubles) must report 'cannot post' rather than crash the send.
+        window = getattr(self, "_window", None)
+        handle = _safe_property(window, "NativeWindowHandle") if window is not None else None
+        if not handle or sys.platform != "win32":
+            return False
+        # Identity check before writing into anyone's queue: only a window that
+        # announces itself as WeChat's own mmui surface is a legitimate target.
+        # A bare handle number proves nothing, and an unprovable identity is
+        # treated exactly like a foreign window - skip and refuse.
+        class_name = str(_safe_property(window, "ClassName") or "")
+        if not class_name.startswith("mmui::"):
+            return False
+        if self._draft_text() is None:
+            return False
+        from ctypes import wintypes
+
+        try:
+            user32 = _user32()
+            # Repeat count 1, scan code for Return, previous-key-state up.
+            down = wintypes.LPARAM(1 | (0x1C << 16))
+            up = wintypes.LPARAM(1 | (0x1C << 16) | (0xC0 << 24))
+            user32.PostMessageW(wintypes.HWND(int(handle)), wintypes.UINT(self.WM_KEYDOWN),
+                                wintypes.WPARAM(self.VK_RETURN), down)
+            user32.PostMessageW(wintypes.HWND(int(handle)), wintypes.UINT(self.WM_KEYUP),
+                                wintypes.WPARAM(self.VK_RETURN), up)
+        except Exception:
+            return False
+        # Give the app a moment to consume it, then require the proof.
+        for _ in range(6):
+            time.sleep(0.25)
+            after = self._draft_text()
+            if after is not None and not after.strip():
+                return True
+        return False
     def _focus_is_contained(self, control: Any) -> bool:
         """True when the focused element belongs to THIS WeChat process.
 

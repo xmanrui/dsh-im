@@ -1181,6 +1181,155 @@ class SendByInvokeTests(unittest.TestCase):
         self.assertEqual(input_ctl.typed, [])
 
 
+class PostedEnterTests(unittest.TestCase):
+    """Route 2: Enter posted into WeChat's own message queue.
+
+    SetKeys injects globally and needs the keyboard, which a background window
+    cannot have. PostMessage targets a single window handle in a single thread
+    queue, so by construction the keystroke cannot reach another application.
+    Qt then delivers it to whichever widget holds the app's INTERNAL focus,
+    which is why this can work while WeChat is hidden - but that is the part not
+    verified on this build (its panel was X-closed and unrecoverable), so
+    success is never assumed: the draft is re-read and the adapter still proves
+    delivery from the message list.
+    """
+
+    class Value:
+        def __init__(self, holder):
+            self.holder = holder
+
+        @property
+        def Value(self):
+            return self.holder.text
+
+    class Input:
+        def __init__(self, text="draft"):
+            self.text = text
+            self.typed = []
+            self.ProcessId = 11940
+            self.NativeWindowHandle = 0
+            self.AutomationId = "chat_input_field"
+            self.ClassName = "mmui::ChatInputField"
+
+        def GetValuePattern(self):
+            return PostedEnterTests.Value(self)
+
+        def SendKeys(self, text, waitTime=0):
+            self.typed.append(text)
+
+    def backend(self, input_text="draft", handle=44565750, focused=None):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        input_ctl = self.Input(input_text)
+        window = self.Input("")
+        window.NativeWindowHandle = handle
+        window.ProcessId = 11940
+        # A real main window announces itself as mmui; the posted-Enter route
+        # checks that before writing a keystroke into anyone's queue.
+        window.ClassName = "mmui::MainWindow"
+        backend._window = window
+        backend._control = lambda automation_id: input_ctl
+        backend._auto = type("A", (), {"GetFocusedControl": staticmethod(lambda: focused)})
+        return backend, input_ctl
+
+    def test_posts_enter_to_the_wechat_window_and_stops(self):
+        backend, input_ctl = self.backend()
+        fake_user32 = mock.MagicMock()
+
+        def settle(hwnd, msg, wparam, lparam):
+            # The app consumed the key: the draft empties, as it does on a real
+            # send. Nothing else may then be attempted.
+            input_ctl.text = ""
+            return 1
+
+        fake_user32.PostMessageW.side_effect = settle
+        with mock.patch.object(uia, "_user32", lambda: fake_user32):
+            backend.press_enter()
+        # ctypes scalar wrappers do not compare equal to plain ints, so read
+        # the value out; comparing the wrapper itself would make this toothless.
+        posted = [int(call.args[1].value) for call in fake_user32.PostMessageW.mock_calls]
+        self.assertIn(0x0100, posted, "return keydown must be posted")
+        self.assertIn(0x0101, posted, "return keyup must be posted")
+        self.assertEqual(fake_user32.PostMessageW.mock_calls[0].args[0].value, 44565750)
+        self.assertEqual(input_ctl.typed, [], "no global keystroke after a post")
+
+    def test_falls_back_to_the_keyboard_when_the_draft_survives(self):
+        backend, input_ctl = self.backend()
+        holder = self.Input("")
+        holder.ProcessId = 11940
+        holder.NativeWindowHandle = 44565750
+        backend._auto = type("A", (), {"GetFocusedControl": staticmethod(lambda: holder)})
+        fake_user32 = mock.MagicMock()
+        fake_user32.PostMessageW.return_value = 1
+        with mock.patch.object(uia, "_user32", lambda: fake_user32):
+            backend.press_enter()
+        # A verified no-op may fall through, and containment makes the keystroke
+        # safe so the send still happens.
+        self.assertEqual(input_ctl.typed, ["{Enter}"])
+
+    def test_unreadable_draft_refuses_to_post_blindly(self):
+        # Without readback there is no way to tell a delivered Enter from a lost
+        # one, and a blind post followed by a fallback could send twice. So the
+        # route is skipped and the keystroke path is used.
+        backend, input_ctl = self.backend()
+        input_ctl.GetValuePattern = lambda: None
+        holder = self.Input("")
+        holder.ProcessId = 11940
+        holder.NativeWindowHandle = 44565750
+        backend._auto = type("A", (), {"GetFocusedControl": staticmethod(lambda: holder)})
+        fake_user32 = mock.MagicMock()
+        with mock.patch.object(uia, "_user32", lambda: fake_user32):
+            backend.press_enter()
+        self.assertEqual(fake_user32.PostMessageW.mock_calls, [])
+        self.assertEqual(input_ctl.typed, ["{Enter}"])
+
+    def stranger(self):
+        # Focus in ANOTHER process, so containment cannot license a keystroke
+        # and the flow really reaches the posted-Enter route under test.
+        other = self.Input("")
+        other.ProcessId = 9999
+        other.NativeWindowHandle = 264128
+        other.ClassName = "Chrome_WidgetWin_1"
+        return other
+
+    def test_a_window_that_is_not_wechat_is_never_posted_to(self):
+        # The route must be specific to WeChat: a handle that belongs to some
+        # other window must not receive a synthetic Enter just because numbers
+        # lined up. Only an mmui window is a legitimate target, and without one
+        # the send is refused rather than guessed at.
+        backend, input_ctl = self.backend(focused=self.stranger())
+        backend._window.ClassName = "Chrome_WidgetWin_1"
+        fake_user32 = mock.MagicMock()
+        with mock.patch.object(uia, "_user32", lambda: fake_user32):
+            with self.assertRaises(uia.SafetyError) as ctx:
+                backend.press_enter()
+        self.assertEqual(ctx.exception.code, "focus_not_on_target")
+        self.assertEqual(fake_user32.PostMessageW.mock_calls, [])
+        self.assertEqual(input_ctl.typed, [])
+
+    def test_missing_class_name_skips_the_post(self):
+        # Unprovable identity is treated like a foreign window: no post, refuse.
+        backend, input_ctl = self.backend(focused=self.stranger())
+        backend._window.ClassName = ""
+        fake_user32 = mock.MagicMock()
+        with mock.patch.object(uia, "_user32", lambda: fake_user32):
+            with self.assertRaises(uia.SafetyError):
+                backend.press_enter()
+        self.assertEqual(fake_user32.PostMessageW.mock_calls, [])
+        self.assertEqual(input_ctl.typed, [])
+    def test_no_window_handle_skips_the_post(self):
+        backend, input_ctl = self.backend(handle=0)
+        holder = self.Input("")
+        holder.ProcessId = 11940
+        holder.NativeWindowHandle = 44565750
+        backend._auto = type("A", (), {"GetFocusedControl": staticmethod(lambda: holder)})
+        fake_user32 = mock.MagicMock()
+        with mock.patch.object(uia, "_user32", lambda: fake_user32):
+            backend.press_enter()
+        self.assertEqual(fake_user32.PostMessageW.mock_calls, [])
+        self.assertEqual(input_ctl.typed, ["{Enter}"])
+
+
 class NoOpenChatTests(unittest.TestCase):
     """A freshly logged-in WeChat has no chat panel until one is opened."""
 
