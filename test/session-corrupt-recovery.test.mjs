@@ -126,15 +126,21 @@ for (const [code, message] of [
 }
 
 for (const race of [false, true]) {
-  test(`archive takes priority over corruption (race=${race})`, async () => {
+  test(`archive takes priority over corruption and repairs the binding (race=${race})`, async () => {
     const f = fixture();
     f.archived = !race;
     f.archiveOnFailure = race;
-    await assert.rejects(f.ask(), { code: 'session-archived' });
-    assert.equal(f.created, 0);
-    assert.equal(f.submitted, 0);
-    assert.equal(f.bound, 'old-session');
-    assert.deepEqual(f.notices, []);
+    // The injected corruption only affects the old binding, so the replacement can
+    // serve the message: an archive is repairable, corruption of the old log is not
+    // sufficient reason to keep the user stuck.
+    const result = await f.ask();
+    assert.equal(result.sessionId, 'new-session');
+    assert.equal(f.created, 1);
+    assert.equal(f.submitted, 1);
+    assert.equal(f.bound, 'new-session');
+    assert.equal(f.notices.length, 1);
+    assert.match(f.notices[0], /归档.*新会话/u);
+    assert.doesNotMatch(f.notices[0], /日志已损坏/u, 'archive repair never claims corruption');
   });
 }
 

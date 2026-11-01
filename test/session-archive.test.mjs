@@ -7,6 +7,7 @@ import { getImHostLanguage, setImHostLanguage, t as translate } from '../src/cha
 import { COMMAND_PERMISSION_DENIED_MESSAGE } from '../src/channels/shared/inbound-access.mjs';
 
 const SESSION = 'archive-session';
+const REPLACEMENT = 'archive-replacement';
 const event = (seq, type, data) => ({ event: { seq, type, data } });
 
 test('HTTP RPC archive checks preserve the binding and never load a corrupt log', async () => {
@@ -35,10 +36,16 @@ function fixture(options = {}) {
     if (method === 'host.describe') return {};
     if (method === 'workspace.list') {
       f.archiveReads++;
-      return f.readArchive ? f.readArchive() : { archivedSessionIds: f.archived ? [SESSION] : [] };
+      if (f.readArchive) return f.readArchive();
+      return { items: [{ workspaceId: 'workspace', path: '/tmp', sessionIds: [SESSION] }],
+        archivedSessionIds: f.archived ? [SESSION] : [] };
     }
     if (method === 'session.history') return f.readHistory ? f.readHistory() : { events: [...f.events] };
     if (method === 'session.list') return { items: [{ sessionId: SESSION, running: false }] };
+    if (method === 'session.create') {
+      f.created = (f.created ?? 0) + 1;
+      return { sessionId: REPLACEMENT };
+    }
     if (method === 'session.prompt') {
       f.prompt = options.rpcId;
       if (f.onPrompt) return f.onPrompt();
@@ -55,26 +62,80 @@ function fixture(options = {}) {
   return f;
 }
 
-test('archived bindings remain present and fail before history, files, subscriptions or prompt', async () => {
-  const f = fixture(); f.archived = true;
+test('an archived binding is replaced once, the prompt is resent to the new Session, and the user is told why', async () => {
+  // File ingress must exist so the replacement attempt can stage its attachments;
+  // the archived attempt must still reach no ingress at all.
+  let staged = 0;
+  const f = fixture({ fileIngressExecutor: async () => {
+    staged += 1;
+    return { files: [], cleanup: async () => {} };
+  } });
+  f.archived = true;
   assert.equal(await f.client.sessionExists(SESSION), true);
+  let bound = SESSION;
+  const notices = [];
+  const asks = [];
+  const ask = f.client.ask.bind(f.client);
+  f.client.ask = async (sessionId, prompt, options) => {
+    asks.push(sessionId);
+    return ask(sessionId, prompt, options);
+  };
+  const result = await askInWorkspaceSession({
+    harness: f.client,
+    state: { sessionFor: () => bound, setSession: async (_key, value) => { bound = value; } },
+    key: 'direct:owner', text: 'hello',
+    onNotice: async (notice) => notices.push(notice),
+    askOptions: { files: [{ name: 'test.txt', data: Buffer.from('test') }] },
+  });
+  assert.equal(staged, 1, 'the replacement stages the inbound file exactly once');
+  assert.equal(result.sessionId, REPLACEMENT);
+  assert.deepEqual(asks, [SESSION, REPLACEMENT], 'the archived Session is tried once, then the replacement');
+  assert.equal(f.created, 1, 'exactly one replacement Session');
+  assert.equal(bound, REPLACEMENT, 'the repaired binding persists');
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /归档.*新会话.*原会话记录已保留/u);
+  assert.doesNotMatch(notices[0], /日志已损坏/u, 'an archive repair never claims log corruption');
+});
+
+test('an archived binding fails without replacement when the Harness cannot create a Session', async () => {
+  let bound = SESSION;
+  const archived = Object.assign(new Error('The Session is archived and cannot process this message.'), {
+    code: 'session-archived', promptAccepted: false, details: { submissionState: 'not-submitted' },
+  });
+  const harness = {
+    sessionExists: async () => true,
+    ask: async () => { throw archived; },
+  };
+  await assert.rejects(askInWorkspaceSession({
+    harness,
+    state: { sessionFor: () => bound, setSession: async (_key, value) => { bound = value; assert.fail('rebound'); } },
+    key: 'direct:owner', text: 'hello',
+  }), (error) => {
+    assert.equal(error.code, 'session-archived');
+    assert.equal(classifyMessageFailure(error).code, 'SESSION_ARCHIVED');
+    return true;
+  });
+  assert.equal(bound, SESSION, 'an unrepairable binding is never silently rewritten');
+});
+
+test('an archive discovered after the prompt was accepted is reported, never replayed into a second Session', async () => {
+  const f = fixture();
+  f.onPrompt = () => { f.archived = true; };
   let bound = SESSION;
   await assert.rejects(askInWorkspaceSession({
     harness: f.client,
     state: { sessionFor: () => bound, setSession: async (_key, value) => { bound = value; assert.fail('rebound'); } },
     key: 'direct:owner', text: 'hello',
-    askOptions: { files: [{ name: 'test.txt', load: () => assert.fail('loaded') }],
-      onInteraction: () => assert.fail('interaction') },
+    askOptions: { timeoutMs: 650 },
   }), (error) => {
     assert.equal(error.code, 'session-archived');
-    assert.equal(error.promptAccepted, false);
-    assert.equal(classifyMessageFailure(error).code, 'SESSION_ARCHIVED');
+    assert.equal(error.promptAccepted, true);
+    assert.match(classifyMessageFailure(error).message, /仍在会话队列/u);
     return true;
   });
+  assert.equal(f.created, undefined, 'an accepted prompt is never duplicated');
   assert.equal(bound, SESSION);
-  assert.deepEqual(f.calls, ['workspace.list', 'workspace.list', 'host.describe', 'workspace.list']);
-  f.archived = false;
-  assert.equal(await f.ask(), '正常回复', 'unarchiving works without clearing or caching the binding');
+  assert.equal(f.calls.filter((method) => method === 'session.prompt').length, 1);
 });
 
 for (const phase of ['exists', 'initial-history', 'prompt', 'poll']) {

@@ -76,6 +76,39 @@ async function createSession(harness, options) {
 }
 
 /**
+ * A binding that can never serve another message, paired with the repair reason
+ * reported to the user. Both codes mean the stored Session is intact but the
+ * Harness refuses to use it, so the only way to answer this message is a new
+ * Session -- never a silent rewrite of the old one.
+ */
+const REPAIRABLE_BINDING_LOSS = Object.freeze({
+  'session-unreadable': 'corrupt',
+  'session-archived': 'archived',
+});
+
+/**
+ * Decide whether this failure may replace the binding and replay once.
+ *
+ * Every guard is a reason not to replay: a DS Bot owns its Session, an alternate
+ * Harness may not be able to create one, one replacement per message is enough,
+ * and any failure that might already be queued in the Session (an accepted
+ * prompt, an unknown submission state) must surface instead of being duplicated.
+ */
+function repairableBindingLoss(error, failure, {
+  alreadyReplaced, canCreate, dsBotSession, signal, existsSignal,
+}) {
+  const reason = REPAIRABLE_BINDING_LOSS[error?.code];
+  if (!reason) return null;
+  if (alreadyReplaced || !canCreate || dsBotSession) return null;
+  if (signal?.aborted || existsSignal?.aborted) return null;
+  if (extractConnectionEvidence(failure).details.submissionState !== 'not-submitted') return null;
+  // The archive guard can fire after DSH accepted the prompt and the turn was
+  // then stopped by the archive; replaying that would submit a second copy.
+  if (reason === 'archived' && error?.promptAccepted === true) return null;
+  return reason;
+}
+
+/**
  * Resolve, persist, and ask through a session that belongs to the bot's
  * current workspace. A concurrent workspace switch invalidates the scoped
  * session and retries before any prompt is sent to the stale session.
@@ -116,7 +149,13 @@ export async function askInWorkspaceSession({
   const renameSignal = createOptions?.signal
     ?? (typeof askOptions === 'object' ? askOptions?.signal : undefined);
   const renameOptions = renameSignal ? { signal: renameSignal } : undefined;
-  let unreadableSessionId;
+  // One-shot binding repair. `replacedSessionId` is the Session this message
+  // was first tried against and `replacementReason` says why it had to go.
+  // At most one replacement per message: a Harness that keeps failing must not
+  // spawn one new Session per retry.
+  let replacedSessionId;
+  let replacementReason;
+  const canCreateSession = typeof harness?.createSession === 'function';
   while (true) {
     const diagnostic = { stage: 'session.prepare', submissionState: 'not-submitted' };
     let dsBotSession = false;
@@ -128,8 +167,8 @@ export async function askInWorkspaceSession({
         let sessionId = dsBotSessionId || state.sessionFor(key);
         diagnostic.sessionId = sessionId;
         let session = sessionId ? workspaceSession(harness, sessionId, key) : null;
-        const replacingUnreadable = sessionId && sessionId === unreadableSessionId;
-        if (!session || replacingUnreadable || !(await sessionExists(session, existsOptions))) {
+        const replacingStale = Boolean(sessionId) && sessionId === replacedSessionId;
+        if (!session || replacingStale || !(await sessionExists(session, existsOptions))) {
           if (dsBotSessionId) {
             throw Object.assign(new Error('DS Bot 的当前会话不可用。'), { code: 'ds-bot-unavailable' });
           }
@@ -159,14 +198,16 @@ export async function askInWorkspaceSession({
           if (conversationGenerationMoved(harness, key, conversationGeneration)) {
             throw workspaceSessionStaleError();
           }
-          return { sessionId, session, recovered: replacingUnreadable };
+          return { sessionId, session, recovered: replacingStale ? replacementReason : null };
         }
         return { sessionId, session };
       });
       if (!binding) continue;
       diagnostic.sessionId = binding.sessionId;
-      if (binding.recovered) {
+      if (binding.recovered === 'corrupt') {
         await onNotice?.(t('绑定会话的日志已损坏，已切换到新会话并继续处理本条消息。原会话记录已保留，历史上下文不会自动带入。'));
+      } else if (binding.recovered === 'archived') {
+        await onNotice?.(t('绑定的会话已在 DSH 中归档，已自动切换到新会话继续处理本条消息。原会话记录已保留，历史上下文不会自动带入。'));
       }
       diagnostic.stage = 'prompt.prepare';
       const artifacts = [];
@@ -216,11 +257,16 @@ export async function askInWorkspaceSession({
       // Retry once, only with positive evidence that no prompt was submitted.
       // The binding lock rechecks identity so a concurrent /new or workspace
       // switch cannot be overwritten by recovery of the previous Session.
-      if (!unreadableSessionId && !dsBotSession && diagnostic.sessionId
-        && error?.code === 'session-unreadable'
-        && !renameSignal?.aborted && !existsOptions?.signal?.aborted
-        && extractConnectionEvidence(failure).details.submissionState === 'not-submitted') {
-        unreadableSessionId = diagnostic.sessionId;
+      const repair = repairableBindingLoss(error, failure, {
+        alreadyReplaced: replacedSessionId !== undefined,
+        canCreate: canCreateSession,
+        dsBotSession,
+        signal: renameSignal,
+        existsSignal: existsOptions?.signal,
+      });
+      if (repair && diagnostic.sessionId) {
+        replacedSessionId = diagnostic.sessionId;
+        replacementReason = repair;
         continue;
       }
       if (error?.code !== WORKSPACE_SESSION_STALE) throw failure;
