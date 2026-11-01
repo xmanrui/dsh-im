@@ -404,8 +404,17 @@ export class MemoryStore {
     const at = checkedMillis(now, this.#now());
     const capped = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, MAX_LIMIT) : DEFAULT_LIMIT;
     // 先问 FTS；没命中（含 2 个汉字这种 trigram 无法索引的短词）就退回 LIKE。
-    const matched = this.#ftsAvailable ? this.#matchCandidates(normalizedScope, tokens) : [];
-    const candidates = matched.length > 0 ? matched : this.#likeCandidates(normalizedScope, tokens);
+    // And if the strict pass finds nothing at all, widen to ANY token:
+    //
+    // A message that mentions one unknown word must not erase every memory.
+    // "橘猫 吉他" against a store holding only 橘猫 used to return nothing,
+    // because both paths AND their tokens -- so a single unfamiliar noun in a
+    // real sentence silently defeated the whole layer. The strict pass still
+    // runs first and keeps its ordering; the wide pass only fills in when it
+    // produced nothing, and its weaker matches score lower and sort below.
+    let candidates = this.#ftsAvailable ? this.#matchCandidates(normalizedScope, tokens) : [];
+    if (candidates.length === 0) candidates = this.#likeCandidates(normalizedScope, tokens);
+    if (candidates.length === 0) candidates = this.#anyTokenCandidates(normalizedScope, tokens);
     return candidates
       .map((row) => scoreRow(row, tokens, at))
       .sort((left, right) => right.score - left.score)
@@ -430,6 +439,27 @@ export class MemoryStore {
     const clause = tokens
       .map(() => "(object LIKE ? ESCAPE '!' OR subject LIKE ? ESCAPE '!' OR predicate LIKE ? ESCAPE '!')")
       .join(' AND ');
+    const params = [scope];
+    for (const token of tokens) {
+      const pattern = likePattern(token);
+      params.push(pattern, pattern, pattern);
+    }
+    params.push(CANDIDATE_LIMIT);
+    return this.#db.prepare('SELECT * FROM facts WHERE scope = ? AND valid_to IS NULL AND '
+      + clause + ' LIMIT ?').all(...params);
+  }
+
+  /**
+   * 最后一道：任一词命中即算候选（OR），而不是要求全部命中（AND）。
+   *
+   * 只在严格的两条路径都没有结果时才会跑到这里，所以它不会降低正常召回的精度；
+   * 它只是保证「句子里有一个没见过的词」不会把整段记忆一起抹掉。
+   * 每个词单独绑定，用户文本依旧只当字面量。
+   */
+  #anyTokenCandidates(scope, tokens) {
+    const clause = tokens
+      .map(() => "(object LIKE ? ESCAPE '!' OR subject LIKE ? ESCAPE '!' OR predicate LIKE ? ESCAPE '!')")
+      .join(' OR ');
     const params = [scope];
     for (const token of tokens) {
       const pattern = likePattern(token);
