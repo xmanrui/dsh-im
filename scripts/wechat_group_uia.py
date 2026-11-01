@@ -46,11 +46,11 @@ ERROR_MESSAGES = {
     # A remembered account, not a lost one. Do not restart WeChat: that is how a
     # live session gets thrown away. Confirming the login is all that is needed.
     "wechat_login_confirmation": "WeChat is asking to confirm the remembered account; open WeChat and press 登录 there.",
-    # Measured: X-closing the panel leaves the process alive but destroys the tree,
-    # and MINIMISING destroys it too on this build - so the earlier advice to
-    # 'keep it minimised' was wrong and cost the operator his only working session.
-    # Say only what is true: reopen it and leave it as opened.
-    "wechat_panel_closed": "WeChat's panel was closed; reopen it and leave it open.",
+    # Measured 2026-11-02: X-closing the panel keeps the process alive but destroys
+    # the tree, so the panel must be reopened. MINIMISING IS FINE and must not be
+    # named here - with QT_ACCESSIBILITY present a minimised panel is fully readable
+    # and writable (IsIconic=True, 158x26 off-screen, whole tree answered).
+    "wechat_panel_closed": "WeChat's panel was closed; reopen it. (Minimising is fine and does not cause this.)",
     # The missing provider is decided by Qt at process start from QT_ACCESSIBILITY,
     # so a plain restart reproduces the same provider-less state and the message has
     # to name the variable. WM_GETOBJECT answering 0 on a visible 1477x880 panel is
@@ -59,7 +59,14 @@ ERROR_MESSAGES = {
         "accessibility tree (WM_GETOBJECT returns 0). Set QT_ACCESSIBILITY=1 in the "
         "user environment, then restart WeChat - Qt attaches the provider only at "
         "process start, so a restart without it reproduces the same state.",
-    "main_window_missing": "No WeChat window was found; start WeChat and log in.",
+    # Deliberately does NOT suggest logging in: "no window" and "signed out" are
+    # different states, and telling a signed-in operator to log in is how a live
+    # session gets destroyed. The login states have their own codes above.
+    "main_window_missing": "No WeChat window was found; start WeChat if it is not running.",
+    # Not a lost surface: a recheck disagreed with the first snapshot, which is a
+    # reason to look again, not to restart anything. Kept out of SURFACE_LOST_CODES
+    # so it never triggers the exit-and-restart ladder.
+    "transient_surface": "WeChat's windows changed while they were being classified; looking again without touching anything.",
     "focus_not_on_target": "Keyboard focus could not be proven to be on the WeChat input; nothing was typed.",
     # Not a lost surface: respawning the child cannot expand a sidebar the operator
     # collapsed, so this code must never trigger the exit-and-retry ladder. Kept as
@@ -309,6 +316,20 @@ def read_visible_rows_as_messages(
     unverified row cannot name its author. This deliberately returns
     UNVERIFIED_SENDER_PREFIX rows instead of inventing a member name; callers
     must therefore treat them as observe-only and never as addressed.
+
+    ONE MESSAGE CAN SPAN SEVERAL SIBLING ROWS. Measured 2026-11-02 00:40 on the
+    live machine: the operator's single "@大肥鱼 /dsh 在吗" arrives as two
+    mmui::ChatTextItemView rows under the same mmui::RecyclerListView -
+
+        index 4  '@大肥鱼\u2005'   top=689  height=134
+        index 5  '/dsh 在吗'      top=824  height=134
+
+    Judging each row on its own made the mention row body-less (dropped as empty)
+    and the body row mention-less (no leading @ token), so the operator's own @
+    was silently ignored - the defect behind "群里直接 @ 唤不起". merge_mention_rows
+    rejoins exactly that shape; a time separator or any non-text row stops the
+    join, because that is the only evidence this build gives that two rows are
+    two different messages.
     """
 
     if not allow_unverified:
@@ -316,26 +337,85 @@ def read_visible_rows_as_messages(
             "message item layout lacks verified sender fields",
             "message_layout_unverified",
         )
-    messages: list[RawMessage] = []
+    # Classify first, join second, so the join can still see the separators it
+    # must respect. A non-text row (time separator, image, transfer card) is kept
+    # as a barrier instead of being dropped: dropping it would splice two
+    # unrelated messages into one.
+    entries: list[tuple[str, str]] = []
     for row in rows:
         if not isinstance(row, dict):
             raise SafetyError("message row has an unknown shape", "invalid_message_shape")
         cls = row.get("cls") or ""
         name = row.get("name") or ""
         if "ChatTextItemView" not in cls:
-            # Images, time separators and referral items carry no addressable text.
+            entries.append(("sep", ""))
             continue
         text = name.strip()
-        if not text:
-            continue
-        messages.append(RawMessage(
+        entries.append(("text", text) if text else ("sep", ""))
+
+    return [
+        RawMessage(
             sender=UNVERIFIED_SENDER_PREFIX + "row",
             text=text,
             is_self=False,
             visible_time="",
             message_type=1,
-        ))
-    return messages
+        )
+        for text in merge_mention_rows(entries)
+    ]
+
+
+# A text row that is nothing but an @ token: the shape WeChat leaves behind when
+# the mention and the typed body land in separate list rows. Both measured forms
+# are accepted (bracket "@[___]" and readable "@大肥鱼"); no trailing separator is
+# required because the caller has already stripped the row.
+MENTION_ONLY_RE = re.compile(r"^@(?:\[[^\]\n]*\]|[^\s@\[\]\u2005]+)$")
+
+
+def merge_mention_rows(entries: Iterable[tuple[str, str]]) -> list[str]:
+    """Rejoin an @-row with the body row that belongs to the same message.
+
+    Two details are load-bearing:
+
+    - The separator has to be re-inserted. Callers strip each row, and str.strip()
+      also removes U+2005 FOUR-PER-EM SPACE, the character WeChat writes after a
+      mention. Naive concatenation would yield '@大肥鱼/dsh 在吗', whose captured
+      name is '大肥鱼/dsh' - a name no trigger_names list can match. Joining with
+      an explicit U+2005 restores the shape READABLE_MENTION_RE expects.
+    - Only a mention-only row may start a join. Two ordinary text rows stay two
+      messages, so a body can never be glued onto the previous message.
+
+    A mention run with no following text row keeps its bare form; the adapter then
+    drops it for having no body to act on, which is the correct outcome for a bare
+    '@someone' someone typed and never finished.
+    """
+
+    ordered = list(entries)
+    merged: list[str] = []
+    index = 0
+    while index < len(ordered):
+        kind, text = ordered[index]
+        if kind != "text":
+            index += 1
+            continue
+        if MENTION_ONLY_RE.match(text) is None:
+            merged.append(text)
+            index += 1
+            continue
+
+        # Collect the run of mention-only rows, then at most one body row.
+        parts = [text]
+        cursor = index + 1
+        while (cursor < len(ordered) and ordered[cursor][0] == "text"
+               and MENTION_ONLY_RE.match(ordered[cursor][1]) is not None):
+            parts.append(ordered[cursor][1])
+            cursor += 1
+        if cursor < len(ordered) and ordered[cursor][0] == "text":
+            parts.append(ordered[cursor][1])
+            cursor += 1
+        merged.append("\u2005".join(part for part in parts if part))
+        index = cursor
+    return merged
 
 
 def build_message_event(
@@ -858,6 +938,17 @@ SURFACE_LOST_CODES = frozenset({
 # from any other child death.
 SURFACE_LOST_EXIT_CODE = 4
 
+# How long to wait before re-reading a window class that a diagnosis depends on.
+# Short on purpose: it only has to outlive a window swap (the login window being
+# destroyed and the main window being built), not a user action.
+SURFACE_RECHECK_DELAY_S = 0.4
+
+# The one code that means "the snapshot disagreed with itself", which is NOT a
+# surface loss and must never enter SURFACE_LOST_CODES: a transient disagreement
+# is a reason to look again, not a reason to tear the bridge down and restart it.
+# Deliberately absent from that frozenset above - keep it that way.
+TRANSIENT_SURFACE_CODE = "transient_surface"
+
 
 class JsonlProtocol:
     """Request/response boundary; business safety remains in WechatGroupAdapter."""
@@ -1125,6 +1216,29 @@ def _window_is_minimised(hwnd: int) -> bool:
     except Exception:
         return False
 
+def _still_present(auto: Any, class_name: str) -> bool:
+    """Re-read a window class after a short pause; True only if it is still there.
+
+    Two samples are the cheapest way to tell a real state from a transition. The
+    startup race this exists for lasts tens of milliseconds: the login window is
+    torn down and the main window is built in its place, and a single snapshot
+    taken inside that gap reports "login window present, main window absent" -
+    which is the signed-out diagnosis, and the signed-out diagnosis is the one that
+    tells a perfectly signed-in operator to log in again.
+
+    The pause is deliberately short. Growing it would not make the answer truer,
+    only slower, and the caller already re-enters this classifier on its slow
+    ladder. Any exception answers False: an unreadable window is not evidence that
+    a window is there.
+    """
+
+    time.sleep(SURFACE_RECHECK_DELAY_S)
+    try:
+        return bool(auto.WindowControl(searchDepth=1, ClassName=class_name).Exists(0, 0))
+    except Exception:
+        return False
+
+
 def _login_window_offers_confirmation(auto: Any) -> bool:
     """True when the login window shows the remembered-account 登录 button.
 
@@ -1169,10 +1283,13 @@ def classify_missing_main_window(auto: Any) -> str:
     - a titled 微信 shell window (Qt51514*, no mmui subtree), offscreen or
       tray-sized -> the panel was CLOSED with the X button. The process lives but
       the tree is gone, so nothing can be read or sent (wechat_panel_closed).
-      RETRACTED, and it cost a session to learn: minimising does NOT preserve the
-      tree on this build either (measured - after SW_SHOWMINNOACTIVE the window was
-      still non-iconic yet UIA found zero mmui controls desktop-wide). Never
-      advise minimising.
+      MINIMISING IS NOT THIS STATE. An earlier note here said minimising also
+      destroys the tree; that was a misdiagnosis. The run behind it had a missing
+      QT_ACCESSIBILITY, and "no provider" and "minimised" both present as zero
+      mmui controls desktop-wide. Measured 2026-11-02 with the provider present and
+      the panel minimised (IsIconic=True, showCmd=2, parked off-screen at 158x26):
+      the full tree was readable and the input field writable. So tell the operator
+      to reopen a CLOSED panel, and never imply that minimising broke anything.
     - a 微信 shell window that is large and on screen, still with no mmui subtree
       -> the panel is visible to the operator and only the accessibility PROVIDER
       is missing; WM_GETOBJECT answers 0 (wechat_accessibility_unavailable). Qt
@@ -1191,6 +1308,29 @@ def classify_missing_main_window(auto: Any) -> str:
         except Exception:
             return False
 
+    # A single zero-timeout Exists() is a photograph, not a diagnosis, and this
+    # classifier used to act on one photograph. Two ways that misfired on the live
+    # machine, both ending in the operator being told to re-login while his session
+    # was still perfectly valid:
+    #
+    #   1. Startup race - the main window is created a moment after the login
+    #      window is destroyed. Sampling inside that gap sees LoginWindow present
+    #      and MainWindow absent, which reads as "signed out" for a session that
+    #      was never lost.
+    #   2. COM flake - one bad snapshot makes Exists() answer False for both, and
+    #      the old code returned main_window_missing without ever looking again.
+    #
+    # So re-check the main window first (it is the thing whose presence proves the
+    # session is alive), and require the SAME diagnosis on consecutive samples
+    # before reporting a state whose advice can cost the operator his login. The
+    # caller already runs a slow ladder for these codes, so a few hundred extra
+    # milliseconds here are cheap compared with a wrongly-triggered restart.
+    if exists("mmui::MainWindow"):
+        # The surface came back between the caller's check and this one: there is
+        # no missing-window state to classify, and inventing one is how a healthy
+        # session gets destroyed.
+        raise SafetyError("main window reappeared during classification", TRANSIENT_SURFACE_CODE)
+
     if exists("mmui::LoginWindow"):
         # Existence of the login window is NOT proof of being signed out. Measured
         # on the live machine it appears in two states that need opposite handling:
@@ -1203,6 +1343,11 @@ def classify_missing_main_window(auto: Any) -> str:
         # existence, and fall back to the weaker claim when nothing can be read.
         if _login_window_offers_confirmation(auto):
             return "wechat_login_confirmation"
+        # Nothing readable inside a login window is weaker evidence than a positive
+        # 扫码 signature, and it is exactly the shape a mid-transition window
+        # produces. Confirm it is still there before claiming a signed-out account.
+        if not _still_present(auto, "mmui::LoginWindow"):
+            raise SafetyError("login window vanished during classification", TRANSIENT_SURFACE_CODE)
         return "wechat_logged_out"
     # The tray/shell window WeChat leaves behind after the panel is X-closed: it
     # carries the Qt window class, not an mmui one, and has no widget subtree.
@@ -1440,29 +1585,38 @@ class UiaBackend:
         except Exception:
             return False
     def maybe_auto_minimize(self) -> None:
-        """Refuse to minimise: it destroys the tree the bridge depends on.
+        """Still a no-op, but the reason has been corrected: the tree survives.
 
-        RETRACTED behaviour, kept as a no-op so an operator who still has
-        autoMinimize:true in his config file is protected rather than sabotaged.
-        The original reasoning was: WeChat 4.x deleted close-to-tray, X-closing the
-        panel destroys mmui::MainWindow, therefore minimising is the headless
-        operating point where InvokePattern still works. Measured instead: after
-        SW_SHOWMINNOACTIVE the window was still non-iconic and UIA found zero mmui
-        controls desktop-wide - minimise destroys the tree exactly like X-closing.
-        So enabling this switch did not create a background-capable state, it
-        removed the only working one: the bridge hid the panel and then went blind,
-        reporting a missing surface and retrying forever.
+        The old docstring claimed minimising destroys mmui::MainWindow. That was
+        WRONG, and it was wrong because the measurement behind it was taken while
+        QT_ACCESSIBILITY was missing rather than while the window was minimised -
+        two different states that both present as "zero mmui controls desktop-wide".
 
-        Reading the environment variable is retained so the gate stays observable
-        (a caller can still tell whether the operator asked for it), but no window
-        API is called in any branch.
+        Measured 2026-11-02 00:40 on this machine, with QT_ACCESSIBILITY=1 already
+        persisted in HKCU\\Environment and the panel minimised for the whole run:
+
+            IsIconic=True  GetWindowPlacement.showCmd=2  rect=-18286,-18286 158x26
+            GetForegroundWindow() != hwnd                (never stole focus)
+            mmui::MainWindow exists, session_list 10 rows, chat_message_list 8 rows
+            desktop walk found 1544 controls / 106 mmui-named
+            chat_input_field ValuePattern writable: SetValue -> read back -> restored
+
+        So a minimised panel is a perfectly workable operating point. This method
+        stays a no-op for a different and better reason: it would be a window API
+        call the bridge does not need. The operator may minimise WeChat himself, and
+        the bridge then simply keeps working; it must not do the minimising for him,
+        exactly as it must not do the restoring for him.
+
+        Corollary for the next reader: ``ensure_window_restored`` is not needed to
+        make sending work. Keep allowWindowRestore off - the bridge no longer has a
+        legitimate reason to touch ShowWindow/SetForegroundWindow at all.
         """
 
         if os.environ.get("DSH_WECHAT_GROUP_AUTO_MINIMIZE") != "1":
             return
-        # Deliberate dead end. If a future build really does keep the tree while
-        # minimised, re-enable by proving it first: measure the mmui control count
-        # desktop-wide before and after SW_SHOWMINNOACTIVE, as a test, not a docstring.
+        # Deliberate dead end: no window API is called in any branch. Re-enabling
+        # this would mean hiding the operator's own window for him, which is the
+        # screen control the objective forbids - not a capability the bridge lacks.
         return
     def _control(self, automation_id: str) -> Any:
         if self._closed:
@@ -1609,10 +1763,10 @@ class UiaBackend:
         item = items[0]
         # Order of preference, always verified by reading the chat title back:
         #   1. InvokePattern - protocol-level, no focus change, no synthetic input.
-        #      (It used to claim "works with the window minimised"; that is
-        #      retracted - minimising destroys mmui::MainWindow here, so a
-        #      minimised panel has no controls to invoke at all.) On this build it
-        #      can return True while nothing switches, so success is never assumed.
+        #      It does work against a minimised panel: 2026-11-02 measured the full
+        #      control tree while IsIconic=True. On this build it can return True
+        #      while nothing switches, so success is never assumed - the title is
+        #      read back and a false success falls through to the next route.
         #   2. SetFocus + Click - proven to switch, but needs a visible window.
         # SelectionItemPattern.Select() stays unused: it lies the same way.
         # A refused activation falls through; an activation that reports success
@@ -1678,13 +1832,14 @@ class UiaBackend:
     def ensure_window_restored(self) -> None:
         """Restore and focus the main window only when the operator opted in.
 
-        The bridge never needs this: session switching goes through the
-        protocol-level InvokePattern, so the default is to touch no window API at
-        all. Corrected wording - the sentence here used to add "which works while
-        the window is minimised or hidden", and that is what misled me: minimising
-        destroys mmui::MainWindow on this build (measured: after SW_SHOWMINNOACTIVE,
-        zero mmui controls desktop-wide), so there is no minimised state in which
-        InvokePattern could still be used. Only a visible panel has a tree.
+        The bridge never needs this, and the reason is now measured rather than
+        assumed. An earlier version of this docstring justified the default by
+        claiming a minimised panel has no tree; that was wrong (see
+        maybe_auto_minimize). The correct reason is stronger: a minimised panel is
+        fully readable and writable - measured 2026-11-02 with IsIconic=True and the
+        window parked off-screen at 158x26, the whole control tree answered and the
+        input field accepted SetValue. So this method has no capability to unlock;
+        all it can do is yank the operator's window to the front. Keep it off.
 
         This method used to carry a duplicated tail copy of its own body AFTER
         the opt-in `if`, so the unconditional half ran on every 750ms poll: the
@@ -1707,6 +1862,22 @@ class UiaBackend:
         time.sleep(0.3)
         user32.SetForegroundWindow(wintypes.HWND(handle))
         time.sleep(0.4)
+
+    def _foreground_window(self) -> int | None:
+        """Read-only snapshot of the OS foreground window handle.
+
+        Used as evidence, never as control: press_enter() compares the value before
+        and after a keystroke to prove the send did not raise WeChat over whatever
+        the operator was using. None means "could not be read", and callers must
+        treat that as no evidence rather than as agreement.
+        """
+
+        if sys.platform != "win32":
+            return None
+        try:
+            return int(_user32().GetForegroundWindow())
+        except Exception:
+            return None
 
     def read_input(self) -> str:
         pattern = self._control("chat_input_field").GetValuePattern()
@@ -1735,51 +1906,75 @@ class UiaBackend:
         """
 
         control = self._control("chat_input_field")
-        # Route 1: the app's own send control. Invoke is a UIA message to one
-        # control and needs no keyboard at all, so nothing about the operator's
-        # foreground window changes.
-        if self.send_by_invoke():
-            return
-        # Route 2: keyboard, but only when WeChat provably owns it. This is the
-        # reliable route, so it is taken before the experimental one: a route
-        # that might deliver AND a fallback that might deliver could send twice.
-        if self._focus_is_contained(control):
-            control.SendKeys("{Enter}", waitTime=0)
-            return
-        # Route 3: one Enter posted into WeChat's own message queue. PostMessage
-        # targets a single window handle in a single thread queue, so by
-        # construction it cannot reach another application, and Qt delivers it to
-        # whichever widget holds the app's INTERNAL focus - which is why this may
-        # work while WeChat is hidden. Whether this build honours it is NOT
-        # verified (its panel was X-closed and unrecoverable), so it is only
-        # trusted when the draft is re-read and provably gone.
+        # Route order is decided by measurement, not by which route sounds
+        # cheapest. On this machine, with the operator using his own machine:
+        #   - posting Enter to the top-level mmui::MainWindow handle DELIVERED: a
+        #     new row with the exact mark appeared and the draft went empty, with
+        #     no ShowWindow, no SetFocus and no SetForegroundWindow. This is a
+        #     background send with no physical presence, which is the requirement.
+        #   - send_by_invoke returned True and NO row ever appeared, so this build
+        #     lies about the send button exactly as it lies about chat selection.
+        #     Trying it first therefore returned early on a false success and left
+        #     the only working route unreachable - every send ended
+        #     outcome_unknown while the message was never sent.
+        # So the posted route runs first. It is still trusted only on proof: the
+        # draft must read back empty, and the caller re-reads the transcript.
         if self._posted_enter_delivered():
             return
-        # Containment first: if WeChat's own process already owns the keyboard,
-        # the chat that receives Enter is inside WeChat, so typing is safe
-        # without touching focus at all (SetFocus is what could move a window
-        # forward). Only when the keystroke is not provably ours do we attempt
-        # one focus change, and even then we re-prove containment before typing.
-        if self._focus_is_contained(control):
-            control.SendKeys("{Enter}", waitTime=0)
+        # The app's own send control: legitimate on a build that honours it, and
+        # needs no keyboard, so it is the second choice rather than the first.
+        if self.send_by_invoke():
             return
-        # Route 4: the recovery below is itself a screen takeover. SetFocus on a
-        # control in a background window ACTIVATES that window to move the caret,
-        # raising WeChat over whatever the operator is using; measured, it also
-        # fails silently while minimised, so it buys nothing in the state that
-        # matters and steals the screen in every other state. Gated by the same
-        # opt-in as the click fallback, so one switch governs every takeover path.
+
+        # Route 3: keyboard, but only while the keyboard provably already belongs
+        # to WeChat - and with the foreground window PROVEN unchanged afterwards.
+        #
+        # Why the proof and not just the predicate: uiautomation's Control.SendKeys
+        # is literally ``self.SetFocus(); SendKeys(...)`` (measured in the installed
+        # library, not inferred), and SetFocus on a control in a background window
+        # ACTIVATES that window. Measured on this machine:
+        #
+        #     GetForegroundWindow() before SetFocus -> 4392416 (the operator's app)
+        #     GetForegroundWindow() after  SetFocus -> 3017014 (WeChat)
+        #
+        # So the containment predicate alone was not enough: it proved the keystroke
+        # could not leak into another application, which is a different promise from
+        # "the operator's focus never moved". This route now takes one screenshot of
+        # the foreground window, injects only when WeChat already owns the keyboard,
+        # and refuses on the next poll if that call raised WeChat anyway.
+        if self._focus_is_contained(control):
+            foreground_before = self._foreground_window()
+            control.SendKeys("{Enter}", waitTime=0)
+            after = self._foreground_window()
+            if foreground_before is not None and after != foreground_before:
+                # The call moved the operator's focus. Report it rather than pretend
+                # the send was clean: the caller records focus_not_on_target and the
+                # bridge stops, which is far better than silently stealing the screen
+                # on every send.
+                raise SafetyError(
+                    "sending raised WeChat over the operator's window",
+                    "focus_not_on_target",
+                )
+            return
+        # Route 4: the recovery below is itself a screen takeover, because a
+        # SetFocus is what moves the caret. Opt-in only.
         if self._allow_window_restore():
             try:
                 control.SetFocus()
             except Exception:
                 pass
-        if not self._focus_is_contained(control) and not self._focus_is_target(control):
-            raise SafetyError(
-                "keyboard focus is not provably on the WeChat input",
-                "focus_not_on_target",
-            )
-        control.SendKeys("{Enter}", waitTime=0)
+            if not self._focus_is_contained(control) and not self._focus_is_target(control):
+                raise SafetyError(
+                    "keyboard focus is not provably on the WeChat input",
+                    "focus_not_on_target",
+                )
+            control.SendKeys("{Enter}", waitTime=0)
+            return
+        raise SafetyError(
+            "no keyboard-free send route delivered, and focus is not provably on "
+            "the WeChat input",
+            "focus_not_on_target",
+        )
 
     # Virtual-key code and message ids for the posted-Enter route. Spelled out
     # rather than imported so the intent is readable without a Win32 header.

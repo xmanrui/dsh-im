@@ -1280,6 +1280,17 @@ class SelectChatScreenGateTests(unittest.TestCase):
         self.assertEqual((item.focus, item.clicks), (0, 0))
 
 
+def _allow_screen_use():
+    """Context manager that opts this test into keyboard/window control.
+
+    press_enter() refuses every keyboard route unless the operator opted in, so a
+    test about the keyboard route has to say so explicitly. Using a helper keeps the
+    opt-in visible at the call site instead of hidden in a global patch.
+    """
+
+    return mock.patch.dict(os.environ, {"DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE": "1"})
+
+
 class PressEnterFocusGuardTests(unittest.TestCase):
     """A background bridge must never inject a keystroke into another app.
 
@@ -1866,6 +1877,122 @@ class ProcessScopedFocusTests(unittest.TestCase):
         backend._window = self.Node(11940, handle=44565750)
         target = self.Node(11940, handle=0, automation_id="chat_input_field")
         self.assertFalse(backend._focus_is_contained(target))
+
+def _ctypes_int(value):
+    """Numeric value of a ctypes wrapper, tolerant of plain ints.
+
+    wintypes.HWND / wintypes.UINT are ctypes subclasses; their .value is the real
+    number. A plain int (a test that passes 12 directly) has no .value and is
+    returned unchanged, so both call shapes keep working.
+    """
+
+    inner = getattr(value, "value", None)
+    return int(inner) if inner is not None else int(value)
+
+class SendRouteOrderTests(unittest.TestCase):
+    """The posted route is the one that works; invoke must not pre-empt it.
+
+    Measured on the live group at 00:32 while the operator was using his machine:
+    - send_by_invoke() returned True and NO row ever appeared (checked against the
+      transcript twice), so this build lies about the send button exactly as it
+      lies about chat selection;
+    - control-level PostMessage could not be targeted at all because every mmui
+      child reports NativeWindowHandle == 0;
+    - posting WM_KEYDOWN/WM_KEYUP(VK_RETURN) to the top-level mmui::MainWindow
+      handle DID deliver: a new row with the exact mark appeared, the draft went
+      empty, and no window API was called - no ShowWindow, no SetFocus, no
+      SetForegroundWindow. That is a background send with no physical presence,
+      which is precisely what the operator requires.
+
+    So the posted route must be tried FIRST. The old order asked invoke first and
+    returned on its true return value, so the only working route was never
+    reached and every send ended as outcome_unknown.
+    """
+
+    class Field:
+        def __init__(self, draft):
+            self.Name = "Target"
+            self.AutomationId = "chat_input_field"
+            self.ClassName = "mmui::ChatInputField"
+            self.NativeWindowHandle = 0
+            self.ProcessId = 11940
+            self._draft = draft
+
+        def GetValuePattern(self):
+            return None
+
+    class Window:
+        Name = "\u5fae\u4fe1"
+        AutomationId = ""
+        ControlTypeName = "WindowControl"
+        ClassName = "mmui::MainWindow"
+        NativeWindowHandle = 3017014
+        ProcessId = 11940
+
+    def backend(self, invoke_lies=True):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._auto = None
+        backend._window = self.Window()
+        backend.field = self.Field("draft")
+        backend.posted = []
+        backend.invoked = []
+        # The draft clears once the posted key is delivered, which is the proof
+        # press_enter requires; nothing else is allowed to change it.
+        # The production code resolves user32 through the module-level _user32(),
+        # not an attribute on the instance, so the double has to be installed the
+        # same way - patching self._user32 would be invisible to it.
+        class U:
+            def PostMessageW(self, hwnd, msg, wparam, lparam):
+                # The production call passes wintypes.HWND/UINT wrappers, and on
+                # CPython 3.12 int() on those raises instead of returning the
+                # numeric value. Unwrap via .value, which is what the ctypes
+                # wrappers expose, so the recorded tuple still carries real numbers.
+                backend.posted.append((_ctypes_int(hwnd), _ctypes_int(msg)))
+                backend.field._draft = ""
+                return 1
+        self.user32_patch = mock.patch.object(uia, "_user32", lambda: U())
+        self.user32_patch.start()
+        self.addCleanup(self.user32_patch.stop)
+        backend._draft_text = lambda: backend.field._draft
+        backend._focus_is_contained = lambda control: False
+        return backend
+
+    def test_the_working_route_is_tried_before_the_lying_one(self):
+        # POSITIVE CONTROL: restore the old order and this fails, because invoke
+        # is consulted first and short-circuits.
+        backend = self.backend()
+        called = {"invoke": 0}
+
+        def lying_invoke():
+            called["invoke"] += 1
+            return True
+
+        backend.send_by_invoke = lying_invoke
+        self.assertTrue(backend._posted_enter_delivered())
+        # The posted route demonstrably delivered the draft, so invoke must not
+        # have been needed at all.
+        self.assertEqual(called["invoke"], 0)
+        self.assertTrue(backend.posted)
+
+    def test_a_truthful_invoke_is_still_used_when_posting_fails(self):
+        # The keyboard-free invoke is legitimate on a build that honours it; it
+        # just must not be trusted ahead of the route that provably works here.
+        backend = self.backend()
+        backend.field._draft = "draft"
+        # PostMessage reports 0 and the draft never clears: no delivery proof.
+        with mock.patch.object(uia, "_user32", lambda: type("U", (), {
+                "PostMessageW": staticmethod(lambda *a: 0), })()):
+            self.assertFalse(backend._posted_enter_delivered())
+
+    def test_posting_to_a_foreign_window_is_refused(self):
+        # Identity gate stays: only a window announcing itself as mmui:: may be
+        # written into, because a bare handle number proves nothing.
+        backend = self.backend()
+        backend._window = self.Window()
+        backend._window.ClassName = "Qt51514QWindowIcon"
+        self.assertFalse(backend._posted_enter_delivered())
+        self.assertEqual(backend.posted, [])
 
 class SendByInvokeTests(unittest.TestCase):
     """Prefer the app's own send button over a keyboard keystroke.
@@ -2562,12 +2689,20 @@ class ProviderMessageTests(unittest.TestCase):
         # process start; a running process cannot be talked into attaching later.
         self.assertIn("restart", message.lower())
 
-    def test_panel_closed_message_does_not_advice_minimising(self):
-        # Pinned again because this wording once sent an operator to minimise the
-        # window, and minimise destroys the tree on this build.
-        message = uia.ERROR_MESSAGES["wechat_panel_closed"]
-        self.assertNotIn("minimis", message.lower())
-        self.assertNotIn("minimiz", message.lower())
+    def test_panel_closed_message_rules_out_the_minimise_misdiagnosis(self):
+        # Inverted on purpose. This test used to forbid the word "minimise" because
+        # the codebase believed minimising destroyed the accessibility tree; the
+        # measurement behind that belief was taken with QT_ACCESSIBILITY missing, and
+        # both states look identical ("zero mmui controls desktop-wide"). Measured
+        # 2026-11-02 with the provider present and the panel minimised for the whole
+        # run (IsIconic=True, showCmd=2, off-screen 158x26): session list 10 rows,
+        # message list 8 rows, input field writable via ValuePattern.
+        # So the honest message names the fix AND clears the minimise the operator
+        # almost certainly suspects - while never sending him to restart WeChat.
+        message = uia.ERROR_MESSAGES["wechat_panel_closed"].lower()
+        self.assertIn("reopen", message)
+        self.assertIn("minimis", message)
+        self.assertNotIn("restart", message)
 
 class LoginWindowKindTests(unittest.TestCase):
     """A login window is not proof of being signed out.
@@ -2709,10 +2844,13 @@ class PanelClosedClassifierTests(unittest.TestCase):
         # mmui controls desktop-wide, so minimise destroys the tree too. Following
         # that wording is what left the operator with a visible panel and no bridge.
         # The message may only say what is true: reopen the panel and leave it open.
+        # See the sibling test above: the old rule forbade "minimise" outright on a
+        # premise that turned out to be a misdiagnosis (missing QT_ACCESSIBILITY,
+        # not minimisation). The message must name the fix and rule the minimise out.
         message = uia.ERROR_MESSAGES["wechat_panel_closed"].lower()
         self.assertIn("reopen", message)
-        self.assertNotIn("minimis", message)
-        self.assertNotIn("minimiz", message)
+        self.assertIn("minimis", message)
+        self.assertNotIn("restart", message)
 
     def test_missing_window_message_says_start_wechat(self):
         self.assertIn("start", uia.ERROR_MESSAGES["main_window_missing"].lower())
@@ -2721,3 +2859,230 @@ class PanelClosedClassifierTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class GroupedRowMentionTests(unittest.TestCase):
+    """WeChat renders one @-message as several list rows; the bridge must rejoin them.
+
+    Why this exists: measured 2026-11-02 00:40 on the live machine, the operator's
+    single message "@大肥鱼 /dsh 在吗" arrives as TWO sibling mmui::ChatTextItemView
+    rows inside one mmui::RecyclerListView:
+
+        index 4  name '@大肥鱼\u2005'   BoundingRectangle top=689  height=134
+        index 5  name '/dsh 在吗'      BoundingRectangle top=824  height=134
+
+    read_visible_rows_as_messages() judged every row on its own, so the mention row
+    had no body (skipped as empty) and the body row had no leading @ token. Both
+    rows failed parse_trigger and the operator's @ was silently ignored. That is
+    the whole defect behind "群里直接艾特不能调用".
+    """
+
+    AT = "@\u5927\u80a5\u9c7c\u2005"
+
+    def test_consecutive_mention_row_and_body_row_join(self):
+        rows = [
+            {"cls": "mmui::ChatItemView", "name": "00:32"},
+            {"cls": "mmui::ChatTextItemView", "name": self.AT},
+            {"cls": "mmui::ChatTextItemView", "name": "/dsh \u5728\u5417"},
+        ]
+        messages = uia.read_visible_rows_as_messages(rows, allow_unverified=True)
+        self.assertEqual(len(messages), 1, "the two sibling rows must become one message")
+        self.assertEqual(messages[0].text, self.AT + "/dsh \u5728\u5417")
+
+    def test_a_time_separator_breaks_the_join(self):
+        # A time row between them means they are different messages, not one @.
+        rows = [
+            {"cls": "mmui::ChatTextItemView", "name": self.AT},
+            {"cls": "mmui::ChatItemView", "name": "00:32"},
+            {"cls": "mmui::ChatTextItemView", "name": "/dsh \u5728\u5417"},
+        ]
+        messages = uia.read_visible_rows_as_messages(rows, allow_unverified=True)
+        self.assertEqual([m.text for m in messages],
+                         ["@\u5927\u80a5\u9c7c", "/dsh \u5728\u5417"])
+
+    def test_a_plain_body_row_is_never_glued_to_a_previous_body_row(self):
+        rows = [
+            {"cls": "mmui::ChatTextItemView", "name": "\u7b2c\u4e00\u6761"},
+            {"cls": "mmui::ChatTextItemView", "name": "\u7b2c\u4e8c\u6761"},
+        ]
+        messages = uia.read_visible_rows_as_messages(rows, allow_unverified=True)
+        self.assertEqual([m.text for m in messages],
+                         ["\u7b2c\u4e00\u6761", "\u7b2c\u4e8c\u6761"])
+
+    def test_the_joined_row_then_matches_the_configured_trigger_name(self):
+        rows = [
+            {"cls": "mmui::ChatTextItemView", "name": self.AT},
+            {"cls": "mmui::ChatTextItemView", "name": "/dsh \u5728\u5417"},
+        ]
+        messages = uia.read_visible_rows_as_messages(rows, allow_unverified=True)
+        parsed, text = uia.parse_trigger(
+            messages[0].text, "/dsh", mention_mode="mention-or-command",
+            trigger_names=("\u5927\u80a5\u9c7c",), allow_masked_mention=True)
+        self.assertTrue(parsed)
+        self.assertEqual(text, "\u5728\u5417")
+
+    def test_a_lone_mention_row_stays_a_bare_mention(self):
+        # The measured row 7 of the same transcript: '@大肥鱼' with nothing after it.
+        # The trailing U+2005 is gone by design: read_visible_rows_as_messages strips
+        # every row and str.strip() also removes U+2005. That is precisely why
+        # merge_mention_rows has to re-insert its own separator when it joins.
+        rows = [{"cls": "mmui::ChatTextItemView", "name": self.AT}]
+        messages = uia.read_visible_rows_as_messages(rows, allow_unverified=True)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].text, "@\u5927\u80a5\u9c7c")
+        # A bare mention has no trailing separator left after stripping, and
+        # READABLE_MENTION_RE requires one. So it does not parse - which is the
+        # right answer: there is no body to act on, and the adapter's _observe
+        # drops empty bodies anyway. Asserting this keeps the expectation honest.
+        parsed, text = uia.parse_trigger(
+            messages[0].text, "/dsh", mention_mode="mention-or-command",
+            trigger_names=("\u5927\u80a5\u9c7c",), allow_masked_mention=True)
+        self.assertFalse(parsed)
+        self.assertEqual(text, "@\u5927\u80a5\u9c7c")
+
+
+class LoginMisdiagnosisGuardTests(unittest.TestCase):
+    """A single snapshot must never be enough to declare the session lost.
+
+    The defect this pins: classify_missing_main_window() used to act on one
+    zero-timeout Exists() call. Two live situations made that lie, and both end with
+    a signed-in operator being told to log in - the advice that costs him a session:
+
+      1. startup race - the login window is destroyed and the main window is built
+         a moment later; a sample inside that gap reads "logged out";
+      2. COM flake - one failed snapshot makes both windows answer absent.
+
+    The fix re-reads the main window before classifying, and re-reads the login
+    window before claiming a signed-out account. Both are tested here.
+    """
+
+    def test_a_reappearing_main_window_is_not_classified_at_all(self):
+        # The caller already saw no main window; by the time the classifier runs it
+        # is back. There is no missing-window state to describe.
+        auto = ClassifierFakeAuto(main=True, login=True)
+        with self.assertRaises(uia.SafetyError) as caught:
+            uia.classify_missing_main_window(auto)
+        self.assertEqual(caught.exception.code, uia.TRANSIENT_SURFACE_CODE)
+
+    def test_a_login_window_that_vanishes_is_transient_not_logged_out(self):
+        # First read: login window present, nothing readable inside it. Second read
+        # (the recheck): gone, because the real main window finished building.
+        auto = ClassifierFakeAuto(main=False, login=True)
+        reads = {"login": 0}
+
+        class Flaky(ClassifierFakeAuto):
+            def WindowControl(self, searchDepth, ClassName):
+                if ClassName == "mmui::LoginWindow":
+                    reads["login"] += 1
+                    # The classifier's own read is the first one; the recheck is
+                    # the second, and by then the window is gone.
+                    return ClassifierFakeWin(reads["login"] == 1)
+                return ClassifierFakeAuto.WindowControl(self, searchDepth, ClassName)
+
+        with self.assertRaises(uia.SafetyError) as caught:
+            uia.classify_missing_main_window(Flaky(main=False, login=True))
+        self.assertEqual(caught.exception.code, uia.TRANSIENT_SURFACE_CODE)
+
+    def test_a_stable_login_window_is_still_reported_as_logged_out(self):
+        # Negative control for the two tests above: when the login window really is
+        # there on both reads and offers no confirmation button, the signed-out
+        # diagnosis must still come through, or the guard would have swallowed the
+        # very case it exists to distinguish.
+        auto = ClassifierFakeAuto(main=False, login=True)
+        self.assertEqual(uia.classify_missing_main_window(auto), "wechat_logged_out")
+
+    def test_a_remembered_account_still_wins_over_the_signed_out_diagnosis(self):
+        auto = ClassifierFakeAuto(main=False, login=True)
+        auto._login_buttons = ["登录"]
+        self.assertEqual(
+            uia.classify_missing_main_window(auto), "wechat_login_confirmation")
+
+    def test_the_transient_code_never_enters_the_surface_lost_set(self):
+        # If it did, one flaky snapshot would make the child exit and trigger the
+        # restart ladder - which is the destructive action this whole guard avoids.
+        self.assertNotIn(uia.TRANSIENT_SURFACE_CODE, uia.SURFACE_LOST_CODES)
+
+    def test_the_transient_code_is_not_an_instruction_to_restart(self):
+        message = uia.ERROR_MESSAGES[uia.TRANSIENT_SURFACE_CODE].lower()
+        self.assertIn("looking again", message)
+        self.assertNotIn("restart", message)
+        self.assertNotIn("log in", message)
+
+
+class SendMustNotRaiseWeChatTests(unittest.TestCase):
+    """A send must be able to prove it did not raise WeChat over the operator.
+
+    Measured on this machine, this is not hypothetical:
+
+        GetForegroundWindow() before control.SetFocus() -> 4392416  (operator's app)
+        GetForegroundWindow() after  control.SetFocus() -> 3017014  (WeChat)
+        wechat_became_foreground = True
+
+    uiautomation's Control.SendKeys is `self.SetFocus(); SendKeys(...)`, so every
+    keyboard send used to include that focus change. The containment predicate only
+    promised the key would not reach another app - a weaker promise than "the
+    operator's screen never moved". press_enter() now snapshots the foreground window
+    around the keystroke and refuses when it changed.
+    """
+
+    class Control:
+        def __init__(self):
+            self.AutomationId = "chat_input_field"
+            self.ClassName = "mmui::ChatInputField"
+            self.NativeWindowHandle = 0
+            self.ProcessId = 11940
+            self.typed = []
+
+        def SendKeys(self, text, waitTime=0):
+            self.typed.append(text)
+
+    def backend(self, foreground_sequence):
+        """Backend whose foreground handle is read from a scripted sequence."""
+
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        control = self.Control()
+        backend._control = lambda automation_id: control
+        backend._focus_is_contained = lambda c: True
+        # The posted and invoke routes must not deliver, or this route is never
+        # reached and the test would pass for the wrong reason.
+        backend._posted_enter_delivered = lambda: False
+        backend.send_by_invoke = lambda: False
+        values = list(foreground_sequence)
+        backend._foreground_window = lambda: values.pop(0) if values else None
+        return backend, control
+
+    def test_a_send_that_raises_wechat_is_refused(self):
+        # The proof the operator asked for: the call would steal his screen, so it
+        # must be reported instead of silently done.
+        backend, control = self.backend([4392416, 3017014])
+        with self.assertRaises(uia.SafetyError) as caught:
+            backend.press_enter()
+        self.assertEqual(caught.exception.code, "focus_not_on_target")
+        # The keystroke did go out (that is what SendKeys does), but the bridge now
+        # says so instead of pretending the send was clean. The caller records
+        # outcome_unknown rather than claiming success.
+        self.assertEqual(control.typed, ["{Enter}"])
+
+    def test_a_send_that_leaves_the_foreground_alone_is_clean(self):
+        # Negative control: when the foreground handle is unchanged the send is
+        # accepted, so the guard is not simply refusing everything.
+        backend, control = self.backend([3017014, 3017014])
+        backend.press_enter()
+        self.assertEqual(control.typed, ["{Enter}"])
+
+    def test_an_unreadable_foreground_is_not_treated_as_agreement(self):
+        # None means no evidence. The route still runs (there is nothing to compare
+        # against), but a later change is still caught; the assertion here is that a
+        # read failure does not crash the send or fabricate a mismatch.
+        backend, control = self.backend([None, None])
+        backend.press_enter()
+        self.assertEqual(control.typed, ["{Enter}"])
+
+    def test_without_containment_and_without_opt_in_nothing_is_typed(self):
+        backend, control = self.backend([4392416, 4392416])
+        backend._focus_is_contained = lambda c: False
+        with self.assertRaises(uia.SafetyError) as caught:
+            backend.press_enter()
+        self.assertEqual(caught.exception.code, "focus_not_on_target")
+        self.assertEqual(control.typed, [], "no keystroke without a proven target")
