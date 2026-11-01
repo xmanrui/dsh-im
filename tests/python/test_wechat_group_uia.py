@@ -681,12 +681,18 @@ class AdapterSafetyTests(unittest.TestCase):
         self.assertEqual(operations(backend, "select"), [])
 
     def test_wrong_chat_after_selection_is_never_read_as_target(self):
+        # Safety intent preserved, mechanism updated: the bridge no longer selects
+        # a chat at all (headless switching is impossible on this build - measured:
+        # Select and Invoke both return True and nothing changes), so it must refuse
+        # to read while a different chat is open rather than switch to it.
         backend = FakeBackend(current="Beta", messages={"Beta": [raw("/dsh secret")]})
         backend.wrong_selection = "Beta"
         adapter = uia.WechatGroupAdapter([group()], backend)
-        with self.assertRaises(uia.SafetyError):
-            adapter.start()
+        adapter.start()
+        # The secret text in Beta must never surface as an event for group Alpha.
+        self.assertEqual(adapter.poll(), [])
         self.assertEqual(operations(backend, "read_messages"), [])
+        self.assertEqual(operations(backend, "select"), [])
 
     def test_unknown_chat_send_is_refused_without_ui_mutation(self):
         backend = FakeBackend()
@@ -866,15 +872,28 @@ class AdditionalSafetyTests(unittest.TestCase):
         self.assertEqual(adapter.poll(), [])
 
     def test_two_groups_keep_identical_member_text_in_separate_conversations(self):
+        # Same intent (two groups, identical text, no cross-contamination) under the
+        # idle rule: only the chat on screen is read; the other group is reported as
+        # waiting instead of being switched to. The operator opening each group in
+        # turn is what feeds both, and their events stay distinct.
         groups = [group(), group(chat_id="uia_g2", title="Beta")]
-        backend = FakeBackend(messages={"Alpha": [], "Beta": []})
+        backend = FakeBackend(messages={"Alpha": [], "Beta": []}, current="Alpha")
         adapter = uia.WechatGroupAdapter(groups, backend, clock=lambda: 5)
         adapter.start()
+        self.assertEqual(adapter.health()["waiting_on"], ["uia_g2"])
         backend.messages["Alpha"].append(raw("/dsh same"))
-        backend.messages["Beta"].append(raw("/dsh same"))
         events = adapter.poll()
-        self.assertEqual({event["conversation_id"] for event in events}, {"uia_g1", "uia_g2"})
-        self.assertEqual(len({event["message_id"] for event in events}), 2)
+        self.assertEqual({event["conversation_id"] for event in events}, {"uia_g1"})
+        # Now the operator opens Beta; its backlog is history, so a fresh line is
+        # what must fire, and it must belong to Beta only.
+        backend.current = "Beta"
+        backend.messages["Beta"].append(raw("/dsh same"))
+        adapter.poll()
+        backend.messages["Beta"].append(raw("/dsh same"))
+        beta_events = adapter.poll()
+        self.assertTrue(beta_events)
+        self.assertEqual({event["conversation_id"] for event in beta_events}, {"uia_g2"})
+        self.assertEqual(len({event["message_id"] for event in beta_events}), 1)
 
 
 class ProtocolTests(unittest.TestCase):
@@ -2072,6 +2091,103 @@ class PostedEnterTests(unittest.TestCase):
             backend.press_enter()
         self.assertEqual(fake_user32.PostMessageW.mock_calls, [])
         self.assertEqual(input_ctl.typed, ["{Enter}"])
+
+
+class TargetNotOpenIdleTests(unittest.TestCase):
+    """When another chat is open the bridge waits instead of fighting or dying.
+
+    Measured on the live machine at 23:45 with the panel open and the tree healthy:
+    the operator had 星有野 on screen and the target group in the list; Select()
+    and Invoke() on that row BOTH returned True and the open chat never changed
+    (polled 4.0s and 4.5s). WeChat 4.2.0.12 cannot be switched head-lessly, so the
+    baseline raise was a permanent condition, and every raise killed the child -
+    which the supervisor respawned, so the bridge re-scanned the whole UIA tree
+    roughly every 30 seconds forever while answering nobody.
+
+    The correct behaviour is neither to force the operator's chat away (that is the
+    screen takeover the objective forbids, and it does not work anyway) nor to die.
+    It is to idle: read nothing, touch nothing, and start reading the moment the
+    group he himself opens IS the target.
+    """
+
+    def test_a_different_open_chat_is_never_touched(self):
+        # POSITIVE CONTROL: delete the idle guard and the select() count is the
+        # first thing to go red, because the old code selected away from the
+        # operator's chat twice per poll (there and back).
+        backend = FakeBackend(messages={"Alpha": [raw("old")], "Beta": []},
+                              current="Beta")
+        adapter = uia.WechatGroupAdapter([group()], backend)
+        adapter.start()
+        self.assertEqual(operations(backend, "select"), [])
+        self.assertEqual(backend.current, "Beta")
+
+    def test_start_survives_an_unreachable_target(self):
+        # The production bug: start() raised, the child exited, the supervisor
+        # respawned it, and the loop repeated - a bridge that looks broken in the
+        # log and is in fact waiting.
+        backend = FakeBackend(messages={"Alpha": [], "Beta": []}, current="Beta")
+        adapter = uia.WechatGroupAdapter([group()], backend)
+        adapter.start()
+        self.assertEqual(adapter.poll(), [])
+        self.assertEqual(operations(backend, "select"), [])
+
+    def test_opening_the_group_replays_no_history(self):
+        # The safety half of resuming: when the operator finally opens the group,
+        # whatever is already on screen is history he has read, not a request. It
+        # must be taken as a fresh baseline - a /dsh line sitting in that backlog
+        # must NOT fire the agent, or opening a busy group would answer a dozen old
+        # commands at once.
+        backend = FakeBackend(messages={"Alpha": [raw("/dsh \u65e7\u547d\u4ee4",
+                                                  sender="uia-unverified:row")],
+                                        "Beta": []}, current="Beta")
+        adapter = uia.WechatGroupAdapter(
+            [group(prefix="/dsh", allow_unverified_trigger=True)], backend,
+            clock=lambda: 5)
+        adapter.start()
+        backend.current = "Alpha"
+        self.assertEqual(adapter.poll(), [])
+        self.assertEqual(adapter.poll(), [])
+
+    def test_a_new_message_after_opening_is_still_addressed(self):
+        # And the working half: once the fresh baseline is in, the next real message
+        # is processed normally, with no restart and no window call in between.
+        backend = FakeBackend(messages={"Alpha": [], "Beta": []}, current="Beta")
+        adapter = uia.WechatGroupAdapter(
+            [group(prefix="/dsh", allow_unverified_trigger=True)], backend,
+            clock=lambda: 5)
+        adapter.start()
+        backend.current = "Alpha"
+        self.assertEqual(adapter.poll(), [])
+        backend.messages["Alpha"].append(raw("/dsh \u5e2e\u6211\u4e0b\u5355",
+                                            sender="uia-unverified:row"))
+        events = adapter.poll()
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0]["addressed"])
+
+    def test_idle_state_is_reported_instead_of_silence(self):
+        # An operator reading the log must be able to tell 'waiting for you to open
+        # the group' from 'broken', which is the confusion that made this session
+        # look dead when the tree was fine.
+        backend = FakeBackend(messages={"Alpha": [], "Beta": []}, current="Beta")
+        adapter = uia.WechatGroupAdapter([group()], backend)
+        adapter.start()
+        adapter.poll()
+        self.assertIn("uia_g1", adapter.health()["waiting_on"])
+
+    def test_target_not_open_is_not_a_lost_surface(self):
+        # The tree is present; only the conversation differs. Classifying this as
+        # surface loss would restart WeChat, which is the destructive advice this
+        # objective exists to stop.
+        self.assertIn("target_not_open", uia.ERROR_MESSAGES)
+        self.assertNotIn("target_not_open", uia.SURFACE_LOST_CODES)
+
+    def test_nothing_open_still_lets_the_bridge_select(self):
+        # Regression guard for the login case: no chat is open, so selecting the
+        # target takes nothing away from the operator and must still be attempted.
+        backend = FakeBackend(messages={"Alpha": [], "Beta": []}, current=None)
+        adapter = uia.WechatGroupAdapter([group()], backend)
+        adapter.start()
+        self.assertEqual(operations(backend, "select")[:1], [("select", "Alpha")])
 
 
 class CollapsedSidebarTests(unittest.TestCase):

@@ -66,6 +66,11 @@ ERROR_MESSAGES = {
     # a distinct diagnosis because "control_missing" reads like a broken bridge
     # when the truth is that the chat list is hidden.
     "sidebar_collapsed": "WeChat's session sidebar is collapsed; expand it, or keep the target group open on screen.",
+    # The bridge is healthy and waiting, not broken: another chat is on screen and
+    # WeChat 4.2.0.12 cannot switch chats head-lessly (measured: Select and Invoke
+    # both return True and nothing changes). Opening the group is the operator's
+    # own click; the bridge never raises WeChat to do it for him.
+    "target_not_open": "Another chat is open in WeChat; the group bridge is idle and waiting — open the target group and it resumes on its own.",
 }
 
 
@@ -415,6 +420,9 @@ class WechatGroupAdapter:
         self.clock = clock or (lambda: int(time.time() * 1000))
         self._by_id = {group.id: group for group in self.groups}
         self._states = {group.id: _GroupState() for group in self.groups}
+        # Groups whose chat is not the one currently on screen. Polling these is
+        # idle: no read, no select, no window call. See _read_target.
+        self._waiting: set[str] = set()
         self._outbounds: dict[str, _Outbound] = {}
         self._pending_events: list[dict[str, Any]] = []
         self._lock = threading.RLock()
@@ -492,12 +500,26 @@ class WechatGroupAdapter:
             raise SafetyError("current chat differs from target", "target_title_mismatch")
 
     def _read_target(self, group: GroupConfig) -> list[RawMessage]:
+        # Headless chat switching does not exist on this build. Measured at 23:45
+        # with a healthy tree: the operator had another chat open, and both
+        # SelectionItemPattern.Select() and InvokePattern.Invoke() on the target row
+        # returned True while the open chat never changed (polled 4.0s and 4.5s).
+        # The only mechanism that really switches chats is SetFocus + Click, which
+        # raises WeChat over whatever the operator is using - the exact screen
+        # takeover the objective forbids, and it is gated off by default.
+        # So when a DIFFERENT chat is open, the bridge waits instead of fighting:
+        # read nothing, touch nothing, and start the moment the operator opens the
+        # group himself. Anything else either steals his screen or, as before, dies
+        # and respawns forever while answering nobody.
+        original = self.backend.current_chat_title()
+        if original is not None and original != group.title:
+            raise SafetyError("another chat is open; waiting for the operator to "
+                              "open the target group", "target_not_open")
         self._assert_unique_title(group)
         # A minimised window reports success for a UIA click but opens nothing.
         restore = getattr(self.backend, "ensure_window_restored", None)
         if callable(restore):
             restore()
-        original = self.backend.current_chat_title()
         try:
             if original != group.title:
                 self.backend.select_chat(group.title)
@@ -521,7 +543,19 @@ class WechatGroupAdapter:
             baselines: dict[str, list[RawMessage]] = {}
             for group in self.groups:
                 # Every baseline is captured before any event can reach stdout.
-                baselines[group.id] = self._read_target(group)
+                # A group whose chat is not the one on screen is skipped: the
+                # operator is using WeChat, chat switching is impossible head-lessly
+                # (measured: Select and Invoke both return True and nothing changes),
+                # and forcing it would raise WeChat over his screen. Baseline is
+                # captured on the first poll that finds the group open instead.
+                try:
+                    baselines[group.id] = self._read_target(group)
+                    self._waiting.discard(group.id)
+                except SafetyError as exc:
+                    if exc.code != "target_not_open":
+                        raise
+                    self._waiting.add(group.id)
+                    baselines[group.id] = []
             for group in self.groups:
                 state = self._states[group.id]
                 state.previous = baselines[group.id]
@@ -620,7 +654,26 @@ class WechatGroupAdapter:
             if not self._started:
                 raise SafetyError("baseline has not completed", "not_ready")
             for group in self.groups:
-                self._observe(group, self._read_target(group))
+                try:
+                    current = self._read_target(group)
+                except SafetyError as exc:
+                    # Idle: still waiting for the operator to open this group. A
+                    # transient loss of the surface must still propagate, so only
+                    # this one code is swallowed.
+                    if exc.code != "target_not_open":
+                        raise
+                    self._waiting.add(group.id)
+                    continue
+                if group.id in self._waiting:
+                    # The operator just opened it. Take a fresh baseline rather than
+                    # replaying whatever history is on screen, so old messages in a
+                    # conversation he opened for the first time never fire the agent.
+                    self._waiting.discard(group.id)
+                    state = self._states[group.id]
+                    state.previous = list(current)
+                    state.cursor = len(current)
+                    continue
+                self._observe(group, current)
             return self.drain_events()
 
     def drain_events(self) -> list[dict[str, Any]]:
@@ -746,6 +799,12 @@ class WechatGroupAdapter:
                 "healthy": healthy,
                 "ready": self._started and not self._closed,
                 "groups": [group.id for group in self.groups],
+                # The distinction an operator needs: groups that are configured and
+                # healthy but idle because another chat is on screen. Without this,
+                # a waiting bridge and a broken bridge look identical in the log,
+                # which is exactly the confusion that made today session look dead
+                # while its accessibility tree was fine.
+                "waiting_on": sorted(self._waiting),
                 "overlap_resets": self._overlap_resets,
                 # Report the truth: mention routing is live for any group whose
                 # mode honours it. A hardcoded False contradicted the operator's
