@@ -72,6 +72,7 @@ const required = [
   'src/channels/shared/memory-turn.mjs',
   'src/channels/shared/humanize-outbound.mjs',
   'plugin-src/host/persona-context.mjs',
+  'scripts/set-persona.mjs',
   'src/channels/weixin/wechat-group-conversation.mjs',
   'src/channels/weixin/wechat-group-config.mjs',
   'src/channels/weixin/wechat-group-process.mjs',
