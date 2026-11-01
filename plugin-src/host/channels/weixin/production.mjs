@@ -22,6 +22,8 @@ import {
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
 import { prepareBotWorkspace } from '../../../../src/channels/shared/default-workspace.mjs';
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
+import { openSeededPersonaProvider } from '../../../../src/channels/shared/persona-store.mjs';
+import { createEphemeralMemoryStore } from '../../../../src/channels/shared/memory-store.mjs';
 import { listModelCatalog } from '../../../../src/channels/shared/model-setting.mjs';
 import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
 import { createConnectionSupervisor } from './connection-supervisor.mjs';
@@ -124,6 +126,44 @@ export async function createProductionController(ctx, config = {}, internals = {
     ? observeBotWorkspaceRemovals(configStore, { workspaces })
     : configStore;
   const stateStores = new Map();
+  // One persona provider and one memory store per account, opened lazily so an
+  // account that never speaks costs neither a file read nor a database open.
+  // Both are keyed by botId and live for the process, which is the same lifetime
+  // the state stores above already have.
+  const personaProviders = new Map();
+  const personaFor = async (botId) => {
+    let provider = personaProviders.get(botId);
+    if (!provider) {
+      // Seeded, not merely opened: a bot that was never configured answers as the
+      // shipped character instead of as an unnamed assistant.
+      provider = await openSeededPersonaProvider(resolve(paths.accounts, botId, 'persona.json'), {
+        onError: (text) => logger.warn?.(`[dsh-weixin] ${text}`),
+      });
+      personaProviders.set(botId, provider);
+    }
+    return provider;
+  };
+  const memoryStores = new Map();
+  // Deletion only has to drop the held reference (see deleteState below): the
+  // store holds no handle between calls, so once nobody points at it the
+  // account directory is removable.
+  const closeMemoryOnDelete = new Map();
+  const memoryFor = async (botId) => {
+    let store = memoryStores.get(botId);
+    if (!store) {
+      // Ephemeral, not long-held: the account directory has to stay deletable, and
+      // an open SQLite handle blocks that on Windows. Each recall or write opens,
+      // works and closes, which is a few milliseconds on a warm file.
+      store = createEphemeralMemoryStore(resolve(paths.accounts, botId, 'memory'), {
+        logger: {
+          warn: (...args) => logger.warn?.(`[dsh-weixin] memory:`, ...args),
+        },
+      });
+      memoryStores.set(botId, store ?? null);
+      closeMemoryOnDelete.set(botId, store);
+    }
+    return store;
+  };
 
   const statePath = (botId) => resolve(paths.accounts, botId, 'state.json');
   const stateFor = async (botId) => {
@@ -178,6 +218,8 @@ export async function createProductionController(ctx, config = {}, internals = {
         botId, workspaces, state, agentPresetCatalog,
       });
       const contextEnhancement = { botId, getSettings: () => workspaces.contextEnhancementFor(botId) };
+      const persona = await personaFor(botId);
+      const memory = await memoryFor(botId);
       const accessPolicy = accessPolicyProvider(workspaces, botId, {
         channel: 'weixin', config: accountConfig,
       });
@@ -198,10 +240,14 @@ export async function createProductionController(ctx, config = {}, internals = {
         harness: workspaceScope.harness,
         state: workspaceScope.state,
         contextEnhancement,
+        persona,
+        memory,
         accessPolicy,
         groupRuntime,
         replyTimeoutMs: config.replyTimeoutMs ?? 600_000,
         maxMessageChars: config.maxMessageChars ?? DEFAULT_WEIXIN_MAX_MESSAGE_CHARS,
+        // Production is where a human is waiting, so this is where pacing is on.
+        humanize: true,
         logger: {
           error: (...args) => logger.error?.(`[${botId}]`, ...args),
           warn: (...args) => logger.warn?.(`[${botId}]`, ...args),
@@ -211,6 +257,17 @@ export async function createProductionController(ctx, config = {}, internals = {
       });
     },
     deleteState: async ({ botId }) => {
+      // Release the SQLite handle first: everything below deletes files.
+      const memory = closeMemoryOnDelete.get(botId);
+      closeMemoryOnDelete.delete(botId);
+      memoryStores.delete(botId);
+      if (memory) {
+        try {
+          await memory.close();
+        } catch (error) {
+          logger.warn?.(`[dsh-weixin] unable to close the memory database for ${botId}:`, error);
+        }
+      }
       const state = stateStores.get(botId);
       stateStores.delete(botId);
       if (state && typeof state.remove === 'function') {

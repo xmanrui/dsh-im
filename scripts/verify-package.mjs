@@ -62,6 +62,16 @@ const required = [
   'src/channels/matrix/matrix-runtime.mjs',
   'src/channels/matrix/matrix-api.mjs',
   'src/channels/shared/context-enhancement.mjs',
+  // The «像人» set: a shipped package that cannot render a character, remember a
+  // fact, or pace a reply must fail here rather than at runtime.
+  'src/channels/shared/persona.mjs',
+  'src/channels/shared/persona-store.mjs',
+  'src/channels/shared/im-persona.mjs',
+  'src/channels/shared/memory-store.mjs',
+  'src/channels/shared/memory-extract.mjs',
+  'src/channels/shared/memory-turn.mjs',
+  'src/channels/shared/humanize-outbound.mjs',
+  'plugin-src/host/persona-context.mjs',
   'src/channels/weixin/wechat-group-conversation.mjs',
   'src/channels/weixin/wechat-group-config.mjs',
   'src/channels/weixin/wechat-group-process.mjs',

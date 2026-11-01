@@ -122,6 +122,11 @@ function repairableBindingLoss(error, failure, {
  * applied, carried to the Host out of band so it can materialize it as session
  * prompt context. It is never re-derived from the prompt, which also carries
  * whatever the user typed.
+ *
+ * `personaGuidance` travels the same way and for the same reason: it is the
+ * rendered character the bot answers as, and it is read from the bot's own
+ * persona card rather than from anything the user sent. Both are optional, and
+ * an absent value simply leaves that context empty.
  */
 export async function askInWorkspaceSession({
   harness,
@@ -132,6 +137,7 @@ export async function askInWorkspaceSession({
   prepareContent,
   titleText,
   sourceGuidance,
+  personaGuidance,
   contextEnhanced = false,
   createOptions,
   existsOptions,
@@ -221,6 +227,7 @@ export async function askInWorkspaceSession({
       // The guidance the channel's captured settings applied, carried out of
       // band so the Host never has to read configuration out of the prompt.
       artifactOptions.sourceGuidance = sourceGuidance;
+      artifactOptions.personaGuidance = personaGuidance;
       artifactOptions.onArtifact = async (artifact) => {
         artifacts.push(artifact);
         await originalOnArtifact?.(artifact);

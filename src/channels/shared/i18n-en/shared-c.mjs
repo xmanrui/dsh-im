@@ -212,4 +212,6 @@ export default {
     'Batch submission failed; {count} messages were retained.\nSend /send to retry or /cancel to cancel.',
   '你可以发送普通消息，但没有执行命令的权限。请联系管理员在 DSH 设置 → IM机器人 → 对应机器人 → 访问设置中，为你开启当前私聊或群聊场景的命令权限后重试。':
     'You can send regular messages, but you do not have permission to run commands. Ask an administrator to grant you command permission for the current direct or group chat under DSH Settings → IM Bots → the relevant bot → Access Settings, then try again.',
+  '{segments} 段，预计 {seconds} 秒发完':
+    '{segments} message(s), about {seconds}s to send.',
 };

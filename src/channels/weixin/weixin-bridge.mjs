@@ -38,6 +38,10 @@ import {
 } from '../shared/preset-command.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import { renderPersonaGuidance } from '../shared/persona.mjs';
+import { planOutbound } from '../shared/humanize-outbound.mjs';
+import { contextBlockFor } from '../shared/conversation/context-builder.mjs';
+import { memoryScope, recallMemoryBlock, recordInboundMemory } from '../shared/memory-turn.mjs';
 import {
   captureContextEnhancement,
   captureContextEnhancementSource,
@@ -323,11 +327,15 @@ export class WeixinHarnessBridge {
   #state;
   #deferred;
   #contextEnhancement;
+  #persona;
+  #memory;
+  #botId;
   #accessPolicy;
   #status;
   #logger;
   #replyTimeoutMs;
   #maxMessageChars;
+  #humanize;
   #typingKeepaliveMs;
   #signal;
   #queues = new Map();
@@ -357,11 +365,15 @@ export class WeixinHarnessBridge {
     harness,
     state,
     contextEnhancement,
+    persona,
+    memory,
+    botId,
     accessPolicy,
     status = createWeixinBridgeStatus(),
     logger = console,
     replyTimeoutMs = 600_000,
     maxMessageChars = DEFAULT_WEIXIN_MAX_MESSAGE_CHARS,
+    humanize = false,
     typingKeepaliveMs = DEFAULT_TYPING_KEEPALIVE_MS,
     signal,
   }) {
@@ -378,11 +390,24 @@ export class WeixinHarnessBridge {
     this.#harness = harness;
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
+    // The character card, read once per account. It is a plain provider rather
+    // than a copy so an operator's edit is visible on the next message without
+    // recreating the bridge.
+    this.#persona = persona ?? null;
+    // Optional long-term memory: an open MemoryStore plus the account it belongs
+    // to. Absent means the feature is off, and every call below is then a no-op.
+    this.#memory = memory ?? null;
+    this.#botId = nonEmptyString(botId) ?? null;
     this.#accessPolicy = accessPolicy;
     this.#status = status;
     this.#logger = logger;
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#maxMessageChars = maxMessageChars;
+    // Pacing is off unless the account asks for it. Off is the old behaviour
+    // byte for byte, which is what every existing caller and test expects;
+    // production turns it on in the channel wiring, where a human is present to
+    // be convinced.
+    this.#humanize = humanize === true;
     this.#typingKeepaliveMs = typingKeepaliveMs;
     this.#signal = signal;
     this.#deferred = createDeferredDeliveryCoordinator({ harness, state, signal, logger,
@@ -442,6 +467,11 @@ export class WeixinHarnessBridge {
       rememberConnectionTestTarget(this.#state, { toUserId: sender });
     }
     const key = conversationKey(message);
+    // Record what this message stated about its sender. Fire and forget: the
+    // reply path must not wait on a disk write, and the sender's display name
+    // is what makes a fact useful in a group later. Placed after `key` because
+    // the memory scope is the conversation, never the bare account.
+    this.#rememberInbound(key, commandText, conversation.senderName ?? sender, messageId);
     const contextToken = nonEmptyString(message?.context_token) ?? undefined;
     void this.#state.rememberContextToken?.({
       userId: replyTarget,
@@ -881,20 +911,37 @@ export class WeixinHarnessBridge {
 
       let answer;
       let artifacts = [];
+      // Wall time the model spent producing this answer, so the simulated typing
+      // pause only covers what generation did not already cover.
+      const askedAt = Date.now();
       await this.#startTyping(replyTarget, contextToken);
       try {
         let content = hasImages || hasReply
           ? await promptContentForInboundMessage(promptMessage, { signal: this.#signal, deferImages: true })
           : undefined;
         const captured = this.#acceptedMessageIds.get(messageId);
+        // What the bot remembers about this conversation rides in as its own
+        // injected block, ahead of the source block: the Host splits it out into
+        // a separate context message, so it never becomes part of the question.
+        const memoryBlock = await this.#memoryBlock(key, text);
+        // Two independent reasons to enhance: memory was recalled, or the
+        // channel's captured settings render a source block. The flag is sticky
+        // so one reason never hides the other in the title decision that reads it.
         let contextEnhanced = false;
+        if (memoryBlock) {
+          const base = content ?? text;
+          content = typeof base === 'string'
+            ? `${memoryBlock}\n\n${base}`
+            : [{ type: 'text', text: memoryBlock }, ...base];
+          contextEnhanced = true;
+        }
         if (captured) {
           const originalContent = content ?? text;
           // The capture already carries the moment its own source published, so
           // `enhanceContextContent` accepts it as-is: passing only `.snapshot`
           // here would drop `sentAt` and silently render no block at all.
           content = enhanceContextContent(originalContent, captured);
-          contextEnhanced = content !== originalContent;
+          contextEnhanced = contextEnhanced || content !== originalContent;
         }
         await this.#state.markSeen(messageId);
         promptRecorded = true;
@@ -908,6 +955,7 @@ export class WeixinHarnessBridge {
           content,
           titleText: batchSubmission?.title,
           sourceGuidance: captured?.snapshot?.config?.guidance,
+          personaGuidance: this.#personaGuidance(),
           contextEnhanced,
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },
@@ -951,7 +999,9 @@ export class WeixinHarnessBridge {
         textReceipt = createDeliveryReceipt({
           deliveryId: messageId,
           presentation: 'weixin-text',
-          providerMessageIds: await this.#send(replyTarget, answerText, contextToken, runId),
+          providerMessageIds: await this.#sendPaced(replyTarget, answerText, contextToken, runId, {
+            elapsedMs: Date.now() - askedAt,
+          }),
         });
       } catch (error) {
         textDeliveryError = channelDeliveryFailure(error);
@@ -1352,6 +1402,110 @@ export class WeixinHarnessBridge {
       nonEmptyString(message?.context_token) ?? undefined,
       nonEmptyString(message?.run_id) ?? undefined,
     ).catch(() => undefined);
+  }
+
+  /**
+   * The memory scope of one conversation, or null when memory is off.
+   *
+   * Built from the account and the channel's own conversation key so two
+   * groups on one account can never read each other's facts.
+   */
+  #memoryScope(key) {
+    if (!this.#memory || !this.#botId) return null;
+    return memoryScope({ channel: 'weixin', botId: this.#botId, conversationKey: key });
+  }
+
+  /**
+   * Record what this message stated, without waiting for it.
+   *
+   * Deliberately not awaited by the reply path: a memory write must never add
+   * latency to an answer, and losing one memory is cheaper than losing the
+   * message. The rejection is already contained inside recordInboundMemory.
+   */
+  #rememberInbound(key, text, senderName, messageId) {
+    const scope = this.#memoryScope(key);
+    if (!scope) return;
+    void recordInboundMemory(this.#memory, {
+      scope, text, speaker: senderName, messageId, logger: this.#logger,
+    });
+  }
+
+  /**
+   * The memory block to prepend to this prompt, as one injected context block.
+   *
+   * Rendered through the shared context grammar rather than spliced into the
+   * user text, so the Host still splits it out as its own plugin-sourced
+   * message and what the human typed stays exactly what the human typed.
+   * Answers '' on every failure: memory is an enhancement, never a dependency.
+   */
+  async #memoryBlock(key, query) {
+    const scope = this.#memoryScope(key);
+    if (!scope) return '';
+    const text = await recallMemoryBlock(this.#memory, { scope, query, logger: this.#logger });
+    if (!text) return '';
+    return contextBlockFor({ collector: 'memory', roomId: key, text });
+  }
+
+  /**
+   * The rendered character for this bot, or undefined when none is configured.
+   *
+   * Read on every prompt instead of being cached, because an operator editing
+   * the card should see the next reply change without a restart. A broken card
+   * must never cost a message, so a throwing provider answers "no persona".
+   */
+  #personaGuidance() {
+    try {
+      const card = this.#persona?.get?.();
+      if (!card) return undefined;
+      const text = renderPersonaGuidance(card);
+      return text || undefined;
+    } catch (error) {
+      this.#logger.warn?.('[dsh-weixin] unable to render the persona card:', error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Wait out one simulated typing pause, or give up the moment the turn is
+   * cancelled. The timer is always cleared and the listener always removed, so
+   * a stopped conversation cannot leave a pending wakeup behind.
+   */
+  #pause(ms) {
+    if (!(ms > 0) || this.#signal?.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { this.#signal?.removeEventListener?.('abort', abort); resolve(); }, ms);
+      const abort = () => { clearTimeout(timer); resolve(); };
+      this.#signal?.addEventListener?.('abort', abort, { once: true });
+    });
+  }
+
+  /**
+   * Deliver one finished answer the way a person would send it.
+   *
+   * The plan decides how many bubbles the answer becomes and how long each
+   * pause is; this method only performs it. A single-segment plan with no delay
+   * is byte-for-byte the old behaviour, so an answer that needs no pacing takes
+   * the same path it always did. The typing indicator is kept alive across the
+   * pauses because that is exactly what a person does between two messages.
+   */
+  async #sendPaced(toUserId, text, contextToken, runId, { elapsedMs = 0 } = {}) {
+    // Pacing off: the answer travels exactly as it always did.
+    if (!this.#humanize) return this.#send(toUserId, text, contextToken, runId);
+    const plan = planOutbound(text, { elapsedMs });
+    const providerMessageIds = [];
+    for (let index = 0; index < plan.segments.length; index += 1) {
+      this.#signal?.throwIfAborted();
+      const delay = plan.delaysMs[index] ?? 0;
+      if (delay > 0) {
+        // Re-arm the indicator before the pause: the bubble is what sells the
+        // wait, and the previous #send turned it off.
+        await this.#startTyping(toUserId, contextToken).catch(() => false);
+        await this.#pause(delay);
+        this.#signal?.throwIfAborted();
+      }
+      providerMessageIds.push(...await this.#send(toUserId, plan.segments[index], contextToken, runId));
+    }
+    return providerMessageIds;
   }
 
   async #send(toUserId, text, contextToken, runId, { stopTyping = true } = {}) {

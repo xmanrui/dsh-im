@@ -19,6 +19,7 @@ import {
 } from './image-prompt.mjs';
 import { imageInputLimits } from './image-input-policy.mjs';
 import { inboundImagesAsFiles, imageContentFromStaged, isImageAdmissionRejection, IMAGE_HOST_LIMIT_FALLBACK_PROMPT } from './image-input.mjs';
+import { imPersona } from './im-persona.mjs';
 import { imSourceGuidance } from './im-source-guidance.mjs';
 import { outboundArtifactRegistry } from './semantic/artifact.mjs';
 import { t } from './i18n.mjs';
@@ -2076,6 +2077,13 @@ export class HarnessClient {
       // `content`: the prompt also carries whatever the user typed, and a
       // message that merely looks like a guidance block is not configuration.
       imSourceGuidance.publish(sessionId, options.sourceGuidance);
+      // The same hand-off for the character. It travels beside the source
+      // guidance rather than inside the prompt text: a persona is configuration,
+      // and writing it into the user's own message would put the operator's card
+      // in the transcript and let a message that merely looks like a card become
+      // one. A channel with no persona publishes nothing, and the Host then
+      // renders no persona block at all.
+      imPersona.publish(sessionId, options.personaGuidance);
       const timeZoneFields = clientTimeZoneFields();
       const sendPrompt = (promptContent) => {
         diagnostic.stage = 'prompt.submit';

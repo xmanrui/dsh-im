@@ -13,6 +13,7 @@ import { installDsBotQuestionSync } from './ds-bot-question-sync.mjs';
 import { installInboundTtlRpc } from './inbound-ttl-rpc.mjs';
 import { installSidebarSettingsRpc } from './sidebar-settings.mjs';
 import { installInjectedContext } from './injected-context.mjs';
+import { installPersonaContext } from './persona-context.mjs';
 import { installSessionSyncCoordinator } from './session-sync-coordinator.mjs';
 import { installSessionTitlePrefix } from './session-title-prefix.mjs';
 import { installUpdateRpc } from './update-rpc.mjs';
@@ -154,6 +155,14 @@ export function createImHostPlugin(internals = {}) {
       startInjectedContext(ctx, { logger });
     } catch (error) {
       logger.error?.('[dsh-im] failed to activate injected-context pairing; prompts keep the inline prefix', error);
+    }
+    // The character rides its own prompt context, so a persona edit never has to
+    // touch the source-guidance snapshot and vice versa. A Host that cannot
+    // register prompt contexts simply answers without a persona.
+    try {
+      installPersonaContext(ctx);
+    } catch (error) {
+      logger.error?.('[dsh-im] failed to activate persona context; replies keep the base character', error);
     }
     if (ctx?.connection?.fetch) {
       if (hostLanguage) {

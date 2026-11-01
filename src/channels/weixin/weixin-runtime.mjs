@@ -118,12 +118,16 @@ export class WeixinRuntime {
   #harness;
   #state;
   #contextEnhancement;
+  #persona;
+  #memory;
+  #botId;
   #accessPolicy;
   #logger;
   #diagnostics;
   #startContext = {};
   #replyTimeoutMs;
   #maxMessageChars;
+  #humanize;
   #startRetryDelaysMs;
   #status = createWeixinRuntimeStatus();
   #bridge = null;
@@ -140,11 +144,14 @@ export class WeixinRuntime {
     harness,
     state,
     contextEnhancement,
+    persona,
+    memory,
     accessPolicy,
     logger = console,
     diagnostics,
     replyTimeoutMs = 600_000,
     maxMessageChars = DEFAULT_WEIXIN_MAX_MESSAGE_CHARS,
+    humanize = false,
     startRetryDelaysMs,
     groupRuntime,
   }) {
@@ -157,11 +164,19 @@ export class WeixinRuntime {
     this.#harness = harness;
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
+    this.#persona = persona ?? null;
+    this.#memory = memory ?? null;
+    // The account id is what keys a memory scope; absent means memory stays off
+    // rather than silently sharing one scope between accounts.
+    this.#botId = typeof config?.botId === 'string' && config.botId.trim()
+      ? config.botId.trim()
+      : null;
     this.#accessPolicy = accessPolicy;
     this.#logger = logger;
     this.#diagnostics = diagnostics ?? createWeixinDiagnostics({ logger });
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#maxMessageChars = maxMessageChars;
+    this.#humanize = humanize === true;
     this.#startRetryDelaysMs = startRetryDelays(startRetryDelaysMs);
     this.#groupRuntime = groupRuntime ?? null;
     this.#groupStatus = this.#groupRuntime?.status
@@ -217,11 +232,15 @@ export class WeixinRuntime {
         harness: this.#harness,
         state: this.#state,
         contextEnhancement: this.#contextEnhancement,
+        persona: this.#persona,
+        memory: this.#memory,
+        botId: this.#botId,
         accessPolicy: this.#accessPolicy,
         status: this.#status,
         logger: this.#logger,
         replyTimeoutMs: this.#replyTimeoutMs,
         maxMessageChars: this.#maxMessageChars,
+        humanize: this.#humanize,
         signal,
       });
       this.#status.ready = true;
