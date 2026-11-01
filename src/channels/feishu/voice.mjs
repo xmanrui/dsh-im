@@ -12,7 +12,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MAX_TTS_CHARS, TTS_ENDPOINT, normalizeFeishuVoiceConfig } from './voice-config.mjs';
 
-function runFfmpeg(bin, args) {
+/**
+ * 默认 ffmpeg 执行器:真起子进程,负责退出码与 stderr 的收口。
+ *
+ * 为什么做成可注入参数(见 createVoice 的 runFfmpeg):测试需要在**没装 ffmpeg** 的环境里
+ * 也验证整条语音管线。此前的替身是 .sh,Windows 不可执行,依赖它的用例只能整批 skip,
+ * 于是语音链路在本机 CI 永不执行 —— 那是"承诺无法证明"而不是"代码有 bug"。
+ * 注入点让测试换成"用 node 跑跨平台替身"的**真子进程** runner:平台依赖从生产代码里
+ * 移到测试,断言强度不打折(仍然校验 spawn 发生、参数形状、字节落地)。
+ */
+function defaultRunFfmpeg(bin, args) {
   return new Promise((resolve, reject) => {
     const p = spawn(bin, ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
     let err = '';
@@ -48,7 +57,7 @@ async function readResourceToBuffer(resource) {
  * 凭据库解析出的 DashScope api_key。两者任一缺失即返回 { enabled: false },
  * 桥接层据此完全跳过语音路径。
  */
-export function createVoice({ settings, secret, logger } = {}) {
+export function createVoice({ settings, secret, logger, runFfmpeg = defaultRunFfmpeg } = {}) {
   const config = normalizeFeishuVoiceConfig(settings);
   const apiKey = typeof secret === 'string' && secret.trim() ? secret.trim() : null;
   if (!config || !apiKey) {

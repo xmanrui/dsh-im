@@ -13,11 +13,43 @@ import {
 } from '../../../src/channels/feishu/voice-config.mjs';
 import { createVoice } from '../../../src/channels/feishu/voice.mjs';
 
-// 无 ffmpeg 环境:用可执行 sh 替身(见 fixtures/ffmpeg-stub.sh),只把 -i
-// 输入复制到输出路径,不真正转码。Windows 无法直接 spawn 批处理/脚本,
-// 依赖 spawn 的用例在 win32 跳过(CI 的 Linux 环境全量执行)。
-const FFMPEG_STUB = fileURLToPath(new URL('./fixtures/ffmpeg-stub.sh', import.meta.url));
-const SPAWN_SKIP = process.platform === 'win32' ? 'requires the POSIX ffmpeg stub fixture' : false;
+// 无 ffmpeg 环境:用 fixtures/ffmpeg-stub.mjs 这个**跨平台**替身(只把 -i 输入
+// 复制到输出路径,不真正转码)。此前替身是 .sh,Windows 不能直接 spawn 脚本,
+// 依赖它的 5 条用例只能整批 skip,于是语音链路在本机/Windows CI 永不执行 ——
+// 那是测试夹具的平台依赖,不是被测代码的平台依赖。
+//
+// 现在改法:通过 createVoice 的 runFfmpeg 注入位换成"用 node 真起子进程跑替身"。
+// 注入的 runner 保持与生产 defaultRunFfmpeg 相同的参数形状(bin 在前、ffmpeg
+// 公共参数居中、真实参数在后),所以断言强度不打折:仍然真 spawn、仍然看退出码、
+// 仍然校验字节真的落到了输出路径。生产代码一行没为测试让路。
+import { spawn } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+const FFMPEG_STUB = fileURLToPath(new URL('./fixtures/ffmpeg-stub.mjs', import.meta.url));
+// 参数留痕写到 gitignored 的 test/.tmp（.gitignore 已收 test/.tmp/），用来自证"真 spawn 过"。
+const STUB_LOG = fileURLToPath(new URL('../../.tmp/ffmpeg-stub-argv.log', import.meta.url));
+
+/**
+ * 跨平台替身 runner:签名与 src/channels/feishu/voice.mjs 的 defaultRunFfmpeg 一致。
+ *
+ * @param {string} bin 配置里的 ffmpeg 路径(替身只透传,不解释)
+ * @param {string[]} args 真实参数(-i 输入 ... 输出)
+ * @returns {Promise<void>} 退出码非 0 时 reject,与生产同一契约
+ */
+function runFfmpegStub(bin, args) {
+  mkdirSync(dirname(STUB_LOG), { recursive: true });
+  return new Promise((resolve, reject) => {
+    // node 在所有平台都可执行,因此这条路径 win32/linux/darwin 同形。
+    // env 单独构造(不写全局 process.env),避免用例之间互相污染留痕路径。
+    const env = { ...process.env, DSH_FFMPEG_STUB_LOG: STUB_LOG };
+    const p = spawn(process.execPath, [FFMPEG_STUB, bin, '-hide_banner', '-loglevel', 'error', '-y', ...args], { env });
+    let err = '';
+    p.stderr.on('data', (d) => { err += d; });
+    p.on('error', reject);
+    p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg stub exit ${code}: ${err.slice(-300)}`))));
+  });
+}
 
 const OPUS_BYTES = Buffer.from('fake-opus-bytes');
 const WAV_BYTES = Buffer.from('fake-wav-bytes');
@@ -121,6 +153,7 @@ test('createVoice builds an enabled capability with transcription and synthesis'
   const voice = createVoice({
     settings: { enabled: true, secretRef: 'MY_KEY', ttsVoice: 'Cherry', ffmpeg: FFMPEG_STUB },
     secret: 'sk-voice-test',
+    runFfmpeg: runFfmpegStub,
   });
   assert.equal(voice.enabled, true);
   assert.equal(typeof voice.transcribeIncoming, 'function');
@@ -128,10 +161,11 @@ test('createVoice builds an enabled capability with transcription and synthesis'
   assert.equal(Object.isFrozen(voice), true);
 });
 
-test('transcribeIncoming downloads the Feishu resource, converts and calls the ASR endpoint', { skip: SPAWN_SKIP }, async () => {
+test('transcribeIncoming downloads the Feishu resource, converts and calls the ASR endpoint', async () => {
   const voice = createVoice({
     settings: { enabled: true, secretRef: 'MY_KEY', ffmpeg: FFMPEG_STUB },
     secret: 'sk-voice-test',
+    runFfmpeg: runFfmpegStub,
   });
   const stub = fetchStub([jsonResponse({ choices: [{ message: { content: '  你好,请讲个故事  ' } }] })]);
   try {
@@ -155,6 +189,7 @@ test('transcribeIncoming returns null for an audio event without a file key', as
   const voice = createVoice({
     settings: { enabled: true, secretRef: 'MY_KEY', ffmpeg: FFMPEG_STUB },
     secret: 'sk-voice-test',
+    runFfmpeg: runFfmpegStub,
   });
   const stub = fetchStub([]);
   try {
@@ -166,10 +201,11 @@ test('transcribeIncoming returns null for an audio event without a file key', as
   }
 });
 
-test('transcribeIncoming surfaces ASR failures instead of inventing text', { skip: SPAWN_SKIP }, async () => {
+test('transcribeIncoming surfaces ASR failures instead of inventing text', async () => {
   const voice = createVoice({
     settings: { enabled: true, secretRef: 'MY_KEY', ffmpeg: FFMPEG_STUB },
     secret: 'sk-voice-test',
+    runFfmpeg: runFfmpegStub,
   });
   const stub = fetchStub([jsonResponse({ error: 'quota' }, 500)]);
   try {
@@ -182,10 +218,11 @@ test('transcribeIncoming surfaces ASR failures instead of inventing text', { ski
   }
 });
 
-test('synthesize renders speech through the DashScope TTS endpoint and returns opus bytes', { skip: SPAWN_SKIP }, async () => {
+test('synthesize renders speech through the DashScope TTS endpoint and returns opus bytes', async () => {
   const voice = createVoice({
     settings: { enabled: true, secretRef: 'MY_KEY', ttsVoice: 'Cherry', ffmpeg: FFMPEG_STUB },
     secret: 'sk-voice-test',
+    runFfmpeg: runFfmpegStub,
   });
   const stub = fetchStub([
     jsonResponse({ output: { audio: { url: 'https://example.test/audio.wav' } } }),
@@ -211,6 +248,7 @@ test('synthesize returns null for empty text without calling the TTS endpoint', 
   const voice = createVoice({
     settings: { enabled: true, secretRef: 'MY_KEY', ffmpeg: FFMPEG_STUB },
     secret: 'sk-voice-test',
+    runFfmpeg: runFfmpegStub,
   });
   const stub = fetchStub([]);
   try {
@@ -222,10 +260,11 @@ test('synthesize returns null for empty text without calling the TTS endpoint', 
   }
 });
 
-test('synthesize clamps long text at the TTS character budget', { skip: SPAWN_SKIP }, async () => {
+test('synthesize clamps long text at the TTS character budget', async () => {
   const voice = createVoice({
     settings: { enabled: true, secretRef: 'MY_KEY', ffmpeg: FFMPEG_STUB },
     secret: 'sk-voice-test',
+    runFfmpeg: runFfmpegStub,
   });
   const stub = fetchStub([
     jsonResponse({ output: { audio: { url: 'https://example.test/audio.wav' } } }),
@@ -241,10 +280,11 @@ test('synthesize clamps long text at the TTS character budget', { skip: SPAWN_SK
   }
 });
 
-test('synthesize rejects when the TTS response carries no audio url', { skip: SPAWN_SKIP }, async () => {
+test('synthesize rejects when the TTS response carries no audio url', async () => {
   const voice = createVoice({
     settings: { enabled: true, secretRef: 'MY_KEY', ffmpeg: FFMPEG_STUB },
     secret: 'sk-voice-test',
+    runFfmpeg: runFfmpegStub,
   });
   const stub = fetchStub([jsonResponse({ output: {} })]);
   try {

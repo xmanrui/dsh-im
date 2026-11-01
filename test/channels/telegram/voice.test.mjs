@@ -333,17 +333,22 @@ test('a WAV that is not 16 kHz mono PCM16 is converted instead of trusted', asyn
   assert.equal(isCanonicalWav(service.calls.resolve[0].audio), true);
 });
 
+// 真实 ffmpeg 产物的容器检查。此前只试裸 `ffmpeg`，Windows 上 PATH 里没有就整条 skip，
+// 于是「真实转码输出能不能被 Host 的 WAV 校验接受」在本机永不验证（M5 盲区）。
+// 现在改用 test/helpers/ffmpeg-binary.mjs 的定向定位器（本机实测能命中 wheel 自带的
+// v7.1），并把命中的路径显式注入 transcriber —— 断言本体一个字没放松。
 test('real ffmpeg output passes the canonical container check', async (t) => {
   const { spawnSync } = await import('node:child_process');
-  const probe = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8' });
-  if (probe.error) {
-    t.skip('ffmpeg is not installed');
+  const { findFfmpeg } = await import('../../helpers/ffmpeg-binary.mjs');
+  const { path: ffmpegPath } = findFfmpeg();
+  if (!ffmpegPath) {
+    t.skip('no executable ffmpeg found on this machine (PATH and known wheel locations)');
     return;
   }
   const directory = tempWorkspace();
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const input = join(directory, 'in.ogg');
-  const encoded = spawnSync('ffmpeg', [
+  const encoded = spawnSync(ffmpegPath, [
     '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.3',
     '-c:a', 'libopus', input,
@@ -353,6 +358,8 @@ test('real ffmpeg output passes the canonical container check', async (t) => {
   const service = speechService({ text: 'ok' });
   const transcriber = createTelegramVoiceTranscriber({
     speechToText: service,
+    // 注入实测命中的二进制；不注入则走 process.env/裸名，正是本机 skip 的成因。
+    ffmpeg: ffmpegPath,
     workspace: tempWorkspace,
     removeDir: (path) => rmSync(path, { recursive: true, force: true }),
   });
