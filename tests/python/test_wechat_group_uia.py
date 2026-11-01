@@ -1739,6 +1739,181 @@ class PostedEnterTests(unittest.TestCase):
         self.assertEqual(input_ctl.typed, ["{Enter}"])
 
 
+class CollapsedSidebarTests(unittest.TestCase):
+    """A collapsed session sidebar must not take the whole bridge down.
+
+    Measured on the live machine: the operator had collapsed the chat list, so
+    session_list was absent while chat_message_list and chat_input_field were
+    both present and the open chat was readable. The bridge reported
+    control_missing, treated it as a lost surface, exited, and retried every 30
+    seconds - so a group that was perfectly reachable went unanswered. The panel
+    header (chat_input_field.Name) carries the exact chat title, which is real
+    UIA evidence about the chat that is open, so it can stand in for the list
+    while the list is unavailable.
+    """
+
+    class List:
+        """Session list stand-in; empty means nothing is selected."""
+
+        def GetChildren(self):
+            return []
+
+    class Panel:
+        def __init__(self, title):
+            self.Name = title
+            self.AutomationId = "chat_input_field"
+            self.ClassName = "mmui::ChatInputField"
+            self.NativeWindowHandle = 0
+            self.ProcessId = 11940
+
+        def GetValuePattern(self):
+            return None
+
+    def backend(self, title, list_available):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        panel = self.Panel(title)
+
+        class Messages:
+            def GetChildren(self):
+                return []
+
+        def control(automation_id):
+            if automation_id == "chat_input_field":
+                return panel
+            if automation_id == "chat_message_list":
+                # A collapsed sidebar does not hide the open conversation, which is
+                # exactly the live state this class models.
+                return Messages()
+            if list_available:
+                return self.List()
+            raise uia.SafetyError("no such control", "control_missing")
+
+        backend._control = control
+        # The adapter reads rows through the backend boundary, not raw controls.
+        backend.read_messages = lambda: []
+        return backend, panel
+
+    def test_open_chat_title_survives_a_missing_list(self):
+        backend, _ = self.backend("Alpha", list_available=False)
+        self.assertEqual(backend.current_chat_title(), "Alpha")
+
+    def test_an_empty_header_is_not_reported_as_a_chat(self):
+        # An unnamed input proves nothing about which chat is open, and guessing
+        # would let a send land in the wrong conversation.
+        backend, _ = self.backend("", list_available=False)
+        self.assertIsNone(backend.current_chat_title())
+
+    def test_the_list_still_wins_when_both_are_available(self):
+        # Do not weaken the existing two-independent-property check just because
+        # a fallback exists.
+        backend, panel = self.backend("Beta", list_available=True)
+        # FakeList([]) has no selected item, so the list path cannot confirm and
+        # the header alone must not be trusted while the list is present.
+        with self.assertRaises(uia.SafetyError):
+            backend.current_chat_title()
+        self.assertEqual(panel.Name, "Beta")
+
+    def test_unique_title_check_degrades_to_the_open_header(self):
+        backend, _ = self.backend("Alpha", list_available=False)
+        adapter = uia.WechatGroupAdapter([group()], backend)
+        # The configured title matches the open chat header, so reading is safe.
+        adapter._assert_unique_title(group())
+
+    def test_a_duplicated_title_in_an_available_list_is_still_ambiguous(self):
+        # The list IS available and names the target twice: reading or writing by
+        # that visible name could hit the wrong conversation, so it stays a
+        # duplicate_group_title refusal rather than the sidebar diagnosis.
+        backend, _ = self.backend("Alpha", list_available=True)
+        adapter = uia.WechatGroupAdapter([group()], backend)
+        backend.list_session_titles = lambda: ["Alpha", "Alpha"]
+        with self.assertRaises(uia.SafetyError) as ctx:
+            adapter._assert_unique_title(group())
+        self.assertEqual(ctx.exception.code, "duplicate_group_title")
+
+    def test_a_different_open_chat_says_the_sidebar_is_collapsed(self):
+        # Production symptom: the bridge reported control_missing, which is a
+        # lost-surface code, so the child exited and the supervisor retried every
+        # 30s forever. The real condition was a collapsed chat list, which no
+        # number of respawns can expand, and the message must name it.
+        backend, _ = self.backend("Other Group", list_available=False)
+        adapter = uia.WechatGroupAdapter([group()], backend)
+        with self.assertRaises(uia.SafetyError) as ctx:
+            adapter._assert_unique_title(group())
+        self.assertEqual(ctx.exception.code, "sidebar_collapsed")
+        self.assertIn("sidebar", uia.ERROR_MESSAGES["sidebar_collapsed"].lower())
+
+    def test_a_missing_list_still_lets_the_open_target_group_through(self):
+        # The live state right now: sidebar collapsed, target group on screen.
+        # This must read and answer, not exit.
+        backend, _ = self.backend("Alpha", list_available=False)
+        adapter = uia.WechatGroupAdapter([group()], backend)
+        # start() captures a baseline for every group; before this change it died
+        # here with control_missing, which is a lost-surface code, so the child
+        # exited and the supervisor retried forever against a collapsed sidebar.
+        adapter.start()
+        self.assertEqual(adapter.poll(), [])
+    def test_collapsed_sidebar_is_not_reported_as_a_lost_surface(self):
+        # Exiting and respawning cannot expand a sidebar the operator collapsed.
+        self.assertNotIn("sidebar_collapsed", uia.SURFACE_LOST_CODES)
+        self.assertIn("sidebar_collapsed", uia.ERROR_MESSAGES)
+
+
+class ErrorFrameRateLimitTests(unittest.TestCase):
+    """One repeated diagnosis is reported once per window, not once per poll."""
+
+    class Adapter:
+        def __init__(self, code):
+            self.code = code
+            self.calls = 0
+
+        def poll(self):
+            self.calls += 1
+            raise uia.SafetyError("injected", self.code)
+
+    def frames(self, code, cycles, gap=0.0):
+        protocol = uia.JsonlProtocol(self.Adapter(code))
+        written = []
+        clock = [1000.0]
+        original = uia.time.monotonic
+
+        def fake_clock():
+            value = clock[0]
+            clock[0] += gap
+            return value
+
+        uia.time.monotonic = fake_clock
+        try:
+            for _ in range(cycles):
+                written.extend(protocol.poll_frames())
+        finally:
+            uia.time.monotonic = original
+        return written, protocol
+
+    def test_a_repeated_error_is_emitted_once_per_window(self):
+        # The 750ms poll turns any persistent condition into 80 lines an hour,
+        # which is how the original flood buried the diagnosis. The code must
+        # still reach the operator, just not 80 times.
+        frames, protocol = self.frames("poll_failed", 40)
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0]["error"]["code"], "poll_failed")
+
+    def test_a_changed_code_is_reported_immediately(self):
+        # Rate limiting must not hide a new symptom behind an old one.
+        protocol = uia.JsonlProtocol(self.Adapter("poll_failed"))
+        first = protocol.poll_frames()
+        protocol.adapter.code = "target_draft_not_empty"
+        second = protocol.poll_frames()
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second[0]["error"]["code"], "target_draft_not_empty")
+
+    def test_a_fatal_code_is_never_suppressed(self):
+        # Surface loss is the one case where exiting is the point; swallowing the
+        # frame would leave the supervisor guessing why the child died.
+        frames, protocol = self.frames("wechat_panel_closed", 5)
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(protocol.fatal_code, "wechat_panel_closed")
+
 class NoOpenChatTests(unittest.TestCase):
     """A freshly logged-in WeChat has no chat panel until one is opened."""
 

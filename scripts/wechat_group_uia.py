@@ -47,6 +47,11 @@ ERROR_MESSAGES = {
     "wechat_accessibility_unavailable": "WeChat's panel is on screen but exposes no accessibility tree; restart WeChat to restore it.",
     "main_window_missing": "No WeChat window was found; start WeChat and log in.",
     "focus_not_on_target": "Keyboard focus could not be proven to be on the WeChat input; nothing was typed.",
+    # Not a lost surface: respawning the child cannot expand a sidebar the operator
+    # collapsed, so this code must never trigger the exit-and-retry ladder. Kept as
+    # a distinct diagnosis because "control_missing" reads like a broken bridge
+    # when the truth is that the chat list is hidden.
+    "sidebar_collapsed": "WeChat's session sidebar is collapsed; expand it, or keep the target group open on screen.",
 }
 
 
@@ -445,7 +450,24 @@ class WechatGroupAdapter:
             raise ConfigError("duplicate group ID", "invalid_config")
 
     def _assert_unique_title(self, group: GroupConfig) -> None:
-        titles = self.backend.list_session_titles()
+        try:
+            titles = self.backend.list_session_titles()
+        except SafetyError:
+            # Collapsed sidebar: the list is not available to count. Fall back to
+            # the open chat header, which is weaker evidence (one property, and it
+            # says nothing about OTHER chats), so it is accepted only when the
+            # named group is the chat already on screen. A send still re-checks the
+            # title around every mutation, and switching chats is impossible without
+            # the list, so this can never read or write a different conversation.
+            if self.backend.current_chat_title() == group.title:
+                return
+            # Say what is actually wrong. duplicate_group_title means "two chats
+            # share this name", which is not what happened and would send the
+            # operator looking for a rename. The list is gone, so the bridge cannot
+            # switch chats at all; the fix is to expand the sidebar or keep the
+            # target group on screen.
+            raise SafetyError("session list unavailable and the open chat is not "
+                              "the target", "sidebar_collapsed")
         if titles.count(group.title) != 1:
             # Selecting by a duplicated visible name could read or write another group.
             raise SafetyError("target title is missing or duplicated", "duplicate_group_title")
@@ -754,6 +776,10 @@ class JsonlProtocol:
         self.adapter = adapter
         self.stopped = threading.Event()
         self.fatal_code: str | None = None
+        # Poll failures repeat on a fixed cadence, so an unchanged diagnosis is
+        # reported once per window instead of once per cycle. State for that.
+        self._last_error_code: str | None = None
+        self._last_error_at = 0.0
         # Injected so tests can observe the exit instead of killing the runner.
         self._exit_impl = exit_impl or (lambda code: os._exit(code))
         self._write_lock = threading.Lock()
@@ -843,7 +869,7 @@ class JsonlProtocol:
         except SafetyError as exc:
             if exc.code in SURFACE_LOST_CODES:
                 self.fatal_code = exc.code
-            return [self._error(exc.code)]
+            return self._throttled(exc.code)
         except Exception:
             # uiautomation raises plain COM errors when the window is gone, so
             # ask the backend directly why the surface is missing before
@@ -857,8 +883,37 @@ class JsonlProtocol:
                     state = None
             if state in SURFACE_LOST_CODES:
                 self.fatal_code = state
-                return [self._error(state)]
-            return [self._error("poll_failed")]
+                return self._throttled(state)
+            return self._throttled("poll_failed")
+
+    # How often an unchanged polling diagnosis is repeated to the supervisor.
+    ERROR_FRAME_WINDOW_S = 60.0
+
+    def _throttled(self, code: str) -> list[dict[str, Any]]:
+        """Report a poll diagnosis once per window unless it changed.
+
+        A persistent condition at a 750ms cadence produced 80 identical lines an
+        hour, which is how the original flood buried the one line an operator
+        could act on. Two cases are never suppressed:
+        - the code CHANGED, because the previous window's reason is now stale and
+          a new symptom must not hide behind an old one;
+        - a fatal code, because the frame is what tells the supervisor why the
+          child is about to exit, and dropping it would leave a bare process death.
+        """
+
+        now = time.monotonic()
+        # A fatal code needs no special case here: it always differs from the
+        # previous diagnosis on its first occurrence, so it is written, and
+        # serve()'s poll loop exits the process on the same iteration - there is
+        # never a second frame of it to suppress.
+        if code != self._last_error_code:
+            self._last_error_code = code
+            self._last_error_at = now
+            return [self._error(code)]
+        if now - self._last_error_at >= self.ERROR_FRAME_WINDOW_S:
+            self._last_error_at = now
+            return [self._error(code)]
+        return []
 
     @staticmethod
     def _write(stream: TextIO, frame: dict[str, Any]) -> None:
@@ -1316,6 +1371,18 @@ class UiaBackend:
         means 'nothing is open', not 'the title is ambiguous': the caller is
         allowed to select the target first. A panel that IS open must still
         prove its title through the two independent properties below.
+
+        Exception, measured on the live machine: the operator had collapsed the
+        session sidebar, so session_list did not exist while chat_message_list
+        and chat_input_field did, and the bridge was dead in a group that was
+        perfectly readable. The panel header (chat_input_field.Name) carries the
+        exact title of the open chat, so when the list is genuinely absent the
+        header is used alone. That is one property instead of two, and the
+        compromise is bounded: it applies only to the group the operator named
+        by exact title, and every send still re-checks the title before and after
+        each mutation, so a header that disagrees aborts instead of posting.
+        When the list IS present but shows no single selection, nothing falls
+        back - that is a real ambiguity and stays an error.
         """
 
         try:
@@ -1323,8 +1390,15 @@ class UiaBackend:
         except SafetyError:
             # No input control means no chat panel; report that instead of failing.
             return None
+        input_title = _safe_property(input_control, "Name") or ""
+        try:
+            session_items = self._control("session_list").GetChildren()
+        except SafetyError:
+            # Collapsed sidebar. An unnamed header proves nothing about which chat
+            # is open, so it stays 'nothing open' rather than a guessed title.
+            return input_title.strip() or None
         selected: list[str] = []
-        for item in self._control("session_list").GetChildren():
+        for item in session_items:
             try:
                 pattern = item.GetSelectionItemPattern()
                 if pattern and pattern.IsSelected:
@@ -1334,9 +1408,9 @@ class UiaBackend:
                     ))
             except Exception:
                 continue
-        input_title = _safe_property(input_control, "Name") or ""
         if len(selected) != 1 or not selected[0] or input_title != selected[0]:
-            # Two independent visible properties must agree on the exact title.
+            # The list is available, so the two-property agreement still applies:
+            # a header that disagrees with the selection is a real ambiguity.
             raise SafetyError("selected chat title is not exposed unambiguously", "title_unavailable")
         return selected[0]
 
