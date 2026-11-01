@@ -1321,3 +1321,102 @@ test('/ls always shows the bound entry exactly once, inside or outside the windo
   assert.doesNotMatch(inside.message, /…/u, 'no separator when the bound entry is in the window');
   assert.equal((inside.message.match(/● 22\. /gu) ?? []).length, 1, 'bound entry shown once when inside');
 });
+
+test('/drop all removes every entry but the bound one and keeps its number', async () => {
+  const f = await createFixture();
+  for (let i = 1; i <= 5; i += 1) {
+    f.addSession(`s${i}`, { title: `S${i}` });
+    await f.bind(`s${i}`);
+  }
+  const result = await runSessionNavCommand('/drop all', f.harness, f.state, f.key);
+  assert.match(result.message, /已移除 4 条记录/);
+  assert.match(result.message, /保留编号 5/);
+
+  const ring = f.state.ringFor(f.key);
+  assert.equal(ring.entries.length, 1);
+  assert.equal(ring.entries[0].n, 5, 'the bound entry keeps its number');
+  assert.equal(ring.entries[0].sessionId, 's5');
+
+  const ls = await runSessionNavCommand('/ls', f.harness, f.state, f.key);
+  const entryLines = ls.message.split('\n\n').filter((line) => /\. /u.test(line));
+  assert.equal(entryLines.length, 1, '/ls shows exactly one entry');
+});
+
+test('/drop all does not reuse removed numbers', async () => {
+  const f = await createFixture();
+  for (let i = 1; i <= 3; i += 1) {
+    f.addSession(`s${i}`, { title: `S${i}` });
+    await f.bind(`s${i}`);
+  }
+  await runSessionNavCommand('/drop all', f.harness, f.state, f.key);
+  assert.equal(f.state.ringFor(f.key).next, 4, 'next is untouched');
+
+  f.addSession('s-new', { title: 'New' });
+  await f.bind('s-new');
+  const ring = f.state.ringFor(f.key);
+  assert.ok(ring.entries.some((e) => e.n === 4 && e.sessionId === 's-new'), 'a new session gets a fresh number');
+  assert.ok(!ring.entries.some((e) => e.n === 1 || e.n === 2), 'removed numbers are not reused');
+});
+
+test('/drop all cleans the visit trail so /prev and /next see a single-entry ring', async () => {
+  const f = await createFixture();
+  for (let i = 1; i <= 3; i += 1) {
+    f.addSession(`s${i}`, { title: `S${i}` });
+    await f.bind(`s${i}`);
+  }
+  await runSessionNavCommand('/go 1', f.harness, f.state, f.key);
+  await runSessionNavCommand('/go 2', f.harness, f.state, f.key);
+  await runSessionNavCommand('/go 3', f.harness, f.state, f.key);
+  await runSessionNavCommand('/drop all', f.harness, f.state, f.key);
+
+  const ring = f.state.ringFor(f.key);
+  assert.deepEqual(ring.visits, [3], 'the trail ends on the kept entry');
+  assert.equal(ring.visitIndex, 0);
+
+  assert.match((await runSessionNavCommand('/prev', f.harness, f.state, f.key)).message, /没有更早的会话/u);
+  assert.match((await runSessionNavCommand('/next', f.harness, f.state, f.key)).message, /没有更晚的会话/u);
+});
+
+test('/drop all leaves the removed sessions in DSH', async () => {
+  const f = await createFixture();
+  for (let i = 1; i <= 3; i += 1) {
+    f.addSession(`s${i}`, { title: `S${i}` });
+    await f.bind(`s${i}`);
+  }
+  await runSessionNavCommand('/drop all', f.harness, f.state, f.key);
+  assert.equal(f.sessions.has('s1'), true, 's1 is still in DSH');
+  assert.equal(f.sessions.has('s2'), true, 's2 is still in DSH');
+  assert.equal(f.sessions.has('s3'), true, 's3 is still in DSH');
+});
+
+test('/drop all with only the bound entry reports nothing to remove', async () => {
+  const f = await createFixture();
+  f.addSession('s1', { title: 'S1' });
+  await f.bind('s1');
+  const result = await runSessionNavCommand('/drop all', f.harness, f.state, f.key);
+  assert.match(result.message, /无需移除/);
+  const ring = f.state.ringFor(f.key);
+  assert.equal(ring.entries.length, 1);
+  assert.equal(ring.entries[0].sessionId, 's1');
+});
+
+test('/drop all with no binding but entries removes nothing and explains why', async () => {
+  const f = await createFixture();
+  f.addSession('s1', { title: 'S1' });
+  await f.bind('s1');
+  await f.state.clearSession(f.key);
+  const result = await runSessionNavCommand('/drop all', f.harness, f.state, f.key);
+  assert.match(result.message, /尚未绑定会话/);
+  assert.equal(f.state.ringFor(f.key).entries.length, 1, 'entries are untouched');
+});
+
+test('/drop * is an alias for /drop all', async () => {
+  const f = await createFixture();
+  for (let i = 1; i <= 3; i += 1) {
+    f.addSession(`s${i}`, { title: `S${i}` });
+    await f.bind(`s${i}`);
+  }
+  const result = await runSessionNavCommand('/drop *', f.harness, f.state, f.key);
+  assert.match(result.message, /已移除 2 条记录/);
+  assert.equal(f.state.ringFor(f.key).entries.length, 1);
+});

@@ -92,6 +92,7 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   ]),
   defineCatalogCommand('drop', '从会话列表移除一条记录', [
     '/drop 会话编号  从本聊天会话列表移除该条记录（不删除 Harness 会话）',
+    '/drop all  移除除当前会话外的全部记录（不删除 Harness 会话）',
   ]),
   defineCatalogCommand('title', '查看或重命名会话标题', [
     '/title  查看当前会话标题',

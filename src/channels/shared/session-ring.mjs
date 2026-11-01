@@ -125,6 +125,21 @@ export function dropSessionRingEntry(ring, n) {
   return true;
 }
 
+/**
+ * Remove every entry except the one at `keepN`, so its number stays and the
+ * others disappear (and are never reused, as with a single /drop). The visit
+ * trail is rebuilt to end on the kept entry. Returns the removed count.
+ */
+export function dropSessionRingAllExcept(ring, keepN) {
+  const keepEntry = sessionRingEntryByNumber(ring, keepN);
+  if (!keepEntry) return 0;
+  const before = ring.entries.length;
+  ring.entries = ring.entries.filter((entry) => entry.n === keepN);
+  ring.visits = [keepN];
+  ring.visitIndex = 0;
+  return before - ring.entries.length;
+}
+
 export function renameSessionRingEntry(ring, n, title) {
   const entry = sessionRingEntryByNumber(ring, n);
   if (!entry) return null;

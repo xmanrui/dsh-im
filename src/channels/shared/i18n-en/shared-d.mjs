@@ -32,6 +32,12 @@ export default {
   '已切换到会话 {n}（{title}）。': 'Switched to session {n} ({title}).',
   '已从会话列表移除编号 {n}。注意：Harness 中的会话本身未被删除或归档，仍可在 DSH 中访问。':
     'Removed session {n} from the list. Note: the session itself was not deleted or archived in Harness and is still available in DSH.',
+  '当前聊天尚未绑定会话，无法确定保留哪条，未移除任何记录。':
+    'This chat is not bound to a session, so there is nothing to keep; no entries were removed.',
+  '列表里只有当前会话，无需移除。':
+    'Only the current session is in the list, so there is nothing to remove.',
+  '已移除 {count} 条记录，保留编号 {n}（当前会话）。注意：Harness 中的会话本身未被删除或归档，仍可在 DSH 中访问。':
+    'Removed {count} entries; kept № {n} (current). Note: the sessions themselves were not deleted or archived in Harness and are still available in DSH.',
   '会话 {n}：{title}': 'Session {n}: {title}',
   '当前聊天尚未绑定会话。': 'This chat is not bound to a session yet.',
   '当前会话编号 {n}：{title}': 'Current session number {n}: {title}',
@@ -71,6 +77,8 @@ export default {
   '从会话列表移除一条记录': 'Remove one entry from the session list',
   '/drop 会话编号  从本聊天会话列表移除该条记录（不删除 Harness 会话）':
     '/drop <number>  Remove that entry from this chat\'s session list (the Harness session is not deleted)',
+  '/drop all  移除除当前会话外的全部记录（不删除 Harness 会话）':
+    '/drop all  Remove every entry except the current session (the Harness sessions are not deleted)',
   '查看或重命名会话标题': 'Show or rename a session title',
   '/title  查看当前会话标题': '/title  Show the current session title',
   '/title 新标题  重命名当前会话': '/title <new title>  Rename the current session',

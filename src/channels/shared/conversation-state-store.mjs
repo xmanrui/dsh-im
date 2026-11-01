@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import {
   appendSessionRing,
   createEmptySessionRing,
+  dropSessionRingAllExcept,
   dropSessionRingEntry,
   ensureSessionRingEntry,
   markSessionRingEntryUserTitled,
@@ -305,6 +306,15 @@ export class ConversationStateStore {
     if (!ring) return false;
     const removed = dropSessionRingEntry(ring, n);
     if (removed) await this.#persist();
+    return removed;
+  }
+
+  /** Remove every ring entry except the one at n. Returns the removed count. */
+  async dropSessionRingAllExcept(key, n) {
+    const ring = this.#state.rings?.[key];
+    if (!ring) return 0;
+    const removed = dropSessionRingAllExcept(ring, n);
+    if (removed > 0) await this.#persist();
     return removed;
   }
 

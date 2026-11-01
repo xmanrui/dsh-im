@@ -18,7 +18,7 @@ const SESSION_NAV_COMMAND = /^\/(?:ls|list|go|prev|next|drop|title|tail|peek|for
 const GO_COMMAND = /^\/go\s+(\d+)(?:\s+([\s\S]+))?$/iu;
 const PREV_COMMAND = /^\/prev(?:\s+([\s\S]+))?$/iu;
 const NEXT_COMMAND = /^\/next(?:\s+([\s\S]+))?$/iu;
-const DROP_COMMAND = /^\/drop[ \t]+(\d+)$/iu;
+const DROP_COMMAND = /^\/drop[ \t]+(\d+|all|\*)$/iu;
 const TITLE_COMMAND = /^\/title(?:\s+([\s\S]+))?$/iu;
 const TAIL_COMMAND = /^\/(?:tail|peek)(?:\s+([\s\S]+))?$/iu;
 const FORK_COMMAND = /^\/fork(?:\s+([\s\S]+))?$/iu;
@@ -572,6 +572,27 @@ async function runDrop(state, harness, key, n, { signal }) {
   return commandResult(t('已从会话列表移除编号 {n}。注意：Harness 中的会话本身未被删除或归档，仍可在 DSH 中访问。', { n: label }));
 }
 
+/** /drop all: keep only the bound entry; the sessions themselves are untouched. */
+async function runDropAll(state, key) {
+  const ring = state?.ringFor?.(key);
+  const currentSessionId = state?.sessionFor?.(key) ?? null;
+  const currentEntry = currentSessionId && ring
+    ? sessionRingEntryBySessionId(ring, currentSessionId)
+    : null;
+  if (!currentEntry) {
+    return commandResult(t('当前聊天尚未绑定会话，无法确定保留哪条，未移除任何记录。'));
+  }
+  const others = ring.entries.filter((entry) => entry.n !== currentEntry.n);
+  if (others.length === 0) {
+    return commandResult(t('列表里只有当前会话，无需移除。'));
+  }
+  const removed = await state?.dropSessionRingAllExcept?.(key, currentEntry.n);
+  return commandResult(t('已移除 {count} 条记录，保留编号 {n}（当前会话）。注意：Harness 中的会话本身未被删除或归档，仍可在 DSH 中访问。', {
+    count: removed,
+    n: currentEntry.n,
+  }));
+}
+
 function parseTitleArgument(raw) {
   const text = typeof raw === 'string' ? raw.trim() : '';
   if (!text) return { show: true, n: null };
@@ -934,6 +955,9 @@ export async function runSessionNavCommand(text, harness, state, key, options = 
   if (nextMatch) return runStep(state, harness, key, 'forward', { signal, askText: nextMatch[1] ?? null });
   const dropMatch = DROP_COMMAND.exec(command);
   if (dropMatch) {
+    if (dropMatch[1] === 'all' || dropMatch[1] === '*') {
+      return runDropAll(state, key);
+    }
     const n = Number(dropMatch[1]);
     if (!Number.isSafeInteger(n) || n < 1) return commandResult(t('用法：/drop 会话编号（用 /ls 查看编号）。'));
     return runDrop(state, harness, key, n, { signal });
