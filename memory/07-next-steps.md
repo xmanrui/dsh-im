@@ -213,3 +213,16 @@
   两次都当场用 `git reset` / `git apply --cached` 分离、`--amend` 修正，并把对方工作树内容原样还原
   （备份在 `_goal-humanlike/_backup*/`）。
 - 结论：**同一文件里、同一函数附近的并行改动，不能靠 `git add <file>` 分离** —— 必须按 hunk 级 `git apply --cached`。
+
+## 部署路径实测（2026-11-02 04:21，第九轮补）
+
+- **热重载这条路走不通，已验证并留证**：`@deepseek-ai/dsh-hmr` 监听 profile 的 `cordis.patch.yml`，
+  改它确实会重挂补丁层（日志 04:21:09 实测），但**插件 bundle 是 ESM 模块，宿主的模块缓存不会换**
+  —— 与 profile 里已记录的「vendored pack.js 不能热换（ESM 缓存）」同一个机制。
+  所以 `lib/index.js` 的新代码必须靠**进程重启**生效。
+- profile 文件里留了 4 行注释记录该结论与回滚方式（删注释即可）。host 在重挂后健康：
+  `verify-wechat-group-live` PASS、重挂后 0 条 error、适配器 2 个进程在线。
+- **适配器（Python）可以单独重启，且本轮已做**：杀掉子进程后宿主自动重拉，
+  新代码（`0d57e230` 的 `control_missing` 重试）已在其上生效；这不需要重启宿主。
+
+- 剩余唯一动作 = `D:\codex\DSH-IM\rv5.8.0\restart-dsh.cmd`（会一并结束并行的另一个会话，故本轮不做）。
