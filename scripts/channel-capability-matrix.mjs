@@ -106,6 +106,60 @@ export async function collectChannelMatrix() {
   return channels;
 }
 
+/**
+ * 对账：注册表声明 vs 源码证据。两个方向都判漂移。
+ *
+ * - undeclared：源码里有实现证据，声明里却没有。这正是上游 matterbridge 的病
+ *   （harmony 实现了 EventUserTyping，却没登记进 UserTypingSupport ⇒ 那段代码
+ *   永远不可达，而且没人报错）。漏登记不是「少写一行注释」，是功能死掉。
+ * - unbacked：声明说有，代码里已经没有 ⇒ 对外承诺不实（README 写过「支持 X」
+ *   而实现没有，本仓已因此返工过好几次）。
+ * - unknownKey：声明里用了 CAPABILITIES 之外的键名。拼错的键会被静默忽略，
+ *   等于没声明，所以必须判红而不是跳过。
+ * - 集合不一致：src/channels 有目录但 host 没注册，或反之。
+ *
+ * @param {Array<{channel: string, supported: Record<string, boolean>}>} channels
+ * @param {ReadonlyArray<object>} registryEntries
+ * @returns {string[]} 漂移清单；空数组 = 一致
+ */
+export function reconcileDeclarations(channels, registryEntries) {
+  const problems = [];
+  const knownKeys = new Set(CAPABILITIES.map(function (capability) { return capability.key; }));
+  // 渠道名口径统一走 deliveryKey 那一层映射：wecomApp（configKey）与 wecom-app
+  // （目录名）是同一个渠道的两种写法。判据复用注册表已有的映射，不再造第二份。
+  const byName = new Map();
+  for (const entry of registryEntries) {
+    const name = entry.deliveryKey ?? entry.configKey;
+    byName.set(name, entry);
+    if (!Array.isArray(entry.capabilities)) {
+      problems.push(name + ": registry entry has no capabilities array");
+      continue;
+    }
+    for (const key of entry.capabilities) {
+      if (!knownKeys.has(key)) problems.push(name + ": unknown capability key " + key);
+    }
+  }
+  const channelNames = new Set(channels.map(function (row) { return row.channel; }));
+  for (const name of byName.keys()) {
+    if (!channelNames.has(name)) problems.push(name + ": registered in host but no src/channels directory");
+  }
+  for (const row of channels) {
+    const entry = byName.get(row.channel);
+    if (!entry) {
+      problems.push(row.channel + ": has a channel directory but no host registry entry");
+      continue;
+    }
+    if (!Array.isArray(entry.capabilities)) continue;
+    const declared = new Set(entry.capabilities);
+    for (const capability of CAPABILITIES) {
+      const evidence = row.supported[capability.key] === true;
+      const says = declared.has(capability.key);
+      if (evidence && !says) problems.push(row.channel + "." + capability.key + ": implementation evidence but not declared");
+      if (says && !evidence) problems.push(row.channel + "." + capability.key + ": declared but no implementation evidence");
+    }
+  }
+  return problems;
+}
 /** 渲染语言：中文 README 与英文 README 共用同一份数据，只换标签与图例。 */
 export const LOCALES = Object.freeze(['zh', 'en']);
 
@@ -220,7 +274,17 @@ async function main() {
       process.exitCode = 1;
       return;
     }
-    console.log('CAPABILITY_MATRIX_OK ' + channels.length + ' channels, ' + DOCUMENTS.length + ' document(s)');
+    // 第二道判据：README 对得上 ≠ 声明对得上。注册表里的 capabilities 必须与同一
+    // 份实测证据双向一致，否则「登记了但代码没有」与「代码有但没登记」都会绿。
+    const registryModule = await import("./host-registry-for-gate.mjs");
+    const drift = reconcileDeclarations(channels, registryModule.HOST_CHANNELS);
+    if (drift.length > 0) {
+      console.error("CAPABILITY_MATRIX_DECLARATION_DRIFT " + drift.length + " problem(s): " + drift.join(" | "));
+      process.exitCode = 1;
+      return;
+    }
+    // 保留原前缀（旧文档与 grep 仍匹配），只在尾部追加对账读数。
+    console.log('CAPABILITY_MATRIX_OK ' + channels.length + ' channels, ' + DOCUMENTS.length + ' document(s), declarations reconciled');
     return;
   }
 

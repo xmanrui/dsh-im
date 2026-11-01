@@ -37,23 +37,35 @@ import { apply as applyWhatsapp } from './channels/whatsapp/index.mjs';
  * - `deliveryKey` (optional): the channel name used by the delivery service when
  *   it differs from `configKey` (only `wecomApp` -> `wecom-app` today);
  * - `withoutDeliveryService` (optional): the connector does not take a shared
- *   delivery service (`office` only).
+ *   delivery service (`office` only);
+ * - `capabilities` (REQUIRED): what this channel can actually send/receive, keyed
+ *   exactly like `CAPABILITIES` in `scripts/channel-capability-matrix.mjs`.
+ *
+ * Why capabilities live *inside* each entry instead of a second module: the
+ * upstream project this idea came from keeps them in a separate registry
+ * (`bridgemap.UserTypingSupport`) and reconciles nothing — a protocol that
+ * implements typing but forgets to register it stays unreachable in silence
+ * (harmony: `EventUserTyping` implemented, never listed). A second table is only
+ * safe if something compares it against the implementation. Here that comparison
+ * is the gate: `node scripts/channel-capability-matrix.mjs --check` fails on drift
+ * in BOTH directions — evidence the declaration denies, and a declaration the code
+ * no longer backs. That is what makes this field a contract, not documentation.
  */
 export const HOST_CHANNELS = Object.freeze([
-  { configKey: 'feishu', applyName: 'applyFeishu', apply: applyFeishu },
-  { configKey: 'weixin', applyName: 'applyWeixin', apply: applyWeixin },
-  { configKey: 'dingtalk', applyName: 'applyDingtalk', apply: applyDingtalk },
-  { configKey: 'wecom', applyName: 'applyWecom', apply: applyWecom },
-  { configKey: 'wecomApp', applyName: 'applyWecomApp', apply: applyWecomApp, deliveryKey: 'wecom-app' },
-  { configKey: 'qq', applyName: 'applyQq', apply: applyQq },
-  { configKey: 'slack', applyName: 'applySlack', apply: applySlack },
-  { configKey: 'telegram', applyName: 'applyTelegram', apply: applyTelegram },
-  { configKey: 'discord', applyName: 'applyDiscord', apply: applyDiscord },
-  { configKey: 'whatsapp', applyName: 'applyWhatsapp', apply: applyWhatsapp },
-  { configKey: 'imessage', applyName: 'applyIMessage', apply: applyIMessage },
-  { configKey: 'email', applyName: 'applyEmail', apply: applyEmail },
-  { configKey: 'matrix', applyName: 'applyMatrix', apply: applyMatrix },
-  { configKey: 'office', applyName: 'applyOffice', apply: applyOffice, withoutDeliveryService: true },
+  { configKey: 'feishu', applyName: 'applyFeishu', apply: applyFeishu, capabilities: Object.freeze(['text', 'image', 'file', 'voice', 'quote', 'group', 'stream', 'card']) },
+  { configKey: 'weixin', applyName: 'applyWeixin', apply: applyWeixin, capabilities: Object.freeze(['text', 'image', 'file', 'group']) },
+  { configKey: 'dingtalk', applyName: 'applyDingtalk', apply: applyDingtalk, capabilities: Object.freeze(['text', 'image', 'file', 'group', 'markdown']) },
+  { configKey: 'wecom', applyName: 'applyWecom', apply: applyWecom, capabilities: Object.freeze(['text', 'image', 'quote', 'group']) },
+  { configKey: 'wecomApp', applyName: 'applyWecomApp', apply: applyWecomApp, deliveryKey: 'wecom-app', capabilities: Object.freeze(['text', 'image', 'group']) },
+  { configKey: 'qq', applyName: 'applyQq', apply: applyQq, capabilities: Object.freeze(['text', 'image', 'file', 'group']) },
+  { configKey: 'slack', applyName: 'applySlack', apply: applySlack, capabilities: Object.freeze(['text', 'file', 'group', 'stream']) },
+  { configKey: 'telegram', applyName: 'applyTelegram', apply: applyTelegram, capabilities: Object.freeze(['text', 'image', 'file', 'voice', 'quote', 'group', 'stream', 'card']) },
+  { configKey: 'discord', applyName: 'applyDiscord', apply: applyDiscord, capabilities: Object.freeze(['text', 'file', 'quote', 'stream']) },
+  { configKey: 'whatsapp', applyName: 'applyWhatsapp', apply: applyWhatsapp, capabilities: Object.freeze(['text', 'image', 'file', 'markdown']) },
+  { configKey: 'imessage', applyName: 'applyIMessage', apply: applyIMessage, capabilities: Object.freeze(['text']) },
+  { configKey: 'email', applyName: 'applyEmail', apply: applyEmail, capabilities: Object.freeze(['text', 'image', 'file']) },
+  { configKey: 'matrix', applyName: 'applyMatrix', apply: applyMatrix, capabilities: Object.freeze(['text', 'image', 'group', 'markdown']) },
+  { configKey: 'office', applyName: 'applyOffice', apply: applyOffice, withoutDeliveryService: true, capabilities: Object.freeze([]) },
 ]);
 
 /** The delivery-service name for one registry entry (`wecomApp` -> `wecom-app`). */
