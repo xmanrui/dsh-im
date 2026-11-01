@@ -54,8 +54,10 @@ const MACHINE_PHRASES = Object.freeze([
   // (总而言之/综上) are handled by the replacement rules below instead, so they
   // survive as 总之 rather than disappearing.
   // The separator after the opener is optional: "作为一个AI，首先我要说" has no
-  // comma once the AI disclaimer in front of it is gone.
-  [/^\s*(?:首先|其次|最后)[，,：:]?\s*/gmu, ''],
+  // comma once the AI disclaimer in front of it is gone. `是` belongs to the
+  // opener too -- stripping only "其次" leaves "是水温…", which is worse than
+  // leaving the opener in place.
+  [/^\s*(?:首先|其次|再次|最后|另外一点)(?:[，,：:]|是)?\s*/gmu, ''],
   [/总而言之/g, '总之'],
   [/值(?:得|得)注意的是/g, '另外'],
   [/需要注意的是/g, '另外'],
