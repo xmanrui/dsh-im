@@ -900,6 +900,114 @@ class UiaBackend:
             pass
         return classify_missing_main_window(self._auto)
 
+    # Labels and ids WeChat uses for the control that commits the draft. Matched
+    # exactly (not by substring) so 发送图片 / 发送表情 cannot be mistaken for it.
+    SEND_LABELS = frozenset(("发送", "send", "send(s)", "send message"))
+    SEND_ID_HINTS = ("send",)
+
+    def _all_controls(self, budget: int = 4000):
+        """Depth-first walk of the attached window, bounded, never raising.
+
+        Used to look for affordances that are not exposed by automation id. The
+        budget stops a runaway walk; any COM error ends the walk with what was
+        already collected rather than failing the operation, because 'no
+        affordance found' is a legitimate answer with a keyboard fallback.
+        """
+
+        found = []
+        stack = [(self._window, 0)]
+        while stack and len(found) < budget:
+            control, depth = stack.pop()
+            try:
+                children = list(control.GetChildren())
+            except Exception:
+                continue
+            for child in children:
+                found.append(child)
+                if depth < 18:
+                    stack.append((child, depth + 1))
+        return found
+
+    def _looks_like_send(self, control: Any) -> bool:
+        """Predicate for the control that commits the draft."""
+
+        try:
+            if control.IsOffscreen:
+                return False
+            if str(control.ControlTypeName) not in ("ButtonControl", "HyperlinkControl"):
+                return False
+        except Exception:
+            return False
+        label = str(_safe_property(control, "Name") or "").strip().lower()
+        identifier = str(_safe_property(control, "AutomationId") or "").strip().lower()
+        named = label in {x.lower() for x in self.SEND_LABELS}
+        ided = bool(identifier) and any(h in identifier for h in self.SEND_ID_HINTS)
+        if not (named or ided):
+            return False
+        return _safe_property(control, "ClassName") is not None
+
+    def _send_by_name_hint(self):
+        """Targeted UIA search for the send button; None when unsupported.
+
+        Cheaper than the fallback walk: the tree is deep and a full scan on every
+        send would cost hundreds of milliseconds. Not all builds expose this
+        lookup, hence the getattr guard instead of a direct call.
+        """
+
+        # getattr on the namespace itself: a backend that never attached one must
+        # fall through to the walk rather than raise out of a background send.
+        namespace = getattr(self, "_auto", None)
+        factory = getattr(namespace, "ButtonControl", None)
+        if factory is None:
+            return None
+        for label in sorted(self.SEND_LABELS):
+            try:
+                control = factory(FirstChild=True, Name=label, searchDepth=24, Exists=False)
+            except Exception:
+                return None
+            if control is not None and self._looks_like_send(control):
+                return control
+        return None
+
+    def _send_affordance(self):
+        """Return a control that looks like WeChat's own send button, or None."""
+
+        hinted = self._send_by_name_hint()
+        if hinted is not None:
+            return hinted
+        try:
+            pool = self._all_controls()
+        except Exception:
+            return None
+        # Fallback walk for builds that expose no targeted lookup. The predicate
+        # lives in _looks_like_send so the fast path and this one cannot drift.
+        for control in pool:
+            if self._looks_like_send(control):
+                return control
+        return None
+
+    def send_by_invoke(self) -> bool:
+        """Commit the draft through the app's send control. Needs no keyboard.
+
+        True only when the control exists and Invoke() reported success; the
+        caller still verifies delivery by reading the message list back, so an
+        Invoke that lies (this build has done exactly that for chat selection)
+        is caught there instead of being trusted here.
+        """
+
+        control = self._send_affordance()
+        if control is None:
+            return False
+        try:
+            pattern = control.GetInvokePattern()
+        except Exception:
+            return False
+        if pattern is None:
+            return False
+        try:
+            return bool(pattern.Invoke(waitTime=0))
+        except Exception:
+            return False
     def maybe_auto_minimize(self) -> None:
         """Put WeChat away without touching the operator's screen. Opt-in only.
 
@@ -1163,6 +1271,13 @@ class UiaBackend:
         """
 
         control = self._control("chat_input_field")
+        # Preferred route: the app's own send control. Invoke is a UIA message to
+        # one control and needs no keyboard at all, so nothing about the
+        # operator's foreground window changes. Only when WeChat exposes no such
+        # affordance (or refuses the invoke) do we fall back to a keystroke, and
+        # that path keeps its focus proof because it can affect other apps.
+        if self.send_by_invoke():
+            return
         # Containment first: if WeChat's own process already owns the keyboard,
         # the chat that receives Enter is inside WeChat, so typing is safe
         # without touching focus at all (SetFocus is what could move a window

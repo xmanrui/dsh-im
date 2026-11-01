@@ -991,6 +991,145 @@ class ProcessScopedFocusTests(unittest.TestCase):
         target = self.Node(11940, handle=0, automation_id="chat_input_field")
         self.assertFalse(backend._focus_is_contained(target))
 
+class SendByInvokeTests(unittest.TestCase):
+    """Prefer the app's own send button over a keyboard keystroke.
+
+    A keystroke needs the keyboard, and the keyboard belongs to exactly one
+    window: taking it means raising WeChat over whatever the operator uses, which
+    is the screen control the objective forbids. Measured here: a standard EDIT
+    ignores a posted WM_CHAR while unfocused, so a targeted PostMessage is not an
+    escape hatch either. UIA Invoke on the send control is the only mechanism that
+    needs no keyboard at all, so it is tried first and the Enter path becomes the
+    fallback used only when WeChat already owns the keyboard.
+    """
+
+    class Ctl:
+        def __init__(self, name="", automation_id="", class_name="", invoke=None):
+            self.Name = name
+            self.AutomationId = automation_id
+            self.ClassName = class_name
+            self.ControlTypeName = "ButtonControl"
+            self.ProcessId = 11940
+            self.NativeWindowHandle = 0
+            self.IsOffscreen = False
+            self._invoke = invoke
+            self.invoked = 0
+            self.typed = []
+
+        def GetInvokePattern(self):
+            return self._invoke
+
+        def SetFocus(self):
+            self.focused = getattr(self, "focused", 0) + 1
+
+        def SendKeys(self, text, waitTime=0):
+            self.typed.append(text)
+
+    class Invoke:
+        def __init__(self, ok=True):
+            self.ok = ok
+            self.calls = 0
+
+        def Invoke(self, waitTime=0):
+            self.calls += 1
+            return self.ok
+
+    def backend(self, pool, focused_pid=11940):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._window = self.Ctl(class_name="mmui::MainWindow")
+        backend._window.ProcessId = 11940
+        input_ctl = self.Ctl(automation_id="chat_input_field", class_name="mmui::ChatInputField")
+        backend._control = lambda automation_id: input_ctl
+        backend._auto = type("A", (), {"GetFocusedControl": staticmethod(
+            lambda: input_ctl if focused_pid == 11940 else None)})
+        # Every UIA walk in the adapter starts from one control lookup.
+        backend._all_controls = lambda: pool
+        return backend, input_ctl
+
+    def test_send_button_is_invoked_and_no_key_is_typed(self):
+        invoke = self.Invoke()
+        button = self.Ctl(name="发送", automation_id="send_button", invoke=invoke)
+        backend, input_ctl = self.backend([button])
+        self.assertTrue(backend.send_by_invoke())
+        self.assertEqual(invoke.calls, 1)
+        self.assertEqual(input_ctl.typed, [])
+        self.assertEqual(getattr(input_ctl, "focused", 0), 0)
+
+    def test_english_label_also_counts(self):
+        invoke = self.Invoke()
+        button = self.Ctl(name="Send", invoke=invoke)
+        backend, _ = self.backend([button])
+        self.assertTrue(backend.send_by_invoke())
+        self.assertEqual(invoke.calls, 1)
+
+    def test_no_affordance_returns_false_without_invoking_anything(self):
+        invoke = self.Invoke()
+        decoy = self.Ctl(name="发送图片", automation_id="", class_name="mmui::Other")
+        other = self.Ctl(name="设置", invoke=invoke)
+        backend, _ = self.backend([decoy, other])
+        self.assertFalse(backend.send_by_invoke())
+        self.assertEqual(invoke.calls, 0)
+
+    def test_refused_invoke_is_reported_not_silently_accepted(self):
+        invoke = self.Invoke(ok=False)
+        button = self.Ctl(name="发送", invoke=invoke)
+        backend, _ = self.backend([button])
+        self.assertFalse(backend.send_by_invoke())
+        self.assertEqual(invoke.calls, 1)
+
+    def test_real_traversal_finds_a_nested_button(self):
+        # The other five tests replace _all_controls wholesale; this one walks
+        # the production traversal itself, so a broken GetChildren recursion
+        # cannot hide behind them.
+        invoke = self.Invoke()
+        button = self.Ctl(name="发送", invoke=invoke)
+        panel = self.Ctl(name="panel")
+        panel.GetChildren = lambda: [button]
+        title = self.Ctl(name="title")
+        title.GetChildren = lambda: []
+        root = self.Ctl(name="root")
+        root.GetChildren = lambda: [title, panel]
+
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._window = root
+        # The walk reports children before their own children, and never the
+        # root itself, so the expected order is fixed and checkable.
+        self.assertEqual(
+            [c.Name for c in backend._all_controls()],
+            ["title", "panel", "\u53d1\u9001"],
+        )
+        self.assertTrue(backend.send_by_invoke())
+        self.assertEqual(invoke.calls, 1)
+
+    def test_traversal_survives_a_failing_child(self):
+        # A COM error on one branch must not lose the whole search: the answer
+        # is either the affordance or none, never a crash on a background send.
+        invoke = self.Invoke()
+        button = self.Ctl(name="发送", invoke=invoke)
+        bad = self.Ctl(name="bad")
+
+        def boom():
+            raise RuntimeError("com gone")
+
+        bad.GetChildren = boom
+        root = self.Ctl(name="root")
+        root.GetChildren = lambda: [bad, button]
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._window = root
+        self.assertTrue(backend.send_by_invoke())
+
+    def test_press_enter_prefers_invoke_over_the_keyboard(self):
+        invoke = self.Invoke()
+        button = self.Ctl(name="发送", invoke=invoke)
+        backend, input_ctl = self.backend([button])
+        backend.press_enter()
+        self.assertEqual(invoke.calls, 1)
+        self.assertEqual(input_ctl.typed, [])
+
+
 class NoOpenChatTests(unittest.TestCase):
     """A freshly logged-in WeChat has no chat panel until one is opened."""
 
