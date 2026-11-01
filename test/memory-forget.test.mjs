@@ -36,8 +36,9 @@ test('不是忘记指令的一律返回 null', () => {
   assert.equal(extractForgetTarget('今天天气不错'), null);
   assert.equal(extractForgetTarget(''), null);
   assert.equal(extractForgetTarget(undefined), null);
-  // 目标是单字，会命中半张表，拒绝。
-  assert.equal(extractForgetTarget('忘掉咖'), null);
+  // 单字在中文里就是真实目标（「忘掉茶」），不设长度门槛；
+  // 安全性由「字面包含」判定保证，不由目标长度保证。
+  assert.equal(extractForgetTarget('忘掉茶'), '茶');
 });
 
 test('忘掉命中短语的事实，别的一条不动', async () => {

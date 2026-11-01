@@ -151,7 +151,11 @@ export async function recordInboundMemory(store, {
  * @returns how many facts were removed.
  */
 export async function forgetMatching(store, { scope, target, logger = console } = {}) {
-  if (!store || !scope || typeof target !== 'string' || target.trim().length < 2) return 0;
+  // No length floor: in Chinese a single character IS a target ("忘掉茶"), and the
+  // old two-character floor turned the most natural request into a silent no-op --
+  // measured, the fact stayed in the store. Safety comes from the exact-containment
+  // check below, not from the length of what the person asked to erase.
+  if (!store || !scope || typeof target !== 'string' || target.trim().length < 1) return 0;
   let removed = 0;
   try {
     const facts = await store.recall({ scope, query: target, limit: 50 });

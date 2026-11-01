@@ -183,8 +183,13 @@ export function extractForgetTarget(text) {
     const match = pattern.exec(body);
     if (!match) continue;
     const target = tidy(match[1]);
-    // A one-character target would match half the memory; refuse it.
-    if (target.length < 2) continue;
+    // A single character is a real target in Chinese -- "忘掉茶" names 茶, and the
+    // old floor of two silently turned the most natural request into a no-op
+    // (measured: the fact stayed in the store). What makes a target dangerous is
+    // not its length but its reach, and `forgetMatching` already requires exact
+    // containment inside one scope, so a broad target can only remove rows that
+    // literally contain it.
+    if (target.length < 1) continue;
     return target;
   }
   return null;
