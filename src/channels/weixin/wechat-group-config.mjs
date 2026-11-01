@@ -157,11 +157,15 @@ export async function loadWechatGroupConfig(path) {
   if (root.allowWindowRestore !== undefined && typeof root.allowWindowRestore !== 'boolean') {
     throw invalid('allowWindowRestore must be boolean');
   }
-  // autoMinimize asks the bridge to stow WeChat with a NON-activating minimise
-  // after its baseline. It exists because WeChat 4.x deleted close-to-tray: X-ing
-  // the panel quits and destroys the accessibility tree, so minimise is the only
-  // state where a hidden WeChat still feeds the bridge. Default off, because even
-  // hiding a window the operator is reading is a takeover of their screen.
+  // autoMinimize is accepted for compatibility but does nothing, and the comment
+  // here used to explain it as "the only state where a hidden WeChat still feeds
+  // the bridge". Retracted: measured after SW_SHOWMINNOACTIVE the window was still
+  // non-iconic and UIA found zero mmui controls desktop-wide, so minimising
+  // destroys the accessibility tree exactly like X-closing the panel. The switch
+  // therefore removed the only working state instead of hiding it, and
+  // UiaBackend.maybe_auto_minimize now refuses to call any window API even when
+  // the flag is on, so an existing config file cannot sabotage itself.
+  // Re-enable only against a fresh measurement, as a test rather than a claim.
 
   const groups = root.groups.map(normalizeGroup);
   const ids = new Set();

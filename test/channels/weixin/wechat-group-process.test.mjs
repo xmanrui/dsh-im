@@ -153,6 +153,46 @@ test('config switches travel into the adapter environment without touching the h
   assert.equal(process.env.DSH_WECHAT_GROUP_AUTO_MINIMIZE, undefined);
 });
 
+test('a switch inherited from the host environment cannot arm itself', async (t) => {
+  // Fail-open hole found by audit: #adapterEnv starts from { ...process.env } and
+  // deletes only the four PYTHON* names, then SETS the DSH_WECHAT_GROUP_* switches
+  // when the config says true. It never deletes them when the config says false, so
+  // a value inherited from the Host process (a shell profile, an HKCUEnvironment
+  // entry, a launcher wrapper) reaches the adapter even though the account config
+  // file says off. The operator would have written allowWindowRestore:false and the
+  // bridge would still raise WeChat and take the foreground - the exact screen
+  // takeover this objective forbids. Config must be able to CLOSE a switch,
+  // not merely open one, so the inherited values are scrubbed before the
+  // conditional set, and this test injects them the way a poisoned host would.
+  const inherited = {
+    ...process.env,
+    DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE: '1',
+    DSH_WECHAT_GROUP_AUTO_MINIMIZE: '1',
+    DSH_WECHAT_GROUP_ALLOW_UNVERIFIED: '1',
+    DSH_WECHAT_GROUP_ALLOW_SEND: '1',
+  };
+  // Default config: every one of those four switches is false.
+  const off = makeProcess(t, { env: inherited });
+  await startReady(off.groupProcess, off.children);
+  const offEnv = off.spawnCalls[0].options.env;
+  for (const name of ['DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE', 'DSH_WECHAT_GROUP_AUTO_MINIMIZE',
+    'DSH_WECHAT_GROUP_ALLOW_UNVERIFIED', 'DSH_WECHAT_GROUP_ALLOW_SEND']) {
+    assert.equal(offEnv[name], undefined, name + ' leaked in from the host environment');
+  }
+
+  // And a config that enables exactly one must enable exactly that one.
+  const one = makeProcess(t, {
+    env: inherited,
+    config: { ...CONFIG, allowSend: true },
+  });
+  await startReady(one.groupProcess, one.children);
+  const oneEnv = one.spawnCalls[0].options.env;
+  assert.equal(oneEnv.DSH_WECHAT_GROUP_ALLOW_SEND, '1');
+  assert.equal(oneEnv.DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE, undefined,
+    'enabling send must not enable screen restore through an inherited value');
+  assert.equal(oneEnv.DSH_WECHAT_GROUP_AUTO_MINIMIZE, undefined);
+  assert.equal(oneEnv.DSH_WECHAT_GROUP_ALLOW_UNVERIFIED, undefined);
+});
 test('an explicit interpreter override wins over the discovered launcher', async (t) => {
   const saved = process.env.DSH_WECHAT_GROUP_PYTHON;
   process.env.DSH_WECHAT_GROUP_PYTHON = 'D:/custom/python.exe';

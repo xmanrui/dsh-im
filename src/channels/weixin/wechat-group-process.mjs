@@ -151,6 +151,18 @@ export class WechatGroupProcess extends EventEmitter {
     for (const name of ['PYTHONHOME', 'PYTHONPATH', 'PYTHONSTARTUP', 'PYTHONEXECUTABLE']) {
       delete env[name];
     }
+    // The capability switches must be scrubbed too, before the conditional set
+    // below. env starts from a copy of the Host process environment, so a value
+    // that survives there (a shell profile, an HKCU\Environment entry, a launcher
+    // wrapper) would reach the adapter even when the account config file says off,
+    // and the adapter reads the environment as its gate. allowWindowRestore:false
+    // would then still arm the raise-and-foreground path - a fail-open screen
+    // takeover controlled by a file the operator believes is protecting him.
+    // Config has to be able to CLOSE a switch, not only open one.
+    for (const name of ['DSH_WECHAT_GROUP_ALLOW_UNVERIFIED', 'DSH_WECHAT_GROUP_ALLOW_SEND',
+      'DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE', 'DSH_WECHAT_GROUP_AUTO_MINIMIZE']) {
+      delete env[name];
+    }
     if (this.#allowUnverifiedRead) env.DSH_WECHAT_GROUP_ALLOW_UNVERIFIED = '1';
     if (this.#allowSend) env.DSH_WECHAT_GROUP_ALLOW_SEND = '1';
     if (this.#allowWindowRestore) env.DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE = '1';

@@ -1365,31 +1365,30 @@ class UiaBackend:
         except Exception:
             return False
     def maybe_auto_minimize(self) -> None:
-        """Put WeChat away without touching the operator's screen. Opt-in only.
+        """Refuse to minimise: it destroys the tree the bridge depends on.
 
-        WeChat 4.x has no close-to-tray setting (forensics: the option was
-        removed; X-closing quits and DESTROYS the mmui tree). The headless
-        operating point is therefore minimised, where InvokePattern still
-        switches chats and sends. This method lets the bridge reach that state
-        itself instead of asking a human, and it is the right hide because
-        SW_SHOWMINNOACTIVE (7) does NOT activate the window, unlike SW_MINIMIZE
-        (6) or SetForegroundWindow, which would steal focus from whatever the
-        operator is doing. Default off: even stowing a window is a takeover if
-        nobody asked for it.
+        RETRACTED behaviour, kept as a no-op so an operator who still has
+        autoMinimize:true in his config file is protected rather than sabotaged.
+        The original reasoning was: WeChat 4.x deleted close-to-tray, X-closing the
+        panel destroys mmui::MainWindow, therefore minimising is the headless
+        operating point where InvokePattern still works. Measured instead: after
+        SW_SHOWMINNOACTIVE the window was still non-iconic and UIA found zero mmui
+        controls desktop-wide - minimise destroys the tree exactly like X-closing.
+        So enabling this switch did not create a background-capable state, it
+        removed the only working one: the bridge hid the panel and then went blind,
+        reporting a missing surface and retrying forever.
+
+        Reading the environment variable is retained so the gate stays observable
+        (a caller can still tell whether the operator asked for it), but no window
+        API is called in any branch.
         """
 
         if os.environ.get("DSH_WECHAT_GROUP_AUTO_MINIMIZE") != "1":
             return
-        handle = _safe_property(self._window, "NativeWindowHandle")
-        if not handle or sys.platform != "win32":
-            return
-        if _window_is_minimised(int(handle)):
-            return
-        from ctypes import wintypes
-
-        SW_SHOWMINNOACTIVE = 7
-        _user32().ShowWindow(wintypes.HWND(int(handle)), SW_SHOWMINNOACTIVE)
-        time.sleep(0.3)
+        # Deliberate dead end. If a future build really does keep the tree while
+        # minimised, re-enable by proving it first: measure the mmui control count
+        # desktop-wide before and after SW_SHOWMINNOACTIVE, as a test, not a docstring.
+        return
     def _control(self, automation_id: str) -> Any:
         if self._closed:
             raise SafetyError("backend is closed", "backend_closed")
@@ -1534,9 +1533,11 @@ class UiaBackend:
             raise SafetyError("target session item is not unique", "duplicate_group_title")
         item = items[0]
         # Order of preference, always verified by reading the chat title back:
-        #   1. InvokePattern - protocol-level, works with the window minimised,
-        #      no focus change, no synthetic input. On this build it can return
-        #      True while nothing switches, so success is never assumed.
+        #   1. InvokePattern - protocol-level, no focus change, no synthetic input.
+        #      (It used to claim "works with the window minimised"; that is
+        #      retracted - minimising destroys mmui::MainWindow here, so a
+        #      minimised panel has no controls to invoke at all.) On this build it
+        #      can return True while nothing switches, so success is never assumed.
         #   2. SetFocus + Click - proven to switch, but needs a visible window.
         # SelectionItemPattern.Select() stays unused: it lies the same way.
         # A refused activation falls through; an activation that reports success
@@ -1603,8 +1604,12 @@ class UiaBackend:
         """Restore and focus the main window only when the operator opted in.
 
         The bridge never needs this: session switching goes through the
-        protocol-level InvokePattern, which works while the window is minimised
-        or hidden, so the default is to touch no window API at all.
+        protocol-level InvokePattern, so the default is to touch no window API at
+        all. Corrected wording - the sentence here used to add "which works while
+        the window is minimised or hidden", and that is what misled me: minimising
+        destroys mmui::MainWindow on this build (measured: after SW_SHOWMINNOACTIVE,
+        zero mmui controls desktop-wide), so there is no minimised state in which
+        InvokePattern could still be used. Only a visible panel has a tree.
 
         This method used to carry a duplicated tail copy of its own body AFTER
         the opt-in `if`, so the unconditional half ran on every 750ms poll: the

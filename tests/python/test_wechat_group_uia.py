@@ -937,6 +937,49 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(operations(self.backend, "send"), [])
 
 
+class AutoMinimizeSelfSabotageTests(unittest.TestCase):
+    """Minimising must never happen: it destroys the tree the bridge reads.
+
+    autoMinimize was shipped on the claim that a minimised WeChat keeps its
+    accessibility tree. Measured instead: after SW_SHOWMINNOACTIVE the window was
+    still non-iconic while UIA found zero mmui controls desktop-wide. So the switch
+    did not create a background-capable state, it removed the only working one -
+    the bridge would hide the panel and then be blind. Following that advice is
+    what cost the operator his session, and the old docstrings still advertise it.
+    """
+
+    class Win(FakeWindow):
+        # A real handle so the old early-return guards are all passed and the only
+        # reason not to call ShowWindow can be the retracted behaviour itself.
+        NativeWindowHandle = 68314
+
+    def backend(self):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._window = self.Win(exists=True)
+        return backend
+
+    def test_opt_in_no_longer_touches_the_window(self):
+        fake_user32 = mock.MagicMock()
+        backend = self.backend()
+        env = {"DSH_WECHAT_GROUP_AUTO_MINIMIZE": "1"}
+        with mock.patch.object(uia.os, "environ", env):
+            with mock.patch.object(uia, "_user32", lambda: fake_user32):
+                backend.maybe_auto_minimize()
+        # POSITIVE CONTROL for the retraction: restore the ShowWindow call and this
+        # is the first assertion to go red.
+        self.assertEqual(fake_user32.mock_calls, [])
+
+    def test_docstring_no_longer_advertises_minimising(self):
+        # The claim outlived the code that was written against it, which is how an
+        # operator ends up doing the one thing that breaks the bridge. Pin the
+        # retraction in the text itself, the same way
+        # test_panel_closed_message_names_the_headless_fix pins the message copy.
+        text = (uia.UiaBackend.maybe_auto_minimize.__doc__ or "").lower()
+        self.assertNotIn("keeps the tree", text)
+        self.assertNotIn("operating point is therefore minimised", text)
+        self.assertIn("destroy", text)
+
 class AutoMinimizeGateTests(unittest.TestCase):
     """The bridge can put WeChat away without touching the operator's screen.
 
@@ -966,7 +1009,14 @@ class AutoMinimizeGateTests(unittest.TestCase):
                 backend.maybe_auto_minimize()
         self.assertEqual(fake_user32.mock_calls, [])
 
-    def test_opt_in_minimises_without_activating(self):
+    def test_opt_in_still_touches_no_window_api(self):
+        # RETRACTED, and this assertion used to enforce the retracted behaviour:
+        # it demanded ShowWindow(SW_SHOWMINNOACTIVE) on opt-in, because the switch
+        # was shipped on the claim that a minimised WeChat keeps its accessibility
+        # tree. Measured: after SW_SHOWMINNOACTIVE the window was still non-iconic
+        # and UIA found zero mmui controls desktop-wide, so the switch destroyed the
+        # only state the bridge can read. An operator who still has
+        # autoMinimize:true must be protected by the code, not sabotaged by it.
         fake_user32 = mock.MagicMock()
         backend = self.backend()
         env = {"DSH_WECHAT_GROUP_AUTO_MINIMIZE": "1"}
@@ -974,10 +1024,11 @@ class AutoMinimizeGateTests(unittest.TestCase):
             with mock.patch.object(uia, "_user32", lambda: fake_user32):
                 with mock.patch.object(uia, "_window_is_minimised", lambda hwnd: False):
                     backend.maybe_auto_minimize()
-        names = [call[0] for call in fake_user32.mock_calls]
-        self.assertEqual(names, ["ShowWindow"])
-        # 7 = SW_SHOWMINNOACTIVE. Anything else could activate and steal focus.
-        self.assertEqual(fake_user32.ShowWindow.call_args[0][1], 7)
+        self.assertEqual(fake_user32.mock_calls, [])
+        # Standing guard if this is ever re-enabled: prove it by measurement first,
+        # and never use SW_MINIMIZE (6), which activates and steals focus from
+        # whatever the operator is doing.
+        self.assertNotIn(6, [c[1][1] for c in fake_user32.mock_calls])
 
     def test_already_minimised_window_is_left_alone(self):
         fake_user32 = mock.MagicMock()
