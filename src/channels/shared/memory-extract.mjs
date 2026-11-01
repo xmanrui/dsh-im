@@ -36,6 +36,20 @@ const CAPTURE_MAX = 40;
 const RULES = Object.freeze([
   // "记住 X" is an explicit instruction and outranks every inference below.
   { kind: 'note', label: 'explicit', pattern: /(?:^|[，,。\s])(?:请)?记住[：:，,]?\s*([^。！？!?\n]{1,40})/u },
+  // A standing instruction is the single most useful thing a group ever tells a
+  // bot, and nothing captured it: measured, "以后都用简体中文", "下次直接给成品就行",
+  // "别再发进度了" and "回答短一点" ALL produced nothing. They are not preferences
+  // (nobody likes/dislikes anything) and not notes (not "remember X"), so every
+  // rule missed them. Stored as `note`, because that is exactly what they are:
+  // something the group asked to be remembered and applied.
+  { kind: 'note', label: 'instruction', pattern: /(?:^|[，,。；;\s])(?:以后|下次|往后|今后)(?:都|请|就)?\s*([^。！？!?\n]{2,40})/u },
+  // The negation is part of the meaning: dropping 别 turned "别老是问我要不要帮忙"
+  // into "有人说要不要帮忙" -- the opposite of what was asked. The capture keeps
+  // the verb too, so the stored line reads as the request it actually was.
+  { kind: 'note', label: 'instruction', pattern: /(?:^|[，,。；;\s])((?:别|不要|不用|甭)(?:再|老是|总是|总|一直)?\s*(?:发|说|问|给|写|用|提)[^。！？!?\n]{0,40})/u },
+  // A bare style requirement, with no 以后/别 in front of it. It is a command about
+  // HOW to answer, which is exactly what a group means by "回答短一点".
+  { kind: 'note', label: 'instruction', pattern: /(?:^|[，,。；;\s])((?:回答|回复|说话|打字)(?:得|要|请)?\s*(?:短|长|简洁|简单|慢|快|详细)[^。！？!?\n]{0,20})/u },
   // Self-description: name, job, location. Stored as identity.
   { kind: 'identity', label: 'name', pattern: /我(?:叫|是|的名字(?:是|叫))\s*([^，,。！？!?\s]{1,20})/u },
   { kind: 'identity', label: 'work', pattern: /我在\s*([^，,。！？!?\s]{1,20}?)(?:工作|上班|读书|上学)/u },
@@ -175,6 +189,9 @@ const LORE_PHRASES = Object.freeze({
   has: (object) => `群里有人有${object}`,
   doing: (object) => `群里有人最近在${object}`,
   explicit: (object) => `有人让你记住：${object}`,
+  // Phrased as a standing requirement, not as gossip: an instruction the group
+  // gave is something to FOLLOW, and "群里有人提到…" reads like hearsay.
+  instruction: (object) => `群里的要求：${object}`,
 });
 
 /**
