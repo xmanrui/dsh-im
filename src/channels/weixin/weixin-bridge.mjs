@@ -39,7 +39,7 @@ import {
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
 import { renderPersonaGuidance } from '../shared/persona.mjs';
-import { flattenMarkdown, planOutbound } from '../shared/humanize-outbound.mjs';
+import { flattenMarkdownDetailed, planOutbound } from '../shared/humanize-outbound.mjs';
 import { contextBlockFor } from '../shared/conversation/context-builder.mjs';
 import { memoryScope, recallMemoryBlock, recordInboundMemory } from '../shared/memory-turn.mjs';
 import {
@@ -1494,7 +1494,8 @@ export class WeixinHarnessBridge {
     // WeChat renders no Markdown, so `**bold**` would arrive as literal asterisks
     // -- one of the loudest machine tells there is. Flatten first, then plan: the
     // segment lengths must be measured on what is actually sent.
-    const plan = planOutbound(flattenMarkdown(text), { elapsedMs });
+    const flattened = flattenMarkdownDetailed(text);
+    const plan = planOutbound(flattened.text, { elapsedMs, structured: flattened.structured });
     const providerMessageIds = [];
     for (let index = 0; index < plan.segments.length; index += 1) {
       this.#signal?.throwIfAborted();

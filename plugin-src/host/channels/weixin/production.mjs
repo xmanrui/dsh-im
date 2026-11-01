@@ -136,12 +136,24 @@ export async function createProductionController(ctx, config = {}, internals = {
     if (!provider) {
       // Seeded, not merely opened: a bot that was never configured answers as the
       // shipped character instead of as an unnamed assistant.
-      provider = await openSeededPersonaProvider(resolve(paths.accounts, botId, 'persona.json'), {
-        onError: (text) => logger.warn?.(`[dsh-weixin] ${text}`),
-      });
-      personaProviders.set(botId, provider);
+      //
+      // Opened defensively. This runs while the account is being created, so an
+      // unexpected I/O failure here (a path that is a directory, a permission
+      // error the read path did not anticipate) would not degrade the character
+      // -- it would stop the bot from existing at all. A cache entry of null
+      // means "this account has no persona right now", which every caller already
+      // treats as a supported state.
+      try {
+        provider = await openSeededPersonaProvider(resolve(paths.accounts, botId, 'persona.json'), {
+          onError: (text) => logger.warn?.(`[dsh-weixin] ${text}`),
+        });
+      } catch (error) {
+        logger.warn?.(`[dsh-weixin] 人设不可用，本次按无人设启动 ${botId}:`, error);
+        provider = null;
+      }
+      personaProviders.set(botId, provider ?? null);
     }
-    return provider;
+    return provider ?? null;
   };
   const memoryStores = new Map();
   // Deletion only has to drop the held reference (see deleteState below): the

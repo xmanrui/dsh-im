@@ -83,6 +83,22 @@ const KEEP_PATTERNS = Object.freeze([
 ]);
 
 /**
+ * A short random token for this call's placeholders.
+ *
+ * The placeholders must be unguessable by the text being flattened, otherwise a
+ * message that happens to contain the placeholder text collides with a real one
+ * and restores to the wrong value (measured: a literal NUL CODE 5 NUL restored as
+ * `undefined`). Falls back to a counter when no crypto is available.
+ */
+let placeholderCounter = 0;
+function randomToken() {
+  const uuid = globalThis.crypto?.randomUUID;
+  if (typeof uuid === 'function') return uuid.call(globalThis.crypto).replaceAll('-', '').slice(0, 12);
+  placeholderCounter += 1;
+  return `p${placeholderCounter.toString(36)}`;
+}
+
+/**
  * The largest index <= `limit` that does not split a surrogate pair.
  *
  * `String.prototype.slice` counts UTF-16 units, so a limit that lands on the
@@ -315,9 +331,28 @@ export function segmentGapMs({ jitter, random = Math.random } = {}) {
  * @param options.elapsedMs - wall time already spent producing this answer.
  * @returns `{ segments: string[], delaysMs: number[] }`, index-aligned.
  */
+/**
+ * Plan one outbound answer: the segments to send and the pause before each.
+ *
+ * Pure: it reads nothing and sends nothing, so a bridge can compute the plan and
+ * a test can assert it without a clock or a socket. The caller owns the waiting
+ * and the abort handling.
+ *
+ * `options.structured` lets the caller say "the ORIGINAL was a list or a code
+ * block" when it already had to flatten the text first: the flattened form no
+ * longer looks structured, and splitting it would undo the very protection that
+ * stopped it being split in the first place.
+ *
+ * @param text - the finished answer.
+ * @param options - forwarded to `splitReply`, `typingDelayMs`, `segmentGapMs`.
+ * @param options.elapsedMs - wall time already spent producing this answer.
+ * @returns `{ segments: string[], delaysMs: number[] }`, index-aligned.
+ */
 export function planOutbound(text, options = {}) {
   const cleaned = stripMachinePhrases(text);
-  const segments = splitReply(cleaned, options);
+  const segments = options.structured === true
+    ? (cleaned.trim() ? [cleaned.trim()] : [])
+    : splitReply(cleaned, options);
   const delaysMs = segments.map((segment, index) => (index === 0
     ? typingDelayMs(segment, options)
     : segmentGapMs(options)));
@@ -373,20 +408,39 @@ export const PLAIN_TEXT_TARGETS_FALLBACK = true;
  * @param text - the finished answer.
  * @returns the text a plain-text client should receive.
  */
-export function flattenMarkdown(text) {
-  if (typeof text !== 'string' || !text) return '';
+/**
+ * Flatten the Markdown a chat client will not render into what a person would type.
+ *
+ * Returns the flattened text plus whether the ORIGINAL was structured. The
+ * caller needs that second half: flattening a bulleted list turns it into plain
+ * lines, which then look like ordinary prose to `splitReply` and get chopped --
+ * so the "never split a list" guarantee has to be decided on the input, not on
+ * what is left after flattening.
+ *
+ * @param text - the finished answer.
+ * @returns `{ text, structured }`.
+ */
+export function flattenMarkdownDetailed(text) {
+  if (typeof text !== 'string' || !text) return { text: '', structured: false };
+  // Decided on the INPUT: see the doc comment above.
+  const structured = looksStructured(text);
   let out = text;
   // Fences first, so nothing inside them is rewritten by the rules below.
+  //
+  // The placeholder carries a NUL and a per-call random token: a plain
+  // `\u0000CODE5\u0000` inside the message itself would collide with a real
+  // placeholder index and then restore as `undefined`, corrupting the text.
+  const token = randomToken();
   const fences = [];
   out = out.replace(/```[\s\S]*?```/gu, (block) => {
     fences.push(block);
-    return `\u0000FENCE${fences.length - 1}\u0000`;
+    return `\u0000${token}F${fences.length - 1}\u0000`;
   });
   // Inline code is protected the same way: a command must stay copyable.
   const codes = [];
   out = out.replace(/`([^`\n]+)`/gu, (_match, code) => {
     codes.push(code);
-    return `\u0000CODE${codes.length - 1}\u0000`;
+    return `\u0000${token}C${codes.length - 1}\u0000`;
   });
   out = out
     // [text](url) -> text（url）: the address survives, the syntax does not.
@@ -400,6 +454,12 @@ export function flattenMarkdown(text) {
     .replace(/^\s{0,3}>\s?/gmu, '')
     // Horizontal rules are not something a person types.
     .replace(/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/gmu, '')
+    // A star that stands alone between spaces is arithmetic or a glob, never
+    // emphasis: `2 * 3 * 4` and `*.log` are the two shapes that showed up. They
+    // are swapped for a sentinel before the emphasis rules and restored after,
+    // because deleting them silently changes what the message says.
+    .replace(/\s\*\s/gu, (match) => match.replace('*', '\u0000STAR\u0000'))
+    .replace(/(^|[\s（(])\*(?=[.\w])/gu, (match, lead) => lead + '\u0000STAR\u0000')
     // Emphasis: strip the markers, keep the words. Bold before italic, so `***x***`
     // resolves to x rather than leaving a stray asterisk behind.
     .replace(/\*\*\*([^*\n]+)\*\*\*/gu, '$1')
@@ -407,10 +467,31 @@ export function flattenMarkdown(text) {
     .replace(/__([^_\n]+)__/gu, '$1')
     .replace(/(^|[^*\w])\*([^*\n]+)\*(?![*\w])/gu, '$1$2')
     .replace(/(^|[^_\w])_([^_\n]+)_(?![_\w])/gu, '$1$2')
-    .replace(/~~([^~\n]+)~~/gu, '$1');
-  // Restore the protected spans, in reverse so indices stay valid.
-  out = out.replace(/\u0000CODE(\d+)\u0000/gu, (_match, index) => codes[Number(index)]);
-  out = out.replace(/\u0000FENCE(\d+)\u0000/gu, (_match, index) => fences[Number(index)]);
+    .replace(/~~([^~\n]+)~~/gu, '$1')
+    .replace(/\u0000STAR\u0000/gu, '*');
+  // Restore the protected spans. A placeholder whose index is somehow out of
+  // range leaves the raw text alone rather than printing `undefined` into the
+  // group -- silence is recoverable, a literal `undefined` is not.
+  const restore = (text, marker, values) => text.replace(
+    new RegExp(`\\u0000${token}${marker}(\\d+)\\u0000`, 'gu'),
+    (match, index) => values[Number(index)] ?? match,
+  );
+  out = restore(out, 'C', codes);
+  out = restore(out, 'F', fences);
   // Flattening leaves doubled blank lines and trailing spaces behind.
-  return out.replace(/[ \t]+$/gmu, '').replace(/\n{3,}/gu, '\n\n').trim();
+  const flattened = out.replace(/[ \t]+$/gmu, '').replace(/\n{3,}/gu, '\n\n').trim();
+  return { text: flattened, structured };
+}
+
+/**
+ * Flatten Markdown and return only the text.
+ *
+ * Kept as the plain-answer API; `flattenMarkdownDetailed` is for callers that
+ * also need the structure decision (the pacing path does).
+ *
+ * @param text - the finished answer.
+ * @returns the text a plain-text client should receive.
+ */
+export function flattenMarkdown(text) {
+  return flattenMarkdownDetailed(text).text;
 }

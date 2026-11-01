@@ -131,14 +131,34 @@ export async function openPersonaProvider(path, { onError } = {}) {
  * @returns the provider, seeded on first open.
  */
 export async function openSeededPersonaProvider(path, { onError } = {}) {
-  const provider = await openPersonaProvider(path, { onError });
+  // One report per open, not one per read: opening inspects the file twice (once
+  // to load the card, once to decide whether seeding is allowed), and a doubled
+  // diagnostic reads like a doubled problem.
+  let reported = false;
+  const report = (text) => {
+    if (reported) return;
+    reported = true;
+    onError?.(text);
+  };
+  const provider = await openPersonaProvider(path, { onError: report });
+  // Seed only when the file is genuinely absent.
+  //
+  // "Could not read a card" and "there is no card" are different states, and
+  // only the second one may be written over. A damaged file is somebody's work:
+  // a hand edit with a trailing comma used to be replaced by the shipped card,
+  // which is silent data loss in the one place an operator was trying to
+  // customise. It is reported and left alone; the bot answers as the shipped
+  // character in the meantime because `get()` is null.
   if (provider.get() === null) {
-    try {
-      await provider.save(DEFAULT_PERSONA);
-    } catch (error) {
-      // A read-only data directory must not stop the bot from answering; it just
-      // answers without a card until somebody fixes the permissions.
-      onError?.(`人设文件无法写入，本次按无人设处理：${error?.message ?? error}`);
+    const state = await inspectPersonaFile(path, { onError: report });
+    if (!state.present) {
+      try {
+        await provider.save(DEFAULT_PERSONA);
+      } catch (error) {
+        // A read-only data directory must not stop the bot from answering; it
+        // just answers without a card until somebody fixes the permissions.
+        onError?.(`人设文件无法写入，本次按无人设处理：${error?.message ?? error}`);
+      }
     }
   }
   return provider;
@@ -161,4 +181,43 @@ export async function personaFileExists(path) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Read one bot's persona file, distinguishing "absent" from "damaged".
+ *
+ * `loadPersonaFile` answers null for both, which is right for a prompt path that
+ * must never fail -- but wrong for the seeding path, where the difference is
+ * whether writing a fresh card destroys something. A damaged file is somebody's
+ * work: it is reported once and then left exactly where it is.
+ *
+ * @param path - absolute path of the persona file.
+ * @param options.onError - called with a corrupt-file diagnostic.
+ * @returns `{ persona, present, damaged }`.
+ */
+export async function inspectPersonaFile(path, { onError } = {}) {
+  let text;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { persona: null, present: false, damaged: false };
+    // Some other read failure (EISDIR, EACCES): treat it as present-and-unusable,
+    // so a seeding caller cannot decide the file is simply missing and overwrite
+    // a path it does not understand.
+    onError?.(`persona.json 无法读取，本次按无人设处理：${error?.message ?? error}`);
+    return { persona: null, present: true, damaged: true };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    onError?.(`persona.json 不是合法 JSON，已按无人设处理（文件未改动）：${error?.message ?? error}`);
+    return { persona: null, present: true, damaged: true };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    onError?.('persona.json 顶层必须是对象，已按无人设处理（文件未改动）。');
+    return { persona: null, present: true, damaged: true };
+  }
+  const card = parsed.persona ?? parsed;
+  return { persona: normalizePersona(card), present: true, damaged: false };
 }
