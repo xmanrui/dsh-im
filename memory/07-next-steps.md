@@ -121,3 +121,23 @@
 - [ ] 真实微信群未发消息验证。
 - [ ] 设置界面 / RPC 未做（改人设走 `scripts/set-persona.mjs`）。
 - [ ] 其余 12 个渠道未接。
+
+## 已闭环（2026-11-02 第六轮：中文检索 + 群路径）
+
+- [x] 群路径接线验证 → `acb2f8cb`：`test/humanlike-weixin-group.test.mjs` 用真实 `uia-wechat-group/v1`
+      事件形状穿过 `WeixinHarnessBridge`，证明**群里被 @** 这条路同样带人设与记忆（不只是私聊）。
+      途中修正了三处测试自身的错误假设：群 sender 不是 owner（需显式策略）、
+      群会话键带 `group:` 前缀、写记忆是 fire-and-forget（要 yield 一拍）。
+- [x] 中文检索 → `acb2f8cb`：检索按空格切词，而中文不分词，于是
+      「咖啡豆哪种好」是一个整词元，永远匹配不到记忆里的「咖啡」—— 记过却答不上来。
+      现在长中文词元额外产出相邻二元组（两字保持原样，否则「咖」会命中一切），
+      群消息开头的 `@大肥鱼` 也不再当检索词。5 条用例钉住两个方向，含「无关查询仍返回空」。
+- [x] 全量：`4896 tests / 4888 pass / 0 fail`；`BUILT_ARTIFACTS_OK 2 files match HEAD`。
+- [x] 部署读回：`lib/index.js` 三处 sha256 同为 `5323c68a7e0e…`。
+
+## 未闭环（第六轮）
+
+- [ ] 宿主进程未重载（HMR 忽略 node_modules，本插件是 link 依赖）→ 需 `restart-dsh.cmd`。
+- [ ] 真实微信群未发消息验证。
+- [ ] 设置界面 / RPC 未做。
+- [ ] 其余 12 个渠道未接。
