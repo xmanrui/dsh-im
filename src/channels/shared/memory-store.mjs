@@ -105,23 +105,62 @@ function factView(row) {
   };
 }
 
+/** Trigger mentions that carry no meaning for retrieval. */
+const MENTION_TOKEN = /^@\S*$/u;
+
 /**
  * 把检索词切成词元：全角空格先归一成半角，再按半角空格切分，
  * 去重、限量、截断。空查询返回空数组（调用方据此返回空结果）。
+ *
+ * 两个实测修正，都是为了「明明记过却召不回」：
+ *
+ * ① 群消息的正文带着 `@大肥鱼`，它既不是内容也不在任何记忆里；当成检索词
+ *    只会拉低命中占比。整段以 @ 开头的词元直接丢弃。
+ * ② 中文不按空格分词，所以 `咖啡豆哪种好` 曾是一个整体词元，永远匹配不到
+ *    `咖啡`。这些词元再加一层 CJK 二元切分：长词元拆出相邻两字，短于三字的
+ *    保持原样（`咖啡` 本身就是一个词）。
  */
 function queryTokens(query) {
   if (typeof query !== 'string') return [];
   const normalized = query.replaceAll(String.fromCharCode(0x3000), ' ');
   const seen = new Set();
   const tokens = [];
+  const push = (value) => {
+    if (!value || seen.has(value) || tokens.length >= MAX_QUERY_TOKENS) return;
+    seen.add(value);
+    tokens.push(value);
+  };
   for (const raw of normalized.split(' ')) {
     const token = raw.trim().slice(0, MAX_TOKEN_LENGTH);
-    if (!token || seen.has(token)) continue;
-    seen.add(token);
-    tokens.push(token);
-    if (tokens.length >= MAX_QUERY_TOKENS) break;
+    // A leading @ token is an address, not a search term.
+    if (!token || MENTION_TOKEN.test(token)) continue;
+    push(token);
+    // CJK runs longer than a word are also probed by their adjacent bigrams,
+    // which is how `咖啡豆哪种好` gets to match a stored `咖啡`.
+    for (const bigram of cjkBigrams(token)) push(bigram);
   }
   return tokens;
+}
+
+/**
+ * Adjacent two-character runs of the CJK parts of one token.
+ *
+ * Only runs of three or more characters are split: a two-character run is
+ * already a word, and splitting it would produce single characters that match
+ * almost everything. Latin text and digits are left alone.
+ *
+ * @param token - one whitespace-delimited token.
+ * @returns the bigrams, possibly none.
+ */
+function cjkBigrams(token) {
+  const out = [];
+  const runs = token.match(/[\u3400-\u4dbf\u4e00-\u9fff]{3,}/gu) ?? [];
+  for (const run of runs) {
+    for (let index = 0; index + 1 < run.length; index += 1) {
+      out.push(run.slice(index, index + 2));
+    }
+  }
+  return out;
 }
 
 /**
