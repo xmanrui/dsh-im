@@ -2544,7 +2544,15 @@ export function createBotWorkspaceScope(
               }
               // This is a Bot-wide setting. Never mutate only the IM session: DS
               // Bot applies the choice to its own and group sessions as well.
-              return dsBot.updateBotModel(dsBotId, selection, options);
+              const result = await dsBot.updateBotModel(dsBotId, selection, options);
+              const selected = result?.selected;
+              if (!selected || selected.reasoningEffort !== undefined) return result;
+              // Without a level DS Bot sends none, and DSH runs the model's
+              // default one: report the level the Session actually runs.
+              const current = (await target.getSessionModels(sessionId, options))?.current;
+              return current?.provider === selected.provider && current?.model === selected.model
+                ? { selected: { ...current } }
+                : result;
             },
             isRunning(...args) {
               return invokeCurrentSession('isSessionRunning', args, 'run-state check');

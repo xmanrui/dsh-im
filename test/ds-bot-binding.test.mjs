@@ -190,11 +190,19 @@ async function fixture(t, { channel = 'qq', key = 'c2c:user-one', target = { kin
     },
     async updateBotModel(id, selection) {
       modelCalls.push([id, selection]);
+      // Like DSH, a Session selected without a level runs the model's default
+      // one, while DS Bot's reply carries no level.
+      const reasoning = modelCatalog.groups[0].models
+        .find((entry) => entry.id === selection.model)?.reasoning;
+      const effort = selection.reasoningEffort ?? reasoning?.defaultEffort;
       selectedModel = {
         provider: selection.provider, model: selection.model,
-        ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
+        ...(effort ? { reasoningEffort: effort } : {}),
       };
-      return { selected: selectedModel };
+      return { selected: {
+        provider: selection.provider, model: selection.model,
+        ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
+      } };
     },
   };
   const sent = [];
@@ -264,13 +272,13 @@ test('bound Feishu model picker and reasoning command update DS Bot without crea
   assert.equal(f.state.sessionFor(f.key), bot.sessionId);
 
   const reasoning = await runModelCommand('/reasoning --default', f.scope.harness, f.scope.state, f.key);
-  assert.match(reasoning.message, /推理等级已切换为：/);
+  assert.match(reasoning.message, /推理等级已切换为：\nLow \(low\)/);
   assert.deepEqual(f.modelCalls[1], [bot.id, { provider: 'provider-one', model: 'new' }]);
   assert.equal(f.state.sessionFor(f.key), bot.sessionId);
 
   f.setCurrent({ ...bot, sessionId: 'session-two' });
   const rolled = await runModelCommand('/model 1', f.scope.harness, f.scope.state, f.key);
-  assert.match(rolled.message, /模型已切换为：/);
+  assert.match(rolled.message, /模型已切换为：\nprovider-one\/old\n推理等级：High \(high\)/);
   assert.equal(f.state.sessionFor(f.key), 'session-two');
   assert.deepEqual(f.modelCalls[2], [bot.id, { provider: 'provider-one', model: 'old' }]);
 });
