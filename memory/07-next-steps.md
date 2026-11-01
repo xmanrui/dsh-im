@@ -26,11 +26,16 @@
   `test/channel-registry.test.mjs` 8 条钉住「注册表 ⇄ 磁盘目录」配对、apply 指向同源、
   激活顺序、逐渠道 deliveryService 契约，并禁止 index.mjs 再自带渠道清单。
   负向对照（实测）：造一个无注册项的 `channels/matrixtest/` → 配对判据红；删除 → 8/8 绿。
-- [x] ③ ARCHITECTURE.md → `ARCHITECTURE.md`（356 行 / 8 个一级章节）。两轮派发 arch-doc-writer 队友均未落盘（连续 2 次失败 ⇒ Lead 自干并登记根因）。全部引用路径实测存在（40 条，missing=0）；数字现读现引（§8.2 给复算命令）；中英 README〈设计〉段已指向本文。**未**把它加进 `package.json` 的 `files`：那会改动被编进
-  bundle 的 manifest，逼出一笔 `npm run build` 的产物提交，而此刻并行会话正改着
-  `src/channels/weixin/wechat-group-runtime.mjs` 与其测试未提交 —— 重建会把他们未提交的源码扫进我的
-  `lib/index.js`，等于用我的提交署名他们的代码（R328）。⇒ 登记为待办：等该文件提交落定后再
-  「改 files + 重建 + 同笔提交产物」。
+- [x] ③ ARCHITECTURE.md → `ARCHITECTURE.md`（356 行 / 8 个一级章节）。两轮派发 arch-doc-writer 队友均未落盘（连续 2 次失败 ⇒ Lead 自干并登记根因）。全部引用路径实测存在（40 条，missing=0）；数字现读现引（§8.2 给复算命令）；中英 README〈设计〉段已指向本文。
+  `package.json` 的 `files` 已加入本文（`260e816`）—— 该笔当时**故意押后**：并行会话正改
+  `src/channels/weixin/wechat-group-runtime.mjs` 与其测试未提交，重建会把他们未提交的源码扫进我的
+  `lib/index.js`，等于用我的提交署名他们的代码（R328）。等其提交落定、工作树只剩我的改动后才做。
+  做法：先验证「干净 HEAD 重建 == HEAD 产物」（`BUILT_ARTIFACTS_OK`，字节数 cmp 差 0），
+  确认基线自洽后再改 files 重建 —— 结果 diff 仅 3 行，就是清单里那一行插入两个 bundle；
+  源码与 bundle **同一笔**提交（分两笔会让守卫在两笔之间判红，那正是它要拦的形态）。
+  另记一条判读教训：对 10 MB 的单文件做字节区间 diff 时，插入 20 字节会让其后**全部**位置错位，
+  看起来像「几百处巨大改动」，实际只有 1 处插入 —— 该用 `git diff --stat` 的增删行数或内容锚点判断，
+  别拿位置差当证据。
 
 ## 未闭环（下一轮候选，按优先级）
 
