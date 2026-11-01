@@ -3188,3 +3188,66 @@ class GluedMentionAndBarePokeTests(unittest.TestCase):
     def test_the_default_prompt_is_the_one_the_operator_asked_for(self):
         # Pinned so a future refactor cannot quietly change the wording he chose.
         self.assertEqual(uia.GroupConfig.bare_mention_prompt, "\u5e72\u5417")
+
+
+class TransientTitleFailureTests(unittest.TestCase):
+    """One unreadable chat header must not cost a whole polling cycle.
+
+    Measured 2026-11-02 in the host log:
+
+        01:34:40 [W] [dsh-weixin] group adapter reported a sanitized error (title_unavailable)
+
+    A single moment where the chat header could not be read aborted the entire poll,
+    and the adapter then reported nothing for that group until a restart took a fresh
+    baseline - which is how a real message gets dropped for good. The header being
+    briefly unreadable is a reading failure, not a state change.
+    """
+
+    def test_a_transient_title_failure_skips_one_cycle_without_losing_rows(self):
+        # The row arrives while the header is unreadable. It must still be delivered
+        # on the next readable cycle, not swallowed by a re-baseline.
+        backend = FakeBackend(messages={"Alpha": []})
+        original = backend.current_chat_title
+        # Armed explicitly rather than by call count: _read_target reads the title
+        # more than once per poll, so a counter would fire in the wrong cycle.
+        armed = {"on": False}
+
+        def flaky_title():
+            if armed["on"]:
+                armed["on"] = False   # exactly one failed read
+                raise uia.SafetyError("header unreadable", "title_unavailable")
+            return original()
+
+        backend.current_chat_title = flaky_title
+        adapter = uia.WechatGroupAdapter([group()], backend, clock=lambda: 7)
+        adapter.start()
+
+        backend.messages["Alpha"].append(raw("/dsh \u4e0b\u5355"))
+        armed["on"] = True
+        # This poll hits the unreadable header and must return no events WITHOUT
+        # raising, so the polling loop keeps running.
+        self.assertEqual(adapter.poll(), [])
+        # The next poll reads normally and must deliver the row that was waiting.
+        events = adapter.poll()
+        self.assertEqual([e["text"] for e in events], ["\u4e0b\u5355"],
+                         "the row must survive the unreadable cycle")
+
+    def test_a_real_surface_loss_still_propagates(self):
+        # Negative control: swallowing everything would hide a closed panel behind a
+        # silent loop, which is the bug this guard must not introduce.
+        backend = FakeBackend(messages={"Alpha": []})
+        original = backend.current_chat_title
+        armed = {"on": False}
+
+        def closing():
+            if armed["on"]:
+                raise uia.SafetyError("panel gone", "wechat_panel_closed")
+            return original()
+
+        backend.current_chat_title = closing
+        adapter = uia.WechatGroupAdapter([group()], backend, clock=lambda: 7)
+        adapter.start()
+        armed["on"] = True
+        with self.assertRaises(uia.SafetyError) as caught:
+            adapter.poll()
+        self.assertEqual(caught.exception.code, "wechat_panel_closed")

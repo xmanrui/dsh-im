@@ -861,10 +861,25 @@ class WechatGroupAdapter:
                     # Idle: still waiting for the operator to open this group. A
                     # transient loss of the surface must still propagate, so only
                     # this one code is swallowed.
-                    if exc.code != "target_not_open":
-                        raise
-                    self._waiting.add(group.id)
-                    continue
+                    if exc.code == "target_not_open":
+                        self._waiting.add(group.id)
+                        continue
+                    # A header that could not be read for one cycle is a reading
+                    # failure, not a state change. Measured 2026-11-02: one
+                    # 'title_unavailable' from a momentarily unreadable chat header
+                    # aborted the whole poll, and the adapter then reported nothing
+                    # for that group until the next restart took a fresh baseline -
+                    # which is exactly how a message gets dropped for good. Skipping
+                    # only this group for one cycle is safe: state.previous is left
+                    # untouched, so the next successful read still produces the right
+                    # delta and nothing is replayed twice.
+                    #
+                    # Deliberately NOT added to _waiting: that set means "the
+                    # operator has to open this chat", and re-baselining on recovery
+                    # would silently swallow the messages that arrived meanwhile.
+                    if exc.code == "title_unavailable":
+                        continue
+                    raise
                 if group.id in self._waiting:
                     # The operator just opened it. Take a fresh baseline rather than
                     # replaying whatever history is on screen, so old messages in a
