@@ -1194,10 +1194,28 @@ class UiaBackend:
 
     # Labels and ids WeChat uses for the control that commits the draft. Matched
     # exactly (not by substring) so 发送图片 / 发送表情 cannot be mistaken for it.
-    SEND_LABELS = frozenset(("发送", "send", "send(s)", "send message"))
+    # ORDERED, not a set: the probe below tries these one at a time and the label
+    # this build really uses (发送, measured on the live tree) must be first. The
+    # old sorted() put the three English aliases ahead of it, each absent label
+    # costing a full timeout, so the working name was reached only after ~30s.
+    SEND_LABELS = ("发送", "send", "send(s)", "send message")
+    # Bound for each probe. The library default is TIME_OUT_SECOND = 10, and
+    # 4 absent labels x 10s is what made a background send stall for half a
+    # minute. A present control answers in tens of milliseconds, so 0.6s gives
+    # the UI layer room to breathe without turning a miss into a stall.
+    SEND_PROBE_TIMEOUT_S = 0.6
     SEND_ID_HINTS = ("send",)
+    # Depth and node budget for the fallback walk. Both numbers come from the live
+    # tree, not from guesswork: the 发送 button sits 20 levels below
+    # mmui::MainWindow, so a limit of 18 (the previous value) never reached it and
+    # the probe reported send_candidates: 0 - a false 'this build has no send
+    # control' that would have pushed background sending onto the keyboard route.
+    # The budget is generous because a panel with a long message list is far
+    # larger than the ~160 nodes measured on an idle chat.
+    CONTROL_WALK_DEPTH = 26
+    CONTROL_WALK_BUDGET = 6000
 
-    def _all_controls(self, budget: int = 4000):
+    def _all_controls(self, budget: int | None = None):
         """Depth-first walk of the attached window, bounded, never raising.
 
         Used to look for affordances that are not exposed by automation id. The
@@ -1206,9 +1224,12 @@ class UiaBackend:
         affordance found' is a legitimate answer with a keyboard fallback.
         """
 
+        # Resolve the default at call time so the class constant stays the single
+        # source of truth for both the walk and its tests.
+        limit = self.CONTROL_WALK_BUDGET if budget is None else budget
         found = []
         stack = [(self._window, 0)]
-        while stack and len(found) < budget:
+        while stack and len(found) < limit:
             control, depth = stack.pop()
             try:
                 children = list(control.GetChildren())
@@ -1216,7 +1237,7 @@ class UiaBackend:
                 continue
             for child in children:
                 found.append(child)
-                if depth < 18:
+                if depth < self.CONTROL_WALK_DEPTH - 1:
                     stack.append((child, depth + 1))
         return found
 
@@ -1252,31 +1273,50 @@ class UiaBackend:
         factory = getattr(namespace, "ButtonControl", None)
         if factory is None:
             return None
-        for label in sorted(self.SEND_LABELS):
+        for label in self.SEND_LABELS:
             try:
-                control = factory(FirstChild=True, Name=label, searchDepth=24, Exists=False)
+                # No Exists=False: the factories take no timeout keyword, so an
+                # unknown name is collected into searchProperties and the returned
+                # control stays LAZY - the first property read then re-runs the
+                # search with the library default of ten seconds. No FirstChild
+                # either: that prunes the search to the first child of every level,
+                # and the real 发送 button sits on a later branch of the input
+                # toolbar (measured at depth 20), so the fast path could never see it.
+                control = factory(Name=label, searchDepth=self.CONTROL_WALK_DEPTH)
+                # Exists(seconds, interval) is what bounds the wait; it raises on a
+                # miss, which the except below reads as simply not-this-label.
+                if not control.Exists(self.SEND_PROBE_TIMEOUT_S, 0.05):
+                    continue
             except Exception:
-                return None
-            if control is not None and self._looks_like_send(control):
+                # Absent label, or a build whose factory does not accept these
+                # arguments. Either way the bounded walk is the fallback.
+                continue
+            if self._looks_like_send(control):
                 return control
         return None
 
     def _send_affordance(self):
-        """Return a control that looks like WeChat's own send button, or None."""
+        """Return a control that looks like WeChat's own send button, or None.
 
-        hinted = self._send_by_name_hint()
-        if hinted is not None:
-            return hinted
+        Ordered by measured cost, not by which lookup sounds cheaper. On the live
+        tree one bounded walk visits all 170 nodes in 141ms and finds the button;
+        probing the four labels by name costs 1515ms for the same result, because
+        uiautomation re-derives the tree from the root for every Name filter. The
+        walk therefore runs first and the labelled probe is only the fallback for
+        the case where the walk returns nothing (a window that detached mid-poll,
+        or a tree deeper than the budget). The predicate lives in
+        _looks_like_send so both paths judge a candidate identically.
+        """
+
         try:
             pool = self._all_controls()
         except Exception:
-            return None
-        # Fallback walk for builds that expose no targeted lookup. The predicate
-        # lives in _looks_like_send so the fast path and this one cannot drift.
+            pool = []
         for control in pool:
             if self._looks_like_send(control):
                 return control
-        return None
+        # Nothing found in the walk: give the named probe its turn.
+        return self._send_by_name_hint()
 
     def send_by_invoke(self) -> bool:
         """Commit the draft through the app's send control. Needs no keyboard.

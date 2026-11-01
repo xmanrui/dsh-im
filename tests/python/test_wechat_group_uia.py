@@ -1386,6 +1386,290 @@ class PressEnterFocusGuardTests(unittest.TestCase):
         self.assertEqual(target.typed, ["{Enter}"])
 
 
+class SendControlDepthTests(unittest.TestCase):
+    """The send button sits deeper than the walk reached.
+
+    Measured on the live machine with the panel open and the tree healthy:
+    mmui::XOutlineButton named 发送, InvokePattern supported, at depth 20 below
+    mmui::MainWindow. The probe reported send_candidates: 0, which read like
+    'this build exposes no send control' and would have pushed background sending
+    onto the keyboard route - the one a hidden window can never get. Both search
+    paths were simply too shallow: the walk stopped at 18 levels and the targeted
+    lookup pruned to first children only.
+    """
+
+    class Invoke:
+        def __init__(self):
+            self.calls = 0
+
+        def Invoke(self, waitTime=0):
+            self.calls += 1
+            return True
+
+    def deep_chain(self, depth, leaf):
+        """Wrap leaf in `depth` single-child levels, outermost first."""
+
+        node = leaf
+        for _ in range(depth):
+            child = node
+
+            class Wrapper:
+                def __init__(self, inner):
+                    self.inner = inner
+
+                def GetChildren(self):
+                    return [self.inner]
+
+            node = Wrapper(child)
+        return node
+
+    def leaf(self):
+        invoke = self.Invoke()
+        button = mock.MagicMock()
+        button.IsOffscreen = False
+        button.ControlTypeName = "ButtonControl"
+        button.Name = "\u53d1\u9001"
+        button.AutomationId = ""
+        button.ClassName = "mmui::XOutlineButton"
+        button.GetInvokePattern = lambda: invoke
+        return button, invoke
+
+    def backend(self, root):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._auto = None
+        backend._window = root
+        return backend
+
+    def test_send_button_at_measured_depth_is_found(self):
+        # Depth 20 is the real number, not a round one chosen to pass.
+        button, invoke = self.leaf()
+        backend = self.backend(self.deep_chain(20, button))
+        self.assertTrue(backend.send_by_invoke())
+        self.assertEqual(invoke.calls, 1)
+
+    def test_targeted_lookup_does_not_prune_to_first_children(self):
+        # FirstChild=True only descends the first child of each level, so a send
+        # button that is a later sibling is invisible to it. Prove the fallback
+        # covers that shape: two branches, the button on the second one.
+        button, invoke = self.leaf()
+
+        class Branch:
+            def __init__(self, children):
+                self._children = children
+
+            def GetChildren(self):
+                return self._children
+
+        decoy = mock.MagicMock()
+        decoy.IsOffscreen = True
+        decoy.ControlTypeName = "ButtonControl"
+        decoy.Name = ""
+        decoy.AutomationId = ""
+        decoy.ClassName = "mmui::XImage"
+        root = Branch([Branch([decoy]), self.deep_chain(19, button)])
+        backend = self.backend(root)
+        self.assertTrue(backend.send_by_invoke())
+        self.assertEqual(invoke.calls, 1)
+
+    def test_walk_budget_covers_a_real_panel(self):
+        # The live tree is ~160 nodes at the depth we care about, but a panel with
+        # a long message list is far larger; a budget that stops before the input
+        # toolbar silently means 'no send control'.
+        self.assertGreaterEqual(uia.UiaBackend.CONTROL_WALK_BUDGET, 4000)
+        self.assertGreaterEqual(uia.UiaBackend.CONTROL_WALK_DEPTH, 26)
+
+
+class SendSearchOrderTests(unittest.TestCase):
+    """The bounded walk is the fast path; the targeted lookup is not.
+
+    The docstring claimed the targeted lookup was cheaper than walking the tree.
+    Measured on the live tree after the timeout fix: the walk visits all 170
+    nodes in 141ms and returns the 发送 button, while the name-by-name lookup
+    takes 1515ms for the same answer. uiautomation re-derives the tree from the
+    root for every Name filter, so four labelled probes cost more than one scan.
+    Ordering the cheap thing first is the whole point.
+    """
+
+    class Auto:
+        def __init__(self):
+            self.factory_calls = 0
+
+        def ButtonControl(self, **kwargs):
+            self.factory_calls += 1
+
+            class Hit:
+                IsOffscreen = False
+                ControlTypeName = "ButtonControl"
+                ClassName = "mmui::XOutlineButton"
+                AutomationId = ""
+                Name = "\u53d1\u9001"
+
+                def Exists(self, seconds, interval):
+                    return True
+
+            return Hit()
+
+    def button(self, name="\u53d1\u9001"):
+        control = mock.MagicMock()
+        control.IsOffscreen = False
+        control.ControlTypeName = "ButtonControl"
+        control.Name = name
+        control.AutomationId = ""
+        control.ClassName = "mmui::XOutlineButton"
+        control.GetInvokePattern = lambda: mock.MagicMock()
+        return control
+
+    def backend(self, pool):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._window = mock.MagicMock()
+        backend._all_controls = lambda: pool
+        backend._auto = self.Auto()
+        return backend
+
+    def test_walk_result_is_returned_without_any_labelled_probe(self):
+        # POSITIVE CONTROL: after any reorder this is the first assertion to go
+        # red, because it pins the order, not merely the outcome.
+        target = self.button()
+        backend = self.backend([target])
+        self.assertIs(backend._send_affordance(), target)
+        self.assertEqual(backend._auto.factory_calls, 0)
+
+    def test_labelled_probe_is_still_the_fallback_for_an_empty_pool(self):
+        # A window that is not attached yields an empty walk; the name lookup is
+        # the only remaining chance, so it must not be deleted, only demoted.
+        backend = self.backend([])
+        self.assertIsNotNone(backend._send_affordance())
+        self.assertGreater(backend._auto.factory_calls, 0)
+
+    def test_an_uninvokeable_named_label_does_not_end_the_search(self):
+        # 发送 also exists as a plain Text node (measured: mmui::XTextView named
+        # 发送 with no InvokePattern). Returning that would report a send that
+        # never happened, so the search must continue to the real button.
+        label_only = mock.MagicMock()
+        label_only.IsOffscreen = False
+        label_only.ControlTypeName = "TextControl"
+        label_only.Name = "\u53d1\u9001"
+        label_only.AutomationId = ""
+        label_only.ClassName = "mmui::XTextView"
+        real = self.button()
+        backend = self.backend([label_only, real])
+        self.assertIs(backend._send_affordance(), real)
+
+
+class SendProbeBudgetTests(unittest.TestCase):
+    """The targeted send lookup must not spend ten seconds per absent label.
+
+    Measured on the live tree: _send_by_name_hint took 25.9s and
+    _send_affordance 34.5s, while walking the whole tree costs 109ms. Cause,
+    confirmed from the installed signature (uiautomation 2.0.29 has no timeout
+    parameter on the control factories): unknown keywords such as Exists=False
+    and FirstChild=True are collected into searchProperties, so the factory
+    returns a LAZY control and the first property read re-runs the search with
+    the library default TIME_OUT_SECOND=10. Three English labels that WeChat
+    never uses therefore cost 30 seconds before the Chinese label is tried at
+    all - and sorted() put that label last.
+    """
+
+    class Lazy:
+        """Stand-in for a lazy UIA control: reading a property re-searches."""
+
+        def __init__(self, auto, name, exists):
+            self._auto = auto
+            self.Name = name
+            self._exists = exists
+            if exists:
+                # A control that really is there answers property reads instantly,
+                # so _looks_like_send can confirm it.
+                self.ControlTypeName = "ButtonControl"
+                self.ClassName = "mmui::XOutlineButton"
+                self.AutomationId = ""
+                self.IsOffscreen = False
+
+        def Exists(self, seconds, interval):
+            self._auto.timeout_calls.append(seconds)
+            return self._exists
+
+        def GetInvokePattern(self):
+            return None
+
+        def __getattr__(self, item):
+            if item.startswith("_") or item in ("Name", "Exists"):
+                raise AttributeError(item)
+            # On a real lazy control this is the call that re-searches for ten
+            # seconds. Record it instead of raising: the production predicate wraps
+            # its reads in try/except Exception, and AssertionError is an Exception,
+            # so raising here would be swallowed and the test would pass for the
+            # wrong reason. The assertions below check the ledger instead.
+            self._auto.property_reads.append((self.Name, item))
+            raise AttributeError(item)
+
+    class Auto:
+        def __init__(self, hit_name=None):
+            self.queries = []
+            self.timeout_calls = []
+            self.property_reads = []
+            self.hit_name = hit_name
+
+        def ButtonControl(self, **kwargs):
+            name = kwargs.get("Name", "")
+            self.queries.append(name)
+            # Remember the whole keyword set: the bug is a search property that
+            # restricts the walk (FirstChild) or a missing explicit timeout.
+            self.kwargs = getattr(self, "kwargs", [])
+            self.kwargs.append(dict(kwargs))
+            return SendProbeBudgetTests.Lazy(
+                self, name, exists=(name == self.hit_name))
+
+    def backend(self, hit_name=None):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._window = None
+        backend._auto = self.Auto(hit_name)
+        return backend
+        self.assertEqual(backend._auto.property_reads, [])
+
+    def test_probe_uses_an_explicit_small_timeout(self):
+        # Every probe must bound its own wait; anything falling through to the
+        # library default of ten seconds is the bug being fixed.
+        backend = self.backend(hit_name="\u53d1\u9001")
+        self.assertIsNotNone(backend._send_by_name_hint())
+        self.assertTrue(backend._auto.timeout_calls, "no explicit Exists timeout")
+        self.assertLessEqual(max(backend._auto.timeout_calls), 1.0,
+                             "probe fell back to the library default timeout")
+
+    def test_a_label_that_does_not_exist_is_never_read(self):
+        # The re-search happens on the first property read, so a label that is not
+        # present must be dropped straight after Exists returns False.
+        backend = self.backend(hit_name=None)
+        self.assertIsNone(backend._send_by_name_hint())
+        # Four labels, each probed once, and none of them read further: 0.6s x 4
+        # instead of 10s x 4. Reaching this assertion at all proves no Lazy
+        # property was read (the double raises on any read of an unprobed control).
+        self.assertEqual(len(backend._auto.queries), len(uia.UiaBackend.SEND_LABELS))
+        self.assertEqual(len(backend._auto.timeout_calls), len(uia.UiaBackend.SEND_LABELS))
+        # Nothing was probed past Exists(): no ten-second re-search per label.
+
+    def test_the_label_wechat_actually_uses_is_queried_first(self):
+        # Order is the difference between 0.6s and 30s on this build.
+        backend = self.backend(hit_name="\u53d1\u9001")
+        backend._send_by_name_hint()
+        self.assertEqual(backend._auto.queries[0], "\u53d1\u9001")
+        self.assertEqual(len(backend._auto.queries), 1)
+
+    def test_no_first_child_pruning(self):
+        # FirstChild=True restricts the search to the first child of each level, so
+        # a send button on any other branch is invisible to the fast path.
+        backend = self.backend(hit_name="\u53d1\u9001")
+        backend._send_by_name_hint()
+        for kwargs in backend._auto.kwargs:
+            self.assertNotIn("FirstChild", kwargs, str(kwargs))
+            self.assertNotIn("Exists", kwargs,
+                             "Exists=False returns a lazy control that re-searches")
+
+
+
 class ProcessScopedFocusTests(unittest.TestCase):
     """Containment, not identity, is what makes a background Enter safe.
 
