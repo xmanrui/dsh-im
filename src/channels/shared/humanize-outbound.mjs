@@ -82,6 +82,28 @@ const KEEP_PATTERNS = Object.freeze([
   /^(?:哈|呵|嘿|哎|唉|哦|噢|呃|嗯)/u,
 ]);
 
+/**
+ * The largest index <= `limit` that does not split a surrogate pair.
+ *
+ * `String.prototype.slice` counts UTF-16 units, so a limit that lands on the
+ * high half of an emoji tears it in two. Backing off by one keeps every code
+ * point whole, which is what the receiving chat client actually renders.
+ *
+ * @param text - the string being cut.
+ * @param limit - the desired maximum length in UTF-16 units.
+ * @returns an index safe to slice at, never below 1 for non-empty text.
+ */
+function codePointSafeCut(text, limit) {
+  if (limit >= text.length) return text.length;
+  if (limit <= 0) return 0;
+  // A high surrogate as the LAST kept unit means the pair would be broken.
+  const last = text.charCodeAt(limit - 1);
+  const next = text.charCodeAt(limit);
+  const lastIsHigh = last >= 0xd800 && last <= 0xdbff;
+  const nextIsLow = next >= 0xdc00 && next <= 0xdfff;
+  return lastIsHigh && nextIsLow ? limit - 1 : limit;
+}
+
 /** Structures that must never be chopped into chat-sized pieces. */
 function looksStructured(text) {
   return /```/u.test(text)
@@ -156,6 +178,19 @@ export function splitReply(text, { maxSegments = MAX_SEGMENTS, splitBelowChars =
         chunk = sentence;
       } else {
         chunk += sentence;
+      }
+      // A single sentence can itself exceed the ceiling -- a pasted log line, or
+      // text with no sentence-ending punctuation at all. Cutting it here is the
+      // only way the ceiling means anything; the alternative is one bubble far
+      // past what the platform will accept, which fails at send time instead.
+      //
+      // The cut is taken on a code-point boundary: a naive slice at a raw index
+      // can land between the two halves of a surrogate pair, and the resulting
+      // lone surrogates render as replacement characters on the other side.
+      while (chunk.length > MAX_SEGMENT_CHARS) {
+        const cut = codePointSafeCut(chunk, MAX_SEGMENT_CHARS);
+        units.push(chunk.slice(0, cut));
+        chunk = chunk.slice(cut);
       }
     }
     if (chunk.trim()) units.push(chunk.trim());
