@@ -392,26 +392,32 @@ export class WechatGroupRuntime {
   }
 
   #validEvent(event) {
-    if (!event || typeof event !== 'object' || Array.isArray(event)) return null;
-    if (event.source !== GROUP_EVENT_SOURCE || event.message_type !== 1) return null;
-    if (!nonEmptyString(event.message_id) || event.conversation_type !== 'group') return null;
+    // Every refusal names the check it failed. The reason is written to the log by
+    // the caller, so a future rejection is diagnosable from the log alone instead of
+    // requiring the validator to be re-implemented by hand - which is exactly what
+    // seven unexplained rejections cost during this session. Reasons never include
+    // message text: a code is enough to find the branch.
+    const deny = (reason) => ({ group: null, reason });
+    if (!event || typeof event !== 'object' || Array.isArray(event)) return deny('not-an-object');
+    if (event.source !== GROUP_EVENT_SOURCE || event.message_type !== 1) return deny('wrong-source');
+    if (!nonEmptyString(event.message_id) || event.conversation_type !== 'group') return deny('bad-id-or-type');
     const group = this.#groups.get(event.conversation_id);
-    if (!group || event.conversation_title !== group.title) return null;
-    if (!nonEmptyString(event.from_user_id) || !nonEmptyString(event.sender_name)) return null;
+    if (!group || event.conversation_title !== group.title) return deny('unknown-group-or-title');
+    if (!nonEmptyString(event.from_user_id) || !nonEmptyString(event.sender_name)) return deny('missing-identity');
     // WeChat 4.1 exposes no sender, so the adapter reports one fixed
     // unverified identity. Accept it only for a group whose owner explicitly
     // opted in, and never let it borrow a real member id.
     if (event.from_user_id === UNVERIFIED_SENDER_ID) {
-      if (event.sender_name !== UNVERIFIED_SENDER_ID) return null;
-      if (group.allowUnverifiedTrigger !== true) return null;
-    } else if (event.from_user_id !== 'uia-name:' + event.sender_name) return null;
-    if (event.reply_target !== group.id || event.addressed !== true) return null;
-    if (!nonEmptyString(event.text) || !nonEmptyString(event.raw_text)) return null;
-    if (!Number.isSafeInteger(event.sent_at) || event.sent_at < 0 || typeof event.is_self !== 'boolean') return null;
-    if (event.is_self && !group.allowSelf) return null;
-    if (!Array.isArray(event.item_list) || event.item_list.length !== 1) return null;
+      if (event.sender_name !== UNVERIFIED_SENDER_ID) return deny('identity-fields-disagree');
+      if (group.allowUnverifiedTrigger !== true) return deny('no-unverified-opt-in');
+    } else if (event.from_user_id !== 'uia-name:' + event.sender_name) return deny('identity-shape');
+    if (event.reply_target !== group.id || event.addressed !== true) return deny('not-addressed');
+    if (!nonEmptyString(event.text) || !nonEmptyString(event.raw_text)) return deny('empty-text');
+    if (!Number.isSafeInteger(event.sent_at) || event.sent_at < 0 || typeof event.is_self !== 'boolean') return deny('bad-metadata');
+    if (event.is_self && !group.allowSelf) return deny('self-not-allowed');
+    if (!Array.isArray(event.item_list) || event.item_list.length !== 1) return deny('item-list-shape');
     const item = event.item_list[0];
-    if (item?.type !== 1 || item?.text_item?.text !== event.text) return null;
+    if (item?.type !== 1 || item?.text_item?.text !== event.text) return deny('item-list-mismatch');
     // addressed=true is meaningful only when the raw body still proves the
     // configured trigger. This blocks forged or stale adapter events.
     const mode = group.mentionMode || 'command';
@@ -423,12 +429,12 @@ export class WechatGroupRuntime {
       const scan = stripMentionTokens(body, group.triggerNames, group.allowUnverifiedTrigger);
       mentioned = scan.matched;
       body = scan.remainder;
-      if (!mentioned && mode === 'mention') return null;
+      if (!mentioned && mode === 'mention') return deny('mention-required');
     } else if (MENTION_TOKEN_RE.test(event.raw_text.trimStart())) {
       // Command mode ignores mentions entirely, and a mention-shaped body never
       // satisfies the prefix proof below. Reject it here so the reason stays
       // honest rather than falling through to a prefix mismatch.
-      return null;
+      return deny('mention-in-command-mode');
     }
     // Compute the command remainder once, and reuse it: the earlier version
     // re-located the prefix with indexOf when building the body, so two rules
@@ -445,7 +451,7 @@ export class WechatGroupRuntime {
     let triggeredText;
     if (mode === 'mention') {
       // Only a mention counts, and the prefix must not have been consumed.
-      if (!mentioned) return null;
+      if (!mentioned) return deny('mention-mode-needs-mention');
       triggeredText = body.trim();
     } else if (commandBody !== null) {
       triggeredText = commandBody;
@@ -453,12 +459,13 @@ export class WechatGroupRuntime {
       // Mention carried the row with no prefix present.
       triggeredText = body.trim();
     } else {
-      return null;
+      return deny('no-trigger');
     }
     // The stripped body the adapter reports must be exactly what the raw text
     // proves, so an event cannot claim a body its own raw_text does not support.
-    if (!triggeredText || triggeredText !== event.text) return null;
-    return group;
+    if (!triggeredText) return deny('empty-body');
+    if (triggeredText !== event.text) return deny('text-does-not-match-raw');
+    return { group, reason: null };
   }
 
   #onMessage(event) {
@@ -474,10 +481,15 @@ export class WechatGroupRuntime {
       this.#logger.warn?.('[dsh-weixin] dropped group event: no account bridge attached');
       return;
     }
-    if (!this.#validEvent(event)) {
+    const verdict = this.#validEvent(event);
+    if (!verdict || !verdict.group) {
       this.#messagesRejected += 1;
       const messageId = nonEmptyString(event?.message_id) ? event.message_id.slice(0, 16) : 'unknown';
-      this.#logger.warn?.('[dsh-weixin] rejected group event ' + messageId);
+      // The reason is the whole point: without it a rejection is indistinguishable
+      // from a silent drop, and seven of those during this session could only be
+      // explained by re-implementing this validator outside the process.
+      this.#logger.warn?.('[dsh-weixin] rejected group event ' + messageId +
+        ' (' + (verdict?.reason ?? 'validator-returned-nothing') + ')');
       return;
     }
     this.#messagesAccepted += 1;

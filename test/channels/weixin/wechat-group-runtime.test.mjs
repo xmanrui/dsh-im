@@ -323,6 +323,23 @@ test('only complete addressed v1 events for the exact configured group reach the
   assert.equal(logs.join('\n').includes('complete-secret-body'), false);
 });
 
+// The shape the operator actually runs: a readable name plus the unverified opt-in.
+// Needed by the glued-mention tests, because a glued token can only be honoured by
+// matching a configured name - unlike the masked "@[___]" shape, which the opt-in
+// alone can honour.
+const GLUED_CONFIG = {
+  pollIntervalMs: 750,
+  groups: [{
+    id: 'uia_group_one',
+    title: '精确群名',
+    commandPrefix: '/dsh',
+    mentionMode: 'mention-or-command',
+    triggerNames: ['大肥鱼'],
+    allowSelf: false,
+    allowUnverifiedTrigger: true,
+  }],
+};
+
 const MENTION_CONFIG = {
   pollIntervalMs: 750,
   groups: [{
@@ -674,4 +691,71 @@ test('events emitted before the first ready baseline are rejected', async (t) =>
   groupProcess.emit('message', groupEvent({ message_id: 'initial-new' }));
   await runtime.waitForIdle();
   assert.deepEqual(accepted.map((event) => event.message_id), ['initial-new']);
+});
+
+test('a hand-typed @name with no separator still addresses the bot', async (t) => {
+  // Measured 2026-11-02: WeChat only inserts U+2005 when the mention comes from its
+  // own @ picker, so a typed "@大肥鱼测试回复" arrives with no separator at all.
+  // READABLE_MENTION_RE requires one, so the row parsed as unaddressed and the
+  // operator's message was refused - which is why switching models changed nothing.
+  const groupProcess = new FakeGroupProcess();
+  const { runtime, accepted, bridge } = makeRuntime(t, {
+    groupProcess, config: GLUED_CONFIG,
+  });
+  await runtime.start({ bridge });
+  groupProcess.emit('message', groupEvent({
+    conversation_id: 'uia_group_one',
+    conversation_title: '精确群名',
+    reply_target: 'uia_group_one',
+    from_user_id: 'uia-unverified:row',
+    sender_name: 'uia-unverified:row',
+    message_id: 'glued-mention',
+    addressed: true,
+    text: '测试回复',
+    raw_text: '@大肥鱼测试回复',
+    item_list: [{ type: 1, text_item: { text: '测试回复' } }],
+  }));
+  await runtime.waitForIdle();
+  assert.deepEqual(accepted.map((event) => event.message_id), ['glued-mention']);
+});
+
+test('a glued mention of somebody else is still refused', async (t) => {
+  // Negative control: the glued path must not become a way to be addressed
+  // accidentally.
+  const groupProcess = new FakeGroupProcess();
+  const { runtime, accepted, bridge } = makeRuntime(t, {
+    groupProcess, config: GLUED_CONFIG,
+  });
+  await runtime.start({ bridge });
+  groupProcess.emit('message', groupEvent({
+    conversation_id: 'uia_group_one',
+    conversation_title: '精确群名',
+    reply_target: 'uia_group_one',
+    from_user_id: 'uia-unverified:row',
+    sender_name: 'uia-unverified:row',
+    message_id: 'glued-foreign',
+    addressed: true,
+    text: '测试回复',
+    raw_text: '@小李测试回复',
+    item_list: [{ type: 1, text_item: { text: '测试回复' } }],
+  }));
+  await runtime.waitForIdle();
+  assert.deepEqual(accepted.map((event) => event.message_id), []);
+  assert.equal(runtime.status.messagesRejected, 1);
+});
+
+test('a rejection names the check it failed, so the log is diagnosable', async (t) => {
+  // Before this, the log said only 'rejected group event uia-msg-...' and every
+  // diagnosis required re-implementing the validator outside the process. Seven
+  // rejections went by during that session with no recorded cause.
+  const { runtime, groupProcess, logs, bridge } = makeRuntime(t);
+  await runtime.start({ bridge });
+  groupProcess.emit('message', groupEvent({ message_id: 'bad-trigger-reason', raw_text: '/dsh正文' }));
+  groupProcess.emit('message', groupEvent({ message_id: 'not-addressed-reason', addressed: false }));
+  await runtime.waitForIdle();
+  const joined = logs.join('\n');
+  assert.match(joined, /rejected group event bad-trigger-re/);
+  assert.match(joined, /no-trigger|text-does-not-match-raw|empty-body/);
+  // The reason must never carry chat content, only a code.
+  assert.equal(joined.includes('正文'), false);
 });
