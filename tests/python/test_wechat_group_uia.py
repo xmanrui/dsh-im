@@ -826,9 +826,11 @@ class PressEnterFocusGuardTests(unittest.TestCase):
         # Already focused, so no extra SetFocus (which would raise the window).
         self.assertEqual(target.focus, 0)
 
-    def test_recovers_via_one_setfocus_when_not_yet_focused(self):
-        # Focus starts elsewhere; the guard's SetFocus attempt must actually move
-        # it before any keystroke is injected.
+    def test_unknown_focus_refuses_without_touching_focus(self):
+        # UIA reports nothing focusable. Recovery used to call SetFocus here, but
+        # SetFocus ACTIVATES the window to move the caret, which is the screen
+        # takeover this objective forbids - and measured on a minimised window it
+        # returns False anyway. Default behaviour is now refusal, focus untouched.
         target = self.Input()
         auto = self.Auto(focused=None)
         target.auto = auto
@@ -836,7 +838,25 @@ class PressEnterFocusGuardTests(unittest.TestCase):
         backend._closed = False
         backend._auto = auto
         backend._control = lambda automation_id: target
-        backend.press_enter()
+        with self.assertRaises(uia.SafetyError) as ctx:
+            backend.press_enter()
+        self.assertEqual(ctx.exception.code, "focus_not_on_target")
+        self.assertEqual(target.focus, 0)
+        self.assertEqual(target.typed, [])
+
+    def test_opt_in_recovers_via_one_setfocus_when_not_yet_focused(self):
+        # Unattended-machine escape hatch: with the same switch that governs the
+        # click fallback, the bridge may take the keyboard to finish a send.
+        target = self.Input()
+        auto = self.Auto(focused=None)
+        target.auto = auto
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._auto = auto
+        backend._control = lambda automation_id: target
+        with mock.patch.object(uia.os, "environ",
+                               {"DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE": "1"}):
+            backend.press_enter()
         self.assertEqual(target.focus, 1)
         self.assertEqual(target.typed, ["{Enter}"])
 
@@ -855,6 +875,37 @@ class PressEnterFocusGuardTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "focus_not_on_target")
         self.assertEqual(target.typed, [])
 
+    def test_does_not_raise_wechat_to_grab_the_keyboard(self):
+        # The residual screen steal: focus is in another app, so SetFocus on the
+        # WeChat input would ACTIVATE WeChat to take the keyboard back. That is
+        # exactly the takeover the objective forbids, so the recovery attempt is
+        # gated like the click fallback is, and the send is refused instead.
+        target = self.Input(handle=0, automation_id="chat_input_field")
+        target.ClassName = "mmui::ChatInputField"
+        elsewhere = self.Input(handle=264128, automation_id="", process_id=9999)
+        elsewhere.ClassName = "Chrome_WidgetWin_1"
+        backend = self.build(target, focused=elsewhere)
+        with self.assertRaises(uia.SafetyError) as ctx:
+            backend.press_enter()
+        self.assertEqual(ctx.exception.code, "focus_not_on_target")
+        self.assertEqual(target.focus, 0)
+        self.assertEqual(target.typed, [])
+
+    def test_opt_in_still_allows_the_focus_recovery(self):
+        # An unattended machine may want the keystroke badly enough to accept a
+        # window coming forward; that stays available behind the same opt-in the
+        # click fallback uses, so one switch governs every screen takeover path.
+        target = self.Input(handle=111, automation_id="chat_input_field")
+        elsewhere = self.Input(handle=264128, automation_id="chat_input_field",
+                              process_id=9999)
+        backend = self.build(target, focused=elsewhere)
+        backend._control = lambda automation_id: target
+        target.auto = backend._auto
+        with mock.patch.object(uia.os, "environ",
+                               {"DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE": "1"}):
+            backend.press_enter()
+        self.assertEqual(target.focus, 1)
+        self.assertEqual(target.typed, ["{Enter}"])
     def test_real_mmui_shape_has_zero_handles_must_still_send(self):
         # Measured on the live machine: mmui child controls report
         # NativeWindowHandle == 0 (only the top-level window has a real handle),

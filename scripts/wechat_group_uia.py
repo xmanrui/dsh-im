@@ -1286,10 +1286,17 @@ class UiaBackend:
         if self._focus_is_contained(control):
             control.SendKeys("{Enter}", waitTime=0)
             return
-        try:
-            control.SetFocus()
-        except Exception:
-            pass
+        # The recovery below is itself a screen takeover: SetFocus on a control
+        # in a background window ACTIVATES that window to move the caret, raising
+        # WeChat over whatever the operator is using. Measured, it also fails
+        # silently while minimised, so it buys nothing in the state that matters
+        # and steals the screen in every other state. Gated by the same opt-in as
+        # the click fallback, so one switch governs every takeover path.
+        if self._allow_window_restore():
+            try:
+                control.SetFocus()
+            except Exception:
+                pass
         if not self._focus_is_contained(control) and not self._focus_is_target(control):
             raise SafetyError(
                 "keyboard focus is not provably on the WeChat input",
