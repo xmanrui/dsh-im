@@ -548,6 +548,112 @@ class WindowRestoreGateTests(unittest.TestCase):
         with mock.patch.object(uia.os, "environ", {"DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE": "1"}):
             self.assertTrue(uia.UiaBackend._allow_window_restore(object()))
 
+    def test_default_restore_touches_no_window_api_with_a_real_handle(self):
+        """The false-negative hole this closes: a handle-less fake returned early.
+
+        On a real machine NativeWindowHandle always exists, and the code once
+        carried a duplicated tail block that restored and foregrounded the
+        window *after* the opt-in branch, i.e. on every 750ms poll. The window
+        must stay exactly where it is unless the operator opted in.
+        """
+
+        class HandledWindow(FakeWindow):
+            NativeWindowHandle = 68314
+
+        fake_user32 = mock.MagicMock()
+        with mock.patch.object(uia.os, "environ", {}):
+            with mock.patch.object(uia, "_user32", lambda: fake_user32):
+                backend = uia.UiaBackend.__new__(uia.UiaBackend)
+                backend._window = HandledWindow(exists=True)
+                backend.ensure_window_restored()
+        self.assertEqual(fake_user32.mock_calls, [])
+
+    def test_opt_in_restore_uses_exactly_show_and_foreground(self):
+        """The opt-in path is allowed, but only ever the two named calls."""
+
+        class HandledWindow(FakeWindow):
+            NativeWindowHandle = 68314
+
+        fake_user32 = mock.MagicMock()
+        with mock.patch.object(uia.os, "environ", {"DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE": "1"}):
+            with mock.patch.object(uia, "_user32", lambda: fake_user32):
+                backend = uia.UiaBackend.__new__(uia.UiaBackend)
+                backend._window = HandledWindow(exists=True)
+                backend.ensure_window_restored()
+        names = [call[0] for call in fake_user32.mock_calls]
+        self.assertEqual(names, ["ShowWindow", "SetForegroundWindow"])
+
+
+class SelectChatScreenGateTests(unittest.TestCase):
+    """The focus+click fallback must never run unless the operator opted in.
+
+    SetFocus raises the whole WeChat window and Click() posts physical mouse
+    coordinates, so on a minimised or hidden panel it steals the screen and can
+    land on a stale rectangle over some other app. Only InvokePattern is safe.
+    """
+
+    class Item:
+        """Session row that records every screen-affecting call made on it."""
+
+        def __init__(self, title, offscreen=False):
+            # Attribute names are the UIA property names _safe_property reads.
+            self.AutomationId = "session_item_" + title
+            self.Name = title
+            self.IsOffscreen = offscreen
+            self.focus = 0
+            self.clicks = 0
+
+        def GetInvokePattern(self):
+            return None
+
+        def SetFocus(self):
+            self.focus += 1
+
+        def Click(self):
+            self.clicks += 1
+
+    class List:
+        def __init__(self, items):
+            self._items = items
+
+        def GetChildren(self):
+            return self._items
+
+    def build(self, item, allow_restore, title="Alpha"):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._auto = None
+        backend._window = None
+        backend._control = lambda automation_id: self.List([item])
+        backend._allow_window_restore = lambda: allow_restore
+        # The title read-back is what proves a switch happened; keep it fixed.
+        backend.current_chat_title = lambda: None
+        return backend
+
+    def test_default_path_never_focuses_or_clicks(self):
+        item = self.Item("Alpha")
+        backend = self.build(item, allow_restore=False)
+        with self.assertRaises(uia.SafetyError) as ctx:
+            backend.select_chat("Alpha")
+        self.assertEqual(ctx.exception.code, "target_title_mismatch")
+        self.assertEqual((item.focus, item.clicks), (0, 0))
+
+    def test_opted_in_path_may_click(self):
+        item = self.Item("Alpha")
+        backend = self.build(item, allow_restore=True)
+        with self.assertRaises(uia.SafetyError):
+            backend.select_chat("Alpha")
+        self.assertEqual((item.focus, item.clicks), (1, 1))
+
+    def test_offscreen_item_is_never_clicked_even_when_opted_in(self):
+        # Click() would fire at a cached rectangle while the panel is hidden:
+        # a real mouse click somewhere else on the operator's desktop.
+        item = self.Item("Alpha", offscreen=True)
+        backend = self.build(item, allow_restore=True)
+        with self.assertRaises(uia.SafetyError):
+            backend.select_chat("Alpha")
+        self.assertEqual((item.focus, item.clicks), (0, 0))
+
 
 class NoOpenChatTests(unittest.TestCase):
     """A freshly logged-in WeChat has no chat panel until one is opened."""

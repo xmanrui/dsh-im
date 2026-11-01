@@ -893,7 +893,14 @@ class UiaBackend:
         # SelectionItemPattern.Select() stays unused: it lies the same way.
         # A refused activation falls through; an activation that reports success
         # is only accepted after the title check proves the chat really changed.
-        for attempt in (self._select_by_invoke, self._select_by_click):
+        # The click fallback is gated: SetFocus raises the whole WeChat window and
+        # Click() posts real mouse coordinates, so with a minimised or hidden panel
+        # it steals the screen and may land on whatever pixel is under the cached
+        # rectangle. It only runs when the operator explicitly accepted screen use.
+        attempts = [self._select_by_invoke]
+        if self._allow_window_restore():
+            attempts.append(self._select_by_click)
+        for attempt in attempts:
             if attempt(item, title):
                 return
         raise SafetyError("target chat could not be activated", "target_title_mismatch")
@@ -916,8 +923,17 @@ class UiaBackend:
         return self._title_matches(title)
 
     def _select_by_click(self, item: Any, title: str) -> bool:
-        """Activate with focus+click; the only path proven on a visible window."""
+        """Activate with focus+click; proven, but it takes the screen. Opt-in only.
 
+        Refused unless the operator set DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE, and
+        refused when the item reports itself offscreen, because Click() would then
+        fire at a stale rectangle somewhere else on the desktop.
+        """
+
+        if not self._allow_window_restore():
+            return False
+        if _safe_property(item, "IsOffscreen"):
+            return False
         try:
             item.SetFocus()
             time.sleep(0.25)
@@ -936,32 +952,25 @@ class UiaBackend:
             return False
 
     def ensure_window_restored(self) -> None:
-        """Optionally bring the main window on screen; never by default.
+        """Restore and focus the main window only when the operator opted in.
 
-        The bridge does not need this: session switching goes through the
-        protocol-level InvokePattern, which works while the window is minimised.
-        Restoring is kept only for operators who want to watch the bridge work,
-        and it is opt-in because it takes the screen away from whoever is using
-        the machine.
+        The bridge never needs this: session switching goes through the
+        protocol-level InvokePattern, which works while the window is minimised
+        or hidden, so the default is to touch no window API at all.
+
+        This method used to carry a duplicated tail copy of its own body AFTER
+        the opt-in `if`, so the unconditional half ran on every 750ms poll: the
+        WeChat window popped back on screen and stole keyboard focus from
+        whatever the operator was doing, and with the opt-in on it did all of it
+        twice. The guard now wraps the whole body and the calls appear once.
         """
 
-        # Nothing to do: a minimised window is usable through InvokePattern, so
-        # the bridge no longer needs the window on screen at all.
-        if self._allow_window_restore():
-            handle = _safe_property(self._window, "NativeWindowHandle")
-            if not handle or sys.platform != "win32":
-                return
-            from ctypes import wintypes
-
-            user32 = _user32()
-            user32.ShowWindow(wintypes.HWND(handle), 9)  # SW_RESTORE
-            time.sleep(0.3)
-            user32.SetForegroundWindow(wintypes.HWND(handle))
-            time.sleep(0.4)
-        handle = _safe_property(self._window, "NativeWindowHandle")
-        if not handle:
+        # Opt-in only: without it the bridge must not move, show or focus a
+        # window, so any Win32 call here is a screen-steal regression.
+        if not self._allow_window_restore():
             return
-        if sys.platform != "win32":
+        handle = _safe_property(self._window, "NativeWindowHandle")
+        if not handle or sys.platform != "win32":
             return
         from ctypes import wintypes
 
