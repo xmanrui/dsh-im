@@ -62,6 +62,9 @@ test('valid config preserves IDs and defaults allowSelf to false', async (t) => 
       // Same for triggerNames: an absent list normalizes to empty so the mention
       // matcher has one shape to read instead of distinguishing two cases.
       triggerNames: [],
+      // Observation grants memory and no reply; absent means off, so a fresh file
+      // never starts listening to the group's ambient chatter.
+      observeAmbient: false,
     }],
   });
 });
@@ -245,4 +248,22 @@ test('unknown top-level and group keys fail closed instead of hiding typos', asy
     await writeJson(path, value);
     await assert.rejects(() => loadWechatGroupConfig(path), undefined, 'case ' + index);
   }
+});
+
+test('observeAmbient is an explicit, typed, per-group opt-in', async (t) => {
+  // Observation is the one switch that makes the bot remember chatter it was
+  // not addressed in. It must be as hard to turn on by accident as every other
+  // permission: an explicit boolean, defaulting off.
+  const { path } = await fixture(t);
+  const value = validConfig();
+  value.groups[0].observeAmbient = true;
+  await writeJson(path, value);
+  const loaded = await loadWechatGroupConfig(path);
+  assert.equal(loaded.groups[0].observeAmbient, true);
+
+  // A truthy string is not consent.
+  const bogus = validConfig();
+  bogus.groups[0].observeAmbient = 'false';
+  await writeJson(path, bogus);
+  await assert.rejects(() => loadWechatGroupConfig(path), /observeAmbient must be boolean/u);
 });

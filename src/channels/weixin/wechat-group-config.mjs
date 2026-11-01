@@ -12,7 +12,7 @@ const ROOT_KEYS = new Set([
 // group; the runtime still refuses it for every other group and never derives
 // a member identity from it.
 const GROUP_KEYS = new Set(['id', 'title', 'commandPrefix', 'mentionMode', 'allowSelf',
-  'allowUnverifiedTrigger', 'triggerNames']);
+  'allowUnverifiedTrigger', 'triggerNames', 'observeAmbient']);
 // Mirrors MENTION_MODES in scripts/wechat_group_uia.py. command keeps today's
 // behaviour; the other two let a leading @[...] token address the bot.
 const MENTION_MODES = new Set(['command', 'mention', 'mention-or-command']);
@@ -98,6 +98,15 @@ function normalizeGroup(value, index) {
   if (group.allowUnverifiedTrigger !== undefined && typeof group.allowUnverifiedTrigger !== 'boolean') {
     throw invalid('groups[' + index + '].allowUnverifiedTrigger must be boolean');
   }
+  // Opt-in: let unaddressed rows feed the bot's memory without ever waking it.
+  //
+  // A bot that only hears the messages addressed to it can never know what the
+  // group talks about, which is most of what "remembering a group" means. This
+  // flag is deliberately separate from every trigger switch: it grants NO right
+  // to answer, and nothing it observes may produce a reply.
+  if (group.observeAmbient !== undefined && typeof group.observeAmbient !== 'boolean') {
+    throw invalid('groups[' + index + '].observeAmbient must be boolean');
+  }
 
   return {
     id,
@@ -107,6 +116,7 @@ function normalizeGroup(value, index) {
     triggerNames,
     allowSelf: group.allowSelf ?? false,
     allowUnverifiedTrigger: group.allowUnverifiedTrigger ?? false,
+    observeAmbient: group.observeAmbient ?? false,
   };
 }
 

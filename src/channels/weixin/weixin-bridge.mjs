@@ -420,6 +420,41 @@ export class WeixinHarnessBridge {
     return structuredClone(this.#status);
   }
 
+  /**
+   * Record what the group said, without answering it.
+   *
+   * The only thing this may do is write memory. It deliberately shares no code
+   * with `accept`: no access policy (the message is not addressed to anyone), no
+   * prompt, no session binding, no send. A message the bot was not addressed in
+   * must never be able to cause a reply, and the cheapest way to guarantee that
+   * is to have no path from here to one.
+   *
+   * @param message - an adapter event flagged as observed by the runtime.
+   * @returns nothing; failures are logged and swallowed.
+   */
+  async observe(message) {
+    try {
+      // `weixinConversation` answers null for an unaddressed row on purpose --
+      // its callers need somebody to answer. Observation needs the opposite, so
+      // the chat shape is read directly from the event fields.
+      if (message?.source !== 'uia-wechat-group/v1' || message?.conversation_type !== 'group') return;
+      const chatId = nonEmptyString(message.conversation_id);
+      if (!chatId) return;
+      const senderName = nonEmptyString(message.sender_name) ?? '';
+      const text = nonEmptyString(extractWeixinText(message));
+      if (!text) return;
+      // `conversationKey` insists on an ADDRESSED row, because that is what its
+      // callers need for a session binding. Observation has no session, so the
+      // key is built the same way from the conversation itself: same prefix, same
+      // chat id, so the memory scope is exactly the one an addressed message in
+      // this chat would write to.
+      const key = 'group:' + chatId;
+      this.#rememberInbound(key, text, senderName, null);
+    } catch (error) {
+      this.#logger.warn?.('[dsh-weixin] failed to observe a group message:', error?.message ?? error);
+    }
+  }
+
   accept(message) {
     if (this.#signal?.aborted) return Promise.resolve();
     if (message?.message_type === 2) return Promise.resolve();

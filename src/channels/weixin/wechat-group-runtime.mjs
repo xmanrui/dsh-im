@@ -46,6 +46,38 @@ function matchGluedMention(text, names) {
   return null;
 }
 
+/**
+ * Decide whether an unaddressed row may be delivered as observed context.
+ *
+ * The row still has to satisfy every identity, group and shape check the
+ * addressed path enforces -- this only answers the question "may we LOOK at
+ * it". It returns a group with `observed: true` so the caller can route the
+ * message to memory and refuse to start a turn, and it never upgrades the
+ * `addressed` flag: an unread row stays unaddressed all the way down.
+ *
+ * @param event - the raw adapter event, already structurally validated.
+ * @param group - the configured group the event belongs to.
+ * @returns `{ group, reason: null }` with the observed flag, or a denial.
+ */
+/**
+ * Whether an unaddressed row may be delivered as observation.
+ *
+ * Exported so the routing rule can be tested directly instead of through a fake
+ * adapter process: the rule is the whole contract, and testing it through the
+ * socket-shaped seam proves less while doing more.
+ */
+export function decideObserved(event, group) {
+  if (group.observeAmbient !== true) return { group: null, reason: 'not-addressed' };
+  // Observation is context, not a conversation: nothing about it may look
+  // like an attempt to reach the bot.
+  if (event.is_self) return { group: null, reason: 'observed-self' };
+  if (!nonEmptyString(event.text) || !nonEmptyString(event.raw_text)) return { group: null, reason: 'observed-empty' };
+  // The body must be a plain text row. Command-shaped text is instructions to
+  // the bot, and commands are only ever honoured when addressed.
+  if (event.text.trimStart().startsWith(group.commandPrefix)) return { group: null, reason: 'observed-command' };
+  return { group: { ...group, observed: true }, reason: null };
+}
+
 function stripMentionTokens(text, triggerNames, allowMasked) {
   let remainder = text.replace(/^\s+/, '');
   let matched = false;
@@ -411,7 +443,14 @@ export class WechatGroupRuntime {
       if (event.sender_name !== UNVERIFIED_SENDER_ID) return deny('identity-fields-disagree');
       if (group.allowUnverifiedTrigger !== true) return deny('no-unverified-opt-in');
     } else if (event.from_user_id !== 'uia-name:' + event.sender_name) return deny('identity-shape');
-    if (event.reply_target !== group.id || event.addressed !== true) return deny('not-addressed');
+    if (event.reply_target !== group.id) return deny('wrong-reply-target');
+    // An unaddressed row is normally dropped here: nothing may answer it, and a
+    // forged "addressed" must not get through. When the group opted into
+    // observation, the row is still delivered -- but flagged, so the bridge can
+    // record it as something the group said and never as something to answer.
+    if (event.addressed !== true) {
+      return decideObserved(event, group);
+    }
     if (!nonEmptyString(event.text) || !nonEmptyString(event.raw_text)) return deny('empty-text');
     if (!Number.isSafeInteger(event.sent_at) || event.sent_at < 0 || typeof event.is_self !== 'boolean') return deny('bad-metadata');
     if (event.is_self && !group.allowSelf) return deny('self-not-allowed');
@@ -496,7 +535,12 @@ export class WechatGroupRuntime {
     // Track the exact promise handed to the bridge so stop can finish accepted
     // work before it terminates Python. Errors are sanitized to message IDs.
     const task = Promise.resolve()
-      .then(() => this.#bridge.accept(event))
+      // An observed row is memory material, never a question. It takes the
+      // observation path, which cannot start a turn, cannot send, and cannot
+      // borrow the addressed flag.
+      .then(() => (verdict.group.observed === true
+        ? this.#bridge.observe?.(event)
+        : this.#bridge.accept(event)))
       .catch((error) => {
         this.#lastError = errorCode(error, 'message-failed');
         this.#logger.error?.('[dsh-weixin] group event handling failed ' + String(event.message_id).slice(0, 16));
