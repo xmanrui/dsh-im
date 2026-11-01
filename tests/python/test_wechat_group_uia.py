@@ -528,6 +528,90 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(operations(self.backend, "send"), [])
 
 
+class AutoMinimizeGateTests(unittest.TestCase):
+    """The bridge can put WeChat away without touching the operator's screen.
+
+    WeChat 4.x removed close-to-tray entirely (DLL forensics: quitOnLastWindow
+    Closed + MainWindowWillClose -> quit) and X-closing the panel DESTROYS the
+    mmui tree, so a closed panel kills the UIA bridge. Minimising instead keeps
+    the tree and the InvokePattern path (proven headless). SW_SHOWMINNOACTIVE
+    (7) is the only non-activating hide: SW_MINIMIZE (6) would activate and
+    steal focus. Default off: stowing a window the operator is reading is still
+    a takeover of their screen.
+    """
+
+    class Win(FakeWindow):
+        NativeWindowHandle = 68314
+
+    def backend(self):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._window = self.Win(exists=True)
+        return backend
+
+    def test_default_is_off_and_touches_no_window_api(self):
+        fake_user32 = mock.MagicMock()
+        backend = self.backend()
+        with mock.patch.object(uia.os, "environ", {}):
+            with mock.patch.object(uia, "_user32", lambda: fake_user32):
+                backend.maybe_auto_minimize()
+        self.assertEqual(fake_user32.mock_calls, [])
+
+    def test_opt_in_minimises_without_activating(self):
+        fake_user32 = mock.MagicMock()
+        backend = self.backend()
+        env = {"DSH_WECHAT_GROUP_AUTO_MINIMIZE": "1"}
+        with mock.patch.object(uia.os, "environ", env):
+            with mock.patch.object(uia, "_user32", lambda: fake_user32):
+                with mock.patch.object(uia, "_window_is_minimised", lambda hwnd: False):
+                    backend.maybe_auto_minimize()
+        names = [call[0] for call in fake_user32.mock_calls]
+        self.assertEqual(names, ["ShowWindow"])
+        # 7 = SW_SHOWMINNOACTIVE. Anything else could activate and steal focus.
+        self.assertEqual(fake_user32.ShowWindow.call_args[0][1], 7)
+
+    def test_already_minimised_window_is_left_alone(self):
+        fake_user32 = mock.MagicMock()
+        backend = self.backend()
+        env = {"DSH_WECHAT_GROUP_AUTO_MINIMIZE": "1"}
+        with mock.patch.object(uia.os, "environ", env):
+            with mock.patch.object(uia, "_user32", lambda: fake_user32):
+                with mock.patch.object(uia, "_window_is_minimised", lambda hwnd: True):
+                    backend.maybe_auto_minimize()
+        self.assertEqual(fake_user32.mock_calls, [])
+
+    def test_protocol_start_stows_the_window_after_baseline(self):
+        # The bridge minimises (non-activating) right after it is ready, so the
+        # operator never has to open or hide the window themselves, and the mmui
+        # tree (which InvokePattern needs) survives the hide.
+        calls = []
+        class Backend:
+            def list_session_titles(self): return ["Alpha"]
+            def current_chat_title(self): return "Alpha"
+            def select_chat(self, title): pass
+            def read_input(self): return ""
+            def set_input(self, text): pass
+            def press_enter(self): pass
+            def read_messages(self): return []
+            def close(self): pass
+            def maybe_auto_minimize(self): calls.append("minimize")
+
+        adapter = uia.WechatGroupAdapter([uia.GroupConfig(id="uia_g", title="Alpha")], Backend())
+        protocol = uia.JsonlProtocol(adapter)
+        frame = protocol.start()
+        self.assertEqual(frame["type"], "ready")
+        self.assertEqual(calls, ["minimize"])
+    def test_no_handle_never_touches_window_api(self):
+        fake_user32 = mock.MagicMock()
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._window = FakeWindow(exists=True)
+        env = {"DSH_WECHAT_GROUP_AUTO_MINIMIZE": "1"}
+        with mock.patch.object(uia.os, "environ", env):
+            with mock.patch.object(uia, "_user32", lambda: fake_user32):
+                backend.maybe_auto_minimize()
+        self.assertEqual(fake_user32.mock_calls, [])
+
 class WindowRestoreGateTests(unittest.TestCase):
     """The bridge must never take the screen away unless explicitly allowed."""
 

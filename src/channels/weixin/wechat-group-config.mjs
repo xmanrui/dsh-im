@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 // must be able to enable read/send for one account from its own config file.
 const ROOT_KEYS = new Set([
   'version', 'pollIntervalMs', 'groups', 'allowUnverifiedRead', 'allowSend', 'allowWindowRestore',
+  'autoMinimize',
 ]);
 // allowUnverifiedTrigger is the only opt-in that lets an identity-less row
 // become addressed. It is accepted here so an operator can name one exact
@@ -132,6 +133,11 @@ export async function loadWechatGroupConfig(path) {
   if (root.allowWindowRestore !== undefined && typeof root.allowWindowRestore !== 'boolean') {
     throw invalid('allowWindowRestore must be boolean');
   }
+  // autoMinimize asks the bridge to stow WeChat with a NON-activating minimise
+  // after its baseline. It exists because WeChat 4.x deleted close-to-tray: X-ing
+  // the panel quits and destroys the accessibility tree, so minimise is the only
+  // state where a hidden WeChat still feeds the bridge. Default off, because even
+  // hiding a window the operator is reading is a takeover of their screen.
 
   const groups = root.groups.map(normalizeGroup);
   const ids = new Set();
@@ -143,11 +149,16 @@ export async function loadWechatGroupConfig(path) {
     titles.add(group.title);
   }
 
+  if (root.autoMinimize !== undefined && typeof root.autoMinimize !== 'boolean') {
+    throw invalid('autoMinimize must be boolean');
+  }
+
   return {
     pollIntervalMs: root.pollIntervalMs,
     allowUnverifiedRead: root.allowUnverifiedRead ?? false,
     allowSend: root.allowSend ?? false,
     allowWindowRestore: root.allowWindowRestore ?? false,
+    autoMinimize: root.autoMinimize ?? false,
     groups,
   };
 }

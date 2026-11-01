@@ -50,6 +50,7 @@ test('valid config preserves IDs and defaults allowSelf to false', async (t) => 
     allowUnverifiedRead: false,
     allowSend: false,
     allowWindowRestore: false,
+    autoMinimize: false,
     groups: [{
       id: 'uia_group_one',
       title: '精确群名',
@@ -60,6 +61,30 @@ test('valid config preserves IDs and defaults allowSelf to false', async (t) => 
       allowUnverifiedTrigger: false,
     }],
   });
+});
+
+
+test('autoMinimize is accepted as a boolean and preserved', async (t) => {
+  // The opt-in that lets the bridge stow WeChat itself. Without a config key
+  // the only way to enable it is an environment variable, which needs a Host
+  // restart; the whole point of the root switches is to avoid that.
+  const { path } = await fixture(t);
+  await writeJson(path, validConfig({ autoMinimize: true }));
+  const loaded = await loadWechatGroupConfig(path);
+  assert.equal(loaded.autoMinimize, true);
+});
+
+test('autoMinimize must be a boolean', async (t) => {
+  for (const value of ['1', 1, null, {}]) {
+    const { path } = await fixture(t);
+    await writeJson(path, validConfig({ autoMinimize: value === null ? undefined : value }));
+    if (value === null) {
+      const loaded = await loadWechatGroupConfig(path);
+      assert.equal(loaded.autoMinimize, false);
+      continue;
+    }
+    await assert.rejects(() => loadWechatGroupConfig(path), (error) => error.code === 'invalid-group-config');
+  }
 });
 
 test('malformed JSON fails closed', async (t) => {

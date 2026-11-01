@@ -614,6 +614,12 @@ class JsonlProtocol:
 
     def start(self) -> dict[str, Any]:
         self.adapter.start()
+        # The baseline is captured before this runs, so stowing the window cannot
+        # hide a pending read. Non-activating by construction, and a no-op
+        # unless the operator opted in.
+        stow = getattr(self.adapter.backend, "maybe_auto_minimize", None)
+        if callable(stow):
+            stow()
         return {
             "type": "ready",
             "ok": True,
@@ -795,6 +801,18 @@ def _safe_property(control: Any, name: str) -> Any:
         return None
 
 
+def _window_is_minimised(hwnd: int) -> bool:
+    """True when a native window is already iconic (read-only IsIconic check)."""
+
+    if sys.platform != "win32":
+        return False
+    from ctypes import wintypes
+
+    try:
+        return bool(_user32().IsIconic(wintypes.HWND(int(hwnd))))
+    except Exception:
+        return False
+
 def classify_missing_main_window(auto: Any) -> str:
     """Decide why there is no mmui::MainWindow, in order of operator action.
 
@@ -882,6 +900,32 @@ class UiaBackend:
             pass
         return classify_missing_main_window(self._auto)
 
+    def maybe_auto_minimize(self) -> None:
+        """Put WeChat away without touching the operator's screen. Opt-in only.
+
+        WeChat 4.x has no close-to-tray setting (forensics: the option was
+        removed; X-closing quits and DESTROYS the mmui tree). The headless
+        operating point is therefore minimised, where InvokePattern still
+        switches chats and sends. This method lets the bridge reach that state
+        itself instead of asking a human, and it is the right hide because
+        SW_SHOWMINNOACTIVE (7) does NOT activate the window, unlike SW_MINIMIZE
+        (6) or SetForegroundWindow, which would steal focus from whatever the
+        operator is doing. Default off: even stowing a window is a takeover if
+        nobody asked for it.
+        """
+
+        if os.environ.get("DSH_WECHAT_GROUP_AUTO_MINIMIZE") != "1":
+            return
+        handle = _safe_property(self._window, "NativeWindowHandle")
+        if not handle or sys.platform != "win32":
+            return
+        if _window_is_minimised(int(handle)):
+            return
+        from ctypes import wintypes
+
+        SW_SHOWMINNOACTIVE = 7
+        _user32().ShowWindow(wintypes.HWND(int(handle)), SW_SHOWMINNOACTIVE)
+        time.sleep(0.3)
     def _control(self, automation_id: str) -> Any:
         if self._closed:
             raise SafetyError("backend is closed", "backend_closed")

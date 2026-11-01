@@ -124,6 +124,9 @@ test('config switches travel into the adapter environment without touching the h
   assert.equal(offEnv.DSH_WECHAT_GROUP_ALLOW_SEND, undefined);
   // Window restore is never granted implicitly: it would steal the user's screen.
   assert.equal(offEnv.DSH_WECHAT_GROUP_ALLOW_WINDOW_RESTORE, undefined);
+  // Neither is the non-activating hide: stowing a window is still a takeover
+  // unless the operator opted in from the account config file.
+  assert.equal(offEnv.DSH_WECHAT_GROUP_AUTO_MINIMIZE, undefined);
   // A Host may carry its own bundled interpreter's PYTHONHOME/PYTHONPATH; passing
   // them on makes the adapter die before its first statement, which looked like a
   // bare process-exit and left the bridge retrying forever.
@@ -137,13 +140,17 @@ test('config switches travel into the adapter environment without touching the h
     assert.equal(leakedEnv[name], undefined, name + ' must not leak into the adapter');
   }
 
-  const on = makeProcess(t, { config: { ...CONFIG, allowUnverifiedRead: true, allowSend: true } });
+  const on = makeProcess(t, {
+    config: { ...CONFIG, allowUnverifiedRead: true, allowSend: true, autoMinimize: true },
+  });
   await startReady(on.groupProcess, on.children);
   const onEnv = on.spawnCalls[0].options.env;
   assert.equal(onEnv.DSH_WECHAT_GROUP_ALLOW_UNVERIFIED, '1');
   assert.equal(onEnv.DSH_WECHAT_GROUP_ALLOW_SEND, '1');
+  assert.equal(onEnv.DSH_WECHAT_GROUP_AUTO_MINIMIZE, '1');
   // The switches are passed down, never written into the host process itself.
   assert.equal(process.env.DSH_WECHAT_GROUP_ALLOW_SEND, undefined);
+  assert.equal(process.env.DSH_WECHAT_GROUP_AUTO_MINIMIZE, undefined);
 });
 
 test('an explicit interpreter override wins over the discovered launcher', async (t) => {
