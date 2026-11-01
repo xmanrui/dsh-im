@@ -15,8 +15,11 @@ export const WEIXIN_REPLY_QUOTA = 10;
 export const DEFAULT_MAX_TEXT_CHARS = 1_800;
 
 /**
- * @typedef {{ kind: 'image' | 'file' }} OutboundFile
- * @typedef {{ sendText: (text: string) => Promise<unknown>, sendFile: (file: OutboundFile) => Promise<unknown> }} OutboxApi
+ * @typedef {unknown} OutboundFile
+ * @typedef {{
+ *   sendText: (text: string, segment?: unknown) => Promise<unknown>,
+ *   sendFile: (file: OutboundFile) => Promise<unknown>,
+ * }} OutboxApi
  */
 
 export class WeixinQuotaExceededError extends Error {
@@ -38,6 +41,7 @@ export function createSendBudget({ quota = WEIXIN_REPLY_QUOTA } = {}) {
   const used = new Map();
 
   return {
+    quota,
     /** Consume one slot; returns false when the budget is already exhausted. */
     consume(key) {
       const current = used.get(key) ?? 0;
@@ -67,15 +71,25 @@ export function createSendBudget({ quota = WEIXIN_REPLY_QUOTA } = {}) {
  * @param {string} text
  * @param {readonly OutboundFile[]} files
  * @param {number} [maxTextChars]
- * @returns {Array<{ kind: 'text', text: string } | { kind: 'media', file: OutboundFile }>}
+ * @returns {Array<
+ *   { kind: 'text', text: string, sourceText: string, chunkIndex: number, chunkCount: number }
+ *   | { kind: 'media', file: OutboundFile }
+ * >}
  */
 export function planReply(text, files = [], maxTextChars = DEFAULT_MAX_TEXT_CHARS) {
   const media = files.map((file) => ({ kind: 'media', file }));
   const trimmed = typeof text === 'string' ? text.trim() : '';
   if (!trimmed) return media;
+  const chunks = splitText(trimmed, maxTextChars);
   return [
     ...media,
-    ...splitText(trimmed, maxTextChars).map((chunk) => ({ kind: 'text', text: chunk })),
+    ...chunks.map((chunk, chunkIndex) => ({
+      kind: 'text',
+      text: chunk,
+      sourceText: trimmed,
+      chunkIndex,
+      chunkCount: chunks.length,
+    })),
   ];
 }
 
@@ -135,6 +149,12 @@ export function createReplyOutbox({
   formatNotice,
   budget = createSendBudget({ quota }),
 } = {}) {
+  if (!Number.isInteger(quota) || quota < 2) {
+    throw new TypeError('quota must be at least 2 for a reply outbox');
+  }
+  if (budget?.quota !== undefined && budget.quota < 2) {
+    throw new TypeError('budget.quota must be at least 2 for a reply outbox');
+  }
   if (typeof formatNotice !== 'function') throw new TypeError('formatNotice must be a function');
 
   /** @type {Map<string, { pending: Array<{ segment: any, api: OutboxApi }>, asked: boolean, draining: boolean, done: Promise<void>, contextToken?: string }>} */
@@ -143,7 +163,14 @@ export function createReplyOutbox({
   const queueOf = (key) => {
     let queue = queues.get(key);
     if (!queue) {
-      queue = { pending: [], asked: false, draining: false, done: Promise.resolve() };
+      queue = {
+        pending: [],
+        asked: false,
+        draining: false,
+        done: Promise.resolve(),
+        noticePending: false,
+        noticeAcknowledged: false,
+      };
       queues.set(key, queue);
     }
     return queue;
@@ -166,15 +193,20 @@ export function createReplyOutbox({
         if (left <= 0) return;
         if (left === 1 && queue.pending.length > 1) {
           await sendDeferredNotice(key, queue);
-          return;
+          // A resume() may have reset the budget while the notice was in
+          // flight; re-check instead of leaving the pending queue stranded.
+          continue;
         }
         const item = queue.pending.shift();
         if (!budget.consume(key)) {
           queue.pending.unshift(item);
           return;
         }
-        if (item.segment.kind === 'text') await item.api.sendText(item.segment.text);
-        else await item.api.sendFile(item.segment.file);
+        if (item.segment.kind === 'text') {
+          await item.api.sendText(item.segment.text, item.segment);
+        } else {
+          await item.api.sendFile(item.segment.file);
+        }
       }
     } catch (error) {
       queue.pending = [];
@@ -185,9 +217,17 @@ export function createReplyOutbox({
 
   const sendDeferredNotice = async (key, queue) => {
     const next = queue.pending[0];
-    if (!budget.consume(key)) return;
-    await next.api.sendText(formatNotice(queue.pending.length));
-    queue.asked = true;
+    queue.noticePending = true;
+    try {
+      if (!budget.consume(key)) return;
+      await next.api.sendText(formatNotice(queue.pending.length));
+      // If resume() already used this notice to decide that the inbound reply
+      // is only a flush request, do not leave an extra `asked` flag behind.
+      if (!queue.noticeAcknowledged) queue.asked = true;
+    } finally {
+      queue.noticePending = false;
+      queue.noticeAcknowledged = false;
+    }
   };
 
   return {
@@ -203,9 +243,15 @@ export function createReplyOutbox({
       const queue = queueOf(key);
       if (contextToken) queue.contextToken = contextToken;
       budget.reset(key);
-      const asked = queue.asked;
+      const asked = queue.asked || queue.noticePending;
       queue.asked = false;
-      if (queue.draining || queue.pending.length === 0) return undefined;
+      if (queue.noticePending) queue.noticeAcknowledged = true;
+      if (queue.draining) {
+        // The current drain will re-check the reset budget after its in-flight
+        // send (including the deferred notice) settles.
+        return { sending: queue.done, asked };
+      }
+      if (queue.pending.length === 0) return undefined;
       return { sending: drain(key, queue), asked };
     },
 

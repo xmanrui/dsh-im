@@ -36,7 +36,10 @@ function fixture({ quota = 10, maxTextChars = 1_800 } = {}) {
 test('planReply puts every image and file before the text', () => {
   const plan = planReply('result', [media('a'), { kind: 'file', name: 'b' }]);
   assert.deepEqual(plan.map((segment) => segment.kind), ['media', 'media', 'text']);
-  assert.deepEqual(plan[2], { kind: 'text', text: 'result' });
+  assert.equal(plan[2].text, 'result');
+  assert.equal(plan[2].chunkIndex, 0);
+  assert.equal(plan[2].chunkCount, 1);
+  assert.equal(plan[2].sourceText, 'result');
 });
 
 test('planReply returns only media for a file-only answer', () => {
@@ -98,6 +101,62 @@ test('a long media list drains in successive budgets', async () => {
   assert.equal(log.length, 28);
   assert.equal(log.at(-1).type, 'text');
   assert.equal(log.at(-1).text, 'caption');
+});
+
+test('resume during a deferred notice keeps draining with the new budget', async () => {
+  const log = [];
+  const budget = createSendBudget({ quota: 10 });
+  const outbox = createReplyOutbox({
+    quota: 10,
+    budget,
+    formatNotice: (count) => `notice ${count}`,
+  });
+  let releaseNotice;
+  let noticeStarted;
+  const noticeStartedPromise = new Promise((resolve) => {
+    noticeStarted = resolve;
+  });
+  const api = {
+    async sendText(text) {
+      log.push({ type: 'text', text, token: outbox.contextToken('user') });
+      if (text.startsWith('notice')) {
+        noticeStarted();
+        await new Promise((resolve) => {
+          releaseNotice = resolve;
+        });
+      }
+    },
+    async sendFile(file) {
+      log.push({ type: 'file', file, token: outbox.contextToken('user') });
+    },
+  };
+  const files = Array.from({ length: 10 }, (_, i) => media(`m${i}`));
+  const first = outbox.send('user', 'result', files, api);
+  await noticeStartedPromise;
+
+  const resumed = outbox.resume('user', 'new-token');
+  assert.equal(resumed.asked, true);
+  releaseNotice();
+  await Promise.all([first, resumed.sending]);
+
+  assert.equal(log.length, 12);
+  assert.equal(log[9].type, 'text');
+  assert.match(log[9].text, /^notice/);
+  assert.equal(log[10].file.name, 'm9');
+  assert.equal(log[11].text, 'result');
+  assert.equal(log[10].token, 'new-token');
+  assert.equal(log[11].token, 'new-token');
+});
+
+test('a one-message budget is rejected because it cannot send both a notice and a body', () => {
+  assert.throws(
+    () => createReplyOutbox({ quota: 1, formatNotice: () => 'notice' }),
+    /at least 2/,
+  );
+  assert.throws(
+    () => createReplyOutbox({ budget: createSendBudget({ quota: 1 }), formatNotice: () => 'notice' }),
+    /at least 2/,
+  );
 });
 
 test('a send failure clears pending and is rethrown', async () => {
