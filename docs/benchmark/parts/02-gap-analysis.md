@@ -47,8 +47,8 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 | --- | --- | --- | --- |
 | 语言/类型 | 纯 JS（ESM），无 `tsc`、无 `jsconfig` 类型检查 | Koishi/Python 系全部带类型（`py.typed`、TS） | 无静态类型检查 |
 | 格式/lint | 无 `.editorconfig` / `.eslintrc` / `.prettierrc`（`ls -a` 实测） | LangBot 有 `.pre-commit-config.yaml`；matterbridge 有 `.golangci.yaml` | 无 Lint 门禁 |
-| 测试形态 | `node:test`，289 个 mjs，4,752 用例，无覆盖率上报 | 上游有覆盖率/CI 矩阵 | 覆盖率未采集 |
-| 贡献流程 | 无 CONTRIBUTING / CODE_OF_CONDUCT / SECURITY / ISSUE 模板 / PR 模板 | LangBot：`CONTRIBUTING.md` + `CLA.md` | 完全缺失 |
+| 测试形态 | `node:test`，296 个 mjs，4,971 用例；**覆盖率已入 CI**（`62f89f45`：行 89.97%、函数 83.89%、分支 81.14%，阈值 85%） | 上游有覆盖率/CI 矩阵 | 已闭合（分支阈值未设） |
+| 贡献流程 | **已落地**：CONTRIBUTING / CODE_OF_CONDUCT / SECURITY / 3 个 issue 模板 / PR 模板，交叉引用有判据（`f3ad28e`） | LangBot：`CONTRIBUTING.md` + `CLA.md` + `.pre-commit-config.yaml` | 仍缺 CLA 与 pre-commit |
 | 构建产物 | `lib/index.js` 10.1 MB + `lib/client.js` 1.82 MB 入库 | 上游不入库产物 | 漂移风险（改造 ② 已加守卫） |
 
 ### 2.4 性能表现
@@ -83,11 +83,11 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 | --- | --- | --- | --- |
 | API 文档 | 无独立 API 参考；`docs/client-integration.md` 12 KB 是唯一接口文档 | 1/2 | `ls docs` |
 | 使用教程 | README 80 KB 安装/配置/命令/故障全覆盖 + 12 篇 Issue 方案 | 2/2 | README 一级标题 15 个 |
-| 贡献指南 | **无** | 0/2 | `ls CONTRIBUTING*` 失败 |
+| 贡献指南 | CONTRIBUTING + SECURITY + CODE_OF_CONDUCT + issue/PR 模板，交叉引用有判据 | 2/2 | `node scripts/verify-governance.mjs` → `GOVERNANCE_OK 7 files` |
 | 变更日志 | `CHANGELOG.md` 312 KB | 2/2 | `wc -c` |
-| 示例/架构 | ADR 1 篇；无 `ARCHITECTURE.md` | 1/2 | `ls docs/adr` |
+| 示例/架构 | ADR 1 篇 + `ARCHITECTURE.md`（357 行 / 8 个一级章节） | 2/2 | `ls ARCHITECTURE.md docs/adr` |
 
-合计 **6/10**。上游 LangBot 有仓库根 `ARCHITECTURE.md` 31,138 B + `CONTRIBUTING.md` 2,183 B + `CLA.md` 12,158 B + 6 语言 README（README/CN/ES/FR/JP/KO，各 10.7–13.1 KB 实测）。
+合计 **8/10**（本轮两项各 +1）。上游 LangBot 有仓库根 `ARCHITECTURE.md` 31,138 B + `CONTRIBUTING.md` 2,183 B + `CLA.md` 12,158 B + 9 个 README 文件（主 README + CN/ES/FR/JP/KO/RU/TW/VI，`gh api contents --paginate` 实测）。
 
 ### 2.8 适用场景
 

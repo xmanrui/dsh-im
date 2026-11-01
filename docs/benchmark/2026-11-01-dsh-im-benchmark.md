@@ -48,7 +48,7 @@
 | 4 | 性能表现 | 全量 4,752 用例 25 s 左右；`wechat_group_uia.py` 找按钮 156 ms（commit 4fe8b1d 实测 34.5 s → 156 ms） | matterbridge 用 Go 单进程多协议（`gateway.go` 20,347 B），wechaty 23,461★ 以 puppeteer 事件循环承载 | **基准已建立**（`bc27b224`）：`scripts/benchmark-channels.mjs` 六条热路径，固定种子语料 + 下限判据 + CI 警告态 job；跨项目仍无同口径 msg/s 可比数 |
 | 5 | 可扩展性 | 新增渠道 = 新建 `src/channels/<name>/` + `plugin-src/host/channels/<name>/index.mjs` + `plugin-src/client/channels/<name>/`，三处手工接线（`plugin-src/host/index.mjs` 第 2-15 行 import、第 60-75 行 channels 数组） | Koishi 的插件即包（`packages/*`），服务由 `ctx.get()` 注入；NoneBot2 的适配器目录 `nonebot/adapters` 为可外部安装的独立包 | **注册表已落地**（`f192d382`）：`plugin-src/host/channel-registry.mjs`（62 行）成为渠道集合与顺序唯一来源，`index.mjs:63-66` 只剩一次 `map()`；**新缺口是注册条目里没有能力声明**（见 §8 建议 N1） |
 | 6 | 维护状态 | 3,045★ / 86 open issues / 最近推送 2026-11-01T13:07:26Z / 单分支主力 `feat/wechat-groups` | LangBot 最近推送 2026-11-01T15:55:19Z（同日）、open 127；chatgpt-on-wechat 47,732★ 最近推送 2026-11-01T07:33:51Z | **活跃度同档**；但本仓 CI 只覆盖 `test/*.test.mjs` + 两条 Windows 专题，无 lint/覆盖率/发布流水线 |
-| 7 | 文档完善程度 | README 80 KB + 英文版 + `docs/` 98 个 md + ADR 1 篇 + 12 篇 Issue 方案记录 + `ARCHITECTURE.md`（356 行/8 章）+ 治理七件套；**仍缺独立 API 参考** | LangBot 有仓库根 `ARCHITECTURE.md`（31,138 B）+ `CONTRIBUTING.md` + `CLA.md` + 6 语言 README（README/CN/ES/FR/JP/KO） | **体系化文档落后**：本仓有大量「事后记录」但缺「架构总览 + 贡献流程」两块骨架 |
+| 7 | 文档完善程度 | README 80 KB + 英文版 + `docs/` 98 个 md + ADR 1 篇 + 12 篇 Issue 方案记录 + `ARCHITECTURE.md`（356 行/8 章）+ 治理七件套；**仍缺独立 API 参考** | LangBot 有仓库根 `ARCHITECTURE.md`（31,138 B）+ `CONTRIBUTING.md` + `CLA.md` + 9 个 README 文件（主 README + CN/ES/FR/JP/KO/RU/TW/VI，`gh api contents --paginate` 实测） | **体系化文档落后**：本仓有大量「事后记录」但缺「架构总览 + 贡献流程」两块骨架 |
 | 8 | 适用场景 | 必须宿主为 DeepSeek Harness（`dsh.compatibility.dsh` 钉 `0.2.1-rc.2`），一装即得 14 渠道 + 会话隔离 + 产物回投 | LangBot/chatgpt-on-wechat 可独立部署为机器人服务；matterbridge 可独立网关 | **场景窄但粘性高**：本仓不是通用框架，是 DSH 的 IM 面；兼容面仅声明 2 个宿主版本 |
 
 ### 1.2 渠道 × 能力（本仓实测，由源码生成，见 `README.md` 同名表）
@@ -158,7 +158,7 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 | 变更日志 | `CHANGELOG.md` 312 KB | 2/2 | `wc -c` |
 | 示例/架构 | ADR 1 篇 + `ARCHITECTURE.md`（356 行 / 8 个一级章节，引用路径 40 条实测存在） | 2/2 | `ls ARCHITECTURE.md docs/adr` |
 
-合计 **8/10**（本轮两项各 +1：贡献指南 0→2、示例/架构 1→2）。上游 LangBot 有仓库根 `ARCHITECTURE.md` 31,138 B + `CONTRIBUTING.md` 2,183 B + `CLA.md` 12,158 B + 6 语言 README（README/CN/ES/FR/JP/KO，各 10.7–13.1 KB 实测）。
+合计 **8/10**（本轮两项各 +1：贡献指南 0→2、示例/架构 1→2）。上游 LangBot 有仓库根 `ARCHITECTURE.md` 31,138 B + `CONTRIBUTING.md` 2,183 B + `CLA.md` 12,158 B + 9 个 README 文件（主 README + CN/ES/FR/JP/KO/RU/TW/VI，`gh api contents --paginate` 实测）。
 
 ### 2.8 适用场景
 
@@ -187,16 +187,16 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 | ID | 改进项 | 排序依据 | 预期目标 | 完成标准 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | M1 | 渠道注册表取代 14 条手工接线 | 新增渠道 3 处手工改动，是扩展性第一瓶颈 | 单文件登记即可挂载一个渠道 | 新增 `channel-registry.mjs`，`plugin-src/host/index.mjs` 只遍历注册表；现有 14 渠道行为不变（全量测试绿） | 建议 |
-| M2 | `shared/` 二级分层 | 83 文件 24,638 行平铺，最长 2,838 行 | 按 session/permission/delivery/history 四域拆分目录 | 目录数与最大文件行数下降，且 import 面收敛 | 建议 |
-| M3 | 性能基准脚本 | 全仓零基准，性能差异无法量化 | 至少 1 条可复跑的吞吐/延迟基准，进 CI 但只警告 | `node scripts/benchmark-channels.mjs` 输出 JSON + 稳定判据 | 建议 |
-| M4 | 覆盖率上报 | 4,752 用例但无覆盖率 → 高测试量低覆盖可能 | CI 产覆盖率并留档 | `npm test -- --experimental-test-coverage` 输出并入 CI artifact | 建议 |
-| M5 | 语音/媒体链路去平台依赖 | 6/8 skip 依赖 POSIX ffmpeg | 跨平台 stub，让语音链路在 Windows CI 也执行 | skipped 从 8 降到 ≤2 | 建议 |
+| M2 | `shared/` 二级分层 | **口径分两层**（2026-11-02 复算）：根层平铺 85 个 .mjs / 21,089 行；含子目录全量 134 个 .mjs / 27,078 行。旧写法「83 文件 24,638 行」是第三口径（更早快照，且未区分根层/全量），最大文件 2,838 行经复算无误 | 按域拆目录（实测需 13 域而非四域，见 §8.2 N3），且最大文件行数下降 | ⏳ 未动（与本轮改动写面重叠） |
+| M3 | 性能基准脚本 | 全仓零基准，性能差异无法量化 | 至少 1 条可复跑的吞吐/延迟基准，进 CI 但只警告 | `npm run benchmark` → `BENCHMARK_OK suites=6` + 9 条契约测试 | ✅ 已落地（`bc27b224`） |
+| M4 | 覆盖率上报 | 用例多但从未采过覆盖率 | CI 产覆盖率并留档 + 阈值判据 | `npm run coverage` → `COVERAGE_OK lines=89.97%`（阈值 85%） | ✅ 已落地（`62f89f45`）；分支阈值未设 ⇒ M4.4 |
+| M5 | 语音/媒体链路去平台依赖 | 6/8 skip 依赖 POSIX ffmpeg | 跨平台替身，让语音链路在 Windows 也执行 | skipped **8 → 2**（余 2 条需真实群环境/POSIX chmod，非夹具能替） | ✅ 已落地（`ac397eea`） |
 
 ### 3.3 低优先级（P2：体验与生态）
 
 | ID | 改进项 | 排序依据 | 预期目标 | 完成标准 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| L1 | 补 `ARCHITECTURE.md` | 上游 LangBot 有 31 KB 架构文档，本仓只有 ADR | 新人 10 分钟理解分层 | 文件存在且含三层图 | 建议 |
+| L1 | 补 `ARCHITECTURE.md` | 上游 LangBot 有仓库根 31 KB 架构文档，本仓只有 ADR | 新人 10 分钟理解分层 | 文件存在且含三层图 | ✅ 已落地（357 行 / 8 章，`260e816` 入 files 清单）|
 | L2 | 多语言 README | 上游 5 语言 | 至少 zh/en（本仓已有）→ 增 ja/es | — | 已部分 |
 | L3 | 独立网关形态 | matterbridge/LangBot 可脱离宿主独立部署 | 评估可行性，不承诺 | 产出评估结论 | 建议 |
 | L4 | 发布流水线 | 现无 release workflow | tag → 自动发布 npm + 校验 | `.github/workflows/release.yml` | 建议 |
@@ -225,7 +225,7 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 
 | 里程碑 | 交付物 | 判据 | 预计 |
 | --- | --- | --- | --- |
-| M2.1 | `CONTRIBUTING.md`（含本地开发、门禁命令、提交规范、渠道新增五步） | 文件存在且被 README「贡献」段引用；`verify-governance.mjs` PASS | 1 轮 |
+| M2.1 | `CONTRIBUTING.md`（含本地开发、门禁命令、提交规范、渠道新增五步） | 文件存在且被 README「贡献」段引用；`verify-governance.mjs` PASS | ✅ `f3ad28e` |
 | M2.2 | `SECURITY.md`（漏洞上报路径 + 支持版本表） | 同上 | 同轮 |
 | M2.3 | `.github/ISSUE_TEMPLATE/{bug,feature}.yml` + `PULL_REQUEST_TEMPLATE.md` | GitHub 上新建 issue 时能选到模板 | 同轮 |
 | M2.4 | `scripts/verify-governance.mjs` 接入 `npm run check` | 删任一治理文件 → 门禁红 | 同轮 |
@@ -234,7 +234,7 @@ plugin-src/client/      设置页 UI（每渠道 index.js + api.js + styles.js�
 
 | 里程碑 | 交付物 | 判据 |
 | --- | --- | --- |
-| M3.1 | `channel-registry` 单一登记源 | 新增渠道只改 1 处；14 渠道行为等价（全量测试绿 + 能力矩阵不变） |
+| M3.1 | `channel-registry` 单一登记源 + 条目内 `capabilities` | 新增渠道只改 1 处；14 渠道行为等价（全量测试绿 + 能力矩阵不变） | ✅ `f192d382` + `cfd184fc` |
 | M3.2 | `shared/` 按四域拆目录 | 最大文件行数下降 ≥30%；import 面收敛 |
 
 ### 阶段四（长期）：可量化（M3、M4、M5）
@@ -438,7 +438,7 @@ EXIT=0
 
 ### 8.2 新增两条建议（来自上游复现）
 
-- **N1 给 `channel-registry.mjs` 的注册条目加 `capabilities`**。依据：matterbridge 把能力
+- **N1「给 `channel-registry.mjs` 的注册条目加 `capabilities`」** ✅ **已落地**（`cfd184fc`：声明内联进注册条目 + `reconcileDeclarations` 双向对账 + 12 条契约测试）。依据：matterbridge 把能力
   放在第二张表 `bridgemap.UserTypingSupport`，与实现脱钩 ⇒ 穷举 20 个协议目录，
   `EventUserTyping` 在 discord/harmony/slack 三处出现，注册表只登记 discord 与 slack，
   **harmony 的 typing 代码不可达**（`gateway/bridgemap/bharmony.go` 全文只有一行 `FullMap`）。
@@ -446,6 +446,23 @@ EXIT=0
 - **N2 把投递能力声明从 1 个渠道扩到 14 个**。`grep -rln describeDeliveryAccount src/ plugin-src/`
   → 只有 feishu 一家；而 `delivery-service.mjs:579,583` 是**硬读** capabilities（不含
   `proactive-text-checked` 直接拒发）。机制已比上游完整，缺的是覆盖面。
+- **N3（新，来自 LangBot 域分层复现）M2 的域数与引环**：子代理复算需 **13 域**而非原写的四域，
+  且四域方案会漏掉占文件数最多的 i18n（41 个）。两条引环里：第一条是**分类器自己造的伪影**
+  （`classify.mjs:145` 的 semantic 桶含 "image-input" 词，把 2 个 i18n 字典分片划进 semantic；
+  临时改归属重建图 → 边 121→119、方向 40→39、该环整条消失，**零代码改动即解环**）；
+  第二条（7 域大环）SCC 内 19 方向穷举，size 1/2/3 无解，**最小割 = 4 刀、每刀 1 行**：
+  `bot-workspace-store.mjs:24`、`message-failure.mjs:1`、`conversation-state-store.mjs:1`、
+  `deferred-delivery.mjs:1`。第 4 刀是「假一刀」——本人复算：该行字面是
+  `import { AssistantTextAccumulator, accumulateFinalAssistantText } from './harness-client.mjs'`，
+  即一个叫 delivery 的模块实际依赖 agent 轮次层（harness-client）；正解是把职责搬回正确文件，
+  不是随机剪边（它的导出是 `terminalOutcomeOf`/`extractCompletedTurnAnswer`/
+  `createDeferredDeliveryRegistry`，全仓无 `deliverDeferredHarnessTurn` 这个符号——
+  早先版本抄自子代理笔记未复算，已纠）。
+  另一条全仓级事实：**跨适配器 import 全仓只有 1 条且方向违规**
+  （`src/channels/shared/i18n-en/weixin.mjs:1 → ../../weixin/connection-error.en.mjs`）
+  ⇒ 14 个适配器互不引用，M2 的迁移风险 100% 集中在 shared/。
+  另注：分层规划**不能引 ARCHITECTURE.md**（实测其内「二级」0 次、「四域」0 次），
+  只能引本报告 M2/L1 行。详见分卷 08 与 `_research/bench2/langbot-domain-layering.md`。
 
 ### 8.3 报告自身被证伪并更正的四处
 
