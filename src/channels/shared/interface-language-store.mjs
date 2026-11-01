@@ -44,6 +44,9 @@ export class InterfaceLanguageStore {
   // Whether the document on disk is known to already say what #tag says. False
   // for a missing or unreadable document, so the next report repairs it.
   #stored = false;
+  // Language the reader picked for the plugin's own chat messages; null means
+  // "follow DSH" and leaves the resolution to the layers below.
+  #explicit = null;
 
   constructor(path) {
     if (typeof path !== 'string' || !path) {
@@ -60,12 +63,14 @@ export class InterfaceLanguageStore {
       if (error?.code !== 'ENOENT') throw error;
       this.#tag = null;
       this.#stored = false;
+      this.#explicit = null;
       await this.#removeStaleTemporaries();
       return this;
     }
-    const read = this.#readTag(raw);
-    this.#tag = read === undefined ? null : read;
+    const read = this.#readDocument(raw);
+    this.#tag = read?.mirror ?? null;
     this.#stored = read !== undefined;
+    this.#explicit = read?.explicit ?? null;
     await this.#removeStaleTemporaries();
     return this;
   }
@@ -85,9 +90,9 @@ export class InterfaceLanguageStore {
     }
   }
 
-  // Returns the mirrored tag (null when the document mirrors nothing), or
+  // Returns both stored tags (null where the document stores nothing), or
   // undefined when the document is damaged or from an unknown future version.
-  #readTag(raw) {
+  #readDocument(raw) {
     let document;
     try {
       document = JSON.parse(raw);
@@ -96,8 +101,24 @@ export class InterfaceLanguageStore {
     }
     if (!document || typeof document !== 'object' || Array.isArray(document)) return undefined;
     if (document.version !== DOCUMENT_VERSION) return undefined;
-    if (document.interfaceLanguage === undefined) return null;
-    return normalizeInterfaceLanguageTag(document.interfaceLanguage) ?? undefined;
+    return {
+      mirror: document.interfaceLanguage === undefined
+        ? null
+        : normalizeInterfaceLanguageTag(document.interfaceLanguage) ?? null,
+      explicit: document.explicitLanguage === undefined
+        ? null
+        : normalizeInterfaceLanguageTag(document.explicitLanguage) ?? null,
+    };
+  }
+
+  // Both selections live in one document, so every write repeats whichever one
+  // is not changing instead of dropping it.
+  async #write() {
+    await writeSettingsDocument(this.#path, {
+      version: DOCUMENT_VERSION,
+      ...(this.#explicit === null ? {} : { explicitLanguage: this.#explicit }),
+      ...(this.#tag === null ? {} : { interfaceLanguage: this.#tag }),
+    });
   }
 
   getLanguageTag() {
@@ -116,11 +137,29 @@ export class InterfaceLanguageStore {
       : normalizeInterfaceLanguageTag(value);
     if (tag === null && value !== null && value !== undefined) throw invalidTagError();
     if (tag === this.#tag && this.#stored) return tag;
-    await writeSettingsDocument(this.#path, {
-      version: DOCUMENT_VERSION,
-      ...(tag === null ? {} : { interfaceLanguage: tag }),
-    });
     this.#tag = tag;
+    await this.#write();
+    this.#stored = true;
+    return tag;
+  }
+
+  getExplicitTag() {
+    return this.#explicit;
+  }
+
+  /**
+   * Record the language the reader picked for the plugin's own chat messages.
+   * Passing null clears the explicit selection, returning resolution to DSH and
+   * the mirror.
+   */
+  async setExplicitTag(value) {
+    const tag = value === null || value === undefined
+      ? null
+      : normalizeInterfaceLanguageTag(value);
+    if (tag === null && value !== null && value !== undefined) throw invalidTagError();
+    if (tag === this.#explicit) return tag;
+    this.#explicit = tag;
+    await this.#write();
     this.#stored = true;
     return tag;
   }

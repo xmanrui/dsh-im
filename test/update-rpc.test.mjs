@@ -20,16 +20,39 @@ test('update RPC rejects arbitrary commands, paths, profiles, sources and invali
   assert.deepEqual(calls, []);
 });
 
-test('update RPC keeps local authority even when other management uses trusted-host', async () => {
-  const calls = [];
-  const service = { close: async () => {} };
-  const ctx = {
-    connection: { fetch: managementFetch((...args) => calls.push(args)) },
-    effect: () => {},
-  };
-  installUpdateRpc(ctx, { service, runtime: {} });
-  assert.equal(calls[0][0], '/dsh-im');
-  await assert.rejects(calls[0][1]('update.status', {}, undefined, { host: 'trusted.example' }), /HTTP 403/);
+test('all update methods honor the configured authority before calling the service', async () => {
+  for (const authority of [undefined, 'trusted-host', 'loopback']) {
+    const calls = [];
+    let call;
+    const service = {
+      ...Object.fromEntries(['status', 'check', 'install'].map(method => [method, async (payload) => {
+        calls.push({ method, payload });
+        return { method };
+      }])),
+      close: async () => {},
+    };
+    const ctx = {
+      connection: { fetch: managementFetch((channel, handler) => { assert.equal(channel, '/dsh-im'); call = handler; }) },
+      effect: () => {},
+    };
+    installUpdateRpc(ctx, { service, runtime: {}, authority });
+    for (const host of ['192.168.1.100:3080', 'trusted.example', '127.0.0.1:3080', 'localhost']) {
+      const headers = { host, origin: `http://${host}` };
+      const rejected = authority === 'loopback' && ['192.168.1.100:3080', 'trusted.example'].includes(host);
+      for (const method of ['status', 'check', 'install']) {
+        const payload = method === 'install' ? { checkId: 'confirmed', requestId: 'request' } : {};
+        const before = calls.length;
+        if (rejected) {
+          await assert.rejects(call(`update.${method}`, payload, undefined, headers), /HTTP 403/);
+          assert.equal(calls.length, before);
+        } else {
+          assert.deepEqual(await call(`update.${method}`, payload, undefined, headers), { ok: true, value: { method } });
+          assert.equal(calls.length, before + 1);
+          assert.deepEqual(calls.at(-1), { method, payload: method === 'install' ? payload : undefined });
+        }
+      }
+    }
+  }
 });
 
 test('update RPC returns only safe codes for unanticipated runtime errors', async () => {
@@ -59,6 +82,7 @@ test('Host update initialization failure leaves all channel activations availabl
   internals.installUpdateRpc = () => { throw new Error('updater unavailable'); };
   internals.installDeliveryRpc = () => {};
   internals.installInboundTtlRpc = () => {};
+  internals.installDeliverySyncRpc = () => {};
   internals.installSidebarSettingsRpc = () => {};
   internals.installHostLanguage = () => undefined;
   internals.installHostLanguageRpc = () => {};

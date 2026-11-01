@@ -294,4 +294,10 @@ export default {
     'A queued message was interrupted when the service restarted. It was not replayed automatically to avoid running it twice; if it was not processed, please send it again.',
   '已提交补充指令，Agent 会在下一步读取。':
     'Additional instruction submitted; the Agent will read it at the next step.',
+  // delivery-sync-rpc.mjs
+  '请求已取消。': 'The request was cancelled.',
+  '无效的会话同步设置：开关必须是布尔值，图标是不超过 32 个字符的文本。':
+    'Invalid Session sync settings: each switch must be a boolean and an icon is text of at most 32 characters.',
+  '无法读取或保存会话同步设置，请稍后重试。':
+    'Could not read or save Session sync settings. Try again later.',
 };

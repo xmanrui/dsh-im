@@ -22,9 +22,12 @@ import { createDeliveryService } from './delivery-service.mjs';
 import { createDsBotClient } from './ds-bot-client.mjs';
 import { installDsBotQuestionSync } from './ds-bot-question-sync.mjs';
 import { installInboundTtlRpc } from './inbound-ttl-rpc.mjs';
+import { installDeliverySyncRpc } from './delivery-sync-rpc.mjs';
 import { installSidebarSettingsRpc } from './sidebar-settings.mjs';
 import { installInjectedContext } from './injected-context.mjs';
 import { installSessionSyncCoordinator } from './session-sync-coordinator.mjs';
+import { deliverySwitchesOff } from '../../src/channels/shared/delivery-sync-settings.mjs';
+import { getDeliverySyncSettingsStore } from '../../src/channels/shared/delivery-sync-settings-store.mjs';
 import { installSessionTitlePrefix } from './session-title-prefix.mjs';
 import { installUpdateRpc } from './update-rpc.mjs';
 
@@ -52,6 +55,7 @@ export function createImHostPlugin(internals = {}) {
   const startHostLanguageRpc = internals.installHostLanguageRpc ?? installHostLanguageRpc;
   const startUpdate = internals.installUpdateRpc ?? installUpdateRpc;
   const startInboundTtl = internals.installInboundTtlRpc ?? installInboundTtlRpc;
+  const startDeliverySync = internals.installDeliverySyncRpc ?? installDeliverySyncRpc;
   const startSidebarSettings = internals.installSidebarSettingsRpc ?? installSidebarSettingsRpc;
   const startInjectedContext = internals.installInjectedContext ?? installInjectedContext;
   const startDelivery = internals.installDeliveryRpc ?? installDeliveryRpc;
@@ -101,6 +105,21 @@ export function createImHostPlugin(internals = {}) {
         unavailableSessionSyncChannels: unavailableSessionSyncChannels.map((channel) => channel === 'wecomApp' ? 'wecom-app' : channel),
         dsBot: createDsBotClient(ctx),
       });
+      // The delivery switches are the master for everything that follows a Session
+      // through its targets: with both off, `listSessionSyncTargets` answers empty,
+      // so neither the coordinator nor a channel's own mirror (Feishu card) sends.
+      // A settings read failure must not disable delivery, so it falls through.
+      if (typeof deliveryService.listSessionSyncTargets === 'function') {
+        const rawListSessionSyncTargets = deliveryService.listSessionSyncTargets.bind(deliveryService);
+        deliveryService.listSessionSyncTargets = async (sessionId) => {
+          try {
+            if (deliverySwitchesOff(await getDeliverySyncSettingsStore(config).get())) return [];
+          } catch {
+            // keep the unwrapped behaviour
+          }
+          return rawListSessionSyncTargets(sessionId);
+        };
+      }
       /** Sessions already reported, so the log stays one line per session. */
       const describedSessions = new Set();
       const describeConversationLogged = async (sessionId) => {
@@ -125,6 +144,7 @@ export function createImHostPlugin(internals = {}) {
           historyChecked: (botId, route, query, options) => deliveryService.historyChecked(botId, route, query, options),
           replyChecked: (botId, route, text, options) => deliveryService.replyChecked(botId, route, text, options),
           describeConversation: (sessionId) => describeConversationLogged(sessionId),
+
           // Prompt assembly is synchronous, so a caller that needs the identity
           // before the first step cannot await the async variant.
           describeConversationSync: (sessionId) => deliveryService.describeConversationSync(sessionId),
@@ -202,7 +222,7 @@ export function createImHostPlugin(internals = {}) {
         }
       }
       try {
-        startUpdate(ctx);
+        startUpdate(ctx, { authority: config.rpcAuthority });
       } catch (error) {
         logger.error?.('[dsh-im] failed to activate update management; continuing with channels', error);
       }
@@ -213,6 +233,7 @@ export function createImHostPlugin(internals = {}) {
       }
       try {
         startInboundTtl(ctx, { config });
+        startDeliverySync(ctx, { config });
       } catch (error) {
         logger.error?.('[dsh-im] failed to activate inbound TTL settings; continuing with channels', error);
       }
@@ -241,6 +262,7 @@ export function createImHostPlugin(internals = {}) {
         startSessionSync(ctx, deliveryService, {
           logger,
           inputScope: ctx.root ?? ctx,
+          config,
         });
         installDsBotQuestionSync(ctx, deliveryService, { logger });
       } catch (error) {

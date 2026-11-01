@@ -1856,6 +1856,63 @@ test('a mail thread survives a restart', async () => {
   }
 });
 
+test('a reply that quotes only its parent still joins the thread', async (t) => {
+  // iOS Mail quotes only the immediate parent: its References header holds a
+  // single id, our own reply's Message-ID. That id is minted by nodemailer on
+  // the way out and was never mapped, so the resolver found nothing familiar
+  // and forked a brand-new session on every phone reply — one mail thread ran
+  // as two Harness sessions that never saw each other's turns.
+  let repliesSent = 0;
+  let firstDelivered = false;
+  let secondDelivered = false;
+  const mailbox = async () => {
+    if (!firstDelivered) { firstDelivered = true; return [inboundMail(1)]; }
+    // The phone can only reply after our answer went out, so the second mail is
+    // released once the first reply is on the wire.
+    if (repliesSent > 0 && !secondDelivered) {
+      secondDelivered = true;
+      return [inboundMail(2, { references: '<sent-1@x>', inReplyTo: '<sent-1@x>' })];
+    }
+    return [];
+  };
+  const sessionIds = [];
+  const { runtime, asks, state } = await startDeliveryRuntime(t, {
+    mailbox,
+    harnessOverrides: {
+      createSession: async () => {
+        const id = `session-${sessionIds.length + 1}`;
+        sessionIds.push(id);
+        return id;
+      },
+    },
+    createApi: () => ({
+      connect: async () => {}, disconnect: async () => {}, latestUid: async () => 'msg_0',
+      listMessages: mailbox,
+      sendReply: async () => {
+        repliesSent += 1;
+        return { sent: true, messageId: '<sent-1@x>' };
+      },
+      sendText: async () => {},
+    }),
+  });
+  await runtime.start();
+
+  await waitFor(() => repliesSent > 0, () => 'the first reply was never sent');
+  await waitFor(() => asks.length === 2, () => 'the parent-only reply never reached the Harness');
+
+  assert.equal(
+    state.conversationForThreadId('<sent-1@x>'),
+    state.conversationForThreadId('<rfc-1@x>'),
+    'our own reply id is registered against the thread it answers',
+  );
+  assert.equal(
+    asks[1].sessionId,
+    asks[0].sessionId,
+    'the parent-only reply reuses the same Harness session instead of forking',
+  );
+  assert.equal(sessionIds.length, 1, `created ${sessionIds.length} sessions for one thread`);
+});
+
 test('a rate-limited poll backs off instead of hammering the API', async () => {
   // The Agent mailbox allows 10 requests a minute. Retrying on the fixed
   // interval kept the limit exceeded, so the mailbox never recovered.

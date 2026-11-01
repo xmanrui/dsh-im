@@ -822,6 +822,22 @@ const CSS = String.raw`
   .dim-directoryPickerSpinner { animation-duration: 1.8s; }
   .dim-collapsibleBody, .dim-collapsibleChevron { transition: none !important; }
 }
+/* Delivery-sync settings (General settings -> Delivery tab) */
+.dim-deliverySyncSettings { container-type: inline-size; }
+.dim-deliverySyncSettings .dim-globalHead { position: relative; }
+.dim-deliverySyncSettings .dim-globalTtlHelp { position: static; }
+.dim-globalTtlTooltip.dim-deliverySyncTooltip { width: min(360px, 100%); max-width: none; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 17px; white-space: normal; overflow-wrap: anywhere; }
+.dim-deliverySyncFields { min-width: 0; display: grid; gap: 16px; margin-top: 12px; }
+.dim-deliverySyncField { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 200px); align-items: start; gap: 8px 16px; }
+.dim-deliverySyncLabel { min-width: 0; display: grid; gap: 4px; }
+.dim-deliverySyncLabel > label { color: var(--dsw-alias-label-primary, #1f2329); font-size: 14px; line-height: 22px; }
+.dim-deliverySyncCheckLabel { display: flex; align-items: center; gap: 8px; }
+.dim-deliverySyncCheckLabel input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--dsw-alias-state-business-primary, #3370ff); }
+.dim-deliverySyncHelp { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.dim-deliverySyncIcon { min-width: 0; display: grid; gap: 4px; }
+.dim-deliverySyncFields .dim-globalTtlInput { width: 100%; min-width: 0; }
+.dim-deliverySyncFeedback { margin: 10px 0 0; }
+@container (max-width: 460px) { .dim-deliverySyncField { grid-template-columns: minmax(0, 1fr); } }
 `;
 
 export function installImStyles() {

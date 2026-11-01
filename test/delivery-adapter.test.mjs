@@ -113,7 +113,6 @@ const SESSION_SUGGESTIONS = {
   telegram: {
     sessions: {
       'direct:88': 'session-direct',
-      'group:88': 'session-duplicate-chat',
       'group:-1001234567890:42': 'session-topic',
     },
     suggestions: [
@@ -124,7 +123,6 @@ const SESSION_SUGGESTIONS = {
   discord: {
     sessions: {
       'direct:123456789012345678': 'session-direct',
-      'group:123456789012345678': 'session-duplicate-channel',
       'group:223456789012345678': 'session-thread',
     },
     suggestions: [
@@ -486,4 +484,86 @@ test('channel-specific route kinds stay strict', () => {
     }),
     (error) => error?.code === 'invalid-target',
   );
+});
+
+/**
+ * A Telegram forum topic is a shared room: mirrored text belongs there, but a
+ * question or an approval would be answerable by any member, so both stay in
+ * private chat.
+ */
+function topicAdapter() {
+  const target = {
+    targetId: 'topic', name: 'Daily topic', kind: 'topic',
+    route: { chatId: '-1001234567890', messageThreadId: 42 },
+  };
+  const sessions = { 'group:-1001234567890:42': 'session-topic' };
+  const state = { syncKey: null, sends: [], interactions: [] };
+  const workspaces = {
+    has: () => true,
+    listBotIds: () => ['bot-telegram'],
+    listDeliveryTargets: () => [structuredClone(target)],
+    deliveryTargetFor: (_botId, targetId) => (targetId === target.targetId ? structuredClone(target) : null),
+    listSessionSyncTargets: () => (state.syncKey
+      ? [{ botId: 'bot-telegram', targetId: target.targetId, conversationKey: state.syncKey }]
+      : []),
+    async setDeliveryTargetSessionSync(_botId, _targetId, value) { state.syncKey = value; },
+    createDeliveryTarget() {},
+    updateDeliveryTarget() {},
+    deleteDeliveryTarget() {},
+  };
+  const adapter = createDeliveryAdapter({
+    channel: 'telegram',
+    workspaces,
+    coreController: {
+      async sendProactiveText(...args) { state.sends.push(args); },
+      async presentSessionSyncApproval(...args) { state.interactions.push(['approval', ...args]); return true; },
+      async presentSessionSyncQuestion(...args) { state.interactions.push(['question', ...args]); return true; },
+    },
+    stateFor: async () => ({ snapshot: () => ({ sessions }) }),
+  });
+  return { adapter, target, state };
+}
+
+test('a Telegram forum topic receives mirrored text and never a question or approval', async () => {
+  const { adapter, target, state } = topicAdapter();
+
+  assert.deepEqual((await adapter.listTargets('bot-telegram'))[0].sessionSync, {
+    enabled: false, state: 'off',
+  });
+  assert.deepEqual(await adapter.setSessionSync('bot-telegram', target.targetId, true), {
+    enabled: true, state: 'active',
+  });
+  assert.equal(state.syncKey, 'group:-1001234567890:42');
+
+  // Text follows the group route the channel persisted.
+  assert.deepEqual(
+    await adapter.sendSessionSyncText('bot-telegram', target.targetId, 'session-topic', 'answer'),
+    { sent: true },
+  );
+  assert.deepEqual(state.sends.at(-1), ['bot-telegram', { ...target, targetId: target.targetId }, 'answer', {}]);
+  await assert.rejects(
+    adapter.sendSessionSyncText('bot-telegram', target.targetId, 'another-session', 'answer'),
+    { code: 'session-sync-unavailable' },
+  );
+
+  // A group is not a candidate for a synced question or approval, and both
+  // paths refuse it even when asked directly by target id.
+  assert.deepEqual(await adapter.listSessionSyncTargets('session-topic'), []);
+  const interaction = { respond: async () => {}, withdraw: async () => {} };
+  for (const [method, describe] of [
+    ['presentSessionSyncApproval', 'describeSessionSyncApprovalTarget'],
+    ['presentSessionSyncQuestion', 'describeSessionSyncQuestionTarget'],
+  ]) {
+    await assert.rejects(adapter[method]('bot-telegram', target.targetId, 'session-topic', interaction), {
+      code: 'session-sync-unavailable',
+    }, method);
+    await assert.rejects(adapter[describe]('bot-telegram', target.targetId, 'session-topic'), {
+      code: 'session-sync-unavailable',
+    }, describe);
+  }
+  assert.deepEqual(state.interactions, []);
+
+  assert.deepEqual((await adapter.listTargets('bot-telegram'))[0].sessionSync, {
+    enabled: true, state: 'active',
+  });
 });

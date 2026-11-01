@@ -590,7 +590,7 @@ async function startRuntimeForProbe(options = {}) {
 }
 
 for (const phase of ['user echo', 'final fallback']) {
-  test(`a hanging proactive ${phase} times out so other targets and the next turn continue`, { timeout: 5_000 }, async t => {
+  test(`a hanging proactive ${phase} times out so the next turn continues`, { timeout: 5_000 }, async t => {
     const runtime = await startRuntimeForProbe({ requestTimeoutMs: 15_000 });
     t.after(() => runtime.stop());
     t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -602,7 +602,7 @@ for (const phase of ['user echo', 'final fallback']) {
     const create = client.im.v1.message.create;
     client.im.v1.message.create = async request => {
       const text = JSON.parse(request.data.content).text;
-      if (!held && text.startsWith(phase === 'user echo' ? '[来自 DSH]' : '[DSH 助手]')) {
+      if (!held && text === (phase === 'user echo' ? 'question 1' : 'answer 1')) {
         held = true;
         return pending.promise;
       }
@@ -610,22 +610,30 @@ for (const phase of ['user echo', 'final fallback']) {
     };
     const coordinator = createSessionSyncCoordinator({
       deliveryService: {
-        listSessionSyncTargets: async () => [
-          { channel: 'feishu', botId: 'bot_probe', targetId: 'owner' },
-          { channel: 'telegram', botId: 'other', targetId: 'owner' },
-        ],
-        sendSessionSyncText: async (botId, targetId, sessionId, text) => {
-          if (botId === 'other') { delivered.push(text); return; }
+        // The Session binding resolves to this Feishu chat, exactly like the
+        // production service: the coordinator itself knows no address.
+        deliverSessionText: async (sessionId, text) => {
+          delivered.push(text);
           return runtime.sendProactiveText({ kind: 'user', route: { openId: 'ou_owner' } }, text);
         },
       },
+      // The user echo only happens for a mirrored Web input; keep it on so both
+      // phases (echo, final fallback) are exercised.
+      loadSettings: async () => ({ mirrorUserInput: true, deliverModelAnswers: true, inputIcon: '', modelIcon: '' }),
       logger: { warn() {} },
     });
     t.after(() => coordinator.close());
     const emitTurn = turn => {
       for (const event of [
         { type: 'turn/start', data: { turn } },
-        { type: 'user/message', surfaceOp: 'append', data: { content: [{ type: 'text', text: `question ${turn}` }] } },
+        {
+          type: 'user/message',
+          surfaceOp: 'append',
+          data: {
+            source: { kind: 'user', rpcId: `web-rpc-${turn}` },
+            content: [{ type: 'text', text: `question ${turn}` }],
+          },
+        },
         { type: 'assistant/message', surfaceOp: 'append', data: { turn, step: 1, message: { content: [{ type: 'text', text: `answer ${turn}` }] } } },
         { type: 'turn/end', data: { turn, reason: { kind: 'completed' } } },
       ]) void coordinator.enqueue('session', event, 'dsh');
@@ -635,9 +643,11 @@ for (const phase of ['user echo', 'final fallback']) {
     emitTurn(2);
     t.mock.timers.tick(15_000);
     await coordinator.whenIdle();
-    assert.ok(delivered.includes('[DSH 助手]\n\nanswer 1'));
-    assert.ok(delivered.includes('[DSH 助手]\n\nanswer 2'));
-    assert.ok(FakeClient.sent.some(request => JSON.parse(request.data.content).text === '[DSH 助手]\n\nanswer 2'));
+    // A timed-out input echo takes the answer of that same turn with it; the
+    // next turn is unaffected.
+    assert.equal(delivered.includes('answer 1'), phase === 'final fallback');
+    assert.ok(delivered.includes('answer 2'));
+    assert.ok(FakeClient.sent.some(request => JSON.parse(request.data.content).text === 'answer 2'));
     const sent = FakeClient.sent.length;
     pending.resolve({ code: 0 });
     await new Promise(resolve => setImmediate(resolve));

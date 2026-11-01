@@ -18,7 +18,7 @@ async function startHost(t, language) {
     `apply${channel}`, async () => {},
   ]));
   for (const installer of [
-    'installUpdateRpc', 'installDeliveryRpc', 'installInboundTtlRpc',
+    'installUpdateRpc', 'installDeliveryRpc', 'installInboundTtlRpc', 'installDeliverySyncRpc',
     'installSidebarSettingsRpc', 'installInjectedContext',
   ]) internals[installer] = () => {};
   internals.createDeliveryService = () => ({});

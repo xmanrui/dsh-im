@@ -85,6 +85,6 @@ export function installInboundTtlRpc(ctx, options = {}) {
     (endpoint, payload, signal) => Object.values(GROUP_HISTORY_ENDPOINTS).includes(endpoint)
       ? history(endpoint, payload, signal) : Object.values(IMAGE_INPUT_ENDPOINTS).includes(endpoint)
         ? image(endpoint, payload, signal) : ttl(endpoint, payload, signal),
-    { authority: 'loopback' },
+    { authority: options.config?.rpcAuthority },
   );
 }

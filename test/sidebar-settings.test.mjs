@@ -85,7 +85,7 @@ test('invalid and cancelled RPC requests never write; store serializes writes', 
   assert.equal((await call('settings.sidebar-entry.set', { mode: 'show' })).ok, true);
 });
 
-test('sidebar RPC follows channel authority while general settings remain loopback-only', async (t) => {
+test('sidebar and general settings follow the same authority without sharing business endpoints', async (t) => {
   for (const rpcAuthority of [undefined, 'trusted-host', 'loopback']) {
     await t.test(rpcAuthority ?? 'default', async (t) => {
       const dshHome = await home(t);
@@ -122,8 +122,9 @@ test('sidebar RPC follows channel authority while general settings remain loopba
         }
       }
       for (const host of ['192.168.1.1:3080', 'dsh.example.com']) {
-        assert.equal((await request(host, 'dsh-im-settings', 'settings.inbound-ttl.get')).status, 403);
-        assert.equal((await request(host, 'dsh-im-settings', 'settings.inbound-ttl.set', { ttlHours: 0 })).status, 403);
+        const expected = rpcAuthority === 'loopback' ? 403 : 200;
+        assert.equal((await request(host, 'dsh-im-settings', 'settings.inbound-ttl.get')).status, expected);
+        assert.equal((await request(host, 'dsh-im-settings', 'settings.inbound-ttl.set', { ttlHours: 0 })).status, expected);
       }
       const ttl = await request('localhost', 'dsh-im-settings', 'settings.inbound-ttl.get');
       assert.equal((await ttl.json()).result.value.ttlHours, 24);

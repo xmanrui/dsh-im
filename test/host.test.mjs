@@ -13,6 +13,23 @@ const NO_CHANNELS = Object.freeze({
   applyIMessage: async () => {}, applyOffice: async () => {},
 });
 
+test('Host forwards its management authority to both general settings and updates', async () => {
+  for (const rpcAuthority of [undefined, 'trusted-host', 'loopback']) {
+    const seen = [];
+    const config = { rpcAuthority };
+    const internals = Object.fromEntries(CHANNELS.map(([, applyName]) => [applyName, async () => {}]));
+    Object.assign(internals, {
+      createDeliveryService: () => ({}),
+      installHostLanguage: () => undefined,
+      installUpdateRpc: (_ctx, options) => seen.push(['update', options?.authority]),
+      installInboundTtlRpc: (_ctx, options) => { assert.equal(options.config, config); seen.push(['settings', options.config.rpcAuthority]); },
+      installSidebarSettingsRpc: () => {}, installDeliveryRpc: () => {},
+    });
+    await createImHostPlugin(internals).apply({ connection: { fetch: {} } }, config);
+    assert.deepEqual(seen, [['update', rpcAuthority], ['settings', rpcAuthority]]);
+  }
+});
+
 test('Host resolves the bot message language before channels start and serves its RPC', async () => {
   const order = [];
   let resolved = false;
@@ -25,7 +42,7 @@ test('Host resolves the bot message language before channels start and serves it
   const plugin = createImHostPlugin({
     ...NO_CHANNELS,
     createDeliveryService: () => ({}),
-    installUpdateRpc: () => {}, installInboundTtlRpc: () => {},
+    installUpdateRpc: () => {}, installInboundTtlRpc: () => {}, installDeliverySyncRpc: () => {},
     installDeliveryRpc: () => {}, installDeliveryHttp: () => {},
     installSessionSyncCoordinator: () => {},
     installHostLanguage: (_ctx, config) => {
@@ -53,6 +70,37 @@ test('Host resolves the bot message language before channels start and serves it
   assert.deepEqual(order.find(([kind]) => kind === 'sidebar-rpc'),
     ['sidebar-rpc', 'trusted-host', 'en']);
   assert.deepEqual(order.find(([kind]) => kind === 'telegram'), ['telegram', true]);
+});
+
+test('Host-provided describeConversation delegates through ctx.provide', async () => {
+  let provided;
+  const described = {
+    channel: 'telegram',
+    conversationKey: 'group:chat-1:thread-2',
+    senderId: 'user-1',
+  };
+  const deliveryService = {
+    async describeConversation(sessionId) {
+      assert.equal(sessionId, 'session-1');
+      return described;
+    },
+  };
+  const plugin = createImHostPlugin({
+    ...NO_CHANNELS,
+    createDeliveryService: () => deliveryService,
+    installHostLanguage: () => ({ ready: Promise.resolve() }),
+    applyTelegram: async () => {},
+    installUpdateRpc: () => {}, installInboundTtlRpc: () => {}, installDeliverySyncRpc: () => {},
+    installDeliveryRpc: () => {}, installDeliveryHttp: () => {},
+    installSessionSyncCoordinator: () => {},
+  });
+  const ctx = {
+    connection: { fetch: {} },
+    provide: (key, value) => { if (key === 'dshIm') provided = value; },
+  };
+
+  await plugin.apply(ctx, {});
+  assert.deepEqual(await provided.describeConversation('session-1'), described);
 });
 
 test('Host composes IM channels and the AI Office connector inside one plugin context', async () => {
@@ -289,7 +337,7 @@ test('Host installs channel prefixes through the real Cordis sessions dependency
   ctx.provide('sessions', { get: () => session, list: () => [session] });
   const internals = Object.fromEntries(CHANNELS.map(([, applyName]) => [applyName, async () => {}]));
   Object.assign(internals, {
-    installUpdateRpc: () => {}, installInboundTtlRpc: () => {},
+    installUpdateRpc: () => {}, installInboundTtlRpc: () => {}, installDeliverySyncRpc: () => {},
     installDeliveryRpc: () => {}, installSessionSyncCoordinator: () => {},
     // The language test is about session-title prefixes, not the interface
     // language: keep it off the real ~/.dsh mirror so a language a tester set

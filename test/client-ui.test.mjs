@@ -319,12 +319,13 @@ test('the general settings gear sits to the right of GitHub and outside the chan
   assert.doesNotMatch(markup, /id="dim-panel-global-settings"/);
 });
 
-test('general settings defaults to group history and keeps a separate Attachments tab', () => {
+test('general settings defaults to group history and keeps Attachments and Delivery tabs', () => {
   const markup = renderToStaticMarkup(React.createElement(GlobalSettingsPanel, { rpcCall: async () => ({}) }));
   assert.match(markup, /<h2>通用设置<\/h2>/);
   assert.match(markup, /id="dim-general-settings-tab-general"[^>]*aria-selected="true"/);
   assert.match(markup, /id="dim-general-settings-tab-attachments"[^>]*aria-selected="false"/);
-  assert.equal((markup.match(/role="tab"/g) ?? []).length, 2);
+  assert.match(markup, /id="dim-general-settings-tab-delivery"[^>]*aria-selected="false"/);
+  assert.equal((markup.match(/role="tab"/g) ?? []).length, 3);
   assert.match(markup, /群聊天记录保留天数/);
   assert.match(markup, /value="14"/);
   assert.match(markup, /正在读取群记录设置/);

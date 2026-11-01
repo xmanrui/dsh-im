@@ -5,6 +5,7 @@ import TestRenderer from 'react-test-renderer';
 
 import { en, setImTranslator } from '../plugin-src/client/i18n.js';
 import { UpdatePanel } from '../plugin-src/client/update-panel.js';
+import { callManagementRpc } from '../plugin-src/management-rpc.mjs';
 
 const { act, create } = TestRenderer;
 
@@ -347,6 +348,27 @@ test('an older Host gives manual update guidance instead of breaking settings', 
   assert.match(textOf(renderer.toJSON()), /当前 Host 不支持更新接口/);
   assert.equal(buttonNamed(renderer, '安装更新'), undefined);
   assert.ok(buttonNamed(renderer, '重新检查'));
+});
+
+test('update panel preserves HTTP guidance through the real management wrapper without automatic retries', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const [status, expected] of [[401, /登录状态无效或已过期/], [403, /HTTP 403.*权限/], [404, /当前 Host 不支持更新接口/]]) {
+    const calls = [];
+    const connection = { rpc: { async call(_channel, endpoint, payload) {
+      calls.push(payload.method);
+      throw new Error(`transport failure for /api/${endpoint}: HTTP ${status}`);
+    } } };
+    const renderer = await mount(t, (method, payload, signal) => callManagementRpc(connection, '/dsh-im', method, payload, signal));
+    await tick(t, 10_000);
+    assert.deepEqual(calls, ['update.status']);
+    await click(renderer, '检查更新');
+    assert.match(textOf(renderer.toJSON()), expected);
+    if (status === 403) assert.doesNotMatch(textOf(renderer.toJSON()), /重新登录/);
+    assert.equal(buttonNamed(renderer, '安装更新'), undefined);
+    await tick(t, 10_000);
+    assert.deepEqual(calls, ['update.status', 'update.check']);
+    await act(async () => renderer.unmount());
+  }
 });
 
 test('unmount aborts an in-flight status poll and cannot create a zombie timer', async (t) => {

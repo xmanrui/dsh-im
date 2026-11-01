@@ -32,7 +32,8 @@ import {
 import { prepareBotWorkspace } from '../../../../src/channels/shared/default-workspace.mjs';
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
 import { listModelCatalog } from '../../../../src/channels/shared/model-setting.mjs';
-import { createDeliveryAdapter, configuredSessionSyncTargets, sessionSyncTarget } from '../../delivery-adapter.mjs';
+import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
+import { createSessionSyncTargetsFor } from '../../session-sync-targets.mjs';
 import {
   accessPolicyProvider,
   initialAccessPolicyFor,
@@ -169,32 +170,15 @@ export async function createProductionController(ctx, config = {}, internals = {
   };
   // Session-sync mirror targets: which synced DMs (openId) belong to a
   // Session. Resolved lazily per turn start so rebinding a delivery target
-  // takes effect without a restart.
-  const sessionSyncTargetsFor = async (sessionId) => {
-    if (typeof workspaces.listSessionSyncTargets !== 'function') return [];
-    const matches = [];
-    for (const entry of configuredSessionSyncTargets(workspaces)) {
-      let state;
-      try {
-        state = await stateForBotId(entry.botId);
-      } catch {
-        continue;
-      }
-      let bound;
-      try {
-        bound = entry.dsBotId
-          ? (await config.deliveryService?.dsBot?.resolve(entry.dsBotId))?.sessionId
-          : state?.snapshot?.().sessions?.[entry.conversationKey];
-      } catch {
-        continue;
-      }
-      if (bound !== sessionId) continue;
-      const target = sessionSyncTarget('feishu', workspaces, entry);
-      const openId = target?.route?.openId;
-      if (openId) matches.push({ openId, botId: entry.botId, targetId: entry.targetId });
-    }
-    return matches;
-  };
+  // takes effect without a restart. The resolver also reads the global delivery
+  // switches, so the card mirror is silenced by the same predicate as the
+  // coordinator's target path.
+  const sessionSyncTargetsFor = createSessionSyncTargetsFor({
+    channel: 'feishu',
+    workspaces,
+    config,
+    stateForBotId,
+  });
   const commandExecutor = createHarnessCommandExecutor(ctx, internals.commandExecutor);
   const inboundTtl = internals.inboundTtl ?? getInboundTtlRuntime(ctx, config);
   const inboundTtlService = inboundTtl?.service ?? inboundTtl;

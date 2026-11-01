@@ -274,9 +274,10 @@ const info = await dshIm.describeConversation(sessionId);
 
 - Read-only: no network access, session creation, blocking reply, or thrown error; unknown Sessions return `null`.
 - Data comes from the plugin's state files (`sessions`) and bot configuration; no new core fields are required.
-- `chatType` is `group`, `thread`, or `dm`; a `direct:dm:<id>` key supplies `<id>` as `senderId`.
+- `chatType` is `group`, `thread`, or `dm`. Without an author record, `senderId` is derived from the key only where the key names the user: Matrix `direct:dm:<userId>`, `p2p:<id>` (Feishu, Weixin, WeCom app, DingTalk), QQ `c2c:<openid>`, and `direct:<id>` on Telegram and WeCom. On Slack, Discord, WhatsApp, iMessage and others `direct:<id>` names the DM channel, so it is reported as `chatId` and `senderId` stays `null`.
 - The first lookup logs one line per Session; later lookups do not repeat it.
-- The bridge remembers the last inbound author's id, name, username, and bot flag in the bot state, without storing message text.
+- The bridge remembers the last inbound author's id and bot flag in the bot state, without storing message text. The display name and username are stored only when context enhancement is enabled for that chat kind (or the channel already exposes a speaker name, as Matrix does); otherwise they are `null`.
+- Links inserted from conversation keys into numeric chat/topic fields are **Telegram-only**; QQ and other channels must use their native route fields and must not be treated as Telegram links.
 
 ### The two binding events
 
@@ -421,7 +422,9 @@ To additionally restrict IM management to local access, set the following in the
     rpcAuthority: loopback
 ```
 
-`rpcAuthority` defaults to `trusted-host`; explicitly selecting `loopback` additionally requires loopback Host and Origin values. Update and inbound TTL management always remain loopback-only.
+`rpcAuthority` defaults to `trusted-host` for channel management, general settings (group history retention, attachment retention and cleanup, and image limits), and plugin updates. LAN and NAS/Docker requests that pass DSH authentication and Host/Origin checks can use these APIs. Explicitly selecting `loopback` additionally requires a loopback Host and, when present, a loopback Origin.
+
+For management HTTP 401 errors, sign in again using a valid launch link. HTTP 403 means access was denied: check DSH trusted hosts, the proxy's Host/Origin handling, and the plugin's `rpcAuthority` setting. When accessing a remote NAS, do not change the browser address to localhost on your own computer. API access does not make every installation eligible for button updates: source/link installations and unsupported runtimes retain their existing restrictions. Installation confirmation, version checks, concurrency locks, and manual restart requirements are unchanged.
 
 After building the plugin, run `node scripts/verify-lan-management.mjs /path/to/built/deepseek-harness` for the LAN management HTTP integration check. It starts the original DSH CLI with an isolated temporary profile and no bot credentials, checks default access, authentication, Host/Origin checks, and explicit `loopback` restrictions, then stops the server and removes the temporary directory. Requests carry LAN Host/Origin values over loopback TCP; a browser on a second device requires separate verification. The original `0.1.5-alpha.1` CLI rejects `--host 0.0.0.0`, so that browser check needs a Harness environment that supports LAN access.
 

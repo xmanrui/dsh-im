@@ -138,6 +138,8 @@ const ROOT_CANDIDATE_TTL_MS = 30 * 60_000;
 /** Bound main-feed roots awaiting a topic so silent drops cannot grow them. */
 const MAX_ROOT_CANDIDATES = 512;
 const MAX_TOPIC_ANCHORS = 4_000;
+/** Conversations remembered as auto-continued-round delivery targets (LRU). */
+const MAX_CONVERSATION_ROUTES = 512;
 
 const MENU_COMMAND = /^\/m(?:enu)?$/i;
 const REPAIR_COMMAND_PREFIX = /^\/repair(?:\s|$)/i;
@@ -218,6 +220,18 @@ const MIRROR_CHECK_MS = 30_000;
 /** Retire orphan snapshots outside Feishu's message update window. */
 const MIRROR_STALE_MS = 14 * 24 * 60 * 60_000;
 const MIRROR_RECOVERY_MAX_FAILURES = 20;
+
+/**
+ * The one-line label an auto-continued round shows in the conversation. The
+ * Harness goal driver feeds the round a `<goal_round>` prompt that must never
+ * reach the chat, so both the goal-round card and the session-sync mirror
+ * announce the round by number instead of echoing that text.
+ */
+function goalRoundLabel(round) {
+  return Number.isSafeInteger(round) && round > 0
+    ? t('🔄 目标自动续跑（第 {round} 轮）', { round })
+    : t('🔄 目标自动续跑');
+}
 
 function mirrorErrorText(error) {
   return [error?.response?.data?.msg, error?.msg, error?.message]
@@ -747,6 +761,14 @@ export class FeishuHarnessBridge {
   #sessionSyncIdleTimers = new Map();
   /** Conversation keys with an IM ask in flight (set BEFORE the turn starts). */
   #imTurnKeys = new Set();
+  /** Where each conversation posts: { chatId, replyToMessageId } (last inbound). */
+  #conversationRoutes = new Map();
+  /** Goal rounds currently rendering into a bound conversation, by key. */
+  #goalRounds = new Map();
+  // A goal round's user/message carries `source.kind === 'goal'` but no
+  // `data.turn`; the turn/start right before it does. Keep the latest start
+  // so the round can still be identified without inventing a turn.
+  #goalTurnStarts = new Map();
   #cardDataTimeoutMs;
   #requestTimeoutMs;
   /** When true, approval/question interactions render as Feishu cards (buttons). */
@@ -1164,6 +1186,24 @@ export class FeishuHarnessBridge {
     }
   }
 
+  /**
+   * Remember where a conversation posts, so a turn opened outside the IM can
+   * render into it later. Called for every accepted inbound message; a host
+   * that already knows a binding can register it the same way.
+   */
+  rememberConversationRoute(key, { chatId, replyToMessageId = null } = {}) {
+    const conversation = nonEmptyString(chatId);
+    if (!nonEmptyString(key) || !conversation) return;
+    this.#conversationRoutes.delete(key);
+    this.#conversationRoutes.set(key, {
+      chatId: conversation,
+      replyToMessageId: nonEmptyString(replyToMessageId),
+    });
+    while (this.#conversationRoutes.size > MAX_CONVERSATION_ROUTES) {
+      this.#conversationRoutes.delete(this.#conversationRoutes.keys().next().value);
+    }
+  }
+
   accept(event) {
     if (!this.#groupHistory || event?.message?.chat_type !== 'group') return this.#accept(event);
     const content = extractInboundMessage({ ...event, message: { ...event.message, mentions: [] } }, this.#client);
@@ -1214,6 +1254,10 @@ export class FeishuHarnessBridge {
       return Promise.resolve();
     }
     this.#rememberTopicReply(messageId, key);
+    this.rememberConversationRoute(key, {
+      chatId: event.message.chat_id,
+      replyToMessageId: messageId,
+    });
 
     const commandMessage = extractInboundMessage(event, this.#client);
     const commandText = nonEmptyString(commandMessage.content) ?? '';
@@ -4417,7 +4461,12 @@ export class FeishuHarnessBridge {
     this.#scheduleMirrorCheck(key, () => this.#checkMirror(mirror));
     const openId = mirror.target.openId;
     if (type === 'user/message' && event.surfaceOp === 'append') {
-      const text = textFromHarnessContent(event.data?.content);
+      const source = event.data?.source;
+      // Goal rounds carry a `<goal_round>` driver prompt: announce the round
+      // instead of echoing that machine text into the chat.
+      const text = source?.kind === 'goal'
+        ? goalRoundLabel(source.round)
+        : textFromHarnessContent(event.data?.content);
       if (text.trim()) {
         const excerpt = text.length > 400 ? `${text.slice(0, 399)}…` : text;
         await this.#appendStepCardUpdate(key, openId, null,
@@ -4445,6 +4494,199 @@ export class FeishuHarnessBridge {
     }
   }
 
+  // ── Goal rounds opened outside the IM ───────────────────────────────────
+
+  /** Any conversation route bound to this session (the goal-round target). */
+  #hasConversationFor(sessionId) {
+    for (const key of this.#conversationRoutes.keys()) {
+      if (this.#state.sessionFor?.(key) === sessionId) return true;
+    }
+    return false;
+  }
+
+  /**
+   * A goal round is injected by the Harness goal driver: no inbound message
+   * opened it, so the step-card ladder of #answerWithStepPush never runs and
+   * a conversation bound to that session stays silent for the whole round.
+   * Announce the round and stream its tools/answer into the same live card
+   * the IM turns use, so a long auto-run still shows progress and delivers
+   * each round's result. IM-owned turns and sessions already mirrored into a
+   * synced DM are skipped.
+   */
+  async #feedGoalRoundTurn(sessionId, event, imOwned = false) {
+    if (this.#signal?.aborted) return;
+    const type = event.type;
+    if (type === 'turn/start') {
+      const started = event.data?.turn;
+      if (Number.isSafeInteger(started)) {
+        this.#goalTurnStarts.set(sessionId, { turn: started, seq: event.seq });
+      }
+      return;
+    }
+    if (type === 'user/message') {
+      const source = event.data?.source;
+      if (source?.kind !== 'goal' || imOwned) return;
+      const turn = this.#goalRoundTurn(sessionId, event);
+      if (!Number.isSafeInteger(turn) || this.#goalRoundsFor(sessionId, turn).length > 0) return;
+      await this.#openGoalRounds(sessionId, turn, source.round);
+      return;
+    }
+    if (type !== 'tool/call' && type !== 'assistant/message' && type !== 'turn/end') return;
+    const turn = event.data?.turn;
+    // A later turn proves earlier rounds are over even when their turn/end was
+    // lost, so close them instead of leaving a card open forever.
+    if (Number.isSafeInteger(turn)) await this.#sealStaleGoalRounds(sessionId, turn);
+    const rounds = Number.isSafeInteger(turn)
+      ? this.#goalRoundsFor(sessionId, turn)
+      : this.#goalRoundsFor(sessionId);
+    if (!rounds.length) return;
+    if (imOwned) {
+      // The user took the conversation back with a real IM turn: that turn's
+      // ask owns this key's card now, so sealing it here would truncate the
+      // reply the user is waiting for. Hand the round over instead — whatever
+      // streamed so far stays on the card the ask continues.
+      for (const round of rounds) {
+        round.finished = true;
+        this.#goalRounds.delete(round.key);
+      }
+      return;
+    }
+    for (const round of rounds) {
+      if (round.finished || event.seq <= round.lastSeq) continue;
+      if (this.#state.sessionFor?.(round.key) !== sessionId) {
+        // The conversation was rebound to another session: this session's
+        // later output must not land in the card the user now sees there.
+        await this.#sealGoalRound(round, 'completed');
+        continue;
+      }
+      round.lastSeq = event.seq;
+      if (type === 'tool/call') {
+        if (round.pendingStep) {
+          this.#morphStepCardAnswerToNote(round.key, round.pendingStep);
+          round.pendingStep = null;
+        }
+        await this.#appendStepCardUpdate(round.key, round.chatId, round.replyToMessageId,
+          this.#stepCardToolBlock({
+            name: event.data?.name ?? '',
+            arguments: typeof event.data?.arguments === 'string' ? event.data.arguments : '',
+          }), { billable: false });
+      } else if (type === 'assistant/message'
+        && event.surfaceOp === 'append'
+        && event.data?.interrupted !== true) {
+        const text = textFromHarnessContent(event.data?.message?.content);
+        if (!text.trim()) continue;
+        round.assistant.setCanonical(event.data?.step, text);
+        round.pendingStep = text;
+        this.#streamStepCardAnswer(round.key, round.chatId, round.replyToMessageId, text);
+      } else if (type === 'turn/end') {
+        const reason = typeof event.data?.reason === 'string' ? event.data.reason : event.data?.reason?.kind;
+        await this.#sealGoalRound(round, reason);
+      }
+    }
+  }
+
+  /**
+   * The turn a goal round belongs to. Harness `user/message` events injected by
+   * the goal driver omit `data.turn`, so fall back to the turn/start that
+   * opened the turn immediately before it.
+   */
+  #goalRoundTurn(sessionId, event) {
+    const declared = event.data?.turn;
+    if (Number.isSafeInteger(declared)) return declared;
+    const started = this.#goalTurnStarts.get(sessionId);
+    if (!started || !validEventSeq(started.seq) || started.seq >= event.seq) return undefined;
+    return started.turn;
+  }
+
+  #goalRoundsFor(sessionId, turn = null) {
+    const rounds = [];
+    for (const round of this.#goalRounds.values()) {
+      if (round.sessionId !== sessionId) continue;
+      if (turn !== null && round.turn !== turn) continue;
+      rounds.push(round);
+    }
+    return rounds;
+  }
+
+  async #openGoalRounds(sessionId, turn, roundNumber) {
+    const syncedOpenIds = await this.#sessionSyncOpenIds(sessionId);
+    for (const [key, route] of this.#conversationRoutes) {
+      // Only this session's own conversations take part. A key bound to some
+      // other session is not "rebound" from here — it is another session's
+      // card, and its round keeps running until that session says otherwise.
+      if (this.#state.sessionFor?.(key) !== sessionId) continue;
+      const existing = this.#goalRounds.get(key);
+      if (existing && existing.turn !== turn) {
+        // The previous round never reported turn/end (dropped event, crashed
+        // Host): it cannot be updated any more, so close it instead of
+        // letting it block this round.
+        await this.#sealGoalRound(existing);
+      }
+      if (this.#isSyncedDmKey(key, syncedOpenIds)) continue;
+      if (this.#goalRounds.has(key)) continue;
+      // A card left open by an abnormal exit is sealed before the new round
+      // reuses the conversation's card slot.
+      if (this.#stepCards.has(key)) await this.#finishStepCard(key);
+      this.#goalRounds.set(key, {
+        key,
+        sessionId,
+        turn,
+        chatId: route.chatId,
+        replyToMessageId: route.replyToMessageId,
+        assistant: new AssistantTextAccumulator(),
+        pendingStep: null,
+        lastSeq: -1,
+        finished: false,
+      });
+      await this.#appendStepCardUpdate(key, route.chatId, route.replyToMessageId,
+        { kind: 'message', text: goalRoundLabel(roundNumber) }, { billable: false });
+    }
+  }
+
+  /**
+   * Peers whose synced DM already mirrors this session with this bot. The
+   * mirror owns exactly that direct chat, not every conversation bound to the
+   * session, so a group topic keeps rendering alongside it.
+   */
+  async #sessionSyncOpenIds(sessionId) {
+    if (!this.#sessionSyncTargetsFor) return new Set();
+    try {
+      const targets = await this.#sessionSyncTargetsFor(sessionId);
+      const openIds = new Set();
+      for (const target of Array.isArray(targets) ? targets : []) {
+        if (target?.botId === this.#botId && nonEmptyString(target?.openId)) openIds.add(target.openId);
+      }
+      return openIds;
+    } catch {
+      return new Set();
+    }
+  }
+
+  /** The plain peer DM key the session-sync mirror delivers into. */
+  #isSyncedDmKey(key, openIds) {
+    if (!(openIds instanceof Set) || openIds.size === 0) return false;
+    if (!key.startsWith('p2p:')) return false;
+    const peer = key.slice(4);
+    // Managed topics inside a DM are separate surfaces the mirror does not
+    // reach: only the plain direct chat is duplicated by it.
+    return !peer.includes(':') && openIds.has(peer);
+  }
+
+  async #sealStaleGoalRounds(sessionId, turn) {
+    const stale = this.#goalRoundsFor(sessionId).filter((round) => round.turn < turn);
+    for (const round of stale) await this.#sealGoalRound(round, 'completed');
+  }
+
+  async #sealGoalRound(round, reason = 'completed') {
+    if (round.finished) return;
+    round.finished = true;
+    this.#goalRounds.delete(round.key);
+    await this.#finishStepCard(round.key, {
+      stopped: reason === 'stopped' || reason === 'aborted' || reason === 'cancelled',
+      answerText: round.assistant.text,
+    });
+  }
+
   #onHarnessEvent({ sessionId, event }) {
     if (this.#signal?.aborted
       || !sessionId
@@ -4458,10 +4700,15 @@ export class FeishuHarnessBridge {
     // card, tool/call and assistant/message feed it, turn/end seals it);
     // IM-opened turns are skipped — they already own their card via the ask
     // callbacks. turn/end ALSO continues below for watch completions.
+    const imOwned = this.#isImTurn(sessionId);
     if (this.#sessionSyncTargetsFor) {
-      const imOwned = this.#isImTurn(sessionId);
       void this.#queueEventTask(sessionId, () => this.#feedSessionSyncTurn(sessionId, event, imOwned));
-      if (event.type !== 'turn/end') return;
+    }
+    // Goal auto-continuation: a round opened by the Harness goal driver has
+    // no inbound message behind it, so it renders into the bound conversation
+    // through this bridge instead of an ask callback. Same event ladder.
+    if (this.#goalRounds.size > 0 || this.#hasConversationFor(sessionId)) {
+      void this.#queueEventTask(sessionId, () => this.#feedGoalRoundTurn(sessionId, event, imOwned));
     }
     if (event.type !== 'turn/end') return;
     // Record before consulting state: /watch may still be resolving its target

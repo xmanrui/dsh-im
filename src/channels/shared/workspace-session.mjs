@@ -232,7 +232,7 @@ export async function askInWorkspaceSession({
         throw error;
       }
       return {
-        sessionId: (dsBotSession ? state.sessionFor(key) : null) ?? binding.sessionId,
+        sessionId: binding.session.replySessionId ?? binding.sessionId,
         answer,
         ...(artifacts.length > 0 ? { artifacts } : {}),
       };

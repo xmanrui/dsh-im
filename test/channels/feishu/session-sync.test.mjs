@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import { FeishuHarnessBridge } from '../../../src/channels/feishu/bridge.mjs';
 import { StateStore } from '../../../src/channels/feishu/state-store.mjs';
 import { createSessionSyncCoordinator } from '../../../plugin-src/host/session-sync-coordinator.mjs';
+import { createDeliveryAdapter } from '../../../plugin-src/host/delivery-adapter.mjs';
+import { DeliveryService } from '../../../plugin-src/host/delivery-service.mjs';
+import { createSessionSyncTargetsFor } from '../../../plugin-src/host/session-sync-targets.mjs';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const flush = async () => { for (let i = 0; i < 8; i++) await tick(); };
@@ -17,7 +20,11 @@ const scheduled = (turn = 1) => ({ ...user(turn), data: { ...user(turn).data, so
 const answer = (text = 'complete answer', turn = 1) => ({ type: 'assistant/message', seq: turn * 100 + 2, surfaceOp: 'append', data: { turn, step: 1, message: { content: [{ type: 'text', text }] } } });
 const end = (turn = 1, kind = 'completed') => ({ type: 'turn/end', seq: turn * 100 + 3, data: { turn, reason: { kind } } });
 
-async function fixture(t, { state, targets = [target], create, patch, history = [], sync = true, resolver, botId = 'bot-a', bridgeOptions = {} } = {}) {
+async function fixture(t, {
+  state, targets = [target], create, patch, history = [], sync = true, resolver,
+  botId = 'bot-a', bridgeOptions = {}, deliveryService: customDeliveryService,
+  settings = { mirrorUserInput: false, deliverModelAnswers: true },
+} = {}) {
   let listener;
   const controller = new AbortController();
   const creates = [], patches = [], texts = [], warnings = [], historyCalls = [], visible = new Map(), mirrors = new Map();
@@ -45,7 +52,8 @@ async function fixture(t, { state, targets = [target], create, patch, history = 
     botId, harness, state, status: {}, channel: {}, signal: controller.signal,
     allowedSenderOpenIds: new Set(['ou_owner']),
     logger: { warn: (...args) => warnings.push(args), debug() {}, error() {} },
-    sessionSyncTargetsFor: resolver ?? (async () => [{ ...target, botId, openId: 'ou_owner' }]),
+    sessionSyncTargetsFor: resolver ?? (async () => (
+      targets.length > 0 ? [{ ...target, botId, openId: 'ou_owner' }] : [])),
     stepPushClock: { now: () => Date.now(), delay: async () => {} },
     client: { im: { v1: { message: {
       create: async request => {
@@ -65,10 +73,37 @@ async function fixture(t, { state, targets = [target], create, patch, history = 
     } } } },
     ...bridgeOptions,
   });
-  const coordinator = sync ? createSessionSyncCoordinator({ deliveryService: {
-    listSessionSyncTargets: async () => targets,
-    sendSessionSyncText: async (...args) => texts.push(args),
-  }, logger: { warn: (...args) => warnings.push(args) } }) : null;
+  // The coordinator sees the same configured targets the bridge mirrors into, so
+  // both of its paths run here against the real card: the target path when this
+  // bot has targets, the binding path when it has none.
+  const deliveryService = customDeliveryService ?? {
+    async describeConversation() {
+      return targets.length > 0
+        ? { channel: 'feishu', botId, conversationKey: 'oc_sync' }
+        : null;
+    },
+    async listTargets() {
+      return { targets: targets.map(item => ({ targetId: item.targetId })) };
+    },
+    async listSessionSyncTargets() {
+      return targets;
+    },
+    async sendSessionSyncText(botIdArg, targetId, sessionId, text, options) {
+      const channel = targets.find(item => item.botId === botIdArg && item.targetId === targetId)?.channel;
+      texts.push([sessionId, text, options, `target:${channel}`]);
+    },
+    async deliverSessionText(sessionId, text, options) {
+      texts.push([sessionId, text, options, 'binding']);
+      return { sent: true };
+    },
+  };
+  const coordinator = sync ? createSessionSyncCoordinator({
+    deliveryService,
+    logger: { warn: (...args) => warnings.push(args) },
+    // The shipped defaults mirror nothing, so a test that expects a delivered
+    // answer has to be the reader who switched it on.
+    loadSettings: async () => settings,
+  }) : null;
   const close = () => { controller.abort(); coordinator?.close(); };
   t.after(close);
   await flush();
@@ -107,7 +142,8 @@ test('mirror keeps every long code segment fenced across cards without losing in
   assert.deepEqual(receivedRows, rows);
   assert.match(cards.at(-1), /END_LONG_CODE/);
   assert.match(cards.at(-1), /已完成/);
-  assert.equal(f.texts.filter(args => args[3].startsWith('[DSH 助手]')).length, 0);
+  // The cards carry the answer, so the coordinator sends no second copy of it.
+  assert.deepEqual(f.texts, [], 'the confirmed card is the only delivery');
 });
 
 test('mirror snapshots match the delivered expansion even if preferences change during PATCH', async t => {
@@ -150,7 +186,7 @@ test('mirror snapshots match the delivered expansion even if preferences change 
 
 for (const input of [user, scheduled]) {
   for (const phase of ['create', 'final patch']) {
-    test(`${input === scheduled ? 'scheduled ' : ''}mirror ${phase} failure preserves final text fallback and permits next turn`, async t => {
+    test(`${input === scheduled ? 'scheduled ' : ''}mirror ${phase} failure neither blocks nor duplicates the Session text`, async t => {
       let release;
       const gate = new Promise((_resolve, reject) => { release = () => reject(new Error('provider failure')); });
       let failed = false;
@@ -165,15 +201,19 @@ for (const input of [user, scheduled]) {
       await flush();
       f.emit(end());
       await flush();
-      assert.equal(f.texts.filter(r => r[3].startsWith('[DSH 助手]')).length, 0, 'wait for real card outcome');
+      // The answer waits for the card's verdict: a pending card is not proof of
+      // delivery, so nothing is sent while the request hangs.
+      assert.equal(f.texts.filter(r => r[1] === 'complete answer').length, 0);
       release();
       await f.drain();
-      assert.equal(f.texts.filter(r => r[3] === '[DSH 助手]\n\ncomplete answer').length, 1);
-      if (input === scheduled) assert.equal(f.texts.filter(r => r[3].startsWith('[来自 DSH]')).length, 0);
+      // The card did not carry the answer, so the text fallback does, once.
+      assert.equal(f.texts.filter(r => r[1] === 'complete answer').length, 1);
+      if (input === scheduled) assert.equal(f.texts.filter(r => r[1].startsWith('[来自 DSH]')).length, 0);
       f.emit(start(2)); f.emit(input(2)); f.emit(answer('next answer', 2)); f.emit(end(2));
       await f.drain();
       assert.ok([...f.visible.values()].some(text => text.includes('next answer')));
-      assert.equal(f.texts.filter(r => r[3].includes('[DSH 助手]\n\nnext answer')).length, 0);
+      assert.equal(f.texts.filter(r => r[1] === 'next answer').length, 0,
+        'the second card confirmed its answer, so no text follows it');
     });
   }
 }
@@ -206,8 +246,12 @@ for (const phase of ['create', 'running patch', 'final patch']) {
       assert.ok([...f.visible.values()].some(text => text.includes('next answer')),
         'a hanging request must not block the next turn');
       await f.drain();
-      assert.equal(f.texts.filter(r => r[0] === 'bot-a' && r[3] === '[DSH 助手]\n\ncomplete answer').length, 1);
-      assert.ok(f.texts.some(r => r[0] === 'bot-b' && r[3] === '[DSH 助手]\n\ncomplete answer'));
+      // The Feishu card timed out, so its answer falls back to text; the other
+      // target has no card renderer and keeps its own text. One delivery each.
+      assert.deepEqual(
+        f.texts.filter(r => r[1] === 'complete answer').map(r => r[3]),
+        ['target:feishu', 'target:telegram'],
+      );
       assert.ok(f.warnings.some(args => args.some(arg => String(arg).includes('timed out'))));
       const saved = structuredClone(f.state.mirrorEntries());
       const delivered = structuredClone(f.texts);
@@ -240,22 +284,83 @@ test('runtime abort releases a mirror sealing wait before the request deadline',
   assert.deepEqual([f.creates.length, f.patches.length], requests);
 });
 
-test('scheduled sync accepts the existing card receipt without duplicate text', async t => {
+test('a scheduled turn delivers its answer once, in its card', async t => {
   const f = await fixture(t);
   for (const event of [start(), scheduled(), answer(), end()]) f.emit(event);
   await f.drain();
   assert.equal(f.creates.length, 1);
   assert.ok([...f.visible.values()].some(text => text.includes('complete answer')));
+  // The confirmed card is the delivery: no second copy of the same answer.
   assert.deepEqual(f.texts, []);
 });
 
-test('same target id on another channel/bot still receives its answer', async t => {
-  const f = await fixture(t, { targets: [target, other, { ...target, botId: 'bot-c' }, { ...target, targetId: 'second' }] });
+test('a Web turn with targets delivers its answer once, in its card', async t => {
+  const f = await fixture(t);
   for (const event of [start(), user(), answer(), end()]) f.emit(event);
   await f.drain();
-  assert.deepEqual(f.texts.filter(r => r[3].startsWith('[DSH 助手]')).map(r => r.slice(0, 2)),
-    [['bot-b', 'owner'], ['bot-c', 'owner'], ['bot-a', 'second']]);
+  assert.deepEqual(f.texts, []);
+  assert.ok([...f.visible.values()].some(text => text.includes('complete answer')));
 });
+
+test('a bot without targets delivers its answer once through the Session binding', async t => {
+  const f = await fixture(t, { targets: [] });
+  for (const event of [start(), user(), answer(), end()]) f.emit(event);
+  await f.drain();
+  // No target means no card either, so the binding is the only delivery.
+  assert.equal(f.creates.length, 0);
+  assert.deepEqual(f.texts.map(r => r.slice(0, 2)), [['session', 'complete answer']]);
+  assert.equal(f.texts[0][3], 'binding');
+});
+
+for (const scenario of ['current session', 'rolled-over session', 'failed card', 'switches off']) {
+  test(`a DS Bot without saved delivery targets: ${scenario}`, async t => {
+    const settings = { mirrorUserInput: false, deliverModelAnswers: scenario !== 'switches off' };
+    const bot = { id: 'ds-one', sessionId: 'session', parts: ['old-session'] };
+    const dsBot = {
+      status: async () => ({ state: 'ready', bots: [bot] }),
+      resolve: async () => bot,
+    };
+    const workspaces = {
+      has: botId => botId === 'bot-a',
+      listBotIds: () => ['bot-a'],
+      listDeliveryTargets: () => [],
+      listSessionSyncTargets: () => [],
+      listDsBotBindings: () => [{ botId: 'bot-a', conversationKey: 'p2p:ou_owner', dsBotId: bot.id }],
+    };
+    const stateFor = async () => ({ snapshot: () => ({ sessions: {
+      'p2p:ou_owner': scenario === 'rolled-over session' ? 'old-session' : 'session',
+    } }) });
+    const sends = [];
+    const service = new DeliveryService({ dsBot });
+    service.registerAdapter(createDeliveryAdapter({
+      channel: 'feishu', workspaces, dsBot, stateFor,
+      coreController: { sendProactiveText: async (...args) => { sends.push(args); return { sent: true }; } },
+    }));
+    const resolver = createSessionSyncTargetsFor({
+      channel: 'feishu', workspaces, stateForBotId: stateFor,
+      deliveryService: service, loadSettings: async () => settings,
+    });
+    const f = await fixture(t, {
+      targets: [], resolver, deliveryService: service, settings,
+      create: scenario === 'failed card' ? async () => { throw new Error('provider failure'); } : undefined,
+    });
+    for (const event of [start(), scheduled(), answer(), end()]) f.emit(event);
+    await f.drain();
+
+    if (scenario === 'failed card') {
+      assert.equal(sends.length, 1, 'a failed card receives exactly one text fallback');
+      assert.equal(sends[0][2], 'complete answer');
+      assert.equal(sends[0][3].format, 'plain');
+    } else if (scenario === 'switches off') {
+      assert.equal(f.creates.length, 0);
+      assert.deepEqual(sends, []);
+    } else {
+      assert.equal(f.creates.length, 1);
+      assert.ok([...f.visible.values()].some(text => text.includes('complete answer')));
+      assert.deepEqual(sends, [], 'the confirmed DS Bot card must not be duplicated as text');
+    }
+  });
+}
 
 test('two rapid surfaced turns have separate cards and retain both answers', async t => {
   const f = await fixture(t, { sync: false });
@@ -472,7 +577,7 @@ for (const phase of ['running', 'finish']) {
     f.emit(start()); f.emit(user()); await f.drain();
     f.emit(answer()); await f.drain();
     f.emit(end()); await f.drain();
-    assert.equal(f.texts.filter(row => row[3] === '[DSH 助手]\n\ncomplete answer').length, 1);
+    assert.equal(f.texts.filter(row => row[1] === 'complete answer').length, 1);
     assert.equal(f.mirrors.size, 0);
     const count = f.patches.length;
     t.mock.timers.tick(90_000); await f.drain();

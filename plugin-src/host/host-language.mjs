@@ -60,8 +60,11 @@ export function createHostLanguageController({
 
   const mirrorTag = () => (typeof store?.getLanguageTag === 'function' ? store.getLanguageTag() : null);
 
+  const explicitTag = () => (typeof store?.getExplicitTag === 'function' ? store.getExplicitTag() : null);
+
   const resolution = () => resolveHostLanguageTag({
     config: configLanguage,
+    explicit: explicitTag(),
     settings: settingsTag(),
     mirror: mirrorTag(),
   });
@@ -84,6 +87,32 @@ export function createHostLanguageController({
 
     /** The resolution as it stands, without switching the active language. */
     snapshot: () => describe(resolution()),
+
+    /**
+     * Pin the plugin's own message language, or pass null (the settings page's
+     * "same as the DSH interface") to clear that selection. It outranks DSH's
+     * locale, so a reader who wants English DSH with Russian bot messages can
+     * say so; an operator's `language` option still outranks both.
+     */
+    async select(value) {
+      const choice = value === null || value === undefined ? null : value;
+      if (typeof store?.setExplicitTag !== 'function') return apply();
+      if (choice === null) {
+        await store.setExplicitTag(null);
+      } else {
+        const tag = normalizeInterfaceLanguageTag(choice);
+        if (tag === null) {
+          const error = new Error('Invalid message language selection.');
+          error.code = 'interface-language-invalid';
+          throw error;
+        }
+        await store.setExplicitTag(tag);
+      }
+      return apply();
+    },
+
+    /** The current explicit selection, or null when the plugin follows DSH. */
+    explicit: explicitTag,
 
     /** Record the interface locale reported by the settings UI, then re-resolve. */
     async mirror(value) {

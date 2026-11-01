@@ -5,7 +5,29 @@ import { dirname } from 'node:path';
 import { qqStateError } from './state-error.mjs';
 
 const PENDING_MESSAGE_LIMIT = 200;
+const AUTHOR_LIMIT = 500;
 const EMPTY_STATE = Object.freeze({ version: 1, sessions: {}, seenMessageIds: [] });
+
+function normalizeAuthor(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const senderId = typeof value.senderId === 'string' ? value.senderId : '';
+  if (!senderId) return null;
+  const author = { senderId, isBot: value.isBot === true };
+  if (typeof value.senderName === 'string' && value.senderName) author.senderName = value.senderName;
+  if (typeof value.senderUsername === 'string' && value.senderUsername) author.senderUsername = value.senderUsername;
+  if (typeof value.at === 'string' && value.at) author.at = value.at;
+  return author;
+}
+
+function normalizeAuthors(value) {
+  const authors = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return authors;
+  for (const key of Object.keys(value).slice(-AUTHOR_LIMIT)) {
+    const author = normalizeAuthor(value[key]);
+    if (author) authors[key] = author;
+  }
+  return authors;
+}
 
 /**
  * A message persisted when it enters the QQ bridge's in-memory queue, so a
@@ -62,6 +84,7 @@ function normalizeState(value) {
   return {
     version: 1,
     sessions,
+    ...(value.authors ? { authors: normalizeAuthors(value.authors) } : {}),
     includeArchivedSessions: value.includeArchivedSessions === true,
     ...(pendingMessages.length ? { pendingMessages } : {}),
     ...(value.deferred ? { deferred: normalizeDeferredState(value.deferred) } : {}),
@@ -167,6 +190,25 @@ export class QqStateStore {
   }
 
   includesArchivedSessions() { return this.#state.includeArchivedSessions === true; }
+
+  authorFor(key) {
+    const author = this.#state.authors?.[key];
+    return author ? structuredClone(author) : null;
+  }
+
+  async rememberAuthor(key, value) {
+    const author = normalizeAuthor({ at: new Date().toISOString(), ...value });
+    if (typeof key !== 'string' || !key || !author) return null;
+    const authors = this.#state.authors ??= {};
+    delete authors[key];
+    authors[key] = author;
+    const keys = Object.keys(authors);
+    if (keys.length > AUTHOR_LIMIT) {
+      for (const stale of keys.slice(0, keys.length - AUTHOR_LIMIT)) delete authors[stale];
+    }
+    await this.#persist();
+    return structuredClone(author);
+  }
 
   async setIncludeArchivedSessions(include) {
     this.#state.includeArchivedSessions = include === true;

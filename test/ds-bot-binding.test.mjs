@@ -408,8 +408,9 @@ test('turn-blocked exceeding the rollover polling window preserves the original 
 test('transferred message during handoff turn-blocked is processed once without duplicate submission', async (t) => {
   const f = await fixture(t);
   await f.service.bindDsBot('im-one', f.key, bot.id);
-  f.scope.harness.waitForTransferredReply = async (id) => {
+  f.scope.harness.waitForTransferredReply = async (id, options) => {
     assert.equal(id, 'session-two');
+    assert.equal(options.promptRpcId, 'im-transferred');
     return 'answer-transferred-from-session-two';
   };
   f.scope.harness.ask = async (id, text) => {
@@ -417,6 +418,8 @@ test('transferred message during handoff turn-blocked is processed once without 
     f.setCurrent({ ...bot, sessionId: 'session-two', parts: ['session-one'] });
     const error = new Error('Turn blocked');
     error.code = 'turn-blocked';
+    error.promptAccepted = true;
+    error.details = { promptRpcId: 'im-transferred' };
     throw error;
   };
   const result = await f.ask('hello');
@@ -426,7 +429,7 @@ test('transferred message during handoff turn-blocked is processed once without 
   assert.equal(f.state.sessionFor(f.key), 'session-two');
 });
 
-test('transferred message tracks history events when waitForTransferredReply is not explicitly provided', async (t) => {
+test('an adapter without transferred prompt tracking preserves the error instead of guessing a reply', async (t) => {
   const f = await fixture(t);
   await f.service.bindDsBot('im-one', f.key, bot.id);
   f.scope.harness.readSessionHistory = async () => ({
@@ -440,11 +443,11 @@ test('transferred message tracks history events when waitForTransferredReply is 
     f.setCurrent({ ...bot, sessionId: 'session-two', parts: ['session-one'] });
     const error = new Error('Turn blocked');
     error.code = 'turn-blocked';
+    error.promptAccepted = true;
+    error.details = { promptRpcId: 'im-transferred' };
     throw error;
   };
-  const result = await f.ask('hello');
-  assert.equal(result.sessionId, 'session-two');
-  assert.equal(result.answer, 'history-answer');
+  await assert.rejects(f.ask('hello'), { code: 'turn-blocked' });
   assert.deepEqual(f.asks, [{ id: 'session-one', text: 'hello' }]);
 });
 

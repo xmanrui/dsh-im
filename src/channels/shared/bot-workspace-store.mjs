@@ -1,4 +1,4 @@
-import { extractCompletedTurnAnswer } from './deferred-delivery.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { ensurePresetWorkspace } from './preset-workspaces.mjs';
 import { t } from './i18n.mjs';
 import { normalizeBusyMessageMode, validateBusyMessageMode } from './message-mode.mjs';
@@ -26,7 +26,7 @@ import {
   validateAccessPolicy,
 } from './access-policy.mjs';
 import { CONNECTION_TEST_STATE_IDENTITY } from './connection-test.mjs';
-import { SESSION_BINDING_STATE_IDENTITY } from './session-binding-lock.mjs';
+import { SESSION_BINDING_STATE_IDENTITY, withSessionBindingLock } from './session-binding-lock.mjs';
 import {
   DEFAULT_CONTEXT_ENHANCEMENT_CONFIG,
   normalizeContextEnhancementConfig,
@@ -1855,44 +1855,6 @@ export function observeBotWorkspaceRemovals(
   });
 }
 
-async function waitForTransferredHistoryReply(target, sessionId, options = {}) {
-  const signal = options?.signal;
-  const timeoutMs = options?.timeoutMs ?? 600_000;
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    let history;
-    try {
-      history = await target.readSessionHistory(sessionId, { maxMessages: 50 }, 30_000, { signal });
-    } catch (error) {
-      if (signal?.aborted) throw signal.reason ?? error;
-      continue;
-    }
-    const events = history?.events ?? [];
-    const answer = extractCompletedTurnAnswer(events, {
-      finalAnswerOnly: options?.finalAnswerOnly,
-    });
-    if (answer?.found && answer?.text) {
-      return answer.text;
-    }
-    const running = typeof target.isSessionRunning === 'function'
-      ? await target.isSessionRunning(sessionId, { signal }).catch(() => false)
-      : false;
-    if (!running && events.some((e) => (e?.event ?? e)?.type === 'turn/end')) {
-      if (answer?.found && answer?.text) return answer.text;
-      if (answer?.reason && answer?.reason !== 'completed') {
-        const error = new Error(`Transferred turn failed (${answer.reason})`);
-        error.code = 'turn-failed';
-        throw error;
-      }
-    }
-  }
-  const timeoutError = new Error('Harness reply timed out');
-  timeoutError.code = 'harness-reply-timeout';
-  throw timeoutError;
-}
-
 export function createBotWorkspaceScope(
   harness,
   { botId, workspaces, state, agentPresetCatalog, dsBot } = {},
@@ -2541,8 +2503,10 @@ export function createBotWorkspaceScope(
             // actual outcome even if a workspace switch commits concurrently.
             return target[method](sessionId, ...args);
           };
+          let replySessionId = sessionId;
           return Object.freeze({
             sessionId,
+            get replySessionId() { return replySessionId; },
             async sessionExists(...args) {
               if (!isCurrentSession()) return false;
               const exists = await target.sessionExists(sessionId, ...args);
@@ -2615,48 +2579,62 @@ export function createBotWorkspaceScope(
                   throw workspaceSessionStale('DS Bot changed before this prompt started.');
                 }
               }
-              try {
-                return await target.ask(sessionId, ...args);
-              } catch (askError) {
-                if (dsBotId) {
-                  // 1. Confirmed not submitted (e.g. session-archived before prompt was accepted).
-                  // The prompt was never accepted into the old session, so it was never transferred.
-                  // Safe to re-resolve the fresh active session and resubmit there once.
-                  if (askError?.code === 'session-archived' && askError.promptAccepted === false) {
-                    let fresh = null;
-                    for (let i = 0; i < 6; i += 1) {
-                      fresh = await dsBot?.resolve(dsBotId).catch(() => null);
-                      if (fresh && fresh.sessionId !== sessionId) break;
-                      await new Promise((resolve) => setTimeout(resolve, 200));
-                    }
-                    if (fresh && fresh.sessionId !== sessionId) {
-                      throw workspaceSessionStale('DS Bot rolled over to a fresh part.');
-                    }
-                  }
-                  // 2. Prompt was accepted and then turn-blocked occurred (e.g. DS Bot handoff switchBeforeStep).
-                  // DS Bot's pre-step retained the message and forwarded it to the fresh session.
-                  // Avoid resubmitting to prevent duplicate execution; track the transferred result instead.
-                  if (askError?.code === 'turn-blocked') {
-                    let fresh = null;
-                    for (let i = 0; i < 6; i += 1) {
-                      fresh = await dsBot?.resolve(dsBotId).catch(() => null);
-                      if (fresh && fresh.sessionId !== sessionId) break;
-                      await new Promise((resolve) => setTimeout(resolve, 200));
-                    }
-                    if (fresh && fresh.sessionId !== sessionId) {
-                      if (state.sessionFor(conversationKey) !== fresh.sessionId) {
-                        await state.setSession(conversationKey, fresh.sessionId);
-                      }
-                      if (typeof target.waitForTransferredReply === 'function') {
-                        return await target.waitForTransferredReply(fresh.sessionId, ...args);
-                      }
-                      if (typeof target.readSessionHistory === 'function') {
-                        return await waitForTransferredHistoryReply(target, fresh.sessionId, args[1]);
-                      }
-                    }
-                  }
+              if (!dsBotId) return target.ask(sessionId, ...args);
+              const options = typeof args[1] === 'number' ? { timeoutMs: args[1] } : args[1] ?? {};
+              const handoffResources = { stagedBatches: [] };
+              let currentSessionId = sessionId;
+              let promptRpcId;
+              const assertStillBound = () => {
+                options.signal?.throwIfAborted();
+                if (!isCurrentSession()) {
+                  // This input was already accepted. A stale-session error here
+                  // would cause the outer loop to submit it again after unbind.
+                  throw new DOMException('DS Bot binding changed while awaiting a reply.', 'AbortError');
                 }
-                throw askError;
+              };
+              for (;;) {
+                try {
+                  const answer = promptRpcId
+                    ? await target.waitForTransferredReply(currentSessionId, {
+                        ...options, handoffResources, promptRpcId, assertCurrent: assertStillBound,
+                      })
+                    : await target.ask(sessionId, args[0], { ...options, handoffResources });
+                  if (promptRpcId) assertStillBound();
+                  replySessionId = currentSessionId;
+                  return answer;
+                } catch (askError) {
+                  if (!dsBotId || !['session-archived', 'turn-blocked'].includes(askError?.code)) throw askError;
+                  assertStillBound();
+                  const evidence = extractConnectionEvidence(askError);
+                  const notSubmitted = evidence.details.submissionState === 'not-submitted';
+                  const accepted = askError.promptAccepted === true || evidence.details.submissionState === 'accepted';
+                  const originalRpcId = promptRpcId ?? askError.details?.promptRpcId ?? evidence.correlation.promptRpcId;
+                  // A failed submit can have an unknown outcome. Only explicit
+                  // pre-submit evidence permits replay; everything else needs
+                  // the durable identity of an accepted message to follow.
+                  if (!notSubmitted && (!accepted || !originalRpcId
+                    || typeof target.waitForTransferredReply !== 'function')) throw askError;
+                  let fresh;
+                  for (let attempt = 0; attempt < 6; attempt += 1) {
+                    assertStillBound();
+                    fresh = await dsBot.resolve(dsBotId).catch(() => null);
+                    assertStillBound();
+                    if (fresh && fresh.sessionId !== currentSessionId) break;
+                    await delay(200, undefined, { signal: options.signal });
+                  }
+                  if (!fresh || fresh.sessionId === currentSessionId) throw askError;
+                  if (notSubmitted) throw workspaceSessionStale('DS Bot rolled over before this prompt was submitted.');
+                  currentSessionId = fresh.sessionId;
+                  promptRpcId = originalRpcId;
+                  await withSessionBindingLock(state, conversationKey, async () => {
+                    assertStillBound();
+                    await state.setSession(conversationKey, currentSessionId);
+                    assertStillBound();
+                    sessionGenerations.set(currentSessionId, {
+                      generation, conversationKey, conversationGeneration,
+                    });
+                  });
+                }
               }
             },
           });

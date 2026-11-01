@@ -106,8 +106,7 @@ export function createSidebarSettingsRpcHandler({ config = {}, store, configured
 }
 
 export function installSidebarSettingsRpc(ctx, { config = {} } = {}) {
-  // Visibility follows ordinary channel management authority. Keep it separate
-  // from the general settings route, whose TTL operations remain loopback-only.
+  // Visibility follows the same authority as channels and general settings.
   return registerManagementRpc(ctx, SIDEBAR_SETTINGS_RPC_CHANNEL,
     createSidebarSettingsRpcHandler({ config }), { authority: config.rpcAuthority });
 }

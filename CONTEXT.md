@@ -28,8 +28,12 @@ _Avoid_: Chat ID、会话 Key
 由 `botId + targetId` 稳定标识、并绑定到可更新会话路由的主动投递位置；它不依赖当前 Harness Session 或最近一条入站消息。
 _Avoid_: Session ID、ChatRef、临时 Webhook
 
+**会话同步（Session Sync）**：
+按 Session 当前的聊天绑定直接解析投递地址、只在该聊天与这个 Session 之间同步非该聊天发起的回合文字可见性的机制；它不需要预先配置投递目标，是否镜像输入、是否投递最终回答由全局投递设置决定。
+_Avoid_: 双向绑定、目标投递、默认机器人
+
 **会话同步目标（Session Sync Target）**：
-经用户明确开启、随其私聊会话路由当前绑定的 Harness Session 变化的投递目标；它使该 Session 与该私聊之间形成双向文字可见性。
+经用户明确开启、随其会话路由（私聊、群聊、Thread 或 Topic）当前绑定的 Harness Session 变化的投递目标；本版仅决定同步审批与同步提问的候选范围，不再是会话同步的前提。
 _Avoid_: 双向绑定、Session 投递地址、默认机器人
 
 **延迟交付（Deferred Delivery）**：

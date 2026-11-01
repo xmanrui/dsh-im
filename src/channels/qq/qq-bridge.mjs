@@ -1302,6 +1302,15 @@ export class QqHarnessBridge {
       let answer;
       let artifacts = [];
       try {
+        try {
+          await this.#state.rememberAuthor?.(key, {
+            senderId: sender,
+            senderName: message.kind === 'group' ? message.senderName : undefined,
+            isBot: message.senderIsBot === true,
+          });
+        } catch (error) {
+          this.#logger.warn?.('[dsh-im:qq] unable to remember the conversation author:', error?.message ?? error);
+        }
         // Persist consumption before handing the prompt to Harness. Provider
         // redelivery after a failed error notice must never execute it twice.
         await markMessageSeen();

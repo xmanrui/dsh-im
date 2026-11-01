@@ -79,6 +79,7 @@ import {
   replacePageLocation,
 } from './loopback-recovery.js';
 import { installImStyles } from './styles.js';
+import { DELIVERY_SYNC_SETTINGS_RPC_CHANNEL } from './delivery-sync-settings.js';
 import { installSessionChannelLogos } from './session-channel-logos.js';
 import { installDsBotSessionAvatars } from './ds-bot-session-avatars.js';
 import { UpdatePanel, UPDATE_RPC_CHANNEL } from './update-panel.js';
@@ -236,6 +237,8 @@ export function IMSettingsTab({
   updateRpcCall,
   deliveryRpcCall,
   globalSettingsRpcCall,
+  deliverySyncRpcCall,
+  languageRpcCall,
   workspaceDirectoryPicker,
   preferredSectionId,
   browserLocation = globalThis.location,
@@ -288,6 +291,8 @@ export function IMSettingsTab({
     updateRpcCall,
     deliveryRpcCall,
     globalSettingsRpcCall,
+    deliverySyncRpcCall,
+    languageRpcCall,
     imessageRpcCall,
     emailRpcCall,
     matrixRpcCall,
@@ -301,6 +306,7 @@ export function IMSettingsTab({
     deliveryRpcCall,
     feishuRpcCall,
     globalSettingsRpcCall,
+    deliverySyncRpcCall,
     imessageRpcCall,
     emailRpcCall,
     matrixRpcCall,
@@ -411,7 +417,11 @@ export function IMSettingsTab({
         : null,
       h(BotSettingsContext.Provider, { value: botSettingsContext },
         globalSettingsSelected
-          ? h(GlobalSettingsPanel, { rpcCall: rpcCalls.globalSettingsRpcCall })
+          ? h(GlobalSettingsPanel, {
+              rpcCall: rpcCalls.globalSettingsRpcCall,
+              deliverySyncRpcCall: rpcCalls.deliverySyncRpcCall,
+              languageRpcCall: rpcCalls.languageRpcCall,
+            })
           : deliverySettings?.channel === active.id
           ? h(DeliveryTargetSettingsPage, {
               channel: active.id,
@@ -555,6 +565,10 @@ export function apply(ctx) {
   const globalSettingsRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, Object.values(SIDEBAR_SETTINGS_ENDPOINTS).includes(endpoint)
       ? SIDEBAR_SETTINGS_RPC_CHANNEL : GLOBAL_SETTINGS_RPC_CHANNEL, endpoint, payload, signal);
+  const deliverySyncRpcCall = (endpoint, payload, signal) =>
+    managementRpc(ctx.connection, DELIVERY_SYNC_SETTINGS_RPC_CHANNEL, endpoint, payload, signal);
+  const languageRpcCall = (endpoint, payload, signal) =>
+    managementRpc(ctx.connection, HOST_LANGUAGE_RPC_CHANNEL, endpoint, payload, signal);
   const workspaceDirectoryPicker = Object.freeze({
     listDirectory: (path, signal) =>
       callWorkspaceDirectoryApi(ctx, 'listDirectory', path, signal),
@@ -579,6 +593,8 @@ export function apply(ctx) {
     updateRpcCall,
     deliveryRpcCall,
     globalSettingsRpcCall,
+    languageRpcCall,
+    deliverySyncRpcCall,
     workspaceDirectoryPicker,
   };
   const subscribeLocale = (listener) => typeof ctx.on === 'function'
