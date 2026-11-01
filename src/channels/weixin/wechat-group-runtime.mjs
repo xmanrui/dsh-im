@@ -41,6 +41,10 @@ function stripMentionTokens(text, triggerNames, allowMasked) {
 const SURFACE_LOSS_CODES = new Set([
   'wechat_panel_closed',
   'wechat_logged_out',
+  // A remembered account waiting to be confirmed. There is still no window to
+  // work with, so the slow ladder is correct; it must simply not be read as a
+  // request to log in again, which is how a live session gets thrown away.
+  'wechat_login_confirmation',
   'main_window_missing',
   // Measured live: a panel can be on screen and still expose no accessibility
   // tree, which only restarting WeChat fixes. Mirror of SURFACE_LOST_CODES in

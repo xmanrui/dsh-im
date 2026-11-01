@@ -43,6 +43,9 @@ ERROR_MESSAGES = {
     "probe_failed": "The read-only UIA probe failed.",
     "send_disabled": "Sending is disabled until the operator enables it.",
     "wechat_logged_out": "WeChat is on its login screen; log in before starting the group bridge.",
+    # A remembered account, not a lost one. Do not restart WeChat: that is how a
+    # live session gets thrown away. Confirming the login is all that is needed.
+    "wechat_login_confirmation": "WeChat is asking to confirm the remembered account; open WeChat and press 登录 there.",
     "wechat_panel_closed": "WeChat's panel was closed; reopen it, and keep it visible rather than minimised so the bridge can work head-lessly.",
     "wechat_accessibility_unavailable": "WeChat's panel is on screen but exposes no accessibility tree; restart WeChat to restore it.",
     "main_window_missing": "No WeChat window was found; start WeChat and log in.",
@@ -757,7 +760,8 @@ class WechatGroupAdapter:
 # (2.5s..30s) instead of burning CPU and log volume on a dead transport.
 SURFACE_LOST_CODES = frozenset({
     "control_missing", "main_window_missing", "wechat_panel_closed",
-    "wechat_logged_out", "backend_closed", "unsupported_platform", "dependency_missing",
+    "wechat_logged_out", "wechat_login_confirmation",
+    "backend_closed", "unsupported_platform", "dependency_missing",
     # Panel visible but exposing no tree: only a WeChat restart fixes it, so the
     # bridge must back off instead of polling. Kept in step with SURFACE_LOSS_CODES
     # in src/channels/weixin/wechat-group-runtime.mjs.
@@ -1035,6 +1039,35 @@ def _window_is_minimised(hwnd: int) -> bool:
     except Exception:
         return False
 
+def _login_window_offers_confirmation(auto: Any) -> bool:
+    """True when the login window shows the remembered-account 登录 button.
+
+    Reads the same window the classifier already found. Any failure to walk it
+    returns False, because claiming 'your session is still there, just confirm
+    it' without evidence is the guess that must never be made: the safe answer
+    under uncertainty is the ordinary signed-out diagnosis.
+    """
+
+    try:
+        window = auto.WindowControl(searchDepth=1, ClassName="mmui::LoginWindow")
+        if not window.Exists(0, 0):
+            return False
+        walker = getattr(auto, "WalkControl", None)
+        if walker is None:
+            return False
+        for control, _depth in walker(window, includeTop=False, maxDepth=20):
+            try:
+                if str(control.ControlTypeName) != "ButtonControl":
+                    continue
+                if str(control.Name or "").strip() == "\u767b\u5f55":
+                    # 登录 as a button label, not merely a word inside some text.
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        return False
+    return False
+
 def classify_missing_main_window(auto: Any) -> str:
     """Decide why there is no mmui::MainWindow, in order of operator action.
 
@@ -1060,6 +1093,17 @@ def classify_missing_main_window(auto: Any) -> str:
             return False
 
     if exists("mmui::LoginWindow"):
+        # Existence of the login window is NOT proof of being signed out. Measured
+        # on the live machine it appears in two states that need opposite handling:
+        #   - a remembered account shows a real ButtonControl named 登录
+        #     (the session is still valid and only needs confirming);
+        #   - a signed-out client shows 扫码登录 and a 二维码 button instead.
+        # Calling the first one 'logged out' is what destroyed a live session here:
+        # the advice for 'logged out' is to start the client again, and restarting a
+        # logged-in WeChat can drop the session. So read the window, not just its
+        # existence, and fall back to the weaker claim when nothing can be read.
+        if _login_window_offers_confirmation(auto):
+            return "wechat_login_confirmation"
         return "wechat_logged_out"
     # The tray/shell window WeChat leaves behind after the panel is X-closed: it
     # carries the Qt window class, not an mmui one, and has no widget subtree.

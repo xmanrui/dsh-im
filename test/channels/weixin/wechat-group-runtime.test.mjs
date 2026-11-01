@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
@@ -524,6 +525,38 @@ test('surface-loss exits retry on the slow ladder, other failures on the fast on
   assert.equal(fast.runtime.status.surfaceLoss, false);
   await eventually(() => transient.starts === 3, 'second transient retry missing');
   assert.equal(fast.runtime.status.restartDelayMs, 5, 'transient ladder must not widen to slow');
+});
+test('both sides agree on which failures mean the surface is gone', () => {
+  // Two languages hold the same rule: the adapter decides which failures mean the
+  // WeChat surface is gone and exits on them, and this runtime picks the retry
+  // pace from the same set. They are maintained apart, so a code added on one
+  // side silently gets the wrong ladder on the other - fast retries for a
+  // condition only a human can fix, which is the log flood this objective set
+  // out to end. Parse both shipped lists instead of restating either, so the
+  // comparison cannot itself go stale.
+  const python = readFileSync(
+    new URL('../../../scripts/wechat_group_uia.py', import.meta.url), 'utf8');
+  const javascript = readFileSync(
+    new URL('../../../src/channels/weixin/wechat-group-runtime.mjs', import.meta.url), 'utf8');
+  const pyBlock = /SURFACE_LOST_CODES = frozenset\(\{([\s\S]*?)\}\)/.exec(python);
+  const jsBlock = /SURFACE_LOSS_CODES = new Set\(\[([\s\S]*?)\]\)/.exec(javascript);
+  assert.ok(pyBlock, 'adapter SURFACE_LOST_CODES not found to compare');
+  assert.ok(jsBlock, 'runtime SURFACE_LOSS_CODES not found to compare');
+  const pyCodes = new Set([...pyBlock[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]));
+  const jsCodes = new Set([...jsBlock[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]));
+  assert.ok(pyCodes.size >= 5, 'suspiciously few adapter codes parsed: ' + pyCodes.size);
+  assert.ok(jsCodes.size >= 3, 'suspiciously few runtime codes parsed: ' + jsCodes.size);
+  // Codes that end a session or refuse to start, rather than losing a window.
+  const notASurface = new Set([
+    'backend_closed', 'unsupported_platform', 'dependency_missing', 'control_missing',
+  ]);
+  for (const code of jsCodes) {
+    assert.equal(pyCodes.has(code), true, code + ' is in the runtime list but not the adapter');
+  }
+  for (const code of pyCodes) {
+    if (notASurface.has(code)) continue;
+    assert.equal(jsCodes.has(code), true, code + ' is missing from the runtime list');
+  }
 });
 test('the default surface-loss ladder caps its wait at two minutes', async (t) => {
   // The ceiling is what an operator pays after they fix WeChat: the bridge only

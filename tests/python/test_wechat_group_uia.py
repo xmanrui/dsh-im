@@ -1985,6 +1985,15 @@ class ClassifierFakeRoot:
         return self._children
 
 
+class ClassifierFakeNode:
+    """One login-window child, as UIA reports it: type plus visible name."""
+
+    def __init__(self, control_type, name):
+        self.ControlTypeName = control_type
+        self.Name = name
+        self.ClassName = "mmui::XButton"
+
+
 class ClassifierFakeAuto:
     """uiautomation surface for classify_missing_main_window only."""
 
@@ -2000,6 +2009,14 @@ class ClassifierFakeAuto:
             return ClassifierFakeWin(self._login)
         return ClassifierFakeWin(False)
 
+    def WalkControl(self, control, includeTop=False, maxDepth=20):
+        # The classifier reads the login window's CONTENT to tell a remembered
+        # account from a signed-out one, so the double has to expose children.
+        for name in getattr(self, "_login_buttons", []):
+            yield ClassifierFakeNode("ButtonControl", name), 3
+        for name in getattr(self, "_login_texts", []):
+            yield ClassifierFakeNode("TextControl", name), 3
+
     def GetRootControl(self):
         children = []
         # An explicit shell control lets a test set size and offscreen state,
@@ -2011,6 +2028,77 @@ class ClassifierFakeAuto:
             children.append(ClassifierFakeWin(True, "Qt51514QWindowIcon", "微信"))
         return ClassifierFakeRoot(children)
 
+
+class LoginWindowKindTests(unittest.TestCase):
+    """A login window is not proof of being signed out.
+
+    Measured on the live machine, mmui::LoginWindow appears in two different
+    states that need opposite handling:
+    - remembered account: texts 当前登录用户大肥鱼 / 登录 / 切换账号, and a real
+      ButtonControl named 登录. The session is STILL LOGGED IN; it only needs
+      that button pressed.
+    - signed out: texts 仅传输文件 / 扫码登录, a 二维码 button, and no 登录 button.
+
+    Reporting the first as wechat_logged_out is what caused the damage this
+    objective names: an operator or script told 'you are logged out' restarts the
+    client, and a restart of a logged-in client can lose the session. The
+    classifier must therefore read the window, not just its existence.
+    """
+
+    def fake(self, texts, buttons=()):
+        auto = ClassifierFakeAuto(main=False, login=True, shell=True)
+        auto._login_texts = list(texts)
+        auto._login_buttons = list(buttons)
+        return auto
+
+    def test_remembered_account_is_not_reported_as_signed_out(self):
+        auto = self.fake(["当前登录用户大肥鱼", "登录", "切换账号", "仅传输文件", "微信"],
+                         ["登录", "切换账号", "仅传输文件", "关闭"])
+        self.assertEqual(uia.classify_missing_main_window(auto),
+                         "wechat_login_confirmation")
+
+    def test_qr_page_is_still_reported_as_signed_out(self):
+        auto = self.fake(["仅传输文件", "扫码登录", "微信"],
+                         ["仅传输文件", "二维码", "关闭", "网络代理设置"])
+        self.assertEqual(uia.classify_missing_main_window(auto), "wechat_logged_out")
+
+    def test_an_unreadable_login_window_is_reported_as_signed_out(self):
+        # Fail toward the weaker claim: with no text to read the bridge cannot
+        # prove an account is remembered, and 'confirm the login' would be a guess.
+        self.assertEqual(
+            uia.classify_missing_main_window(self.fake([])), "wechat_logged_out")
+
+    def test_confirmation_message_forbids_restarting_wechat(self):
+        # The advice is the point. 'Restart WeChat' against a remembered session is
+        # how a logged-in client gets thrown away.
+        message = uia.ERROR_MESSAGES["wechat_login_confirmation"]
+        self.assertIn("confirm", message.lower())
+        self.assertNotIn("restart", message.lower())
+
+    def test_no_shipped_code_path_may_terminate_the_wechat_process(self):
+        # The regression the operator reported: 'you closed my logged-in client'.
+        # The bridge may stop its OWN adapter child, and may launch Weixin.exe to
+        # start a signed-out client, but nothing it ships may kill a running
+        # WeChat process - killing the client destroys the accessibility tree and
+        # can drop a live session, which is never the bridge's call to make.
+        import pathlib
+
+        root = pathlib.Path(uia.__file__).parent
+        sources = [root / "wechat_group_uia.py"]
+        sources += sorted((root.parent / "src" / "channels" / "weixin").glob("*.mjs"))
+        needles = ("taskkill", "Stop-Process", "Weixin.exe", "WeChat.exe")
+        offenders = []
+        for path in sources:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for line_no, line in enumerate(text.splitlines(), 1):
+                lowered = line.lower()
+                if any(needle.lower() in lowered for needle in ("taskkill", "stop-process")):
+                    offenders.append("%s:%d" % (path.name, line_no))
+                # Launching the client is allowed; killing it is not.
+                if "weixin.exe" in lowered and any(
+                        verb in lowered for verb in ("kill", "stop", "terminate")):
+                    offenders.append("%s:%d" % (path.name, line_no))
+        self.assertEqual(offenders, [], "shipped code must not kill WeChat: " + str(offenders))
 
 class PanelClosedClassifierTests(unittest.TestCase):
     """classify_missing_main_window separates signed-out, closed-panel, absent."""
