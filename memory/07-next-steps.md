@@ -141,3 +141,21 @@
 - [ ] 真实微信群未发消息验证。
 - [ ] 设置界面 / RPC 未做。
 - [ ] 其余 12 个渠道未接。
+
+## 部署状态（2026-11-02 03:50 实测）
+
+- **代码已就位，进程未重载**。实测证据：
+  - Electron 主进程 PID 37528 启动于 `03:21:36`；
+  - 当前 `lib/index.js` 写入于 `03:45:27`（mtime），sha256 `5323c68a7e0e…`；
+  - 宿主日志 `dsh-2026-11-02.2.log` 里 `dsh-im` 没有任何 activate 报错（唯一 pending 的是 `dsh-ops-tui`，与本插件无关）。
+  ⇒ 跑着的是 03:21 那份旧 bundle，本轮 `64f595b2`~`acb2f8cb` 的改动**尚未在运行中的宿主里生效**。
+
+- 为什么没重启：`restart-dsh.cmd` 是 `taskkill /IM "DSH Desktop.exe" /F` + 重新 start，
+  会**同时杀掉并行的另一个会话**（它此刻有 11 个未提交文件、正在同一宿主里跑）。
+  本宿主也没有插件级热重载入口（`@deepseek-ai/dsh-hmr` 明确忽略 `node_modules/`，而本插件是 `link:` 依赖；
+  已 grep 过 `dsh-client-ui-plugin-manager`，没有 reload/restart 端点）。
+  ⇒ 按「不干扰并行会话」优先，重启留给下一次宿主空闲时执行：`D:\codex\DSH-IM\rv5.8.0\restart-dsh.cmd`。
+
+- 重载后的验收（一条命令即可）：
+  `node scripts/verify-wechat-group-live.mjs` → 期望 PASS；
+  群里 `@大肥鱼 你记得我喜欢喝什么吗` → 期望答出手冲咖啡（说明记忆与检索生效）。
