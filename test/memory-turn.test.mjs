@@ -29,9 +29,13 @@ test('同一句话里同一类只留一条，且不把命令当陈述', () => {
   assert.equal(candidates[0].kind, 'preference');
 });
 
-test('renderCandidate 带上说话人，群里不说清是谁等于没记', () => {
+test('renderCandidate 有名有姓用「名字：内容」，没名字用群口吻如实转述', () => {
   assert.equal(renderCandidate({ object: '喝手冲咖啡', speaker: '小李' }), '小李：喝手冲咖啡');
-  assert.equal(renderCandidate({ object: '喝手冲咖啡', speaker: '' }), '喝手冲咖啡');
+  // A bare object with no attribution reads as the bot's own preference, which
+  // is exactly the wrong claim: nobody said the bot likes coffee.
+  assert.equal(renderCandidate({ object: '喝手冲咖啡', speaker: '', label: 'like' }), '群里有人喜欢喝手冲咖啡');
+  // An unrecognized shape still says something true instead of inventing a frame.
+  assert.equal(renderCandidate({ object: '喝手冲咖啡', speaker: '' }), '群里有人提到喝手冲咖啡');
   assert.equal(renderCandidate({ object: '' }), '');
 });
 

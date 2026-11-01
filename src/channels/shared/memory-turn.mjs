@@ -12,17 +12,60 @@
 // from the channel, the bot and the conversation key, in the same shape the
 // memory store validates.
 
-import { extractMemoryCandidates, renderCandidate } from './memory-extract.mjs';
+import { extractMemoryCandidates, isNamedSpeaker, renderCandidate } from './memory-extract.mjs';
 import { renderMemoryBlock } from './memory-store.mjs';
 
 /** Fact predicate used for every extracted statement. */
 const FACT_PREDICATE = 'statement';
+
+/** Longest object fragment folded into an unattributed fact's key. */
+const LORE_KEY_MAX = 60;
+
+/**
+ * The storage key one extracted fact is written under.
+ *
+ * A named speaker is the subject, so a later statement by the same person of the
+ * same kind retires the earlier one: if 小李 says he likes tea after saying he
+ * likes coffee, the coffee row is wrong and must stop being recalled.
+ *
+ * An unnamed speaker gets no such correction, because there is nobody to correct.
+ * The object therefore joins the key: two different group members liking two
+ * different things are two facts, and folding them onto one key would make each
+ * new statement silently delete the last -- the exact opposite of memory.
+ *
+ * @param candidate - one entry from `extractMemoryCandidates`.
+ * @returns `{ subject, predicate }` for `MemoryStore.remember`.
+ */
+export function memoryKeyFor(candidate) {
+  if (isNamedSpeaker(candidate?.speaker)) {
+    return {
+      subject: candidate.speaker.trim(),
+      predicate: FACT_PREDICATE + ':' + candidate.label,
+    };
+  }
+  const object = String(candidate?.object ?? '').trim().replace(/\s+/gu, '').slice(0, LORE_KEY_MAX);
+  return {
+    subject: 'conversation',
+    predicate: FACT_PREDICATE + ':' + candidate.label + ':' + object,
+  };
+}
 
 /** How many recalled facts one prompt may carry. */
 const RECALL_LIMIT = 8;
 
 /** Bounded wait for a recall; past this the answer goes out without memory. */
 const RECALL_TIMEOUT_MS = 400;
+
+/**
+ * How the recalled facts are meant to be used.
+ *
+ * A block of remembered facts with no instruction is read as a checklist to be
+ * recited: the bot announces "我记得你喜欢手冲咖啡" and sounds like a database.
+ * A person simply talks differently because they remember. This one sentence
+ * moves the facts from subject matter to context, and it says nothing when there
+ * is nothing to remember.
+ */
+const MEMORY_USAGE_NOTE = '这些是你还记得的事。像群里的人一样自然地用：需要时提一句，别念清单，也别主动说「我记得」或者复述上面的原话。';
 
 /**
  * Build the memory scope for one conversation.
@@ -65,13 +108,11 @@ export async function recordInboundMemory(store, {
     for (const candidate of candidates) {
       const object = renderCandidate(candidate);
       if (!object) continue;
-      // The subject is the speaker, so "小李喜欢咖啡" and "老王喜欢咖啡" are two
-      // rows that supersede independently; the predicate names the fact shape.
+      // Attributed facts supersede per person; unattributed ones are group lore
+      // keyed by their own content (see memoryKeyFor).
+      const { subject, predicate } = memoryKeyFor(candidate);
       await store.remember({
-        scope,
-        subject: candidate.speaker || 'conversation',
-        predicate: `${FACT_PREDICATE}:${candidate.label}`,
-        object,
+        scope, subject, predicate, object,
         sourceMessageId: messageId,
       });
       written += 1;
@@ -111,7 +152,10 @@ export async function recallMemoryBlock(store, { scope, query = '', logger = con
       timer = setTimeout(() => resolve(''), RECALL_TIMEOUT_MS);
     });
     const block = await Promise.race([work, timeout]);
-    return typeof block === 'string' ? block : '';
+    if (typeof block !== 'string' || !block.trim()) return '';
+    // The instruction rides in the same injected block as the facts it governs,
+    // so a model that reads the memory also reads what to do with it.
+    return block + '\n\n' + MEMORY_USAGE_NOTE;
   } catch (error) {
     logger.warn?.('[dsh-im] memory recall failed:', error?.message ?? error);
     return '';

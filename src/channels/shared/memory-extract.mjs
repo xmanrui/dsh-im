@@ -73,11 +73,55 @@ export function extractMemoryCandidates(text, { speaker = '' } = {}) {
 }
 
 /**
+ * The sender id the WeChat adapter uses when a row exposed no identity.
+ *
+ * Measured on this build: every group row arrives as `uia-unverified:row`,
+ * because the author line is a separate UIA control this reading path cannot
+ * pair with the text row. It is a platform placeholder, never a person.
+ */
+export const UNVERIFIED_SPEAKER_PREFIX = 'uia-unverified:';
+
+/**
+ * Decide whether a speaker string names somebody worth remembering.
+ *
+ * The distinction is not cosmetic. A placeholder stored as a subject turns every
+ * remembered fact into "uia-unverified:row：喜欢咖啡", which is useless to the
+ * model and leaks a machine identity into the prompt. An unattributed statement
+ * is still worth keeping as group lore: the bot should know the group likes
+ * coffee even when it cannot say who said so.
+ *
+ * @param speaker - a display name, an id, or nothing.
+ * @returns whether the speaker may be used as a subject.
+ */
+export function isNamedSpeaker(speaker) {
+  if (typeof speaker !== 'string') return false;
+  const value = speaker.trim();
+  if (!value) return false;
+  return !value.startsWith(UNVERIFIED_SPEAKER_PREFIX);
+}
+
+/**
+ * One unattributed statement, phrased the way a person would repeat it.
+ *
+ * `label` names the sentence shape the rule matched, so the retelling stays
+ * grammatical: "有人自称小李" reads, "小李" on its own does not.
+ */
+const LORE_PHRASES = Object.freeze({
+  name: (object) => `有人自称${object}`,
+  work: (object) => `有人说自己在${object}`,
+  home: (object) => `有人说自己来自${object}`,
+  like: (object) => `群里有人喜欢${object}`,
+  dislike: (object) => `群里有人不喜欢${object}`,
+  plan: (object) => `有人说要${object}`,
+  explicit: (object) => `有人让你记住：${object}`,
+});
+
+/**
  * Render one extracted candidate into the sentence the store keeps.
  *
- * Speaker-attributed on purpose: in a group, "喜欢咖啡" means nothing without
- * whose preference it is, and the store keeps one row per (scope, subject,
- * predicate) so the attribution is what makes the row unique.
+ * A named speaker prefixes their own name. An unnamed one becomes group lore in
+ * the third person -- the fact must be readable on its own, because the memory
+ * block renders the stored object and nothing else.
  *
  * @param candidate - one entry from `extractMemoryCandidates`.
  * @returns the stored object text.
@@ -86,5 +130,8 @@ export function renderCandidate(candidate) {
   const object = tidy(candidate?.object);
   if (!object) return '';
   const speaker = typeof candidate?.speaker === 'string' ? candidate.speaker.trim() : '';
-  return speaker ? `${speaker}：${object}` : object;
+  if (isNamedSpeaker(speaker)) return `${speaker}：${object}`;
+  const phrase = LORE_PHRASES[candidate?.label];
+  // An unmatched label still says something true rather than mislabelling it.
+  return phrase ? phrase(object) : `群里有人提到${object}`;
 }
