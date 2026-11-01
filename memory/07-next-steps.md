@@ -60,3 +60,23 @@
 - fork PR 的 CI 需上游 owner 批准工作流运行才跑（`gh pr checks 516` 目前为空即此原因，不是判据缺失）；本地以 `npm run check` 代替。
 - 部署面：desktop profile 以符号链接指向本仓（`~/.dsh/profiles/desktop/node_modules/@xmanrui/dsh-im -> D:/codex/DSH-IM/rv5.8.0`），
   实测 HEAD blob / 工作树 / profile 实际加载三处 `lib/index.js` sha256 同为 `323954de972af6b9`。
+
+## 已闭环（2026-11-02 第三轮：像人 / 性格 / 记忆）
+
+- [x] 人设：`persona.mjs` / `persona-store.mjs`（每 bot 一个 `accounts/<botId>/persona.json`，首开播种出厂卡）
+      / `im-persona.mjs` 会话级注册表 / `plugin-src/host/persona-context.mjs` 注册 `dsh-im:persona` 提示上下文（order 120，先于 guidance 125）。
+      接缝：`harness-client.ask()` 发布 → `workspace-session` 透传 → weixin bridge 读卡。
+- [x] 记忆：`memory-store.mjs`（node:sqlite + FTS5 trigram，LIKE 兜底；validTo/supersededBy 失效不删；缓冲事务）
+      / `memory-extract.mjs`（锚定规则，宁缺勿错）/ `memory-turn.mjs`（写、召回 400ms 护栏、scope 构造）
+      / `createEphemeralMemoryStore`（每次开-用-关，修掉 Windows 上删除账号目录的 EBUSY）。
+- [x] 拟人出站：`humanize-outbound.mjs`（去 AI 腔 + 按段落分段 + 3 字/秒 ±20% + 段间 700ms + 总预算 18s，扣掉生成耗时）；
+      weixin bridge `#sendPaced` 编排，`humanize` 默认关、生产接线打开（老路径逐字不变）。
+- [x] 门禁：`npm run check` exit 0（4841 tests / 4833 pass / 0 fail；BUILT_ARTIFACTS_OK / CAPABILITY_MATRIX_OK / BENCHMARK_REPORT_OK / GOVERNANCE_OK）。
+- [x] 提交 `28bb1f55`；部署面已同步（profile 符号链接下 `lib/index.js` sha256 = HEAD blob = `4a79f26d6491`）。
+
+## 未闭环（本轮登记）
+
+- [ ] 人设 / 记忆的 **设置界面与 RPC** 未做：目前改人设要直接编辑 `persona.json`（有出厂播种，不改也有人设）。
+- [ ] 其余 12 个渠道的 bridge 尚未接记忆与拟人（同一套模块可直接复用，weixin 是唯一试点）。
+- [ ] 未在真实微信群发消息验证（按仓库纪律需受控授权）；本轮验证到「渲染出正确上下文块 + 进入 ask 参数 + 全量门禁绿」。
+- [ ] 宿主进程需重载才会跑上新 bundle（`restart-dsh.cmd`）；本轮未重启，避免打断正在并行的会话。
