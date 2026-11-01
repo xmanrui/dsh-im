@@ -949,7 +949,12 @@ export class WeixinHarnessBridge {
       // Wall time the model spent producing this answer, so the simulated typing
       // pause only covers what generation did not already cover.
       const askedAt = Date.now();
-      await this.#startTyping(replyTarget, contextToken);
+      // NOT awaited. The typing indicator is decoration: if the provider is slow
+      // it must not delay the answer, and if it fails it must not change what the
+      // group gets. Awaiting it put a 10s provider timeout in front of the model,
+      // so a slow ping meant the reader waited 10 seconds before generation even
+      // started -- measured in the live log (durationMs 10056, timeoutMs 10000).
+      void this.#startTyping(replyTarget, contextToken).catch(() => false);
       try {
         let content = hasImages || hasReply
           ? await promptContentForInboundMessage(promptMessage, { signal: this.#signal, deferImages: true })
@@ -1559,7 +1564,15 @@ export class WeixinHarnessBridge {
   }
 
   async #send(toUserId, text, contextToken, runId, { stopTyping = true } = {}) {
-    if (stopTyping) await this.#stopTyping();
+    // Cancelling the bubble must not become the price of sending the message: it
+    // races a short budget and is abandoned if the provider is slow. The reader is
+    // waiting for the answer, not for a typing indicator to switch off.
+    if (stopTyping) {
+      await Promise.race([
+        this.#stopTyping(),
+        new Promise((resolve) => { const timer = setTimeout(resolve, 1_000); timer.unref?.(); }),
+      ]);
+    }
     contextToken ??= this.#state.contextTokenFor?.(toUserId);
     const providerMessageIds = [];
     const chunks = splitWeixinText(text, this.#maxMessageChars);
@@ -1619,7 +1632,18 @@ export class WeixinHarnessBridge {
     const task = this.#typingTail
       .catch(() => undefined)
       .then(operation);
-    this.#typingTail = task.catch(() => undefined);
+    // The tail settles for everyone else after a fixed bound, even if `operation`
+    // never does. A typing call that ignores its abort signal can hang forever,
+    // and the tail is an internal serializer -- one stuck decoration call must not
+    // become a permanent queue nobody can get through. The operation itself keeps
+    // running to completion; it simply stops blocking new ones.
+    this.#typingTail = Promise.race([
+      task.catch(() => undefined),
+      // A short bound, not a generous one: this cap is only here to stop permanent
+      // blocking, and every millisecond of it is time a reader spends waiting for a
+      // bubble to switch off.
+      new Promise((resolve) => { const timer = setTimeout(resolve, 1_000); timer.unref?.(); }),
+    ]);
     return task;
   }
 
@@ -1692,24 +1716,36 @@ export class WeixinHarnessBridge {
     const stale = this.#typingTicketStale;
     this.#typingTarget = null;
     if (typeof this.#api.sendTyping !== 'function') return false;
+    // The cancellation is decoration too, so it does NOT join the typing queue:
+    // that queue may still be holding a hung status-1 call, and waiting behind it
+    // would delay the answer being sent. It races its own 5s budget instead, and
+    // a slow cancellation is simply abandoned.
     try {
-      return await this.#queueTyping(async () => {
-        if (!target || !ticket) return false;
-        try {
-          await this.#api.sendTyping({
-            baseUrl: this.#baseUrl,
-            token: this.#token,
-            toUserId: target,
-            typingTicket: ticket,
-            status: 2,
-            signal,
-          });
-        } finally {
-          if (stale && this.#typingTicket === ticket) this.#typingTicket = null;
-          this.#typingTicketStale = false;
-        }
-        return true;
-      });
+      return await Promise.race([
+        this.#queueTyping(async () => {
+          if (!target || !ticket) return false;
+          try {
+            await this.#api.sendTyping({
+              baseUrl: this.#baseUrl,
+              token: this.#token,
+              toUserId: target,
+              typingTicket: ticket,
+              status: 2,
+              signal,
+            });
+            } finally {
+              if (stale && this.#typingTicket === ticket) this.#typingTicket = null;
+              this.#typingTicketStale = false;
+            }
+            return true;
+          }),
+        // The same budget, but as a race: the caller is waiting to SEND, not to
+        // cancel a bubble. Abandoning the cancellation is the correct outcome.
+        new Promise((resolve) => {
+          const timer = setTimeout(() => resolve(false), 1_000);
+          signal?.addEventListener?.('abort', () => { clearTimeout(timer); resolve(false); }, { once: true });
+        }),
+      ]);
     } catch (error) {
       if (!signal?.aborted) {
         this.#logger.warn?.('[dsh-weixin] typing cancellation failed:', error);

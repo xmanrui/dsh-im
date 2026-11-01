@@ -741,7 +741,11 @@ export function createWeixinApi({ fetchImpl = fetch, uploadFetchImpl = fetchImpl
         endpoint: 'ilink/bot/sendtyping',
         token,
         signal,
-        timeoutMs: 10_000,
+        // A typing bubble is decoration. Ten seconds was long enough for a stalled
+        // provider to hold the reply path (measured 10056ms in the live log) and
+        // still show nothing to the reader. Two seconds is enough for a healthy
+        // ping and short enough that a stall costs nothing visible.
+        timeoutMs: 2_000,
         body: {
           ilink_user_id: recipient,
           typing_ticket: ticket,
