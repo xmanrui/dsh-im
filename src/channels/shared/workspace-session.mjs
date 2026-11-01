@@ -232,20 +232,21 @@ export async function askInWorkspaceSession({
         throw error;
       }
       return {
-        sessionId: binding.sessionId,
+        sessionId: (dsBotSession ? state.sessionFor(key) : null) ?? binding.sessionId,
         answer,
         ...(artifacts.length > 0 ? { artifacts } : {}),
       };
     } catch (error) {
       const failure = messageDiagnosticError(error, diagnostic);
-      if (dsBotSession && (error?.code === 'session-archived' || error?.code === 'turn-blocked')) {
+      if (dsBotSession && error?.code === 'session-archived'
+        && extractConnectionEvidence(failure).details.submissionState === 'not-submitted') {
         let freshSessionId = null;
         for (let attempt = 0; attempt < 6; attempt += 1) {
           freshSessionId = await harness.resolveDsBotSession?.(key).catch(() => null);
-          if (freshSessionId && freshSessionId !== binding?.sessionId) break;
-          await new Promise((resolve) => setTimeout(resolve, 250));
+          if (freshSessionId && freshSessionId !== diagnostic.sessionId) break;
+          await new Promise((resolve) => setTimeout(resolve, 200));
         }
-        if (freshSessionId && freshSessionId !== binding?.sessionId) {
+        if (freshSessionId && freshSessionId !== diagnostic.sessionId) {
           continue;
         }
       }
