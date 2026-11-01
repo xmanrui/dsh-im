@@ -14,4 +14,14 @@ _audit/
 _hmr/
 _research/
 _uia/
+_larkprobe/
+_tmp/
 @AutomationLog.txt
+DECOMPOSE-*.md
+
+# 测试的 esbuild 兜底目录（见 test/helpers/esbuild-scratch.mjs）
+test/.tmp/
+
+# Python 字节码（UIA 桥与 tests/python 会在原地生成）
+__pycache__/
+*.pyc
