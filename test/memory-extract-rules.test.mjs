@@ -78,3 +78,23 @@ test('放宽字数后仍然一句闲聊都不多抽', () => {
   assert.deepEqual(objectsOf('我喜欢'), []);
   assert.deepEqual(objectsOf('我有'), []);
 });
+
+test('命令与它的参数都不算陈述：operator 说的话不能被记成群友的喜好', () => {
+  // 实测：`/steer 我喜欢咖啡` 曾被抽成「群里有人喜欢咖啡」——把指令当成了事实。
+  assert.deepEqual(objectsOf('/steer 我喜欢咖啡'), []);
+  assert.deepEqual(objectsOf('/dsh 我喜欢咖啡'), []);
+  assert.deepEqual(objectsOf('/remember 我养猫'), []);
+});
+
+test('地址与路径不进记忆：它们是噪音，还会被原样复述出来', () => {
+  assert.deepEqual(objectsOf('看这个 https://example.com/doc 挺有用'), []);
+  assert.deepEqual(objectsOf('文件在 D:\\work\\a.txt 里'), []);
+  // 删掉地址，句子的其余部分仍然成立。
+  assert.deepEqual(objectsOf('我喜欢看 https://a.com 的教程'), ['群里有人喜欢看的教程']);
+});
+
+test('删掉地址后不留多余空格与悬空助词', () => {
+  const [only] = extractMemoryCandidates('我喜欢看 https://a.com 的教程', { speaker: ANON });
+  assert.equal(renderCandidate(only), '群里有人喜欢看的教程');
+  assert.equal(/\s{2,}/u.test(only.object), false);
+});

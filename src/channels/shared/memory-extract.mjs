@@ -57,10 +57,35 @@ const RULES = Object.freeze([
   { kind: 'activity', label: 'doing', pattern: /我(?:最近一直在|最近在|近来在|这阵子在|现在在|最近)\s*([^。！？!?\n]{1,40})/u },
 ]);
 
+/** Link and path patterns that carry no memory value and would be quoted back. */
+const LINK_PATTERN = /(?:https?:\/\/|www\.)\S+|[A-Za-z]:\\\S+|\\\\\S+/gu;
+
+/**
+ * Remove links and file paths before looking for facts.
+ *
+ * A remembered fact gets quoted back into the prompt, so an address inside it
+ * becomes noise the bot may repeat: "群里有人喜欢看 https://a.com 的教程" is not a
+ * thing anybody wants remembered. The rest of the sentence still reads, because
+ * only the address is removed -- "我喜欢看教程" survives.
+ *
+ * @param text - one inbound message.
+ * @returns the message with addresses and paths replaced by a space.
+ */
+function stripLinks(text) {
+  return text.replace(LINK_PATTERN, ' ').replace(/\s{2,}/gu, ' ').trim();
+}
+
 /** Trim one captured span and drop the trailing particles chat text leaves. */
 function tidy(value) {
   if (typeof value !== 'string') return '';
-  return value.replace(/[\s，,。.!！?？~～]+$/u, '').trim().slice(0, CAPTURE_MAX);
+  return value
+    // A removed address leaves a gap; collapse the doubled spaces it creates and
+    // drop the dangling particles that end up next to one ("看 的教程" -> "看的教程").
+    .replace(/\s{2,}/gu, ' ')
+    .replace(/[\s]+(的|了|在|和)/gu, '$1')
+    .replace(/[\s，,。.!！?？~～]+$/u, '')
+    .trim()
+    .slice(0, CAPTURE_MAX);
 }
 
 /**
@@ -73,8 +98,13 @@ function tidy(value) {
  */
 export function extractMemoryCandidates(text, { speaker = '' } = {}) {
   if (typeof text !== 'string' || !text.trim()) return [];
-  // Commands are instructions to the bot, not statements about the sender.
-  const body = text.trim().replace(/^\/\S+\s*/u, '');
+  const raw = text.trim();
+  // A command is an instruction to the bot, not a statement about the sender --
+  // and its ARGUMENTS are part of the instruction. `/steer 我喜欢咖啡` is the
+  // operator telling the bot what to say, so remembering "the group likes coffee"
+  // from it is inventing a fact out of somebody's command (measured: it did).
+  if (raw.startsWith('/')) return [];
+  const body = stripLinks(raw);
   if (!body) return [];
   const candidates = [];
   const usedKinds = new Set();

@@ -23,10 +23,13 @@ test('没关系的话一条都不抽：不猜就没记错', () => {
 });
 
 test('同一句话里同一类只留一条，且不把命令当陈述', () => {
+  // A command is an instruction to the bot; its arguments belong to the
+  // instruction, not to a fact about the sender.
   const candidates = extractMemoryCandidates('/remember 我喜欢喝猫屎咖啡');
-  // The command prefix is stripped, so the statement behind it is still read.
-  assert.equal(candidates.length, 1);
-  assert.equal(candidates[0].kind, 'preference');
+  assert.deepEqual(candidates, []);
+  // Only a real statement produces one fact per kind.
+  const statement = extractMemoryCandidates('我喜欢喝猫屎咖啡，也喜欢喝茶');
+  assert.equal(statement.filter((c) => c.kind === 'preference').length, 1);
 });
 
 test('renderCandidate 有名有姓用「名字：内容」，没名字用群口吻如实转述', () => {
