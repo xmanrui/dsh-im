@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { ensurePresetWorkspace } from './preset-workspaces.mjs';
 import { t } from './i18n.mjs';
 import { normalizeBusyMessageMode, validateBusyMessageMode } from './message-mode.mjs';
@@ -25,7 +26,7 @@ import {
   validateAccessPolicy,
 } from './access-policy.mjs';
 import { CONNECTION_TEST_STATE_IDENTITY } from './connection-test.mjs';
-import { SESSION_BINDING_STATE_IDENTITY } from './session-binding-lock.mjs';
+import { SESSION_BINDING_STATE_IDENTITY, withSessionBindingLock } from './session-binding-lock.mjs';
 import {
   DEFAULT_CONTEXT_ENHANCEMENT_CONFIG,
   normalizeContextEnhancementConfig,
@@ -1998,8 +1999,18 @@ export function createBotWorkspaceScope(
           const binding = dsBinding(key);
           if (!binding) return null;
           if (!dsBot) throw deliveryTargetError('ds-bot-unavailable', 'DS Bot 当前不可用，请检查插件状态。');
-          const bot = await dsBot.resolve(binding.dsBotId);
-          if (!(await target.sessionExists(bot.sessionId))) {
+          let bot = await dsBot.resolve(binding.dsBotId);
+          if (typeof target.isSessionArchived === 'function' && (await target.isSessionArchived(bot.sessionId))) {
+            for (let i = 0; i < 5; i += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              const updated = await dsBot.resolve(binding.dsBotId).catch(() => null);
+              if (updated && updated.sessionId !== bot.sessionId && !(await target.isSessionArchived(updated.sessionId))) {
+                bot = updated;
+                break;
+              }
+            }
+          }
+          if (!(await target.sessionExists(bot.sessionId)) || (typeof target.isSessionArchived === 'function' && (await target.isSessionArchived(bot.sessionId)))) {
             throw deliveryTargetError('ds-bot-not-found', 'DS Bot 的当前会话不可用。');
           }
           assertCurrentBotScope(isCurrentScope);
@@ -2492,8 +2503,10 @@ export function createBotWorkspaceScope(
             // actual outcome even if a workspace switch commits concurrently.
             return target[method](sessionId, ...args);
           };
+          let replySessionId = sessionId;
           return Object.freeze({
             sessionId,
+            get replySessionId() { return replySessionId; },
             async sessionExists(...args) {
               if (!isCurrentSession()) return false;
               const exists = await target.sessionExists(sessionId, ...args);
@@ -2566,7 +2579,63 @@ export function createBotWorkspaceScope(
                   throw workspaceSessionStale('DS Bot changed before this prompt started.');
                 }
               }
-              return target.ask(sessionId, ...args);
+              if (!dsBotId) return target.ask(sessionId, ...args);
+              const options = typeof args[1] === 'number' ? { timeoutMs: args[1] } : args[1] ?? {};
+              const handoffResources = { stagedBatches: [] };
+              let currentSessionId = sessionId;
+              let promptRpcId;
+              const assertStillBound = () => {
+                options.signal?.throwIfAborted();
+                if (!isCurrentSession()) {
+                  // This input was already accepted. A stale-session error here
+                  // would cause the outer loop to submit it again after unbind.
+                  throw new DOMException('DS Bot binding changed while awaiting a reply.', 'AbortError');
+                }
+              };
+              for (;;) {
+                try {
+                  const answer = promptRpcId
+                    ? await target.waitForTransferredReply(currentSessionId, {
+                        ...options, handoffResources, promptRpcId, assertCurrent: assertStillBound,
+                      })
+                    : await target.ask(sessionId, args[0], { ...options, handoffResources });
+                  if (promptRpcId) assertStillBound();
+                  replySessionId = currentSessionId;
+                  return answer;
+                } catch (askError) {
+                  if (!dsBotId || !['session-archived', 'turn-blocked'].includes(askError?.code)) throw askError;
+                  assertStillBound();
+                  const evidence = extractConnectionEvidence(askError);
+                  const notSubmitted = evidence.details.submissionState === 'not-submitted';
+                  const accepted = askError.promptAccepted === true || evidence.details.submissionState === 'accepted';
+                  const originalRpcId = promptRpcId ?? askError.details?.promptRpcId ?? evidence.correlation.promptRpcId;
+                  // A failed submit can have an unknown outcome. Only explicit
+                  // pre-submit evidence permits replay; everything else needs
+                  // the durable identity of an accepted message to follow.
+                  if (!notSubmitted && (!accepted || !originalRpcId
+                    || typeof target.waitForTransferredReply !== 'function')) throw askError;
+                  let fresh;
+                  for (let attempt = 0; attempt < 6; attempt += 1) {
+                    assertStillBound();
+                    fresh = await dsBot.resolve(dsBotId).catch(() => null);
+                    assertStillBound();
+                    if (fresh && fresh.sessionId !== currentSessionId) break;
+                    await delay(200, undefined, { signal: options.signal });
+                  }
+                  if (!fresh || fresh.sessionId === currentSessionId) throw askError;
+                  if (notSubmitted) throw workspaceSessionStale('DS Bot rolled over before this prompt was submitted.');
+                  currentSessionId = fresh.sessionId;
+                  promptRpcId = originalRpcId;
+                  await withSessionBindingLock(state, conversationKey, async () => {
+                    assertStillBound();
+                    await state.setSession(conversationKey, currentSessionId);
+                    assertStillBound();
+                    sessionGenerations.set(currentSessionId, {
+                      generation, conversationKey, conversationGeneration,
+                    });
+                  });
+                }
+              }
             },
           });
         };

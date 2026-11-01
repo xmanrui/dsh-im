@@ -375,6 +375,99 @@ test('rollover while preparing a prompt resolves again without sending to the ol
   assert.deepEqual(await f.service.listSessionSyncTargets('session-one'), []);
 });
 
+test('ordinary turn-blocked without handoff rollover preserves and throws the original error', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.ask = async () => {
+    const error = new Error('Turn blocked by policy');
+    error.code = 'turn-blocked';
+    throw error;
+  };
+  await assert.rejects(f.ask('blocked'), (error) => {
+    assert.equal(error.code, 'turn-blocked');
+    assert.match(error.message, /Turn blocked by policy/);
+    return true;
+  });
+  assert.equal(f.state.sessionFor(f.key), 'session-one');
+});
+
+test('turn-blocked exceeding the rollover polling window preserves the original error', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.ask = async () => {
+    const error = new Error('Turn blocked without timely switch');
+    error.code = 'turn-blocked';
+    throw error;
+  };
+  await assert.rejects(f.ask('timed out rollover'), (error) => {
+    assert.equal(error.code, 'turn-blocked');
+    return true;
+  });
+});
+
+test('transferred message during handoff turn-blocked is processed once without duplicate submission', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.waitForTransferredReply = async (id, options) => {
+    assert.equal(id, 'session-two');
+    assert.equal(options.promptRpcId, 'im-transferred');
+    return 'answer-transferred-from-session-two';
+  };
+  f.scope.harness.ask = async (id, text) => {
+    f.asks.push({ id, text });
+    f.setCurrent({ ...bot, sessionId: 'session-two', parts: ['session-one'] });
+    const error = new Error('Turn blocked');
+    error.code = 'turn-blocked';
+    error.promptAccepted = true;
+    error.details = { promptRpcId: 'im-transferred' };
+    throw error;
+  };
+  const result = await f.ask('hello');
+  assert.equal(result.sessionId, 'session-two');
+  assert.equal(result.answer, 'answer-transferred-from-session-two');
+  assert.deepEqual(f.asks, [{ id: 'session-one', text: 'hello' }]);
+  assert.equal(f.state.sessionFor(f.key), 'session-two');
+});
+
+test('an adapter without transferred prompt tracking preserves the error instead of guessing a reply', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.readSessionHistory = async () => ({
+    events: [
+      { event: { type: 'assistant/message', data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'history-answer' }] } }, seq: 0 } },
+      { event: { type: 'turn/end', data: { turn: 1, reason: 'completed' }, seq: 1 } },
+    ],
+  });
+  f.scope.harness.ask = async (id, text) => {
+    f.asks.push({ id, text });
+    f.setCurrent({ ...bot, sessionId: 'session-two', parts: ['session-one'] });
+    const error = new Error('Turn blocked');
+    error.code = 'turn-blocked';
+    error.promptAccepted = true;
+    error.details = { promptRpcId: 'im-transferred' };
+    throw error;
+  };
+  await assert.rejects(f.ask('hello'), { code: 'turn-blocked' });
+  assert.deepEqual(f.asks, [{ id: 'session-one', text: 'hello' }]);
+});
+
+test('unsubmitted archived session safely resubmits once to fresh session', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.isSessionArchived = async (id) => id === 'session-one';
+  setTimeout(() => {
+    f.setCurrent({ ...bot, sessionId: 'session-two', parts: ['session-one'] });
+  }, 100);
+  f.scope.harness.ask = async (id, text) => {
+    f.asks.push({ id, text });
+    return 'answer-from-session-two';
+  };
+  const result = await f.ask('hello');
+  assert.equal(result.sessionId, 'session-two');
+  assert.equal(result.answer, 'answer-from-session-two');
+  assert.deepEqual(f.asks, [{ id: 'session-two', text: 'hello' }]);
+});
+
 test('missing DS Bot fails closed, while delivery target CRUD leaves bindings intact', async (t) => {
   const f = await fixture(t);
   await f.service.bindDsBot('im-one', f.key, bot.id);
