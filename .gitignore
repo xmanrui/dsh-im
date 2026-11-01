@@ -25,3 +25,7 @@ test/.tmp/
 # Python 字节码（UIA 桥与 tests/python 会在原地生成）
 __pycache__/
 *.pyc
+# M4：coverage-report.mjs 的 --json 产物。同一份代码两次跑出 89.98/89.97 这种
+# 微差（覆盖率含计时相关的动态 require 面），入库会造成无意义脏diff；
+# 基线数字写在 docs/benchmark 的报告正文里（人读、可核对），JSON 只当 CI 工件。
+docs/benchmark/coverage-baseline.json
