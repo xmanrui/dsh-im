@@ -14,7 +14,9 @@
 // fuzzy, and each one captures a bounded span.
 
 /** Kinds a fact may have; the memory store groups and renders them by this. */
-export const MEMORY_KINDS = Object.freeze(['identity', 'preference', 'dislike', 'plan', 'note']);
+export const MEMORY_KINDS = Object.freeze([
+  'identity', 'preference', 'dislike', 'plan', 'note', 'possession', 'activity',
+]);
 
 /** Longest captured object, so one rambling message cannot become a paragraph. */
 const CAPTURE_MAX = 40;
@@ -36,6 +38,13 @@ const RULES = Object.freeze([
   { kind: 'preference', label: 'like', pattern: /我(?:很|超|最|挺)?(?:喜欢|爱|偏好|中意)\s*([^。！？!?\n]{2,40})/u },
   { kind: 'dislike', label: 'dislike', pattern: /我(?:很|超|最|挺)?(?:讨厌|不喜欢|受不了|烦)\s*([^。！？!?\n]{2,40})/u },
   { kind: 'plan', label: 'plan', pattern: /我(?:们)?\s*(?:要|准备|打算|计划|想)\s*([^。！？!?\n]{2,40})/u },
+  // What somebody has, and what they are up to lately. These are the things a
+  // group actually remembers about each other ("老王养了只猫"), and both stay
+  // anchored on 我 so an offhand remark about the weather never becomes a fact
+  // about a member. A measure word is optional but a verb is not: bare 我有
+  // captures nothing on its own.
+  { kind: 'possession', label: 'has', pattern: /我(?:养了|养着|有)(?:[一几]?[只条个台辆棵盆])?\s*([^。！？!?\n]{2,40})/u },
+  { kind: 'activity', label: 'doing', pattern: /我(?:最近一直在|最近在|近来在|这阵子在|现在在|最近)\s*([^。！？!?\n]{2,40})/u },
 ]);
 
 /** Trim one captured span and drop the trailing particles chat text leaves. */
@@ -66,6 +75,15 @@ export function extractMemoryCandidates(text, { speaker = '' } = {}) {
     if (!match) continue;
     const object = tidy(match[1]);
     if (!object || object.length < 2) continue;
+    // An explicit "记住 X" captures the whole instruction, so nothing else is
+    // inferred from the same message: the note already says what to remember,
+    // and re-reading it for a possession ("我有例会") would store half of it as a
+    // separate, worse fact. The operator said what to keep; believe them.
+    if (rule.kind === 'note') {
+      usedKinds.add('note');
+      candidates.push({ kind: 'note', label: rule.label, object, speaker: speaker || '' });
+      break;
+    }
     usedKinds.add(rule.kind);
     candidates.push({ kind: rule.kind, label: rule.label, object, speaker: speaker || '' });
   }
@@ -113,6 +131,8 @@ const LORE_PHRASES = Object.freeze({
   like: (object) => `群里有人喜欢${object}`,
   dislike: (object) => `群里有人不喜欢${object}`,
   plan: (object) => `有人说要${object}`,
+  has: (object) => `群里有人有${object}`,
+  doing: (object) => `群里有人最近在${object}`,
   explicit: (object) => `有人让你记住：${object}`,
 });
 
