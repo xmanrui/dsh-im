@@ -64,10 +64,39 @@ export const DEFAULT_PERSONA = Object.freeze({
   ]),
 });
 
+/**
+ * Tag literals the prompt protocol reserves.
+ *
+ * A persona card is operator-authored text that lands in the same prompt
+ * assembly as the injected-context blocks. If a card could carry
+ * `<dsh_im_source>` verbatim, the Host splitter would have to decide whether the
+ * operator wrote configuration or the channel did -- and a card is never
+ * configuration. The opening bracket is therefore rewritten to its fullwidth
+ * twin: it reads identically to a human and cannot be parsed as our grammar.
+ */
+const RESERVED_TAG_PATTERN = /<(\/?)\s*dsh_im_([a-z_]+)/giu;
+
+/**
+ * Neutralize anything in operator text that could act as protocol.
+ *
+ * Two classes are rewritten, both invisible to a reader: C0/C1 control
+ * characters (a NUL or an ESC in a card is always a mistake, and some renderers
+ * act on them), and the reserved tag literals above. Ordinary angle brackets,
+ * quotes and emoji pass through untouched -- a character is allowed to write
+ * "<3" or a blockquote if it wants to.
+ */
+function sanitizeOperatorText(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu, ' ')
+    .replace(RESERVED_TAG_PATTERN, (_match, slash, name) => (slash ? '‹/' : '‹') + 'dsh_im_' + name);
+}
+
 /** Bounds one optional string field, treating anything non-string as absent. */
 function optionalText(value, max) {
   if (typeof value !== 'string') return '';
-  const trimmed = value.trim();
+  const trimmed = sanitizeOperatorText(value).trim();
   if (!trimmed) return '';
   return max > 0 && trimmed.length > max ? trimmed.slice(0, max) : trimmed;
 }
