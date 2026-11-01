@@ -27,6 +27,98 @@ jobs:
       - name: Run checks
         run: npm run check
 
+  governance:
+    # H4.1：治理判据单独成 job。挂在 check 里时，任何一处 CI 失败都会把「贡献入口
+    # 坏了」这件事埋在一大片测试输出里；独立成 job 后它在 PR 页上有自己的一行，
+    # 坏了能一眼归因，也不会因为主 job 超时被误判成没跑。
+    name: Governance skeleton
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify governance files and cross-references
+        # 装依赖是多余的（脚本只用 node:fs），但保持与其它 job 同一形态：
+        # 万一将来判据要看 package.json 的 files/engines，不会因为没装东西而假绿。
+        run: node scripts/verify-governance.mjs
+
+      - name: Verify benchmark report shape
+        run: node scripts/verify-benchmark-report.mjs
+
+  coverage:
+    # M4：覆盖率入 CI。用例数多 ≠ 覆盖到（报告 §2.3 那条反差），没有读数时
+    # 「大文件低覆盖」只能靠人记。这里把 lcov 汇总成 src/plugin-src 的行覆盖率，
+    # 阈值 85% 取自本机首次标定读数 89.98% 向下留 5 个点的余量。
+    name: Coverage floor (src + plugin-src)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install ffmpeg (so the media/voice suites actually run)
+        # M5 的另一半：语音链在 CI 上也必须真跑，而不是只在 Windows 本机解了 skip。
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Run tests with coverage
+        run: npm run coverage
+
+      - name: Upload lcov and summary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: coverage-lcov
+          path: |
+            test/.tmp/lcov.info
+            docs/benchmark/coverage-baseline.json
+          if-no-files-found: warn
+
+  benchmark:
+    # M3：渠道热路径基准。continue-on-error 是刻意的 —— 免费 runner 的算力抖动
+    # 会把 PR 判成随机红灯，那不是这次改动的责任。下限仍写死在脚本里，所以
+    # 「数量级退化」会在这行显示成 X，看得见但不阻断合并。
+    name: Channel hot-path benchmark (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run benchmark
+        run: npm run benchmark
+
+      - name: Upload benchmark JSON
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-json
+          path: test/.tmp/benchmark.json
+          if-no-files-found: warn
   windows-workspaces:
     name: Workspace and QR regression tests (Windows)
     runs-on: windows-latest
