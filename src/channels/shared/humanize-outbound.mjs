@@ -349,3 +349,68 @@ export function describeOutboundPlan(plan) {
   });
 }
 
+
+/**
+ * Whether a target renders Markdown at all.
+ *
+ * WeChat does not: a `**bold**` arrives as literal asterisks, and a `- item`
+ * arrives as a dash. Sending Markdown to a client that cannot render it is one of
+ * the loudest machine tells -- it reads as a log dump pasted into a chat. Channels
+ * that do render it keep their Markdown; this flag is the difference.
+ */
+export const PLAIN_TEXT_TARGETS_FALLBACK = true;
+
+/**
+ * Flatten the Markdown a chat client will not render into what a person would type.
+ *
+ * Deliberately conservative, like the splitter. Emphasis markers are dropped
+ * because the words are the message; bullets become a middle dot because a real
+ * person does enumerate things; headings become the bare line; links become
+ * "text (url)" because a bare URL with brackets is unreadable. Code fences and
+ * inline code are preserved verbatim -- someone pasted a command expects it to stay
+ * copyable, and stripping backticks would make it wrong.
+ *
+ * @param text - the finished answer.
+ * @returns the text a plain-text client should receive.
+ */
+export function flattenMarkdown(text) {
+  if (typeof text !== 'string' || !text) return '';
+  let out = text;
+  // Fences first, so nothing inside them is rewritten by the rules below.
+  const fences = [];
+  out = out.replace(/```[\s\S]*?```/gu, (block) => {
+    fences.push(block);
+    return `\u0000FENCE${fences.length - 1}\u0000`;
+  });
+  // Inline code is protected the same way: a command must stay copyable.
+  const codes = [];
+  out = out.replace(/`([^`\n]+)`/gu, (_match, code) => {
+    codes.push(code);
+    return `\u0000CODE${codes.length - 1}\u0000`;
+  });
+  out = out
+    // [text](url) -> text（url）: the address survives, the syntax does not.
+    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/gu, '$1（$2）')
+    // Headings lose their hashes but keep the line.
+    .replace(/^\s{0,3}#{1,6}\s+/gmu, '')
+    // Bullets become a middle dot, the way people actually enumerate in chat.
+    .replace(/^\s{0,3}[-*+]\s+/gmu, '· ')
+    .replace(/^\s{0,3}(\d+)[.)]\s+/gmu, '$1. ')
+    // Blockquote markers carry nothing once the line stands alone.
+    .replace(/^\s{0,3}>\s?/gmu, '')
+    // Horizontal rules are not something a person types.
+    .replace(/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/gmu, '')
+    // Emphasis: strip the markers, keep the words. Bold before italic, so `***x***`
+    // resolves to x rather than leaving a stray asterisk behind.
+    .replace(/\*\*\*([^*\n]+)\*\*\*/gu, '$1')
+    .replace(/\*\*([^*\n]+)\*\*/gu, '$1')
+    .replace(/__([^_\n]+)__/gu, '$1')
+    .replace(/(^|[^*\w])\*([^*\n]+)\*(?![*\w])/gu, '$1$2')
+    .replace(/(^|[^_\w])_([^_\n]+)_(?![_\w])/gu, '$1$2')
+    .replace(/~~([^~\n]+)~~/gu, '$1');
+  // Restore the protected spans, in reverse so indices stay valid.
+  out = out.replace(/\u0000CODE(\d+)\u0000/gu, (_match, index) => codes[Number(index)]);
+  out = out.replace(/\u0000FENCE(\d+)\u0000/gu, (_match, index) => fences[Number(index)]);
+  // Flattening leaves doubled blank lines and trailing spaces behind.
+  return out.replace(/[ \t]+$/gmu, '').replace(/\n{3,}/gu, '\n\n').trim();
+}

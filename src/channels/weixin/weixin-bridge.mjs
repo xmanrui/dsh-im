@@ -39,7 +39,7 @@ import {
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
 import { renderPersonaGuidance } from '../shared/persona.mjs';
-import { planOutbound } from '../shared/humanize-outbound.mjs';
+import { flattenMarkdown, planOutbound } from '../shared/humanize-outbound.mjs';
 import { contextBlockFor } from '../shared/conversation/context-builder.mjs';
 import { memoryScope, recallMemoryBlock, recordInboundMemory } from '../shared/memory-turn.mjs';
 import {
@@ -1491,7 +1491,10 @@ export class WeixinHarnessBridge {
   async #sendPaced(toUserId, text, contextToken, runId, { elapsedMs = 0 } = {}) {
     // Pacing off: the answer travels exactly as it always did.
     if (!this.#humanize) return this.#send(toUserId, text, contextToken, runId);
-    const plan = planOutbound(text, { elapsedMs });
+    // WeChat renders no Markdown, so `**bold**` would arrive as literal asterisks
+    // -- one of the loudest machine tells there is. Flatten first, then plan: the
+    // segment lengths must be measured on what is actually sent.
+    const plan = planOutbound(flattenMarkdown(text), { elapsedMs });
     const providerMessageIds = [];
     for (let index = 0; index < plan.segments.length; index += 1) {
       this.#signal?.throwIfAborted();
