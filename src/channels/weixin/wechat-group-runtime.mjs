@@ -25,6 +25,27 @@ const MASKED_MENTION_NAME = '___';
  * reject forged or stale events, so a divergent rule would either reject real
  * mentions or accept invented ones.
  */
+/**
+ * Strip a leading "@name" that has NO separator before the body, or null.
+ *
+ * Mirrors _match_glued_mention in scripts/wechat_group_uia.py. Measured 2026-11-02:
+ * a hand-typed "@大肥鱼测试回复" reaches the bridge as exactly that string, with no
+ * U+2005 and no space, so READABLE_MENTION_RE (which requires a trailing separator)
+ * never matched it. The event was refused here, before any model saw it - which is
+ * why switching models changed nothing.
+ *
+ * Longest configured name wins, so a name that is a prefix of another cannot
+ * swallow half of the longer one.
+ */
+function matchGluedMention(text, names) {
+  if (!text.startsWith('@') || names.size === 0) return null;
+  const rest = text.slice(1);
+  for (const name of [...names].sort((a, b) => b.length - a.length)) {
+    if (name && rest.startsWith(name)) return rest.slice(name.length);
+  }
+  return null;
+}
+
 function stripMentionTokens(text, triggerNames, allowMasked) {
   let remainder = text.replace(/^\s+/, '');
   let matched = false;
@@ -43,11 +64,18 @@ function stripMentionTokens(text, triggerNames, allowMasked) {
     }
     // Shape 2, the readable form this build really emits.
     const readable = READABLE_MENTION_RE.exec(remainder);
-    if (readable === null) break;
-    const readName = readable[1].trim();
-    if (!names.has(readName)) return { matched: false, remainder: text };
+    if (readable !== null) {
+      const readName = readable[1].trim();
+      if (!names.has(readName)) return { matched: false, remainder: text };
+      matched = true;
+      remainder = remainder.slice(readable[0].length).replace(/^\s+/, '');
+      continue;
+    }
+    // Shape 3, the name glued straight to the body with no separator.
+    const glued = matchGluedMention(remainder, names);
+    if (glued === null) break;
     matched = true;
-    remainder = remainder.slice(readable[0].length).replace(/^\s+/, '');
+    remainder = glued.replace(/^\s+/, '');
   }
   return { matched, remainder };
 }

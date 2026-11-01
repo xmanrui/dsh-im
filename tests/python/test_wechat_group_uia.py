@@ -406,8 +406,31 @@ class MentionAdapterTests(unittest.TestCase):
                 [self.unverified_group(opt_in=False, trigger_names=())], backend)
         self.assertEqual(operations(backend, "select"), [])
 
-    def test_bare_mention_emits_nothing(self):
-        self.assertEqual(self.poll_one("@[___]", self.unverified_group()), [])
+    def test_bare_mention_is_answered_instead_of_silently_dropped(self):
+        # Inverted on purpose. A bare @ used to be dropped before it could become an
+        # event, so the operator's poke looked like a dead bridge - measured
+        # 2026-11-02, two bare @ rows produced no event at all. It now becomes one
+        # short turn whose body is the configured prompt.
+        events = self.poll_one("@[___]", self.unverified_group())
+        self.assertEqual(len(events), 1, "a poke must not vanish")
+        self.assertTrue(events[0]["addressed"])
+        self.assertEqual(events[0]["text"], uia.GroupConfig.bare_mention_prompt)
+
+    def test_bare_mention_is_dropped_when_the_prompt_is_explicitly_empty(self):
+        # Negative control for the test above: the old silent behaviour stays
+        # reachable per group, so this is a configurable policy and not a hard-wired
+        # "always answer".
+        group_cfg = self.unverified_group()
+        group_cfg = uia.GroupConfig(
+            id=group_cfg.id, title=group_cfg.title,
+            trigger_names=group_cfg.trigger_names,
+            command_prefix=group_cfg.command_prefix,
+            allow_self=group_cfg.allow_self,
+            allow_unverified_trigger=group_cfg.allow_unverified_trigger,
+            mention_mode=group_cfg.mention_mode,
+            bare_mention_prompt="",
+        )
+        self.assertEqual(self.poll_one("@[___]", group_cfg), [])
 
     def test_prefix_still_works_in_mention_or_command(self):
         events = self.poll_one("/dsh 下单",
@@ -661,9 +684,14 @@ class AdapterEventTests(unittest.TestCase):
         self.assertEqual(event["text"], "ordinary")
 
     def test_command_only_and_empty_messages_are_not_emitted(self):
+        # Unchanged by the bare-mention rule: a command prefix with no argument is
+        # not a poke, and a whitespace row is not a message. Only an actual @ gets
+        # the prompt body.
         self.adapter.start()
         self.backend.messages["Alpha"].extend([raw("/dsh"), raw("   ")])
         self.assertEqual(self.adapter.poll(), [])
+        self.backend.messages["Alpha"].append(raw("/dsh"))
+        self.assertEqual(self.adapter.poll(), [], "a bare prefix is never answered")
 
     def test_self_is_skipped_by_default(self):
         self.adapter.start()
@@ -2930,15 +2958,15 @@ class GroupedRowMentionTests(unittest.TestCase):
         messages = uia.read_visible_rows_as_messages(rows, allow_unverified=True)
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0].text, "@\u5927\u80a5\u9c7c")
-        # A bare mention has no trailing separator left after stripping, and
-        # READABLE_MENTION_RE requires one. So it does not parse - which is the
-        # right answer: there is no body to act on, and the adapter's _observe
-        # drops empty bodies anyway. Asserting this keeps the expectation honest.
+        # A lone "@大肥鱼" now parses as addressed with an empty body: the name is
+        # recognised, there is simply nothing after it. The adapter turns that empty
+        # body into the configured prompt, so the poke is answered instead of
+        # dropped (measured 2026-11-02: two bare @ rows produced no event at all).
         parsed, text = uia.parse_trigger(
             messages[0].text, "/dsh", mention_mode="mention-or-command",
             trigger_names=("\u5927\u80a5\u9c7c",), allow_masked_mention=True)
-        self.assertFalse(parsed)
-        self.assertEqual(text, "@\u5927\u80a5\u9c7c")
+        self.assertTrue(parsed)
+        self.assertEqual(text, "")
 
 
 class LoginMisdiagnosisGuardTests(unittest.TestCase):
@@ -3086,3 +3114,77 @@ class SendMustNotRaiseWeChatTests(unittest.TestCase):
             backend.press_enter()
         self.assertEqual(caught.exception.code, "focus_not_on_target")
         self.assertEqual(control.typed, [], "no keystroke without a proven target")
+
+
+class GluedMentionAndBarePokeTests(unittest.TestCase):
+    """The two shapes that made the operator say "有正文了还是不理我".
+
+    Measured 2026-11-02 in the live group:
+
+        '@大肥鱼'           -> parse returned (False, ...)  and the row was dropped
+        '@大肥鱼测试回复'    -> parse returned (False, ...)  because
+                              READABLE_MENTION_RE requires a separator after the name,
+                              and a hand-typed @ has none: WeChat only inserts U+2005
+                              when the mention comes from its @ picker.
+
+    The second one is why switching models changed nothing - the event was refused in
+    parsing, before any model was called.
+    """
+
+    NAMES = ("\u5927\u80a5\u9c7c",)
+
+    def parse(self, text, mode="mention-or-command"):
+        return uia.parse_trigger(
+            text, "/dsh", mention_mode=mode, trigger_names=self.NAMES,
+            allow_masked_mention=True)
+
+    def test_the_glued_shape_now_carries_its_body(self):
+        # POSITIVE CONTROL for the fix: before it, this returned (False, text).
+        self.assertEqual(self.parse("@\u5927\u80a5\u9c7c\u6d4b\u8bd5\u56de\u590d"),
+                         (True, "\u6d4b\u8bd5\u56de\u590d"))
+
+    def test_all_three_separator_shapes_agree(self):
+        # U+2005 (picker), ASCII space (typed with a space), and none at all
+        # (hand-typed glued) must all be the same event, or the operator gets a
+        # different outcome depending on how he happened to type it.
+        expected = (True, "\u6d4b\u8bd5\u56de\u590d")
+        for text in ("@\u5927\u80a5\u9c7c\u2005\u6d4b\u8bd5\u56de\u590d",
+                     "@\u5927\u80a5\u9c7c \u6d4b\u8bd5\u56de\u590d",
+                     "@\u5927\u80a5\u9c7c\u6d4b\u8bd5\u56de\u590d"):
+            self.assertEqual(self.parse(text), expected, repr(text))
+
+    def test_a_foreign_glued_mention_is_still_refused(self):
+        # The glued path must not become a way to be addressed by accident: a name
+        # that is not ours leaves the row unaddressed, exactly as before.
+        text = "@\u5c0f\u674e\u6d4b\u8bd5\u56de\u590d"
+        self.assertEqual(self.parse(text), (False, text))
+
+    def test_the_longest_configured_name_wins(self):
+        # "@大肥鱼的朋友你好" with both names configured must strip the LONGER name,
+        # otherwise the body would silently lose half of it.
+        parsed, body = uia.parse_trigger(
+            "@\u5927\u80a5\u9c7c\u7684\u670b\u53cb\u4f60\u597d", "/dsh",
+            mention_mode="mention-or-command",
+            trigger_names=("\u5927\u80a5\u9c7c", "\u5927\u80a5\u9c7c\u7684\u670b\u53cb"),
+            allow_masked_mention=True)
+        self.assertTrue(parsed)
+        self.assertEqual(body, "\u4f60\u597d")
+
+    def test_a_bare_mention_is_recognised_as_a_poke(self):
+        # The helper that separates "poked me" from "started a command and stopped".
+        self.assertTrue(uia._has_mention_token("@\u5927\u80a5\u9c7c", self.NAMES, True))
+        self.assertTrue(uia._has_mention_token("@" + "\u5927\u80a5\u9c7c" + "\u2005",
+                                               self.NAMES, True))
+        self.assertTrue(uia._has_mention_token("@[___]", self.NAMES, True))
+
+    def test_a_lone_command_prefix_is_not_a_poke(self):
+        # "/dsh" and "@大肥鱼" both parse to (True, ''), so only the token check can
+        # tell them apart - and answering "/dsh" with 干嘛 would invent an intent.
+        self.assertFalse(uia._has_mention_token("/dsh", self.NAMES, True))
+        self.assertFalse(uia._has_mention_token("hello", self.NAMES, True))
+        self.assertFalse(uia._has_mention_token("@[___]", self.NAMES, False),
+                         "masked token needs the group opt-in")
+
+    def test_the_default_prompt_is_the_one_the_operator_asked_for(self):
+        # Pinned so a future refactor cannot quietly change the wording he chose.
+        self.assertEqual(uia.GroupConfig.bare_mention_prompt, "\u5e72\u5417")

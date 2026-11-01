@@ -134,6 +134,11 @@ class GroupConfig:
     # unverified command-prefixed rows as addressed; identity stays unverified.
     allow_unverified_trigger: bool = False
     mention_mode: str = "command"
+    # What a bare "@bot" with no body means. Measured 2026-11-02: the operator sent
+    # two bare @ rows and got nothing, because a body-less row was dropped before it
+    # could become an event. Treating the poke as one short question is both what he
+    # asked for and legible in the transcript; "" keeps the old silent behaviour.
+    bare_mention_prompt: str = "\u5e72\u5417"
 
 
 @dataclass(frozen=True)
@@ -185,6 +190,7 @@ def split_mention_tokens(
 
     remainder = text.lstrip()
     matched = False
+    names = set(trigger_names)
     while True:
         token = MENTION_TOKEN_RE.match(remainder)
         if token is not None:
@@ -192,7 +198,7 @@ def split_mention_tokens(
             # Only the masked placeholder may be honoured by opt-in; a name that
             # could be read is always compared, so allow_masked never substitutes
             # for a real name match.
-            honoured = bool(allow_masked) if name == MASKED_MENTION_NAME else name in set(trigger_names)
+            honoured = bool(allow_masked) if name == MASKED_MENTION_NAME else name in names
             if not honoured:
                 return False, text
             matched = True
@@ -200,15 +206,96 @@ def split_mention_tokens(
             continue
         # Shape 2: the readable form this build actually produces.
         readable = READABLE_MENTION_RE.match(remainder)
-        if readable is None:
+        if readable is not None:
+            name = readable.group(1).strip()
+            if name not in names:
+                # Somebody else was @-ed; that owns the message.
+                return False, text
+            matched = True
+            remainder = remainder[readable.end():].lstrip()
+            continue
+        # Shape 3: the name with NO separator before the body.
+        #
+        # Measured 2026-11-02: a hand-typed "@大肥鱼测试回复" arrives as exactly that
+        # string - no U+2005, no space - and READABLE_MENTION_RE requires a trailing
+        # separator, so the whole row parsed as unaddressed and the operator's message
+        # was rejected before any model saw it. That is why changing models changed
+        # nothing: the drop happened in parsing, not in generation.
+        #
+        # Longest name first, so "@大肥鱼的朋友..." matches "大肥鱼的朋友" when that is a
+        # configured name rather than the shorter "大肥鱼" plus a stray body - getting
+        # that order wrong would silently strip half of somebody's trigger name.
+        glued = _match_glued_mention(remainder, names)
+        if glued is None:
             break
-        name = readable.group(1).strip()
-        if name not in set(trigger_names):
-            # Somebody else was @-ed; that owns the message.
-            return False, text
         matched = True
-        remainder = remainder[readable.end():].lstrip()
+        remainder = glued.lstrip()
     return matched, remainder
+
+
+def _has_mention_token(
+    text: str, trigger_names: tuple[str, ...], allow_masked: bool,
+) -> bool:
+    """True when the row actually starts with an @ token we would honour.
+
+    Why this exists instead of reusing the parse result: parse_trigger returns
+    (True, "") for BOTH a lone "@大肥鱼" and a lone "/dsh", and those two must be
+    handled differently - an @ is the operator poking the bot (answer it), a command
+    prefix with no argument is an unfinished command (leave it alone). Only the
+    presence of the token tells them apart.
+
+    Mirrors the three shapes split_mention_tokens accepts, so this can never agree
+    with the parser on one branch and disagree on another.
+    """
+
+    remainder = text.lstrip()
+    names = set(trigger_names)
+    # Tracked explicitly because the three shapes share one loop: every accepted
+    # token sets this, and the first token we would NOT honour returns False
+    # immediately. Reaching the loop's end with this still False means the row never
+    # had an @ at all (the "/dsh with no body" case), which is the whole distinction
+    # this helper exists to make.
+    saw_token = False
+    while True:
+        token = MENTION_TOKEN_RE.match(remainder)
+        if token is not None:
+            name = token.group(1).strip()
+            if name == MASKED_MENTION_NAME:
+                if not allow_masked:
+                    return False
+            elif name not in names:
+                return False
+            saw_token = True
+            remainder = remainder[token.end():].lstrip()
+            continue
+        readable = READABLE_MENTION_RE.match(remainder)
+        if readable is not None:
+            if readable.group(1).strip() not in names:
+                return False
+            saw_token = True
+            remainder = remainder[readable.end():].lstrip()
+            continue
+        glued = _match_glued_mention(remainder, names)
+        if glued is None:
+            return saw_token
+        saw_token = True
+        remainder = glued.lstrip()
+
+
+def _match_glued_mention(text: str, names: set[str]) -> str | None:
+    """Return the remainder after a leading "@name" that has no separator.
+
+    None means this is not a bare-glued mention of a configured name. The caller
+    keeps scanning only on a match, so an "@somebody-else..." row stays refused.
+    """
+
+    if not text.startswith("@") or not names:
+        return None
+    rest = text[1:]
+    for name in sorted(names, key=len, reverse=True):
+        if rest.startswith(name):
+            return rest[len(name):]
+    return None
 
 
 
@@ -714,12 +801,30 @@ class WechatGroupAdapter:
             )
             # Unverified rows may only become addressed inside a group whose owner
             # explicitly opted in; the member identity itself stays unverified.
+            #
+            # A bare "@bot" with no body IS addressed, and must stay that way: the
+            # operator poked the bot on purpose, and dropping the row made the poke
+            # look like a dead bridge. Measured 2026-11-02: two bare @ rows in the
+            # live group produced no event at all, which is why the operator kept
+            # asking why nothing answered. The body is filled with the configured
+            # bare-mention prompt instead of being invented here, so the wording
+            # stays an operator decision while the event itself is never swallowed.
             addressed = bool(
-                parsed and text and (not unverified_sender(item.sender)
-                                or group.allow_unverified_trigger)
+                parsed and (not unverified_sender(item.sender)
+                            or group.allow_unverified_trigger)
             )
             if parsed and not text:
-                continue
+                # Only an @ counts as a poke. A lone command prefix ("/dsh" with no
+                # argument) also parses as addressed with an empty body, and answering
+                # THAT with the prompt would be inventing an intent the operator never
+                # expressed - he typed a command and stopped. So the prompt applies
+                # only when the row actually carried an @ token.
+                if not _has_mention_token(item.text, group.trigger_names,
+                                          bool(group.allow_unverified_trigger)):
+                    continue
+                text = group.bare_mention_prompt
+                if not text:
+                    continue
             identity = "\0".join((
                 group.id, str(state.cursor), item.sender, item.text, item.visible_time,
             ))
@@ -1172,6 +1277,12 @@ def load_config(path: str | Path) -> tuple[list[GroupConfig], int]:
                 "mentionMode needs allowUnverifiedTrigger or triggerNames",
                 "invalid_config",
             )
+        # What a bare "@bot" means. Strict string typing for the same reason as the
+        # booleans above: a non-string here would be interpolated into an event body
+        # and reach the agent as garbage.
+        bare_prompt = item.get("bareMentionPrompt", GroupConfig.bare_mention_prompt)
+        if not isinstance(bare_prompt, str):
+            raise ConfigError("bareMentionPrompt must be a string", "invalid_config")
         groups.append(GroupConfig(
             id=item.get("id", ""),
             title=item.get("title", ""),
@@ -1180,6 +1291,9 @@ def load_config(path: str | Path) -> tuple[list[GroupConfig], int]:
             allow_self=allow_self,
             allow_unverified_trigger=opt_in,
             mention_mode=mention_mode,
+            # Absent keeps the documented default (answer a bare @ with one short
+            # question); an explicit "" opts back into the old silent behaviour.
+            bare_mention_prompt=bare_prompt,
         ))
     interval = data.get("pollIntervalMs", 750)
     if type(interval) is not int or interval < 100:
