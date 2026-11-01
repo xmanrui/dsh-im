@@ -443,6 +443,14 @@ export function flattenMarkdownDetailed(text) {
     return `\u0000${token}C${codes.length - 1}\u0000`;
   });
   out = out
+    // Images are DROPPED, not flattened.
+    //
+    // Measured in the live group: the bot sent `![第40帧](D:/dsh-im-robot/_v3_1.png)`
+    // as text, and a reader saw a local Windows path. That is worse than sending
+    // nothing -- it leaks the operator's filesystem into a group chat and tells
+    // the reader to open a file they cannot reach. The image itself is delivered
+    // by the artifact path, so the tag is pure noise.
+    .replace(/!\[([^\]\n]*)\]\(([^)\s]*)\)/gu, '')
     // [text](url) -> text（url）: the address survives, the syntax does not.
     .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/gu, '$1（$2）')
     // Headings lose their hashes but keep the line.
