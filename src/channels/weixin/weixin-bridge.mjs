@@ -514,7 +514,8 @@ export class WeixinHarnessBridge {
       seq: message.seq,
       messageTimeMs: (kind === 'group' ? message.sent_at : message.create_time_ms)
         ?? weixinMessageTimestampMs(messageId),
-    }).catch((error) => this.#logger.warn?.('[dsh-weixin] failed to persist conversation context:', error));
+    }).catch((error) => this.#logger.warn?.('[dsh-weixin] failed to persist conversation context: '
+      + JSON.stringify({ code: String(error?.code ?? 'unknown') })));
     const runId = nonEmptyString(message?.run_id) ?? undefined;
     const pending = this.#pendingInteractions.get(key);
     const batchCommand = isBatchInputCommand(commandText);
@@ -722,7 +723,8 @@ export class WeixinHarnessBridge {
         providerMessageIds: messageId ? [messageId] : [],
       });
     } catch (error) {
-      this.#logger.warn?.('[dsh-weixin] failed to remember a recovered quote:', error);
+      this.#logger.warn?.('[dsh-weixin] failed to remember a recovered quote: '
+        + JSON.stringify({ code: String(error?.code ?? 'unknown') }));
     }
     return { content: text };
   }
@@ -1511,7 +1513,8 @@ export class WeixinHarnessBridge {
       const text = renderPersonaGuidance(card);
       return text || undefined;
     } catch (error) {
-      this.#logger.warn?.('[dsh-weixin] unable to render the persona card:', error);
+      this.#logger.warn?.('[dsh-weixin] unable to render the persona card: '
+        + JSON.stringify({ code: String(error?.code ?? 'unknown') }));
       return undefined;
     }
   }
@@ -1702,7 +1705,10 @@ export class WeixinHarnessBridge {
         this.#typingRetryAt = Date.now() + TYPING_RETRY_DELAY_MS;
       }
       if (!this.#signal?.aborted && !this.#typingClosed) {
-        this.#logger.warn?.('[dsh-weixin] typing indicator failed:', error);
+        // Plain fields only: passing an Error object lets the host logger redact it
+        // into a masked code, which is exactly the datum needed to diagnose it.
+        this.#logger.warn?.('[dsh-weixin] typing indicator failed: '
+          + JSON.stringify({ code: String(error?.code ?? 'unknown'), status: error?.status ?? null }));
       }
       return false;
     }
@@ -1748,7 +1754,8 @@ export class WeixinHarnessBridge {
       ]);
     } catch (error) {
       if (!signal?.aborted) {
-        this.#logger.warn?.('[dsh-weixin] typing cancellation failed:', error);
+        this.#logger.warn?.('[dsh-weixin] typing cancellation failed: '
+          + JSON.stringify({ code: String(error?.code ?? 'unknown') }));
       }
       return false;
     }
@@ -1779,7 +1786,8 @@ export class WeixinHarnessBridge {
         this.#typingTicketStale = Boolean(this.#typingTarget && this.#typingTicket);
         this.#typingRetryAt = Date.now() + TYPING_RETRY_DELAY_MS;
         if (!this.#signal?.aborted && !this.#typingClosed) {
-          this.#logger.warn?.('[dsh-weixin] typing keepalive failed:', error);
+          this.#logger.warn?.('[dsh-weixin] typing keepalive failed: '
+            + JSON.stringify({ code: String(error?.code ?? 'unknown') }));
         }
       });
     }, this.#typingKeepaliveMs);
