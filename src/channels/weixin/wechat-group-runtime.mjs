@@ -1,5 +1,14 @@
 const GROUP_EVENT_SOURCE = 'uia-wechat-group/v1';
 const UNVERIFIED_SENDER_ID = 'uia-unverified:row';
+// Codes that mean the WeChat surface itself is gone rather than the bridge being
+// broken. Mirror of SURFACE_LOST_CODES in scripts/wechat_group_uia.py: the adapter
+// exits once on any of them, and that exit is what lets this layer slow down.
+// Keep both lists in step when adding a classification there.
+const SURFACE_LOSS_CODES = new Set([
+  'wechat_panel_closed',
+  'wechat_logged_out',
+  'main_window_missing',
+]);
 
 function runtimeError(code, message) {
   const error = new Error(message);
@@ -26,6 +35,12 @@ export class WechatGroupRuntime {
   #harness;
   #logger;
   #restartDelaysMs;
+  #surfaceLossDelaysMs;
+  #surfaceIndex = 0;
+  #surfaceLoss = false;
+  // The delay actually used for the pending retry, exposed through status so an
+  // operator (and the tests) can see which ladder is in effect.
+  #pendingDelayMs = null;
   #bridge = null;
   #starting = null;
   #stopping = null;
@@ -55,6 +70,12 @@ export class WechatGroupRuntime {
     // after boot got silence forever. These delays keep trying instead; the cap
     // is 30s so a recovered window is picked up within half a minute.
     restartDelaysMs = [2_500, 5_000, 10_000, 30_000],
+    // Surface loss (panel closed, client logged out, WeChat not running) is
+    // repaired on a human timescale, so the fast ladder only floods the log -
+    // exactly the behaviour this objective flagged as a defect. Ten minutes
+    // between probes still picks a reopened window up promptly while emitting
+    // almost nothing.
+    surfaceLossRestartDelaysMs = [30_000, 120_000, 600_000],
     startRetryLimit = Infinity,
   }) {
     if (!config || !Array.isArray(config.groups) || config.groups.length === 0) {
@@ -69,6 +90,11 @@ export class WechatGroupRuntime {
       || restartDelaysMs.some((delay) => !Number.isFinite(delay) || delay < 0)) {
       throw new TypeError('restartDelaysMs must contain non-negative delays');
     }
+    if (!Array.isArray(surfaceLossRestartDelaysMs)
+      || surfaceLossRestartDelaysMs.length === 0
+      || surfaceLossRestartDelaysMs.some((delay) => !Number.isFinite(delay) || delay < 0)) {
+      throw new TypeError('surfaceLossRestartDelaysMs must contain non-negative delays');
+    }
     if (!(startRetryLimit === Infinity
       || (Number.isSafeInteger(startRetryLimit) && startRetryLimit >= 0))) {
       throw new TypeError('startRetryLimit must be a non-negative integer or Infinity');
@@ -78,6 +104,7 @@ export class WechatGroupRuntime {
     this.#harness = harness;
     this.#logger = logger;
     this.#restartDelaysMs = [...restartDelaysMs];
+    this.#surfaceLossDelaysMs = [...surfaceLossRestartDelaysMs];
     this.#startRetryLimit = startRetryLimit;
 
     this.#process.on('message', (event) => this.#onMessage(event));
@@ -100,6 +127,9 @@ export class WechatGroupRuntime {
       messagesAccepted: this.#messagesAccepted,
       messagesRejected: this.#messagesRejected,
       lastError: this.#lastError,
+      // Which ladder is driving the pending retry, and how long until it fires.
+      surfaceLoss: this.#surfaceLoss,
+      restartDelayMs: this.#pendingDelayMs,
     };
   }
 
@@ -195,6 +225,11 @@ export class WechatGroupRuntime {
     this.#nextRestartIndex = 0;
     this.#restartAttempts = 0;
     this.#startRetryCount = 0;
+    // Ready means the surface came back: both ladders restart at their head and
+    // the slow mode is dropped, so the next unrelated failure retries fast.
+    this.#surfaceIndex = 0;
+    this.#surfaceLoss = false;
+    this.#pendingDelayMs = null;
     if (wasRestart) this.#restarts += 1;
     this.#lastError = null;
     // Only ready opens intake. Any message emitted before this point has already
@@ -205,7 +240,11 @@ export class WechatGroupRuntime {
   #onExit(detail) {
     if (!this.#started || this.#stopping) return;
     this.#accepting = false;
-    this.#lastError = nonEmptyString(detail?.error) ? detail.error : 'process-exit';
+    const code = nonEmptyString(detail?.error) ? detail.error : 'process-exit';
+    this.#lastError = code;
+    // The adapter exits once on surface loss precisely so this layer can decide
+    // the retry pace; its exit code alone is not enough, the stable error code is.
+    this.#surfaceLoss = SURFACE_LOSS_CODES.has(code);
     this.#scheduleRestart();
   }
 
@@ -216,9 +255,17 @@ export class WechatGroupRuntime {
     // used to stay dead until the Host restarted. Past the ladder, keep the
     // slowest delay instead of stopping.
     if (this.#startRetryCount >= this.#startRetryLimit) return;
-    const index = Math.min(this.#nextRestartIndex, this.#restartDelaysMs.length - 1);
-    const delay = this.#restartDelaysMs[index];
-    this.#nextRestartIndex += 1;
+    // Two ladders, chosen by cause. Surface loss walks the slow one and keeps its
+    // own index, so a panel that stays closed for an hour does not add 120 log
+    // lines to the Host the way the old flood did.
+    const ladder = this.#surfaceLoss ? this.#surfaceLossDelaysMs : this.#restartDelaysMs;
+    const index = this.#surfaceLoss
+      ? Math.min(this.#surfaceIndex, ladder.length - 1)
+      : Math.min(this.#nextRestartIndex, ladder.length - 1);
+    const delay = ladder[index];
+    if (this.#surfaceLoss) this.#surfaceIndex += 1;
+    else this.#nextRestartIndex += 1;
+    this.#pendingDelayMs = delay;
     this.#startRetryCount += 1;
     this.#restartTimer = setTimeout(() => {
       this.#restartTimer = null;

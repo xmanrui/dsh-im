@@ -380,6 +380,79 @@ test('repeated restart failure leaves the group runtime offline without replay',
   assert.equal(accepted.length, 0);
 });
 
+test('surface-loss exits retry on the slow ladder, other failures on the fast one', async (t) => {
+  // A closed panel or a logged-out client is fixed on a human timescale, so
+  // probing every 30s only floods the log - the flood this objective called a
+  // defect. The fast ladder is for failures a restart could actually clear
+  // (interpreter trouble, a transient COM glitch), where picking the window up
+  // quickly is worth the noise.
+  // Short delays make the walk observable; production defaults are
+  // [2500,5000,10000,30000] fast and [30000,120000,600000] slow, and only the
+  // shape of the behaviour matters here.
+  //
+  // The retries fail on purpose. A real bridge that lost its surface keeps
+  // losing it: the child writes the same error frame and exits again, so
+  // start() rejects rather than resolving. A fake whose start succeeds without
+  // ever becoming ready would not model production at all, because the real
+  // start() promise only resolves once the ready frame arrives - and ready is
+  // what releases the in-progress flag and resets the ladder.
+  const surface = new FakeGroupProcess();
+  const { runtime, bridge } = makeRuntime(t, {
+    groupProcess: surface,
+    restartDelaysMs: [5, 5],
+    surfaceLossRestartDelaysMs: [7, 20, 40],
+  });
+  await runtime.start({ bridge });
+  await eventually(() => runtime.status.ready, 'initial ready never arrived');
+  assert.equal(runtime.status.surfaceLoss, false);
+  surface.failStarts = 5;
+  surface.status = { running: false, ready: false, pid: null };
+  surface.emit('exit', { code: 4, error: 'wechat_panel_closed' });
+  // Read the ladder head synchronously: scheduling happens inside the exit
+  // handler, whereas by the time the retry has run and failed again the delay
+  // has already advanced to the next rung.
+  assert.equal(runtime.status.restartDelayMs, 7, 'first surface retry uses ladder head');
+  assert.equal(runtime.status.surfaceLoss, true);
+  await eventually(() => surface.starts === 2, 'surface loss did not retry');
+  // Each further failure walks the slow ladder; the delay held for the next
+  // attempt is readable through status without waiting for it to fire. Waiting
+  // on the delay itself, not on the start counter, matters: starts is bumped at
+  // the top of start(), while the next delay is only recorded once that attempt
+  // has failed, so asserting against starts alone races its own value.
+  await eventually(
+    () => runtime.status.restartDelayMs === 20,
+    'second surface retry did not widen',
+    3000,
+  );
+  await eventually(
+    () => runtime.status.restartDelayMs === 40,
+    'third surface retry did not widen',
+    3000,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  // Past the ladder the slowest delay is kept, never wrapped back to 7ms.
+  assert.equal(runtime.status.restartDelayMs, 40, 'ladder wrapped instead of holding');
+  assert.equal(runtime.status.surfaceLoss, true);
+
+  // A failure that is not about the surface (an interpreter glitch, a transient
+  // COM error) stays on the fast ladder, because retrying quickly can fix it.
+  const transient = new FakeGroupProcess();
+  const fast = makeRuntime(t, {
+    groupProcess: transient,
+    restartDelaysMs: [5, 5],
+    surfaceLossRestartDelaysMs: [7, 700000],
+  });
+  await fast.runtime.start({ bridge: fast.bridge });
+  await eventually(() => fast.runtime.status.ready, 'transient ready never arrived');
+  transient.failStarts = 3;
+  transient.status = { running: false, ready: false, pid: null };
+  transient.emit('exit', { code: 1, error: 'poll_failed' });
+  await eventually(() => transient.starts === 2, 'transient failure did not retry');
+  assert.equal(fast.runtime.status.restartDelayMs, 5, 'must stay on the fast ladder');
+  assert.equal(fast.runtime.status.surfaceLoss, false);
+  await eventually(() => transient.starts === 3, 'second transient retry missing');
+  assert.equal(fast.runtime.status.restartDelayMs, 5, 'transient ladder must not widen to slow');
+});
 test('events emitted before the first ready baseline are rejected', async (t) => {
   const groupProcess = new FakeGroupProcess();
   groupProcess.manualReady = true;
