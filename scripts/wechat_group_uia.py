@@ -1163,19 +1163,63 @@ class UiaBackend:
         """
 
         control = self._control("chat_input_field")
-        if self._focus_is_target(control):
+        # Containment first: if WeChat's own process already owns the keyboard,
+        # the chat that receives Enter is inside WeChat, so typing is safe
+        # without touching focus at all (SetFocus is what could move a window
+        # forward). Only when the keystroke is not provably ours do we attempt
+        # one focus change, and even then we re-prove containment before typing.
+        if self._focus_is_contained(control):
             control.SendKeys("{Enter}", waitTime=0)
             return
         try:
             control.SetFocus()
         except Exception:
             pass
-        if not self._focus_is_target(control):
+        if not self._focus_is_contained(control) and not self._focus_is_target(control):
             raise SafetyError(
                 "keyboard focus is not provably on the WeChat input",
                 "focus_not_on_target",
             )
         control.SendKeys("{Enter}", waitTime=0)
+
+    def _focus_is_contained(self, control: Any) -> bool:
+        """True when the focused element belongs to THIS WeChat process.
+
+        The first version compared the focused control with the target by
+        automation id and handle. Live measurement killed that design: on a
+        minimised window UIA reports the focus as an intermediate pane
+        (reproduced with a Tk window: a TkChild whose handle matches neither
+        the top level nor the entry), so identity matching refused every real
+        background send. The property that actually guarantees safety is
+        containment, not identity: Enter can only execute inside the chat that
+        is focused, so if the focused element lives in WeChat's own process,
+        the keystroke cannot reach the operator's application - regardless of
+        which pane inside WeChat holds it.
+
+        Fail-closed on every unknown: a missing reader, a missing pid, or a
+        COM error means 'not provable', so we refuse instead of guessing.
+        """
+
+        auto = self._auto
+        get_focused = getattr(auto, "GetFocusedControl", None)
+        if get_focused is None:
+            return False
+        try:
+            focused = get_focused()
+        except Exception:
+            return False
+        if focused is None:
+            return False
+        # getattr, not indexing: a backend built without a window (older test
+        # doubles) must answer 'unprovable' rather than crash into the send.
+        window = getattr(self, "_window", None)
+        own_pid = _safe_property(window, "ProcessId") if window is not None else None
+        focused_pid = _safe_property(focused, "ProcessId")
+        if not isinstance(own_pid, int) or own_pid <= 0:
+            return False
+        if not isinstance(focused_pid, int) or focused_pid <= 0:
+            return False
+        return focused_pid == own_pid
 
     def _focus_is_target(self, control: Any) -> bool:
         """True only when the OS focused element really is this WeChat control.

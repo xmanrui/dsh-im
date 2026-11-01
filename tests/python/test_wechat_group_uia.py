@@ -749,11 +749,17 @@ class PressEnterFocusGuardTests(unittest.TestCase):
     """
 
     class Input:
-        """UIA control stand-in; SetFocus only succeeds when `takes_focus`."""
+        """UIA control stand-in; SetFocus only succeeds when `takes_focus`.
+
+        process_id models which application owns the element: the guard's hard
+        line is that Enter must never leave WeChat's process, so tests need to
+        say whose process a control belongs to.
+        """
 
         def __init__(self, handle=111, automation_id="chat_input_field",
-                     offscreen=False, takes_focus=True):
+                     offscreen=False, takes_focus=True, process_id=11940):
             self.NativeWindowHandle = handle
+            self.ProcessId = process_id
             self.AutomationId = automation_id
             self.IsOffscreen = offscreen
             self.focus = 0
@@ -788,16 +794,23 @@ class PressEnterFocusGuardTests(unittest.TestCase):
             if self._accept_focus is None or control is self._accept_focus:
                 self._focused = control
 
-    def build(self, target, focused):
+    def build(self, target, focused, window_pid=11940):
         backend = uia.UiaBackend.__new__(uia.UiaBackend)
         backend._closed = False
         backend._auto = self.Auto(focused)
         backend._control = lambda automation_id: target
+        # On a real machine the top-level window always carries a pid; without
+        # it the containment proof has nothing to compare against.
+        backend._window = self.Input(handle=44565750, automation_id="",
+                                     process_id=window_pid)
         return backend
 
-    def test_refuses_to_type_when_focus_is_elsewhere(self):
+    def test_refuses_to_type_when_focus_is_in_another_process(self):
+        # The safety line is containment, not identity: Enter is only ever
+        # safe while the keyboard belongs to WeChat. A control in another
+        # process (the operator's own app) must stop the keystroke entirely.
         target = self.Input()
-        stranger = self.Input(handle=999, automation_id="something_else")
+        stranger = self.Input(handle=999, automation_id="something_else", process_id=9999)
         backend = self.build(target, focused=stranger)
         with self.assertRaises(uia.SafetyError) as ctx:
             backend.press_enter()
@@ -871,40 +884,112 @@ class PressEnterFocusGuardTests(unittest.TestCase):
         self.assertEqual(target.typed, ["{Enter}"])
 
     def test_focus_in_another_apps_top_level_is_refused(self):
-        # The same shape must not accept a foreign window handle: that Enter
-        # would land in the operator's foreground app.
+        # The same shape must not accept a foreign window: that Enter would land
+        # in the operator's own app. Foreign here means foreign PROCESS.
         target = self.Input(handle=0, automation_id="chat_input_field")
         target.ClassName = "mmui::ChatInputField"
-        foreign = self.Input(handle=264128, automation_id="")
+        foreign = self.Input(handle=264128, automation_id="", process_id=9999)
         foreign.ClassName = "Chrome_WidgetWin_1"
         backend = self.build(target, focused=foreign)
-        backend._window = self.Input(handle=44565750)
         with self.assertRaises(uia.SafetyError) as ctx:
             backend.press_enter()
         self.assertEqual(ctx.exception.code, "focus_not_on_target")
         self.assertEqual(target.typed, [])
-    def test_same_automation_id_in_a_foreign_class_is_refused(self):
-        # Another app could expose an element named chat_input_field; the mmui
-        # class is what makes the match specific to WeChat.
+    def test_same_automation_id_in_a_foreign_process_is_refused(self):
+        # Another app can expose an element literally named chat_input_field, so
+        # the name alone proves nothing. What makes a keystroke safe is that the
+        # focused element belongs to WeChat's process, which is why the pid, not
+        # the label, is the deciding fact.
         target = self.Input(handle=0, automation_id="chat_input_field")
         target.ClassName = "mmui::ChatInputField"
-        stranger = self.Input(handle=0, automation_id="chat_input_field")
+        stranger = self.Input(handle=0, automation_id="chat_input_field", process_id=9999)
         stranger.ClassName = "Chrome_WidgetWin_1"
         backend = self.build(target, focused=stranger)
         with self.assertRaises(uia.SafetyError) as ctx:
             backend.press_enter()
         self.assertEqual(ctx.exception.code, "focus_not_on_target")
         self.assertEqual(target.typed, [])
-    def test_a_same_handle_but_different_control_is_not_enough(self):
-        # Focus on another element of the same window must still refuse: the
-        # keystroke would land outside the input box.
+    def test_a_sibling_inside_wechat_is_accepted_not_refused(self):
+        # Deliberate policy, and it supersedes the stricter identity rule this
+        # test originally asserted: focus on another WeChat element (the message
+        # list) means Enter lands inside WeChat, where it is inert - it cannot
+        # reach the operator's application. Refusing here instead would reject
+        # background sends whenever UIA reports focus as a pane rather than the
+        # exact edit, which is the common case on a minimised window. A send
+        # that lands wrong is still caught honestly by the read-back check that
+        # follows, so the failure surfaces as 'not delivered', never as a
+        # keystroke in someone else's window.
         target = self.Input()
         sibling = self.Input(handle=111, automation_id="chat_message_list")
         backend = self.build(target, focused=sibling)
-        with self.assertRaises(uia.SafetyError):
-            backend.press_enter()
-        self.assertEqual(target.typed, [])
+        backend.press_enter()
+        self.assertEqual(target.typed, ["{Enter}"])
 
+
+class ProcessScopedFocusTests(unittest.TestCase):
+    """Containment, not identity, is what makes a background Enter safe.
+
+    Exact control identity turned out to be the wrong key: on a minimised window
+    UIA reports focus as some intermediate pane (measured with a Tk window: a
+    TkChild whose handle is neither the top level nor the edit), so an identity
+    test would refuse every real background send. If the focused element belongs
+    to WeChat's own process, Enter cannot reach the operator's app - all three
+    in-process focus shapes pass and anything from another process fails.
+    """
+    class Node:
+        def __init__(self, pid, handle=0, automation_id="", class_name=""):
+            self.ProcessId = pid
+            self.NativeWindowHandle = handle
+            self.AutomationId = automation_id
+            self.ClassName = class_name
+
+        def SendKeys(self, text, waitTime=0):
+            self.typed = text
+
+    def backend(self, window_pid, focused):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._auto = type("A", (), {"GetFocusedControl": staticmethod(lambda: focused)})
+        backend._window = self.Node(window_pid, handle=44565750, class_name="mmui::MainWindow")
+        return backend
+
+    def test_focus_on_the_target_child_passes(self):
+        target = self.Node(11940, handle=0, automation_id="chat_input_field",
+                           class_name="mmui::ChatInputField")
+        self.assertTrue(self.backend(11940, target)._focus_is_contained(target))
+
+    def test_focus_on_the_main_window_passes(self):
+        focused = self.Node(11940, handle=44565750, class_name="mmui::MainWindow")
+        target = self.Node(11940, handle=0, automation_id="chat_input_field")
+        self.assertTrue(self.backend(11940, focused)._focus_is_contained(target))
+
+    def test_focus_on_an_intermediate_wechat_pane_passes(self):
+        # The measured real-world shape: neither the child nor the top level.
+        focused = self.Node(11940, handle=777, class_name="mmui::ChatViewPane")
+        target = self.Node(11940, handle=0, automation_id="chat_input_field")
+        self.assertTrue(self.backend(11940, focused)._focus_is_contained(target))
+
+    def test_focus_in_another_process_is_refused(self):
+        # Same automation id in someone else's app must not open the gate:
+        # that Enter would submit the operator's own form.
+        stranger = self.Node(9999, handle=264128, automation_id="chat_input_field",
+                             class_name="Chrome_WidgetWin_1")
+        target = self.Node(11940, handle=0, automation_id="chat_input_field")
+        self.assertFalse(self.backend(11940, stranger)._focus_is_contained(target))
+
+    def test_unknown_pids_are_refused(self):
+        # A UIA failure must not be read as containment; the safe answer is no.
+        ambiguous = self.Node(0, handle=0, automation_id="chat_input_field")
+        target = self.Node(11940, handle=0, automation_id="chat_input_field")
+        self.assertFalse(self.backend(11940, ambiguous)._focus_is_contained(target))
+
+    def test_missing_focus_reader_refuses_instead_of_guessing(self):
+        backend = uia.UiaBackend.__new__(uia.UiaBackend)
+        backend._closed = False
+        backend._auto = type("A", (), {})
+        backend._window = self.Node(11940, handle=44565750)
+        target = self.Node(11940, handle=0, automation_id="chat_input_field")
+        self.assertFalse(backend._focus_is_contained(target))
 
 class NoOpenChatTests(unittest.TestCase):
     """A freshly logged-in WeChat has no chat panel until one is opened."""
