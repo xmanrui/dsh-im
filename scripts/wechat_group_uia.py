@@ -97,12 +97,22 @@ class ProtocolError(BridgeError):
 # How a group row becomes an address. command keeps today's behaviour and is the
 # default; mention honours only a leading @ token; mention-or-command takes both.
 MENTION_MODES = frozenset(("command", "mention", "mention-or-command"))
-# A real @ renders as the literal token "@[...]" inside the message text, and the
-# bracket is produced only by picking a member from the @ list. Hand-typed
-# "@name" has no such shape, so the shape is what makes a token count.
+# Two measured shapes, because this build and the documented one differ.
+#
+# Shape 1, masked: "@[...]". WeChat renders the mentioned name as the literal
+# token @[___] (or @[name] if a build exposes it). The bracket is produced only by
+# picking a member from the @ list, so its presence is the signal.
 MENTION_TOKEN_RE = re.compile(r"^@\[([^\]\n]*)\]")
-# WeChat erases the mentioned name to "___" in the accessibility text, which is
-# what makes a token provable-but-anonymous.
+# Shape 2, readable: "@大肥鱼". Measured from the live transcript at 00:26 by
+# reading the exact row the operator sent: the accessibility name was 大肥鱼
+# followed by U+2005 FOUR-PER-EM SPACE and there was no bracket anywhere. This
+# build therefore does NOT mask the name, which is strictly better evidence - the
+# name can be compared against trigger_names - and the old rule that only honoured
+# a bracket meant the operator own @ parsed as unaddressed and the bot stayed mute.
+# U+2005 is what WeChat inserts after a mention; a plain space is accepted too so a
+# hand-typed-looking row cannot silently change the answer.
+READABLE_MENTION_RE = re.compile(r"^@([^\s@\[\]\u2005]+)[\s\u2005]")
+# The erased form this build may still produce; kept so a masking build works.
 MASKED_MENTION_NAME = "___"
 
 
@@ -170,23 +180,29 @@ def split_mention_tokens(
     matched = False
     while True:
         token = MENTION_TOKEN_RE.match(remainder)
-        if token is None:
+        if token is not None:
+            name = token.group(1).strip()
+            # Only the masked placeholder may be honoured by opt-in; a name that
+            # could be read is always compared, so allow_masked never substitutes
+            # for a real name match.
+            honoured = bool(allow_masked) if name == MASKED_MENTION_NAME else name in set(trigger_names)
+            if not honoured:
+                return False, text
+            matched = True
+            remainder = remainder[token.end():].lstrip()
+            continue
+        # Shape 2: the readable form this build actually produces.
+        readable = READABLE_MENTION_RE.match(remainder)
+        if readable is None:
             break
-        name = token.group(1).strip()
-        if name == MASKED_MENTION_NAME:
-            # The erased placeholder proves only that a member was picked, so it
-            # counts exactly when the operator opted this group in. Configured
-            # trigger_names do NOT disable it: they belong to the readable-name
-            # branch below, and a build that hides names hides them for every row.
-            honoured = bool(allow_masked)
-        else:
-            honoured = name in set(trigger_names)
-        if not honoured:
-            # A foreign or unreadable mention owns the message; stop, do not skip.
+        name = readable.group(1).strip()
+        if name not in set(trigger_names):
+            # Somebody else was @-ed; that owns the message.
             return False, text
         matched = True
-        remainder = remainder[token.end():].lstrip()
+        remainder = remainder[readable.end():].lstrip()
     return matched, remainder
+
 
 
 def parse_trigger(

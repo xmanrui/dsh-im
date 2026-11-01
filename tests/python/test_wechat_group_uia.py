@@ -146,6 +146,68 @@ class TriggerTests(unittest.TestCase):
         self.assertEqual(uia.parse_trigger("hello", ""), (False, "hello"))
 
 
+class ReadableMentionShapeTests(unittest.TestCase):
+    """The real @ on this build is a readable name, not a bracket placeholder.
+
+    Measured from the live transcript at 00:26 by reading the exact row the
+    operator sent: its accessibility name was the characters for 大肥鱼 followed by
+    U+2005 (FOUR-PER-EM SPACE), with no bracket anywhere in the codepoint dump.
+    The earlier analysis concluded WeChat masks mentioned names to the literal
+    token @[___] and the whole trigger rule was built on that shape, so the
+    operator own @ parsed as NOT addressed and the bot stayed mute. Both shapes
+    must be honoured: the bracket form for builds that mask, and the readable name
+    for this build - which is stronger evidence, because a name can be compared.
+    """
+
+    # Escapes keep the file ASCII-safe and the codepoints unambiguous:
+    # 大肥鱼 = U+5927 U+80A5 U+9C7C, followed by U+2005.
+    AT = "@\u5927\u80a5\u9c7c\u2005"
+    BODY = "\u5e2e\u6211\u4e0b\u5355"
+
+    def test_the_measured_at_row_is_stripped_to_its_body(self):
+        # POSITIVE CONTROL for this fix: with only the bracket regex this comes
+        # back (False, text) and the operator mention never fires.
+        parsed, text = uia.parse_trigger(
+            self.AT + " " + self.BODY, "/dsh", mention_mode="mention-or-command",
+            trigger_names=("\u5927\u80a5\u9c7c",), allow_masked_mention=True)
+        self.assertTrue(parsed)
+        self.assertEqual(text, self.BODY)
+
+    def test_a_mention_of_someone_else_is_still_refused(self):
+        foreign = "@\u5c0f\u674e\u2005 " + self.BODY
+        self.assertEqual(
+            uia.parse_trigger(foreign, "/dsh", mention_mode="mention-or-command",
+                              trigger_names=("\u5927\u80a5\u9c7c",),
+                              allow_masked_mention=True),
+            (False, foreign),
+        )
+
+    def test_a_readable_name_needs_a_configured_trigger_name(self):
+        # A readable mention must never be honoured merely because the group opted
+        # in for masked tokens: here the name IS readable, so comparing it is the
+        # whole point and the opt-in cannot substitute for it.
+        self.assertEqual(
+            uia.parse_trigger(self.AT + " " + self.BODY, "/dsh",
+                              mention_mode="mention-or-command",
+                              trigger_names=(), allow_masked_mention=True),
+            (False, self.AT + " " + self.BODY),
+        )
+
+    def test_the_bracket_shape_still_works(self):
+        # Regression guard for a masking build: the old shape must keep working.
+        parsed, text = uia.parse_trigger(
+            "@[___] " + self.BODY, "/dsh", mention_mode="mention-or-command",
+            allow_masked_mention=True)
+        self.assertTrue(parsed)
+        self.assertEqual(text, self.BODY)
+
+    def test_command_mode_is_unaffected(self):
+        # The default mode must not start honouring readable mentions.
+        self.assertEqual(
+            uia.parse_trigger(self.AT + " " + self.BODY, "/dsh"),
+            (False, self.AT + " " + self.BODY),
+        )
+
 class MentionTriggerTests(unittest.TestCase):
     """Direct @ mention as an address, with no command prefix.
 

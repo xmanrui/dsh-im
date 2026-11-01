@@ -336,6 +336,61 @@ const MENTION_CONFIG = {
   }],
 };
 
+const READABLE_MENTION_CONFIG = {
+  pollIntervalMs: 750,
+  groups: [{
+    id: 'uia_group_one',
+    title: '精确群名',
+    commandPrefix: '/dsh',
+    mentionMode: 'mention',
+    // The readable branch matches a name, so it needs the name list rather than
+    // the masked-token opt-in. 大肥鱼 is U+5927 U+80A5 U+9C7C.
+    triggerNames: ['\u5927\u80a5\u9c7c'],
+    allowSelf: false,
+    allowUnverifiedTrigger: true,
+  }],
+};
+
+test('the readable @ shape this build really produces is a valid trigger', async (t) => {
+  // Measured from the live transcript at 00:26: the accessibility name of the
+  // operator own mention was 大肥鱼 followed by U+2005 (FOUR-PER-EM SPACE), with no
+  // bracket at all. The runtime re-derives the trigger from raw_text as a
+  // forgery check, so if it only knew the bracket shape it would reject the very
+  // mentions the adapter now accepts - the bot would stay mute in a group whose
+  // adapter was working.
+  const groupProcess = new FakeGroupProcess();
+  const { runtime, accepted, bridge } = makeRuntime(t, {
+    groupProcess, config: READABLE_MENTION_CONFIG,
+  });
+  await runtime.start({ bridge });
+  const at = '@\u5927\u80a5\u9c7c\u2005';
+  groupProcess.emit('message', groupEvent({
+    message_id: 'readable-1', from_user_id: 'uia-unverified:row',
+    sender_name: 'uia-unverified:row', raw_text: at + ' 正文', text: '正文',
+  }));
+  await runtime.waitForIdle();
+  assert.deepEqual(accepted.map((event) => event.message_id), ['readable-1']);
+  assert.equal(accepted[0].text, '正文');
+  assert.equal(runtime.status.messagesRejected, 0);
+});
+
+test('a readable mention of somebody else is still rejected', async (t) => {
+  // The name is readable here, so comparing it is the whole point: an @ of a
+  // different member must never borrow the group opt-in.
+  const groupProcess = new FakeGroupProcess();
+  const { runtime, accepted, bridge } = makeRuntime(t, {
+    groupProcess, config: READABLE_MENTION_CONFIG,
+  });
+  await runtime.start({ bridge });
+  groupProcess.emit('message', groupEvent({
+    message_id: 'foreign-readable', from_user_id: 'uia-unverified:row',
+    sender_name: 'uia-unverified:row',
+    raw_text: '@\u5c0f\u674e\u2005 正文', text: '正文',
+  }));
+  await runtime.waitForIdle();
+  assert.deepEqual(accepted, []);
+  assert.equal(runtime.status.messagesRejected, 1);
+});
 test('a leading mention token is a valid trigger and the body is stripped', async (t) => {
   // The adapter strips @[___] before emitting, so the second proof here has to
   // re-derive the same rule: raw_text must start with a mention token and the

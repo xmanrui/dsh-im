@@ -1,10 +1,16 @@
 const GROUP_EVENT_SOURCE = 'uia-wechat-group/v1';
 const UNVERIFIED_SENDER_ID = 'uia-unverified:row';
-// Mirrors MENTION_TOKEN_RE / MASKED_MENTION_NAME in scripts/wechat_group_uia.py.
-// A real @ renders as "@[name]" in the accessibility text and the bracket is only
-// produced by picking from the @ list, so the shape is the signal; the name inside
-// is erased to ___ on this build.
+// Mirrors MENTION_TOKEN_RE / READABLE_MENTION_RE / MASKED_MENTION_NAME in
+// scripts/wechat_group_uia.py. TWO shapes exist and both must be honoured:
+//   - masked "@[___]": the bracket is produced only by picking a member from the
+//     @ list, and the name is erased, so it proves somebody was @-ed, never whom;
+//   - readable "@大肥鱼" + U+2005: measured from the live transcript at 00:26 on
+//     this build, which does NOT mask the name. That is stronger evidence because
+//     the name can be compared against triggerNames.
+// Only knowing the bracket shape is what made the operator own @ parse as
+// unaddressed while the adapter had already accepted it.
 const MENTION_TOKEN_RE = /^@\[([^\]\n]*)\]/;
+const READABLE_MENTION_RE = /^@([^\s@\[\]\u2005]+)[\s\u2005]/;
 const MASKED_MENTION_NAME = '___';
 
 /**
@@ -25,12 +31,23 @@ function stripMentionTokens(text, triggerNames, allowMasked) {
   const names = new Set(Array.isArray(triggerNames) ? triggerNames : []);
   for (;;) {
     const token = MENTION_TOKEN_RE.exec(remainder);
-    if (token === null) break;
-    const name = token[1].trim();
-    const honoured = name === MASKED_MENTION_NAME ? allowMasked === true : names.has(name);
-    if (!honoured) return { matched: false, remainder: text };
+    if (token !== null) {
+      const name = token[1].trim();
+      // Opt-in can only stand in for a name we CANNOT read. A readable name is
+      // always compared, so allowMasked never substitutes for a real match.
+      const honoured = name === MASKED_MENTION_NAME ? allowMasked === true : names.has(name);
+      if (!honoured) return { matched: false, remainder: text };
+      matched = true;
+      remainder = remainder.slice(token[0].length).replace(/^\s+/, '');
+      continue;
+    }
+    // Shape 2, the readable form this build really emits.
+    const readable = READABLE_MENTION_RE.exec(remainder);
+    if (readable === null) break;
+    const readName = readable[1].trim();
+    if (!names.has(readName)) return { matched: false, remainder: text };
     matched = true;
-    remainder = remainder.slice(token[0].length).replace(/^\s+/, '');
+    remainder = remainder.slice(readable[0].length).replace(/^\s+/, '');
   }
   return { matched, remainder };
 }
