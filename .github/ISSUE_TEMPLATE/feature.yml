@@ -1,0 +1,41 @@
+name: 功能请求
+description: 新能力 / 体验改进
+title: "[FR] "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: channel
+    attributes:
+      label: 涉及渠道
+      options:
+        - 跨渠道 / 通用
+        - weixin
+        - feishu
+        - dingtalk
+        - wecom / wecom-app
+        - qq
+        - slack / telegram / discord
+        - whatsapp / imessage
+        - email / matrix / office
+    validations:
+      required: true
+  - type: textarea
+    id: user-story
+    attributes:
+      label: 用户故事
+      description: 谁、在什么场景、想完成什么；不要先给实现方案
+      placeholder: 我是……，我希望……，这样可以……
+    validations:
+      required: true
+  - type: textarea
+    id: degradation
+    attributes:
+      label: 平台不支持时的降级
+      description: 参考 ADR-0001：明确降级只适用于「原本不具备的新能力」，不得撤掉既有能力
+  - type: dropdown
+    id: willing
+    attributes:
+      label: 是否愿意提交 PR
+      options: ["愿意", "可以指导后提交", "仅提出需求"]
+    validations:
+      required: true

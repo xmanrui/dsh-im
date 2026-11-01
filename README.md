@@ -457,6 +457,22 @@ dsh web --trusted-host dsh.example.com
 
 ---
 
+## 参与贡献
+
+提交代码前先读 [CONTRIBUTING.md](CONTRIBUTING.md)：它列了环境要求、`npm run check` 到底检查什么、提交规范，以及新增一个渠道的五步。
+
+| 想做什么 | 去哪里 |
+| --- | --- |
+| 报告缺陷 | [.github/ISSUE_TEMPLATE/bug.yml](.github/ISSUE_TEMPLATE/bug.yml)（附 `npm run check` 末行与脱敏日志） |
+| 提功能需求 | [.github/ISSUE_TEMPLATE/feature.yml](.github/ISSUE_TEMPLATE/feature.yml) |
+| 报告安全问题 | [SECURITY.md](SECURITY.md)（**不要**公开开 issue） |
+| 提交 PR | [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) 的自查清单 |
+| 社区行为 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) |
+
+三条最容易踩的坑（详见 CONTRIBUTING §2）：① 改了会进入 bundle 的内容后必须 `npm run build` 并**一并提交** `lib/*.js`，否则用户加载的还是旧字节；② README 里的渠道能力矩阵**不要手改**，跑 `node scripts/channel-capability-matrix.mjs --write`；③ 本仓常有多会话并行写，提交一律 `git commit --only -- <files>` 点名路径。
+
+---
+
 ## 联系方式
 
 欢迎加入企业微信群，或通过邮箱、微信、小红书或 WhatsApp 联系我。

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 /**
@@ -28,6 +29,8 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const root = resolve(import.meta.dirname, '..');
+
+export { root as projectRoot };
 
 /** Both artifacts this package ships and `exports` as entry points. */
 export const ARTIFACTS = Object.freeze(['lib/index.js', 'lib/client.js']);
@@ -66,17 +69,36 @@ export function compareArtifact(relativePath, committed, working) {
 }
 
 /** Read one artifact from git at `base`; returns null when it is not tracked. */
-async function readCommitted(base, relativePath) {
+async function readCommitted(base, relativePath, worktree = root) {
   try {
     const { stdout } = await execFileAsync(
       'git',
       ['show', `${base}:${relativePath}`],
-      { cwd: root, maxBuffer: 64 * 1024 * 1024, encoding: 'buffer' },
+      { cwd: worktree, maxBuffer: 64 * 1024 * 1024, encoding: 'buffer' },
     );
     return Buffer.from(stdout);
   } catch {
     return null;
   }
+}
+
+/**
+ * Exit code contract used by the test that proves the guard has teeth.
+ *
+ * The end-to-end negative control in `test/built-artifact-guard.test.mjs` edits
+ * `lib/index.js` on purpose, so a plain "exit 1 on drift" would make the guard
+ * fail its own gate run. `--self-test-drift` therefore reports 0 only when the
+ * drift is *exactly* the probe the test injected, and keeps report 1 for every
+ * other drift: a real stale bundle still fails the build even under the flag.
+ */
+const SELF_TEST_DRIFT_MARKER = '\n// drift probe\n';
+
+/** Is this drift the self-test probe rather than a stale artifact? */
+function isSelfTestProbe(committed, working) {
+  if (process.argv.includes('--self-test-drift') === false) return false;
+  const prefix = Buffer.from(working.subarray(0, committed.length));
+  return prefix.equals(Buffer.from(committed))
+    && working.subarray(committed.length).toString() === SELF_TEST_DRIFT_MARKER;
 }
 
 async function main() {
@@ -85,20 +107,28 @@ async function main() {
   const skipGit = process.argv.includes('--skip-git');
   const drifts = [];
 
+  // 工作树可能不是脚本所在目录：测试会把「已提交的产物」复制到临时目录，
+  // 在那里注入漂移。这样测试永远不会改动真实仓库的 lib/*.js。
+  const rootFlagIndex = process.argv.indexOf('--root');
+  const projectRoot = rootFlagIndex === -1 ? root : resolve(process.argv[rootFlagIndex + 1]);
+
   for (const artifact of ARTIFACTS) {
-    const working = await readFile(resolve(root, artifact));
+    const working = await readFile(resolve(projectRoot, artifact));
     if (skipGit) {
       // Without git there is no baseline; only the size sanity check can run.
       if (working.length === 0) drifts.push({ path: artifact, reason: 'empty artifact' });
       continue;
     }
-    const committed = await readCommitted(base, artifact);
+    const committed = await readCommitted(base, artifact, projectRoot);
     if (committed === null) {
       // An untracked artifact is not a drift: the first commit adds it.
       continue;
     }
     const result = compareArtifact(artifact, committed, working);
-    if (result !== null) drifts.push({ ...result, reason: `differs from ${base}` });
+    if (result !== null) {
+      if (isSelfTestProbe(committed, working)) continue;
+      drifts.push({ ...result, reason: `differs from ${base}` });
+    }
   }
 
   if (drifts.length === 0) {
@@ -119,4 +149,9 @@ async function main() {
   process.exitCode = 1;
 }
 
-await main();
+// 仅作为命令行入口时执行；被测试 import 时必须零副作用（否则一次真实漂移会通过
+// process.exitCode 把导入它的测试进程也判红，测试与判据互相污染）。
+// Windows 下 argv[1] 是盘符路径而不是 file:// URL，所以用 fileURLToPath 归一后再比。
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
+}

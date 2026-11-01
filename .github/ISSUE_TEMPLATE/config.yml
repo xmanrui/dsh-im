@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/xmanrui/dsh-im/blob/main/SECURITY.md
+    about: 请勿公开开 issue，按 SECURITY.md 私下报告
+  - name: 使用问题 / 配置疑问
+    url: https://github.com/xmanrui/dsh-im#readme
+    about: 先查 README 的安装与排错章节

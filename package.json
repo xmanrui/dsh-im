@@ -63,6 +63,12 @@
     "scripts/verify-package.mjs",
     "scripts/verify-built-artifacts.mjs",
     "scripts/channel-capability-matrix.mjs",
+    "scripts/verify-benchmark-report.mjs",
+    "scripts/verify-governance.mjs",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "docs/benchmark/2026-11-01-dsh-im-benchmark.md",
     "scripts/verify-session-channel-logos.mjs",
     "scripts/verify-session-title-prefix.mjs",
     "scripts/wechat_group_uia.py",
@@ -105,7 +111,7 @@
   "scripts": {
     "build": "node plugin-src/client/build.mjs && node plugin-src/host/build.mjs",
     "test": "node --test test/*.test.mjs test/channels/*/*.test.mjs",
-    "check": "npm run build && npm test && node scripts/verify-package.mjs && node scripts/verify-built-artifacts.mjs && node scripts/channel-capability-matrix.mjs --check"
+    "check": "npm run build && npm test && node scripts/verify-package.mjs && node scripts/verify-built-artifacts.mjs && node scripts/channel-capability-matrix.mjs --check && node scripts/verify-benchmark-report.mjs && node scripts/verify-governance.mjs"
   },
   "engines": {
     "node": ">=22.19"

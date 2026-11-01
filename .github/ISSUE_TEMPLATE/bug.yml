@@ -1,0 +1,75 @@
+name: Bug 报告
+description: 功能不正常 / 行为与文档不符
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先跑一遍 `npm run check` 并把结果贴出来。
+        安全漏洞**不要**走这里，见 SECURITY.md。
+  - type: dropdown
+    id: channel
+    attributes:
+      label: 渠道
+      options:
+        - weixin（微信）
+        - weixin-group（个人微信群 UIA 桥）
+        - feishu（飞书）
+        - dingtalk（钉钉）
+        - wecom（企业微信）
+        - wecom-app（企业微信自建应用）
+        - qq
+        - slack
+        - telegram
+        - discord
+        - whatsapp
+        - imessage
+        - email
+        - matrix
+        - office
+        - 插件本身（设置页 / 会话 / 投递）
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: 版本
+      description: `@xmanrui/dsh-im` 版本、DSH 宿主版本、`node -v`
+      placeholder: "dsh-im 5.8.0 / DSH 0.2.1-rc.2 / node v24.16.0"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从干净状态开始的每一步；能贴日志就贴（请脱敏凭据与聊天内容）
+      placeholder: |
+        1. 设置页绑定…… 
+        2. 在群里发送……
+        3. 观察到……
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望 vs 实际
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: `npm run check` 结果
+      description: 贴最后 20 行即可
+      render: shell
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 自查
+      options:
+        - label: 我使用的是支持的版本，且已尝试升级到最新
+          required: true
+        - label: 我已搜索过相同 issue
+          required: true
+        - label: 我已脱敏日志与凭据
+          required: true
