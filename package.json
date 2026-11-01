@@ -61,6 +61,8 @@
     "scripts/verify-lan-management.mjs",
     "scripts/verify-model-setting.mjs",
     "scripts/verify-package.mjs",
+    "scripts/verify-built-artifacts.mjs",
+    "scripts/channel-capability-matrix.mjs",
     "scripts/verify-session-channel-logos.mjs",
     "scripts/verify-session-title-prefix.mjs",
     "scripts/wechat_group_uia.py",
@@ -103,7 +105,7 @@
   "scripts": {
     "build": "node plugin-src/client/build.mjs && node plugin-src/host/build.mjs",
     "test": "node --test test/*.test.mjs test/channels/*/*.test.mjs",
-    "check": "npm run build && npm test && node scripts/verify-package.mjs && node scripts/verify-built-artifacts.mjs"
+    "check": "npm run build && npm test && node scripts/verify-package.mjs && node scripts/verify-built-artifacts.mjs && node scripts/channel-capability-matrix.mjs --check"
   },
   "engines": {
     "node": ">=22.19"

@@ -121,6 +121,33 @@ WhatsApp retains the identifiers of the latest 2,000 bot messages sent to groups
 Matrix encryption is currently for non-sensitive testing only. The default optional mode attempts to start the crypto engine and skips incoming encrypted messages if it fails; required mode refuses to connect when crypto startup fails. Interactive device verification, key backup, SSSS, and attachment-content encryption are not implemented. This release has not been validated against a live homeserver/Element setup; do not treat it as a complete end-to-end confidentiality guarantee.
 
 Other IM platforms can be added through the same channel-adapter structure.
+
+The channel capability matrix below is generated from `src/channels/*/` by
+`scripts/channel-capability-matrix.mjs`; `npm run check` fails when it drifts from the source.
+
+<!-- channel-capability-matrix:start -->
+> 本表由 `scripts/channel-capability-matrix.mjs` 从 `src/channels/*/` 源码生成，
+> 不手写、可复跑：`node scripts/channel-capability-matrix.mjs`。
+> ✅ = 该渠道目录内存在承载此能力的实现文件；— = 未找到实现，属于明确降级（ADR-0001）。
+> 「源码字节」是参与检测的 `.mjs` 内容总字节数，用于说明证据面大小，不是渠道权重。
+
+| 渠道 | 文本 | 图片 | 文件 | 语音 | 引用回复 | 群聊 | 流式/编辑 | 卡片/按钮 | 富文本 | 源码字节 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `dingtalk` | ✅ | ✅ | ✅ | — | — | ✅ | — | — | ✅ | 224792 |
+| `discord` | ✅ | — | ✅ | — | ✅ | — | ✅ | — | — | 55381 |
+| `email` | ✅ | ✅ | ✅ | — | — | — | — | — | — | 129638 |
+| `feishu` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | 590181 |
+| `imessage` | ✅ | — | — | — | — | — | — | — | — | 20255 |
+| `matrix` | ✅ | ✅ | — | — | — | ✅ | — | — | ✅ | 247520 |
+| `office` | — | — | — | — | — | — | — | — | — | 40512 |
+| `qq` | ✅ | ✅ | ✅ | — | — | ✅ | — | — | — | 138211 |
+| `slack` | ✅ | — | ✅ | — | — | ✅ | ✅ | — | — | 76580 |
+| `telegram` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | 146739 |
+| `wecom` | ✅ | ✅ | — | — | ✅ | ✅ | — | — | — | 141363 |
+| `wecom-app` | ✅ | ✅ | — | — | — | ✅ | — | — | — | 116207 |
+| `weixin` | ✅ | ✅ | ✅ | — | — | ✅ | — | — | — | 242320 |
+| `whatsapp` | ✅ | ✅ | ✅ | — | — | — | — | — | ✅ | 76206 |
+<!-- channel-capability-matrix:end -->
 The iMessage contribution is documented separately in [the iMessage channel
 notes](docs/imessage.md); it uses the native macOS Messages.app and requires no
 third-party gateway.
