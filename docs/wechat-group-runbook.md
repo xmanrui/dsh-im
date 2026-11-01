@@ -57,12 +57,39 @@ py -3.12 -B scripts/enable_wechat_uia_flag.py
 
 顺序必须是**先置标志、再启动微信**。若微信已在运行，只能先退出再启动（会掉一次登录态，需要扫码）。
 
+### 后台运行的正确姿势：最小化，不是关闭（微信 4.x 实测）
+
+只读取证（`_audit/weixin-close-window-setting.md`，DLL `2b3677c3`）：微信 4.2.0.12 里
+3.x 的「设置→通用→关闭主面板时→最小化到通知栏」**已被整体删除**——配置层明文
+grep 零命中、44 个 db 里 42 个是 SQLCipher、MMKV 配置带 CRC 加密、命令行也没有
+`--minimized/--tray`。DLL 里写死的是 `quitOnLastWindowClosed` +
+`MainWindowWillClose → 退出`。所以在本版本：
+
+- **X 关闭面板 = 进程退出**，`mmui` 无障碍子树随之销毁，UIA 群桥读不到也发不出，
+  重开面板只能靠人点任务栏（UIA 枚举不到可 Invoke 的任务栏项，非代码可无头绕过）。
+- **最小化 = 树保留**，InvokePattern 照常切群、发送，实测全程无头（窗口在任务栏
+  也看不见），这才是「关掉窗口也能后台跑」在本机唯一成立的形态。
+
+因此桥自带一个开关，让它自己把窗口收进最小化、且绝不抢焦点：
+
+```json
+{ "autoMinimize": true }
+```
+
+`autoMinimize`（根级，默认 false）用 `SW_SHOWMINNOACTIVE`(7) 最小化，实测证明
+它只把目标窗口图标化、键盘焦点纹丝不动（两窗口自含实验：`minimise_did_not_steal_focus=true`）。
+选 7 不选 6(`SW_MINIMIZE`) 正因为 6 会激活抢焦点。默认关：连「收起一个窗口」都算
+动画面，须操作者显式同意。开桥前需微信已登录且面板处于可最小化状态。
+
+错误码现在区分三种「没有主窗口」：`wechat_logged_out`（扫码）、`wechat_panel_closed`
+（面板被 X 关，进程还在但树没了 → 提示去重开或改最小化）、`main_window_missing`（没开微信）。
 ### 群桥起不来时的错误码
 
 | 适配器错误码 | 含义 | 处置 |
 |---|---|---|
 | `wechat_logged_out` | 微信停在登录/扫码页 | 扫码登录后再启动群桥 |
-| `main_window_missing` | 没有微信主窗口 | 确认微信已启动且窗口未被最小化到托盘 |
+| `main_window_missing` | 微信进程没在跑 | 启动微信并登录 |
+| `wechat_panel_closed` | 面板被 X 关闭：进程还在但 mmui 树已销毁 | 重开面板；想长期后台就开 `autoMinimize` 用最小化 |
 | `message_layout_unverified` | 未开 `allowUnverifiedRead` | 在 `group-chats.json` 里置 `"allowUnverifiedRead": true` |
 | `send_disabled` | 未开 `allowSend` | 在 `group-chats.json` 里置 `"allowSend": true` |
 | `duplicate_group_title` | 目标群标题不在可见会话列表里（或重名） | 在微信里把目标群**置顶** |
