@@ -1,38 +1,29 @@
-# 待办：宿主重启后复核（唯一未闭环项）
+# 已闭环：宿主重启后复核（2026-11-01 15:05 实测通过）
 
-## 现在的状态
+## 真正的根因（不是本文早前写的 PYTHONHOME）
 
-- 群桥代码已修好、提交、构建、部署（部署 md5 与构建一致）。
-- **无头能力已实测通过**（窗口最小化）：`STARTED 2.7s / SEND ok / READBACK 1 addressed=true`。
-- 宿主环境模拟（宿主同款 PYTHONPATH）下，清理后适配器 ready 并收到真实群消息。
+- 早前「宿主泄漏 PYTHONHOME」的解释已被测量推翻；PEB 读出的环境块也不支持它。
+- 真根因：打包后的 `lib/index.js` 用 `resolve(import.meta.dirname, '../../../..')`
+  推算包根，叠加 link: 符号链接，把适配器算成了 `D:/scripts/wechat_group_uia.py`，
+  `py` 在解释器启动阶段就报 `can't open file`（stderr 恰好 153 字节）后退出。
+  全文取证 = `docs/wechat-group-adapter-path-rootcause.md`。
 
-## 宿主这边的事实（已取证，不猜）
+## 修复与验证（全部通过）
 
-- 宿主主进程启动于 **2026-11-01 00:53:12**，而最后修复是 **01:05** 才构建 → 它跑的是旧 JS。
-- 每 30 秒出现一次 `group adapter stderr (153 bytes)`，日志里**从未**出现我们代码会打的
-  `sanitized error (...)` 帧 → 宿主的子进程在**执行脚本第一行之前**就死了。
-- 临时在脚本首行装了 env 追踪（已验证在直连 spawn 时会写文件），跨两个重试周期宿主**一次都没写入**
-  → 确认死在我们代码之前，不是适配器逻辑问题。
-- 本地穷举复现 153 字节：坏 PYTHONHOME(1426) / 仅 PYTHONPATH(0) / 空 SystemRoot(0) / 空 PATH(0) /
-  关开关(0) / uiautomation 超时(0) —— **没有任何组合产出 153**。所以那 153 字节不来自我们的 Python。
-- 从外部读宿主 PEB 环境块：读到 1944 字节 60 项，但块内容部分损坏/截断，**据此得出的环境结论一律标为未证**。
-  （之前写的「宿主泄漏 PYTHONHOME」已被测量推翻，那条修复只作为卫生措施保留。）
+- `src/channels/weixin/adapter-script.mjs::findAdapterScript()`：按包内 package.json 门槛上溯定位，不再数目录层级。提交 65918d0。
+- 同轮再修两缺陷并加回归测试：`#restart()` 不重挂 bridge、事件被静默丢弃改为记原因。
+- 第 9 轮用 `restart-dsh.cmd` 分离进程重启，**本会话存活**（纠正了旧文档「一重启本会话即终止、自证闭环被切断」的假设）。
+- 微信登录后桥自动接上；群里一条 `/dsh 验收 FINAL-1793516690` → 收到宿主 Agent 回复（「老大。」前缀 + 唯一 token，探针从未发过）。
+- 入站/处理/回发在宿主会话 `session-acb5509b…` 里逐条落库（`user/message` 带 `dsh_im_source{channel:weixin}` + 两条 `assistant/message`）。
+- 全程无头：窗口未抢焦点，`allowWindowRestore` 保持 false。
 
-## 唯一出路
+## 重启后复核（本轮已全部满足）
 
-重启 DSH Desktop。重启会重新读取启动环境（PATH/PYTHON* 都在此时定型），并且装载新 bundle。
-而**本会话就活在这个宿主里**，一重启本会话即终止 → 自证闭环被切断，不是能力缺口。
+1. ✅ 日志不再有 `group adapter stderr (153 bytes)`（重启后 last 2000 行 0 次）。
+2. ✅ 进程出现 `python.exe -B D:\codex\DSH-IM\rv5.8.0\scripts\wechat_group_uia.py --config …` 且持续存活。
+3. ✅ 群里发 `/dsh …` 收到 Agent 回复。
 
-## 重启后的复核（任一条即可）
+## 验收门
 
-1. 日志不再出现 `group adapter stderr (153 bytes)`；
-2. 群里发 `/dsh 测试`（**不是 @**，@ 在本设计下永远不触发），看到 Agent 回复；
-3. 进程列表出现 `py -3.12 ... wechat_group_uia.py --config ...` 且持续存活。
-
-## 已就绪、无需再动
-
-- 账号 `wx_c087f36721de6f68e06924cf` 的 group-chats.json（群、读/发开、抢屏关）
-- 群白名单 `uia-unverified:row` canExecuteCommands=true
-- `SPI_SETSCREENREADER=True`
-- 目标群已置顶，按标题可选中
-- 抢屏默认关闭，有单测守着它一个 Win32 调用都不许发
+- `scripts/verify-wechat-group-live.mjs`（提交 79e7d69）：重启后 PASS；负向对照证明有牙（旧 `D:/scripts` 路径、缺失路径均判红）。
+- 群三开关（读/发/触发）与白名单、`SPI_SETSCREENREADER=True`、目标群置顶，均保持就绪，无需再动。

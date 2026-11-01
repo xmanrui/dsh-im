@@ -123,20 +123,28 @@ node --test test/channels/weixin/wechat-group-runtime.test.mjs   # 期望 ℹ pa
 - verify-package / npm build / verify-adapter-resolution 全绿；deployed lib/index.js md5 与仓库 HEAD 一致。
 - 用修复后的真实代码路径（group-source → 真 UIA → 真群）实测：ready + 发送成功 + 回读入站行 admitted。
 
-仍未闭环（结构性，非能力缺口）：
-- 运行中的 Host 进程仍持有启动时加载的旧 bundle。HMR 的默认 ignored 含 **/node_modules，
+本轮（第 8 轮）遗留、现已在第 9 轮解除：
+- 运行中的 Host 进程持有启动时加载的旧 bundle。HMR 的默认 ignored 含 **/node_modules，
   且依赖遍历显式跳过 node_modules（dsh-hmr/lib/index.js:240-241, :201, :480），
-  本机 @xmanrui/dsh-im 是 link: 符号链接，两条路径都不在监听范围 → 不重启装不进新代码。
-- 重启会终止本会话，所以「宿主重启后线上验证」只能由重启后的新会话完成。
+  本机 @xmanrui/dsh-im 是 link: 符号链接，两条路径都不在监听范围 → 必须重启宿主装新代码。
+- 第 9 轮实测纠正了「重启会终止本会话」这一假设：用 `restart-dsh.cmd` 分离进程重启后，
+  **验证会话仍然存活**，所以自证闭环并没有被切断。
 
-给下一轮（重启后）的验收清单：
-1. 日志不再出现 `group adapter stderr (153 bytes)`；
-2. 进程列表出现 `python.exe -B …\scripts\wechat_group_uia.py --config …` 且持续存活（不再是 D:\scripts）；
-3. 群里发 `/dsh 测试`（不是 @，@ 在本设计下永不触发）→ 收到 Agent 回复；
-4. 日志若出现 `dropped group event ...` 则说明还有第三个缺陷，按日志原因续查。
+## 端到端闭环已实测（2026-11-01 15:05，第 9 轮）
 
-## 仍未闭环（诚实边界）
+DSH Desktop 于 14:58 重启、加载修复后的 bundle；微信登录后桥自动接上。用**一条** `/dsh` 命令打点，实测全链路：
 
-运行中的宿主仍执行**启动时刻**加载的旧 bundle：dsh-hmr 的默认 ignored 含 **/node_modules（lib/index.js:240-241），且依赖遍历显式跳过 node_modules（:201/:480），
-而本机 @xmanrui/dsh-im 是符号链接，改动落在 node_modules 与链接目标之间，两条路径都不在监听范围。
-因此本修复必须在宿主重启后才会生效；重启会终止本会话，自证闭环只能由重启后的下一次会话完成。
+- 入站：宿主新建群会话 `sessions/--D-dsh-im-robot--/session-acb5509b…`，内含 `user/message` 带 `dsh_im_source{channel:weixin}` 与 `rpcId: weixin-…`，标题自动改为「微信 · …」。
+- 处理：两条 `assistant/message`（turn1/turn2），模型真实推理「This is a simple greeting from WeChat group」。
+- 回发：群里出现宿主 Agent 的回复「老大。群桥验收…FINAL-1793516690 已收到…」（“老大。”前缀 = 宿主 Agent 遵循 AGENTS.md 的指纹，探针脚本从未发过这句）。
+- 无头：全程窗口最小化/未抢焦点，`allowWindowRestore` 保持 false。
+
+验收门 `scripts/verify-wechat-group-live.mjs`：重启后 PASS（适配器从 `rv5.8.0/scripts` 真实路径拉起、日志无 153 字节、群三开关在位）；
+负向对照证明它有牙——喂旧 `D:/scripts` 路径或缺失路径均判红。JS 4721（fail 1 为预存在的飞书 esbuild 临时目录权限，与本改动无关），Python 60 passed。
+
+## 验收清单（第 9 轮全部通过）
+
+1. 日志不再出现 `group adapter stderr (153 bytes)` —— 重启后 last 2000 行 0 次。
+2. 进程出现 `python.exe -B D:\codex\DSH-IM\rv5.8.0\scripts\wechat_group_uia.py --config …` 且持续存活（不再是 `D:\scripts`）。
+3. 群里发 `/dsh …` → 收到宿主 Agent 回复（见上「端到端闭环」，带「老大。」指纹与唯一 token）。
+4. 无 `dropped group event ...`（bridge-re-attach 修复生效）；Agent 自身回复被回读成非命令行时按设计记 `rejected`，属正常。
