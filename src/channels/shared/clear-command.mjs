@@ -1,4 +1,4 @@
-import { isSessionNotFound } from './session-error.mjs';
+import { isSessionArchived, isSessionNotFound, SESSION_ARCHIVED_COMMAND_MESSAGE } from './session-error.mjs';
 import { t } from './i18n.mjs';
 import { WORKSPACE_SESSION_STALE } from './workspace-session.mjs';
 
@@ -26,6 +26,7 @@ function clearErrorMessage(error) {
   if (code === 'commands-unavailable') {
     return t('当前 Host 不支持 /clear，当前会话未修改。');
   }
+  if (isSessionArchived(code)) return t(SESSION_ARCHIVED_COMMAND_MESSAGE);
   return t('清空当前会话上下文失败，当前会话未修改，请稍后重试。');
 }
 

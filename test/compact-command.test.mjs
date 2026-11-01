@@ -35,6 +35,17 @@ function legacyImagesArgumentError(overrides = {}) {
   });
 }
 
+test('a command on an archived Session names the real exit instead of saying retry', async () => {
+  // Retrying is the one thing that cannot work here, so the reply must not say it.
+  const archived = Object.assign(new Error('archived'), { code: 'session-archived' });
+  const harness = {
+    workspaceSession: () => ({ executeCommand: async () => { throw archived; } }),
+  };
+  const result = await runCompactCommand('/compact', harness, state(), 'direct:one');
+  assert.match(result.text ?? result.message, /\u5f52\u6863/u);
+  assert.match(result.text ?? result.message, /\/new/u);
+  assert.doesNotMatch(result.text ?? result.message, /\u7a0d\u540e\u91cd\u8bd5/u, 'retrying cannot succeed');
+});
 test('compact command validates syntax and requires an existing conversation Session', async () => {
   assert.equal(await runCompactCommand('hello', {}, state(), 'direct:one'), null);
   assert.match(

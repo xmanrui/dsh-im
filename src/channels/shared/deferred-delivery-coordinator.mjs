@@ -116,6 +116,20 @@ export function createDeferredDeliveryCoordinator({
     // Bounded reads cannot prove that a truncated answer is complete.
     return { found: false, endSeq: -1, turn: targetTurn };
   }
+  /**
+   * Whether the entry's Session is archived, or null when the Host cannot say.
+   * Read failures stay null: an unanswerable probe must never stop delivery on
+   * its own, only a positive answer may.
+   */
+  async function archivedNow(entry) {
+    if (typeof harness.isSessionArchived !== 'function') return null;
+    try {
+      return await harness.isSessionArchived(entry.sessionId, { signal: activeSignal }) === true;
+    } catch {
+      return null;
+    }
+  }
+
   async function process(id, { stopping = false, urgent = false } = {}) {
     let entry = await pending(id);
     if (!entry || activeSignal.aborted) return 'none';
@@ -123,6 +137,17 @@ export function createDeferredDeliveryCoordinator({
     if (!bound(entry)) { await remove(entry); return 'none'; }
     let sending = false;
     try {
+      // An archived Session can never produce the completion this entry waits for:
+      // the archive gate rejects every model step, so the turn it is tracking will
+      // never end. Polling would repeat forever at pollDelayMs, so the entry is
+      // retired once. The reason is logged because nothing reads a failed row.
+      if (await archivedNow(entry) === true) {
+        warn(Object.assign(new Error('Deferred delivery stopped: the Session was archived.'), {
+          code: 'session-archived',
+        }));
+        await remove(entry);
+        return 'archived';
+      }
       const outcome = await readOutcome(entry);
       // Binding, status and cancellation can change while the RPC is in flight.
       entry = await pending(id);

@@ -1485,6 +1485,17 @@ export class HarnessClient {
     return false;
   }
 
+  /**
+   * Whether DSH reports this Session as archived. `sessionExists` answers a
+   * different question on purpose (an archived Session still exists, so a caller
+   * must not silently rebind), so the few callers that have to *stop* working on
+   * an archived Session -- rather than move to a new one -- need this directly.
+   */
+  async isSessionArchived(sessionId, options = {}) {
+    if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
+    return this.#isSessionArchived(sessionId, options);
+  }
+
   async sessionExists(sessionId, options = {}) {
     // Archived Sessions still exist. Returning false here would silently bind
     // the conversation to a new Session; reading their active log can also fail.

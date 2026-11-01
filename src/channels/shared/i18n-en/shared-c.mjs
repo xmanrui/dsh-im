@@ -1,6 +1,7 @@
 // English translations (shared-c area). Keys are exact Chinese literals passed to t().
 export default {
   '请先在“绑定 DS Bot”中解除绑定，再切换会话或工作目录。': 'Unbind in “Bind DS Bot” before switching the Session or working directory.',
+  '当前会话已在 DSH 中归档，这条命令无法执行。请发送 /new 创建新会话后重试，或联系管理员在 DSH 中取消归档。': 'The current Session is archived, so this command cannot run. Send /new to start a new Session and try again, or ask an administrator to unarchive it in DSH.',
   '当前会话日志已损坏，无法继续读取。请先到 DSH 查看任务状态，再发送 /new 创建新会话；原会话记录会保留。': 'The current Session log is corrupt and cannot be read. Check the task status in DSH before sending /new to create a new Session; the original records will be preserved.',
   '绑定会话的日志已损坏，已切换到新会话并继续处理本条消息。原会话记录已保留，历史上下文不会自动带入。': 'The bound Session log is corrupt. Switched to a new Session to continue processing this message. The original records are preserved; previous context is not carried over automatically.',
   '绑定的会话已在 DSH 中归档，已自动切换到新会话继续处理本条消息。原会话记录已保留，历史上下文不会自动带入。': 'The bound Session was archived in DSH. Switched to a new Session to continue processing this message. The original records are preserved; previous context is not carried over automatically.',

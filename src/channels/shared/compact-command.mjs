@@ -1,4 +1,4 @@
-import { isSessionNotFound } from './session-error.mjs';
+import { isSessionArchived, isSessionNotFound, SESSION_ARCHIVED_COMMAND_MESSAGE } from './session-error.mjs';
 import { t } from './i18n.mjs';
 import { WORKSPACE_SESSION_STALE } from './workspace-session.mjs';
 
@@ -63,6 +63,7 @@ function compactErrorMessage(error) {
   if (code === 'commands-unavailable') {
     return t('当前 Harness 暂不支持从机器人执行上下文压缩。');
   }
+  if (isSessionArchived(code)) return t(SESSION_ARCHIVED_COMMAND_MESSAGE);
   return t('上下文压缩失败，请稍后重试。');
 }
 

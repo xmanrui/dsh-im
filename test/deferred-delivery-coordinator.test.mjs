@@ -63,6 +63,42 @@ test('history lag recovers without another event and does not consume send attem
   assert.equal(f.sent[0].outcome.text, 'result');
 });
 
+test('a deferred entry on an archived Session is retired instead of polled forever', async (t) => {
+  // The archive gate rejects every model step, so the turn this entry waits for can
+  // never end. Without the guard the coordinator re-reads history every pollDelayMs
+  // for as long as the process lives.
+  const warnings = [];
+  let reads = 0;
+  const f = await fixture(t, {
+    harness: {
+      rpc: async () => { reads++; return { events: [start, prompt], hasMore: false }; },
+      isSessionArchived: async () => true,
+    },
+    logger: { warn: (message) => warnings.push(String(message?.message ?? message)) },
+  });
+  await f.track();
+  await until(() => f.state.deferredEntries().length === 0);
+  assert.equal(f.sent.length, 0, 'no delivery is attempted from an archived Session');
+  assert.equal(reads, 0, 'history is not read once the archive is known');
+  // warn() only passes the prefix plus the message, so the entry's retirement is
+  // asserted through state rather than through log text.
+  assert.equal(warnings.length >= 1, true, 'the retirement is logged');
+  await sleep(80);
+  assert.equal(f.state.deferredEntries().length, 0, 'the entry does not come back');
+});
+
+test('a Host that cannot report archive state keeps polling as before', async (t) => {
+  // Only a positive answer may stop delivery: an older Host without the probe, or a
+  // failing probe, must not silently drop a result the user is still waiting for.
+  let reads = 0;
+  const f = await fixture(t, { harness: { rpc: async () => {
+    reads++;
+    return { events: reads < 2 ? [start, prompt] : complete, hasMore: false };
+  }, isSessionArchived: async () => { throw new Error('probe unavailable'); } } });
+  await f.track();
+  await until(() => f.sent.length === 1);
+  assert.equal(f.sent[0].outcome.text, 'result');
+});
 test('an old timeout without user/message recovers its exact early model failure', async (t) => {
   const history = [
     event('agent/inbox/spliced', 1, { target: 'next-turn', start: 0,
