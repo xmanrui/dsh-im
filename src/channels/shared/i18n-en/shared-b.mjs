@@ -300,4 +300,15 @@ export default {
     'Invalid Session sync settings: each switch must be a boolean and an icon is text of at most 32 characters.',
   '无法读取或保存会话同步设置，请稍后重试。':
     'Could not read or save Session sync settings. Try again later.',
+
+  // plan-goal-command.mjs
+  '当前聊天还没有可用的会话，请先发送一条消息。':
+    'This chat has no available Session yet; please send a message first.',
+  '当前 Host 不支持命令委派，请确认 DSH 命令网关可用。':
+    'The current Host does not support command delegation; make sure the DSH command gateway is available.',
+  '{name} 已执行。': '{name} executed.',
+  '{name} 执行失败。': '{name} failed.',
+  '{name} 执行失败，请稍后重试。': '{name} failed; please try again later.',
+  '当前机器人暂不支持 {name} 命令。': 'This bot does not support the {name} command yet.',
+  '当前 Host 未注册 {name} 命令。': 'The current Host has not registered the {name} command.',
 };
