@@ -1370,11 +1370,24 @@ class BackendFailureCodeTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "main_window_missing")
 
 
+class FakeRect:
+    """Minimal stand-in for a UIA BoundingRectangle."""
+
+    def __init__(self, left=0, top=0, right=0, bottom=0):
+        self.left = left
+        self.top = top
+        self.right = right
+        self.bottom = bottom
+
+
 class ClassifierFakeWin:
-    def __init__(self, exists, class_name="", name=""):
+    def __init__(self, exists, class_name="", name="", offscreen=False, rect=None):
         self._exists = exists
         self.ClassName = class_name
         self.Name = name
+        self.IsOffscreen = offscreen
+        # Default: a large on-screen window, i.e. a panel the operator can see.
+        self.BoundingRectangle = rect if rect is not None else FakeRect(0, 0, 1477, 880)
 
     def Exists(self, seconds, interval):
         return self._exists
@@ -1405,7 +1418,12 @@ class ClassifierFakeAuto:
 
     def GetRootControl(self):
         children = []
-        if self._shell:
+        # An explicit shell control lets a test set size and offscreen state,
+        # which is what separates a visible panel from a leftover tray shell.
+        shell = getattr(self, "_shell_win", None)
+        if shell is not None:
+            children.append(shell)
+        elif self._shell:
             children.append(ClassifierFakeWin(True, "Qt51514QWindowIcon", "微信"))
         return ClassifierFakeRoot(children)
 
@@ -1419,10 +1437,54 @@ class PanelClosedClassifierTests(unittest.TestCase):
         fake = ClassifierFakeAuto(main=False, login=True, shell=True)
         self.assertEqual(uia.classify_missing_main_window(fake), "wechat_logged_out")
 
-    def test_shell_without_mmui_tree_is_panel_closed(self):
-        fake = ClassifierFakeAuto(main=False, login=False, shell=True)
+    def test_tray_sized_shell_without_mmui_tree_is_panel_closed(self):
+        # Geometry measured after an X-close: the leftover shell is parked at
+        # -32000,-32000 and is about 276x45. That is the closed-panel case; a
+        # large on-screen shell is the missing-tree case tested below.
+        shell = ClassifierFakeWin(
+            True, "Qt51514QWindowIcon", "微信",
+            offscreen=True, rect=FakeRect(-32000, -32000, -31724, -31955))
+        fake = ClassifierFakeAuto(main=False, login=False, shell=False)
+        fake._shell_win = shell
         self.assertEqual(uia.classify_missing_main_window(fake), "wechat_panel_closed")
 
+    def test_visible_panel_without_a_tree_is_not_called_closed(self):
+        # Measured live: the operator screenshotted an OPEN WeChat panel while
+        # UIA found no mmui tree at all. Reporting that as a closed panel told
+        # them to minimise it - the one action that provably DESTROYS the tree on
+        # this build - so a large on-screen window must be classified differently.
+        fake = ClassifierFakeAuto(main=False, login=False, shell=True)
+        self.assertEqual(
+            uia.classify_missing_main_window(fake),
+            "wechat_accessibility_unavailable",
+        )
+
+    def test_offscreen_shell_is_still_the_closed_panel_case(self):
+        shell = ClassifierFakeWin(True, "Qt51514QWindowIcon", "\u5fae\u4fe1",
+                                  offscreen=True, rect=FakeRect(-32000, -32000, -31724, -31955))
+        fake = ClassifierFakeAuto(main=False, login=False, shell=False)
+        fake._shell_win = shell
+        self.assertEqual(uia.classify_missing_main_window(fake), "wechat_panel_closed")
+
+    def test_tiny_shell_is_still_the_closed_panel_case(self):
+        # A leftover tray-sized shell is what X-closing actually leaves behind.
+        shell = ClassifierFakeWin(True, "Qt51514QWindowIcon", "\u5fae\u4fe1",
+                                  rect=FakeRect(100, 100, 340, 160))
+        fake = ClassifierFakeAuto(main=False, login=False, shell=False)
+        fake._shell_win = shell
+        self.assertEqual(uia.classify_missing_main_window(fake), "wechat_panel_closed")
+
+    def test_missing_tree_counts_as_a_surface_loss(self):
+        # The slow retry ladder is chosen from this set on both sides of the
+        # boundary. A visible panel with no tree can only be fixed by restarting
+        # WeChat, which is human-scale work, so polling it every 2.5s would be
+        # the same log flood the closed-panel case already caused.
+        self.assertIn("wechat_accessibility_unavailable", uia.SURFACE_LOST_CODES)
+    def test_accessibility_message_never_advises_minimising(self):
+        # The advice matters as much as the code: minimise destroys the tree.
+        message = uia.ERROR_MESSAGES["wechat_accessibility_unavailable"]
+        self.assertNotIn("minimise", message.lower())
+        self.assertIn("restart", message.lower())
     def test_nothing_running_is_main_window_missing(self):
         fake = ClassifierFakeAuto(main=False, login=False, shell=False)
         self.assertEqual(uia.classify_missing_main_window(fake), "main_window_missing")

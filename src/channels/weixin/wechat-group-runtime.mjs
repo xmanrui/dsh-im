@@ -8,6 +8,10 @@ const SURFACE_LOSS_CODES = new Set([
   'wechat_panel_closed',
   'wechat_logged_out',
   'main_window_missing',
+  // Measured live: a panel can be on screen and still expose no accessibility
+  // tree, which only restarting WeChat fixes. Mirror of SURFACE_LOST_CODES in
+  // scripts/wechat_group_uia.py; keep the two lists in step.
+  'wechat_accessibility_unavailable',
 ]);
 
 function runtimeError(code, message) {

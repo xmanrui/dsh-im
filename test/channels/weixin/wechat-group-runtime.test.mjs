@@ -454,6 +454,24 @@ test('surface-loss exits retry on the slow ladder, other failures on the fast on
   await eventually(() => transient.starts === 3, 'second transient retry missing');
   assert.equal(fast.runtime.status.restartDelayMs, 5, 'transient ladder must not widen to slow');
 });
+test('a visible panel with no accessibility tree also retries slowly', async (t) => {
+  // Same reason as the closed panel: only restarting WeChat fixes it, and that
+  // is human-scale work. The code is new, so the JS set must stay in step with
+  // SURFACE_LOST_CODES in the adapter or this case silently returns to 2.5s.
+  const groupProcess = new FakeGroupProcess();
+  groupProcess.failStarts = 4;
+  groupProcess.failCode = 'wechat_accessibility_unavailable';
+  const { runtime } = makeRuntime(t, {
+    groupProcess,
+    restartDelaysMs: [5, 5],
+    surfaceLossRestartDelaysMs: [7, 20, 40],
+  });
+  await assert.rejects(() => runtime.start({
+    bridge: { accept: async () => {}, waitForIdle: async () => {}, close: async () => {} },
+  }));
+  assert.equal(runtime.status.surfaceLoss, true);
+  assert.equal(runtime.status.restartDelayMs, 7);
+});
 test('a cold start that loses the surface retries on the slow ladder', async (t) => {
   // The first start is the common path on this machine: the Host boots while
   // WeChat’s panel is closed, start() rejects with the adapter’s code, and

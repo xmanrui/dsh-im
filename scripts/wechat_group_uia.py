@@ -42,7 +42,8 @@ ERROR_MESSAGES = {
     "probe_failed": "The read-only UIA probe failed.",
     "send_disabled": "Sending is disabled until the operator enables it.",
     "wechat_logged_out": "WeChat is on its login screen; log in before starting the group bridge.",
-    "wechat_panel_closed": "WeChat's panel was closed; minimise it instead so the bridge keeps working head-lessly.",
+    "wechat_panel_closed": "WeChat's panel was closed; reopen it, and keep it visible rather than minimised so the bridge can work head-lessly.",
+    "wechat_accessibility_unavailable": "WeChat's panel is on screen but exposes no accessibility tree; restart WeChat to restore it.",
     "main_window_missing": "No WeChat window was found; start WeChat and log in.",
     "focus_not_on_target": "Keyboard focus could not be proven to be on the WeChat input; nothing was typed.",
 }
@@ -594,6 +595,10 @@ class WechatGroupAdapter:
 SURFACE_LOST_CODES = frozenset({
     "control_missing", "main_window_missing", "wechat_panel_closed",
     "wechat_logged_out", "backend_closed", "unsupported_platform", "dependency_missing",
+    # Panel visible but exposing no tree: only a WeChat restart fixes it, so the
+    # bridge must back off instead of polling. Kept in step with SURFACE_LOSS_CODES
+    # in src/channels/weixin/wechat-group-runtime.mjs.
+    "wechat_accessibility_unavailable",
 })
 
 # Distinct exit code so the supervisor and the log can tell a surface loss apart
@@ -827,7 +832,8 @@ def classify_missing_main_window(auto: Any) -> str:
       keeps working head-lessly through InvokePattern).
     - neither -> WeChat is not running at all.
 
-    Returns one of: wechat_logged_out, wechat_panel_closed, main_window_missing.
+    Returns one of: wechat_logged_out, wechat_accessibility_unavailable,
+    wechat_panel_closed, main_window_missing.
     """
 
     def exists(class_name: str) -> bool:
@@ -853,9 +859,34 @@ def classify_missing_main_window(auto: Any) -> str:
                 break
     except Exception:
         shell = None
-    if shell is not None:
-        return "wechat_panel_closed"
-    return "main_window_missing"
+    if shell is None:
+        return "main_window_missing"
+    # Two different truths live behind "there is a WeChat window but no mmui tree":
+    #
+    # - an offscreen or tray-sized shell is what X-closing the panel leaves
+    #   behind (measured: 276x45 parked at -32000,-32000, iconic). The panel
+    #   really is closed.
+    # - a large on-screen shell means the panel IS visible to the operator and
+    #   only the accessibility tree is missing (measured: 743x872 and 1477x880
+    #   visible, non-iconic, with zero UIA nodes). Calling that "closed" is wrong
+    #   twice over: the operator can see it is open, and the advice it gave -
+    #   minimise - is the one action proven to DESTROY the tree on this build.
+    #
+    # So the visible case gets its own code and a message that points at the only
+    # thing that actually restores the tree: restarting WeChat.
+    try:
+        rect = shell.BoundingRectangle
+        width = int(rect.right) - int(rect.left)
+        height = int(rect.bottom) - int(rect.top)
+        offscreen = bool(shell.IsOffscreen)
+    except Exception:
+        # Unprovable geometry stays on the conservative path: report the panel as
+        # closed only when the window is not visibly on screen.
+        width = height = 0
+        offscreen = True
+    if not offscreen and width >= 400 and height >= 400:
+        return "wechat_accessibility_unavailable"
+    return "wechat_panel_closed"
 
 
 class UiaBackend:
