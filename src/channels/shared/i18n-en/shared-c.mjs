@@ -215,4 +215,6 @@ export default {
     'You can send regular messages, but you do not have permission to run commands. Ask an administrator to grant you command permission for the current direct or group chat under DSH Settings → IM Bots → the relevant bot → Access Settings, then try again.',
   '{segments} 段，预计 {seconds} 秒发完':
     '{segments} message(s), about {seconds}s to send.',
+  '这次没答完就断了，你再说一遍我再试。':
+    'My answer got cut off. Say it again and I will try.',
 };

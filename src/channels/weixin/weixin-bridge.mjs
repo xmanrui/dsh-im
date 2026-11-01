@@ -1093,12 +1093,23 @@ export class WeixinHarnessBridge {
         `[dsh-weixin] failed to process an inbound message [${failure.referenceId}]:`,
         messageFailureDiagnostic(error, failure),
       );
+      // A turn that was cut off is not an error the READER can act on. Printing
+      // "错误码：TURN_INTERRUPTED；参考号：MF-…" into a group chat is the least
+      // human failure there is: the operator gets a diagnostic and the members get
+      // a machine. The reference id still goes to the log above, where somebody
+      // who can actually use it will look.
+      const interrupted = failure.code === 'TURN_INTERRUPTED'
+        || error?.code === 'turn-aborted'
+        || error?.details?.reason === 'TURN_ABORTED';
+      const replyText = interrupted
+        ? t('这次没答完就断了，你再说一遍我再试。')
+        : messageFailureText(failure);
       try {
         await this.#send(
           replyTarget,
           batchFailureMessage
-            ? `${messageFailureText(failure)}\n\n${batchFailureMessage}`
-            : messageFailureText(failure),
+            ? `${replyText}\n\n${batchFailureMessage}`
+            : replyText,
           contextToken,
           runId,
         );
