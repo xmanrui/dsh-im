@@ -194,3 +194,22 @@
 - [ ] 真实微信群未发消息验证（需受控授权）。
 - [ ] 设置界面 / RPC 未做（改人设走 `scripts/set-persona.mjs`）。
 - [ ] 其余 12 个渠道未接记忆与拟人。
+
+## 已闭环（2026-11-02 第九轮：群桥「每秒掉线」的真因）
+
+- [x] `0d57e230`：适配器把**任何** `list_session_titles()` 的 SafetyError 都判成「侧栏折叠」，
+      而 `control_missing` 也是微信重绘瞬间 WalkControl 失败的码 —— 两个相反的问题用了同一个诊断。
+      实测证据：一份日志里 15 次 `sidebar_collapsed`，同时窗口未最小化、会话列表 10 行、所有控件逐个探针都在；
+      而适配器在这个码上是**直接退出**的，于是子进程被反复拉起。
+      现在只有「会话列表真的缺失/重复」才走折叠路径；`control_missing` 先重试一次，成功就什么都不报，
+      两次都失败才维持原诊断，重试给出不同错误码则如实上报。2 条 Python 用例钉住这一对。
+- [x] 顺带修掉一个我自己引入的回退：重试成功后仍会落到「折叠」分支（`titles` 已恢复却没继续判断），已修正。
+- [x] 门禁：JS `4913 / 4905 / 0 fail`、Python `223 passed`、`BUILT_ARTIFACTS_OK`、`verify-wechat-group-live` PASS。
+
+## 并发写者纪律（本轮再次踩到）
+
+- 提交前用 `git diff HEAD` 而不是 `git diff` 判断「谁改了什么」：索引里可能残留别人已提交条目的旧快照。
+- 本轮我的提交两次把并行会话的 hunk 一起带进去（一次是索引残留，一次是同一文件内的相邻 hunk）。
+  两次都当场用 `git reset` / `git apply --cached` 分离、`--amend` 修正，并把对方工作树内容原样还原
+  （备份在 `_goal-humanlike/_backup*/`）。
+- 结论：**同一文件里、同一函数附近的并行改动，不能靠 `git add <file>` 分离** —— 必须按 hunk 级 `git apply --cached`。
