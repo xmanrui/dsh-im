@@ -12,7 +12,12 @@
 // from the channel, the bot and the conversation key, in the same shape the
 // memory store validates.
 
-import { extractMemoryCandidates, isNamedSpeaker, renderCandidate } from './memory-extract.mjs';
+import {
+  extractForgetTarget,
+  extractMemoryCandidates,
+  isNamedSpeaker,
+  renderCandidate,
+} from './memory-extract.mjs';
 import { renderMemoryBlock } from './memory-store.mjs';
 
 /** Fact predicate used for every extracted statement. */
@@ -104,6 +109,11 @@ export async function recordInboundMemory(store, {
   if (!store || !scope) return 0;
   let written = 0;
   try {
+    // A "forget this" instruction is handled before anything is written, so the
+    // message can never also be read as a new fact about the same subject
+    // ("忘掉咖啡" names a subject, not a preference).
+    const forget = extractForgetTarget(text);
+    if (forget) return -(await forgetMatching(store, { scope, target: forget, logger }));
     const candidates = extractMemoryCandidates(text, { speaker });
     for (const candidate of candidates) {
       const object = renderCandidate(candidate);
@@ -121,6 +131,41 @@ export async function recordInboundMemory(store, {
     logger.warn?.('[dsh-im] memory write failed:', error?.message ?? error);
   }
   return written;
+}
+
+/**
+ * Delete every fact in one scope that mentions a phrase.
+ *
+ * Matching is literal and scoped: the person said "忘掉咖啡", so the rows that
+ * contain 咖啡 go and everything else stays. Another conversation's memory is
+ * unreachable from here because the scope never crosses.
+ *
+ * Recall proposes the candidates (the same index the answer uses, so "what the
+ * bot would have said" and "what gets deleted" cannot drift apart) and an exact
+ * containment check decides: recall is fuzzy on purpose, deletion must not be.
+ *
+ * @param store - the memory store.
+ * @param options.scope - the conversation scope.
+ * @param options.target - the phrase to erase.
+ * @param options.logger - where a failed delete is reported.
+ * @returns how many facts were removed.
+ */
+export async function forgetMatching(store, { scope, target, logger = console } = {}) {
+  if (!store || !scope || typeof target !== 'string' || target.trim().length < 2) return 0;
+  let removed = 0;
+  try {
+    const facts = await store.recall({ scope, query: target, limit: 50 });
+    for (const fact of facts) {
+      const haystack = `${fact.object} ${fact.subject} ${fact.predicate}`;
+      if (!haystack.includes(target)) continue;
+      await store.forget(scope, fact.id);
+      removed += 1;
+    }
+  } catch (error) {
+    logger.warn?.('[dsh-im] memory forget failed:', error?.message ?? error);
+    return 0;
+  }
+  return removed;
 }
 
 /**

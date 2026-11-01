@@ -570,6 +570,32 @@ export class MemoryStore {
     return Number(result.changes ?? 0);
   }
 
+  /**
+   * 全库维护：清掉所有 scope 里「已失效且超过期限」的事实与过期槽位。
+   *
+   * 单 scope 的 `prune` 对后台巡检没用 —— 巡检不知道这台机器上有哪些会话，
+   * 而记忆是随对话不断长出来的。没有这一条，失效事实只会一直堆在库里：
+   * 读路径虽然过滤了 valid_to，但文件会无上界增长，备份与迁移都跟着变慢。
+   *
+   * 只删「已经失效」的行：当前事实一条都不动，所以这个操作不可能让人忘记
+   * 正在生效的事情。返回实际删除的行数，便于日志里给出真实读数。
+   *
+   * @param options.maxAgeDays - 失效多久之后才可清除。
+   * @returns `{ facts, slots }` 两个已删除行数。
+   */
+  async maintain({ maxAgeDays = DEFAULT_MAX_AGE_DAYS } = {}) {
+    this.#assertOpen();
+    const days = Number.isSafeInteger(maxAgeDays) && maxAgeDays > 0 ? maxAgeDays : DEFAULT_MAX_AGE_DAYS;
+    await this.ready();
+    await this.#flush();
+    const cutoff = this.#now() - days * DAY_MS;
+    const facts = this.#db.prepare('DELETE FROM facts WHERE valid_to IS NOT NULL AND valid_to < ?')
+      .run(cutoff);
+    const slots = this.#db.prepare('DELETE FROM slots WHERE expires_at IS NOT NULL AND expires_at <= ?')
+      .run(this.#now());
+    return { facts: Number(facts.changes ?? 0), slots: Number(slots.changes ?? 0) };
+  }
+
   /** 计数概览：facts 含已失效的历史，activeFacts 是当前事实，slots 是未过期槽位数。 */
   async stats(scope) {
     this.#assertOpen();
@@ -685,6 +711,7 @@ export function createEphemeralMemoryStore(root, options = {}) {
     slots: (scope) => run((store) => store.slots(scope)),
     setSlot: (scope, name, value, slotOptions) => run((store) => store.setSlot(scope, name, value, slotOptions)),
     forget: (scope, factId) => run((store) => store.forget(scope, factId)),
+    maintain: (maintainOptions) => run((store) => store.maintain(maintainOptions)),
     stats: (scope) => run((store) => store.stats(scope)),
     // Nothing is held, so closing only drains the queue -- which is exactly what
     // a caller waiting before it deletes the directory needs.

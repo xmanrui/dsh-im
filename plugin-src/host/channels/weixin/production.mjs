@@ -177,6 +177,29 @@ export async function createProductionController(ctx, config = {}, internals = {
     return store;
   };
 
+  // One sweep for the whole machine, not one per account: the store is opened
+  // per operation anyway, and a timer per bot would multiply itself by however
+  // many accounts exist. It only ever deletes facts that have ALREADY gone out
+  // of force, so a slow sweep never makes the bot forget something current.
+  //
+  // Six hours is a compromise: often enough that the file stops growing without
+  // bound, rare enough that it never competes with a reply.
+  const MEMORY_MAINTENANCE_INTERVAL_MS = 6 * 60 * 60 * 1_000;
+  const maintenanceTimer = setInterval(() => {
+    for (const [botId, store] of memoryStores) {
+      if (!store) continue;
+      void store.maintain()
+        .then((removed) => {
+          if (removed.facts > 0 || removed.slots > 0) {
+            logger.info?.(`[dsh-weixin] memory sweep ${botId}: ${removed.facts} 条失效事实、${removed.slots} 个过期槽位`);
+          }
+        })
+        .catch((error) => logger.warn?.(`[dsh-weixin] memory sweep failed for ${botId}:`, error));
+    }
+  }, MEMORY_MAINTENANCE_INTERVAL_MS);
+  // Never hold the process open (node --test would otherwise never exit).
+  maintenanceTimer.unref?.();
+
   const statePath = (botId) => resolve(paths.accounts, botId, 'state.json');
   const stateFor = async (botId) => {
     let state = stateStores.get(botId);

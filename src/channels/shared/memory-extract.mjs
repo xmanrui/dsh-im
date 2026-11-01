@@ -155,3 +155,37 @@ export function renderCandidate(candidate) {
   // An unmatched label still says something true rather than mislabelling it.
   return phrase ? phrase(object) : `群里有人提到${object}`;
 }
+
+/**
+ * Shapes that mean "forget this", and what they ask to forget.
+ *
+ * A memory system people cannot correct is a memory system they stop trusting:
+ * the moment the bot repeats something wrong, the only repair is to tell it so.
+ * The grammar is deliberately narrow -- 忘掉 / 忘记 / 别记 / 不用记 + a target --
+ * because the failure mode of guessing here is deleting something the person
+ * wanted kept, which is worse than forgetting to forget.
+ */
+const FORGET_PATTERNS = Object.freeze([
+  // 忘掉 X / 忘记 X / 别记着 X / 不用记住 X
+  /(?:忘掉|忘记|忘了|别记着|别记|不用记(?:住)?|不要再记(?:住)?)(?:关于)?\s*([^。！？!?\n]{1,40})/u,
+]);
+
+/**
+ * Read a "forget this" instruction out of one message.
+ *
+ * @param text - the inbound text with the trigger mention removed.
+ * @returns the target phrase to forget, or null when this is not such a message.
+ */
+export function extractForgetTarget(text) {
+  if (typeof text !== 'string' || !text.trim()) return null;
+  const body = text.trim().replace(/^\/\S+\s*/u, '');
+  for (const pattern of FORGET_PATTERNS) {
+    const match = pattern.exec(body);
+    if (!match) continue;
+    const target = tidy(match[1]);
+    // A one-character target would match half the memory; refuse it.
+    if (target.length < 2) continue;
+    return target;
+  }
+  return null;
+}
