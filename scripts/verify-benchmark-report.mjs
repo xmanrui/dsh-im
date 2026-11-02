@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readFile, readdir } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import { CAPABILITIES, collectChannelMatrix } from './channel-capability-matrix.mjs';
 
 /**
@@ -18,7 +18,11 @@ import { CAPABILITIES, collectChannelMatrix } from './channel-capability-matrix.
  * 用法：node scripts/verify-benchmark-report.mjs [path]
  */
 
-const REPORT = process.argv[2] ?? resolve('docs/benchmark/2026-11-01-dsh-im-benchmark.md');
+// 报告路径必须相对**脚本自己**解析，不能靠 cwd（H4.3 实测踩到的真缺陷）：
+// 旧写法 `resolve('docs/...')` 按当前工作目录算，从别的目录跑就指到不存在的文件；
+// 而负控当时恰好是「文件不存在 ⇒ readFile 抛错 ⇒ 进程非零退出」，看起来像判据在工作，
+// 实际是它在测一个不存在的对象。判据的输入端必须先钉死在仓库内。
+const REPORT = process.argv[2] ?? resolve(import.meta.dirname, '..', 'docs/benchmark/2026-11-01-dsh-im-benchmark.md');
 
 /** 8 个维度：每维的标题必须命中「维度名」才算出齐。 */
 export const DIMENSIONS = Object.freeze([
@@ -60,7 +64,6 @@ export function matchCapabilityClaim(reportText, label) {
   if (!fraction) return null;
   return { count: Number(fraction[1]), total: Number(fraction[2]) };
 }
-
 /**
  * 对账：报告主张 vs 生成器实测。只校验报告确实主张过的能力 ——
  * 少写一条不该判红，写错一条必须判红。
@@ -106,6 +109,87 @@ export function inspectReport(text) {
   return { missing, tables, quantified };
 }
 
+
+/**
+ * 列出主报告同目录 parts/ 下所有 md（分卷）。
+ *
+ * 为什么按目录枚举而不是写死文件名：写死就得每加一卷改一次判据，
+ * 而「加了新分卷但没纳入判据」正是 H4.3 要防的那类漏。目录枚举让新增分卷自动进面。
+ *
+ * @param {string} reportPath 主报告绝对路径
+ * @returns {Promise<string[]>} 分卷绝对路径（按名排序，读数可复现）
+ */
+export async function listReportParts(reportPath) {
+  const partsDirectory = resolve(dirname(reportPath), 'parts');
+  let entries;
+  try {
+    entries = await readdir(partsDirectory, { withFileTypes: true });
+  } catch {
+    // 没有 parts/ 不是错误：早期或轻量报告可能本来就是单文件形态。
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => resolve(partsDirectory, entry.name))
+    .sort();
+}
+
+/**
+ * 判一行是不是「能力主张行」：行首第一格是能力名，且该行含 N/M 分数。
+ *
+ * 只认行首第一格：正文里顺带提到的 3/14 不该被当主张，否则任何一处巧合都误伤。
+ * 分卷里的行形态与主报告一致（| 语音 | … |），所以同一口径可复用。
+ *
+ * 正则与 matchCapabilityClaim 同一套写法（该写法已在生产判据里跑通）：
+ * 用 new RegExp 拼接而不是字面量，因为能力名来自数据、必须转义。
+ *
+ * @param {string} line
+ * @param {string[]} labels 中英文标签都可
+ * @returns {{count: number, total: number}|null}
+ */
+export function matchClaimOnLine(line, labels) {
+  for (const label of labels) {
+    const escaped = label.replace(/[$()*+.?[\]^{|}\\]/gu, (ch) => '\\' + ch);
+  const rowPattern = new RegExp('^\\|\\s*`?' + escaped + '`?\\s*\\|(.*)$', 'u');
+    const row = line.match(rowPattern);
+    if (!row) continue;
+    const fraction = row[1].match(/(\d+)\s*\/\s*(\d+)/u);
+    if (!fraction) continue;
+    return { count: Number(fraction[1]), total: Number(fraction[2]) };
+  }
+  return null;
+}
+
+/**
+ * 在一份文档里逐行找能力主张行并回报位置（文件:行号）。
+ *
+ * 与 inspectCapabilityClaims 的分工：那个回答「谁不一致」，这个回答「不一致在哪」。
+ * 分卷纳入后，只说「语音不一致」已经不够定位 —— 主报告与 10 个分卷里都可能有那一行。
+ *
+ * @param {string} text 一份文档全文
+ * @param {string} filePath 该文档路径（只用于报错点名）
+ * @param {Array} channels collectChannelMatrix() 输出
+ * @returns {string[]} 每条形如 `文件:行号 能力 report=x/y matrix=a/b`
+ */
+export function inspectCapabilityClaimsWithLocation(text, filePath, channels) {
+  const problems = [];
+  const lines = text.split(/\r?\n/u);
+  for (const capability of CAPABILITIES) {
+    const labels = [capability.label, capability.labelEn].filter(Boolean);
+    const actual = channels.filter((row) => row.supported[capability.key]).length;
+    for (let index = 0; index < lines.length; index += 1) {
+      const claimed = matchClaimOnLine(lines[index], labels);
+      if (!claimed) continue;
+      if (claimed.count !== actual || claimed.total !== channels.length) {
+        problems.push(filePath + ':' + (index + 1) + ' ' + capability.label
+          + ' report=' + claimed.count + '/' + claimed.total
+          + ' matrix=' + actual + '/' + channels.length);
+      }
+    }
+  }
+  return problems;
+}
+
 async function main() {
   const text = await readFile(REPORT, 'utf8');
   const { missing, tables, quantified } = inspectReport(text);
@@ -120,9 +204,24 @@ async function main() {
     return;
   }
   const channels = await collectChannelMatrix();
+  // 判据二：主报告（沿用既有的第一处主张检查，报错不含行号以保持旧输出兼容）。
   const inconsistent = inspectCapabilityClaims(text, channels);
   if (inconsistent.length > 0) {
     console.error('BENCHMARK_REPORT_MATRIX_MISMATCH: ' + inconsistent.join(' | '));
+    process.exitCode = 1;
+    return;
+  }
+  // 判据三（H4.3）：主报告 + 全部分卷，逐条带位置校验，任何一个文件写错都点名。
+  const documents = [{ path: REPORT, text }];
+  for (const partPath of await listReportParts(REPORT)) {
+    documents.push({ path: partPath, text: await readFile(partPath, 'utf8') });
+  }
+  const located = [];
+  for (const document of documents) {
+    located.push(...inspectCapabilityClaimsWithLocation(document.text, document.path, channels));
+  }
+  if (located.length > 0) {
+    console.error('BENCHMARK_REPORT_PARTS_DRIFT ' + located.length + ' problem(s): ' + located.join(' | '));
     process.exitCode = 1;
     return;
   }
