@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { HarnessClient } from '../src/channels/shared/harness-client.mjs';
+import { createConnectionDiagnostics } from '../src/channels/shared/connection-error.mjs';
 
 import {
   EMPTY_MODEL_CATALOG,
@@ -138,6 +139,76 @@ test('BotWorkspaceStore persists isolated per-bot models without clearing sessio
   await assert.rejects(reloaded.setModel('missing', MODEL), {
     code: 'workspace-bot-not-found',
   });
+});
+
+test('strict catalog reads preserve failures and cancellation without changing status-read fallback', async () => {
+  const failure = new Error('offline');
+  const harness = { async listModels(options) {
+    assert.deepEqual(options, { fresh: true });
+    throw failure;
+  } };
+  assert.deepEqual(await listModelCatalog(harness, { fresh: true }), EMPTY_MODEL_CATALOG);
+  await assert.rejects(listModelCatalog(harness, { fresh: true, throwOnError: true }), error => error === failure);
+  const aborted = new DOMException('Cancelled', 'AbortError');
+  await assert.rejects(listModelCatalog({ listModels() { throw aborted; } }, { throwOnError: true }),
+    error => error === aborted);
+});
+
+test('model saves report catalog failures through WeCom RPC, keep disk state, and recover on retry', async (t) => {
+  const { path, workspace } = await fixture(t);
+  const workspaces = await new BotWorkspaceStore(path, { defaultWorkspace: workspace }).load();
+  await workspaces.ensure('bot_one');
+  let failure;
+  let catalog = CATALOG;
+  const success = (rpcId, value) => ({ rpcId, result: { ok: true, value } });
+  const harness = new HarnessClient({ workspace, apiProxy: {
+    host: { describe: ({ rpcId }) => success(rpcId, {}) },
+    llm: { models: ({ rpcId }) => {
+      if (failure) throw failure;
+      return success(rpcId, structuredClone(catalog));
+    } },
+  } });
+  const { controller: base } = controllerFixture();
+  base.diagnostics = createConnectionDiagnostics({ channel: 'wecom', logger: { error() {} } });
+  const controller = createWorkspaceAwareController(base, {
+    workspaces, stateFor: async () => ({}), modelCatalog: options => listModelCatalog(harness, options),
+  });
+  const handler = createWecomRpcHandler(controller);
+  assert.deepEqual((await controller.status()).modelCatalog, CATALOG);
+  const before = await readFile(path, 'utf8');
+  failure = Object.assign(new Error('private provider error: token=do-not-expose'), { code: 'ECONNRESET' });
+  const failed = await handler(WECOM_ENDPOINTS.setModel, { botId: 'bot_one', model: MODEL });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.error.code, 'model-catalog-unavailable');
+  assert.match(failed.error.message, /模型设置未保存/u);
+  assert.equal(failed.error.details.reason, 'ECONNRESET');
+  assert.equal(failed.error.details.method, 'llm.models');
+  assert.equal(failed.error.details.stage, 'status.read');
+  assert.equal(failed.error.details.transport, 'host-api');
+  assert.equal(JSON.stringify(failed).includes('do-not-expose'), false);
+  assert.equal(await readFile(path, 'utf8'), before);
+  assert.equal(workspaces.modelFor('bot_one'), null);
+  // A background status read still works while the provider is unavailable.
+  assert.deepEqual((await controller.status()).modelCatalog, EMPTY_MODEL_CATALOG);
+
+  failure = null;
+  catalog = { groups: [], failures: [{ id: MODEL.provider, name: 'OpenAI' }] };
+  await assert.rejects(controller.updateModel('bot_one', MODEL), { code: 'model-catalog-unavailable' });
+  assert.equal(await readFile(path, 'utf8'), before);
+
+  catalog = { ...CATALOG, failures: [{ id: 'other-provider', name: 'Other' }] };
+  const retried = await handler(WECOM_ENDPOINTS.setModel, { botId: 'bot_one', model: MODEL });
+  assert.equal(retried.ok, true);
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')).models.bot_one, MODEL);
+
+  const saved = await readFile(path, 'utf8');
+  catalog = { groups: [], failures: [] };
+  await assert.rejects(controller.updateModel('bot_one', MODEL), { code: 'model-selection-unavailable' });
+  assert.equal(await readFile(path, 'utf8'), saved);
+  failure = Object.assign(new Error('offline again'), { code: 'ECONNRESET' });
+  await assert.rejects(controller.updateModel('bot_one', { provider: 'other', model: 'new' }),
+    { code: 'model-catalog-unavailable' });
+  assert.equal(await readFile(path, 'utf8'), saved);
 });
 
 test('workspace-aware model setting refreshes the catalog and rejects unavailable choices', async (t) => {
