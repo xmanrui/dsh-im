@@ -1421,6 +1421,9 @@ export class QqHarnessBridge {
       // QQ stream_messages can acknowledge a final frame without rendering it in
       // some C2C clients. Standard Markdown delivery is the reliable reply path.
       const toolErrors = [];
+      // The newest per-step assistant text, held back from #pushProgress; see
+      // the assistant-message branch of onUpdate below.
+      let heldStepText = null;
       let answer;
       let artifacts = [];
       try {
@@ -1484,8 +1487,19 @@ export class QqHarnessBridge {
               }
               // The model's own per-step text is the progress worth reading: it
               // says what is being done and why, not just which tool ran.
+              // The newest one is held back rather than pushed: the harness's
+              // last canonical message IS the answer the Markdown delivery
+              // below sends as its own message, and QQ can neither edit nor
+              // recall a message it already sent. Pushing it here as well
+              // would show the reply twice — once flattened into a plain
+              // progress line, once rendered. A later step proves the held
+              // line was only intermediate and releases it; a turn that ends
+              // while one is held drops it, because that text is the answer.
               if (update.type === 'assistant-message' && message.kind !== 'group') {
-                void this.#pushProgress(target, key, nonEmptyString(update.text) ?? '');
+                if (heldStepText !== null) {
+                  void this.#pushProgress(target, key, heldStepText);
+                }
+                heldStepText = nonEmptyString(update.text) ?? null;
               }
             },
             onInteraction: (interaction) => this.#handleInteraction(interaction, {
@@ -1499,6 +1513,16 @@ export class QqHarnessBridge {
             images: promptMessage.images,
           },
         }));
+        // The turn is over: the held step text is the answer the delivery
+        // below sends, so it must not also go out as a plain progress line.
+        // A turn that produced no text at all is the one exception — there
+        // the held line is the only thing the reader would otherwise see.
+        if (nonEmptyString(answer)) {
+          heldStepText = null;
+        } else if (heldStepText !== null) {
+          void this.#pushProgress(target, key, heldStepText);
+          heldStepText = null;
+        }
         if (batchSubmission) {
           this.#batchInputs.complete(key, batchSubmission.token);
           batchSettled = true;
