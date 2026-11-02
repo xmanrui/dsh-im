@@ -499,3 +499,29 @@
       实测需 13 域而非四域，最小割 4 行已点名到 file:line）。
 - [ ] M3.2 基准 Infinity 边界、分支覆盖阈值、真实微信群未发消息验证、设置界面/RPC、其余 12 渠道未接。
 - [ ] 宿主未重载：新 bundle 在盘但跑的是旧进程（老大本轮明令禁止自杀重启，不擅自重启）。
+
+### 部署与运行面读数（第十七轮收尾，2026-11-02 08:1x+08:00）
+
+- [x] 提交/推送：10 笔独立提交（HEAD `3593dcfd`）；fork ref == 本地 HEAD
+      （`gh api repos/lxh113377/dsh-im/git/refs/heads/feat/wechat-groups`），
+      **PR #516 head = 3593dcfd、state=open、commits=123**（`HEAD_MATCHES_PUSH=true`）。
+      fork PR 的 `CHECK_RUNS=0` 是上游 owner 需批准 workflow 运行，不是判据缺失（既有约束）。
+- [x] 部署读回：`lib/index.js` 三处 md5 同为 `a86df1bde9ee…`
+      （仓库工作树 == profile 符号链接实际加载件 == `git cat-file HEAD:lib/index.js`）；
+      `BUILT_ARTIFACTS_OK 2 files match HEAD`。
+- [x] 最终读数：`npm run check` exit 0（4,971 tests / 4,969 pass / **0 fail** / skipped 2）、
+      Python 223 passed、`npm run benchmark` → `BENCHMARK_OK suites=6`、
+      `npm run coverage` → `COVERAGE_OK lines=89.97%`。
+- [!] **一处运行时读数变红，但不是本轮改动造成的（已归因）**：
+      `verify-wechat-group-live.mjs` 末两行 `FAIL no live adapter interpreter process` → `FAILED`
+      （同一次运行里 `ADAPTER-RESOLUTION … PASS` 与 group 配置解析 `OK` 都过）。
+      根因实测：**微信进程不存在** —— `tasklist //FI "IMAGENAME eq Weixin.exe" //FI "IMAGENAME eq WeChat.exe"`
+      → `No tasks are running which match the specified criteria`。UIA 桥的物理前提是微信主窗存在
+      （工作区 AGENTS.md 第二节第 4 条），进程没了适配器自然起不来。
+      与我的改动无关的证据：`git log --name-only` 最近 8 笔里 `wechat_group_uia.py` 命中 **0 次**；
+      该文件本轮唯一脏项属**会话前既存**（mtime 2026-11-01T20:16Z，早于本轮 23:07Z 起跑）。
+      未擅自拉起微信：GUI 启动与登录态涉及外部凭据（扫码/手机确认），且本会话语境禁止控屏。
+      恢复动作（微信起来后宿主自会重拉适配器）与判据同一条：
+      `node scripts/verify-wechat-group-live.mjs` 期望末行 `PASS`。
+- [x] 临时件清理：`_tmp/probe-*.mjs`、`_tmp/neg-*.txt`、`_tmp/cm-*.txt`、`_tmp/check*.txt` 已删；
+      上游 clone 与 venv 留在 `D:/tmp/bench2/`（仓外，不入库）。
