@@ -493,7 +493,7 @@ BENCHMARK_REPORT_MATRIX_MISMATCH: 语音: report=3/14 matrix=2/14 | 流式/编�
 
 | 原盲区 | 状态 | 说明 |
 | --- | --- | --- |
-| ① 未 clone 运行上游 | **部分闭合** | matterbridge 全量 clone（HEAD `c4157a4`）+ 284 行 JS 复现 12/12 绿；NoneBot2 **未能 clone**（本机 GitHub 443 被代理阻断，实录 `Failed to connect to github.com:443 over proxy 127.0.0.1`；tarball HTTP 415），按退路降级为 `gh api contents` 取 master 原文 + 125 行复现 10/10 绿 |
+| ① 未 clone 运行上游 | **进一步闭合** | matterbridge 全量 clone + 284 行 JS 复现 12/12 绿；NoneBot2 走 pip 装到**真包**（`nonebot2 2.5.0` + 两个 adapter）并端到端跑真 `Bot.send_to()`／真 `serialize()`（只桩 HTTP 出口，含对照组）⇒ 两条缺陷从「源码推导」升级为「真跑坐实」，并已据此提交 issue（见 §8.6）；Koishi 侧跑通真实 cordis 3.18.1 + `@satorijs/adapter-discord` 实验。根因也查清了：本机 `github.com:443` 不通是**一个没人监听的死代理**所致（`git config --global https.proxy` = `http://127.0.0.1:7897`，`netstat` 查得该端口无监听）⇒ 仓库级覆盖后推送、clone、issue 提交全通 |
 | ② 未做跨框架同消息对照 | **部分闭合** | 同一份意图段 `[quote,text,image,voice,bold]` 喂三个适配器替身 ⇒ 三种调用序列，且投递函数体内零渠道分支 |
 | ③ 未建吞吐基准 | **闭合** | 见 8.1 第 2 项 |
 | §5.5 能力声明盲区 | **闭合且结论是缺陷** | 见 8.2 N1 |
@@ -501,10 +501,29 @@ BENCHMARK_REPORT_MATRIX_MISMATCH: 语音: report=3/14 matrix=2/14 | 流式/编�
 
 ### 8.6 本轮仍未闭环（如实登记）
 
-- Koishi / LangBot 两篇五节笔记：⏳ 在办（首轮子代理读完未落盘，已重派）。
+- Koishi / LangBot 两篇五节笔记：✅ **已落盘**（第二轮重派后交付）。首轮两位都「读完了没落盘」，
+  按 #44 纪律判为未交付并重派 —— 自述不算证据，以磁盘为准。
+  `koishi-adapter-di.md` 58,038 B / 574 行（判据实测 `NOTES_OK 58038 bytes`）：
+  跑通了真实 cordis 3.18.1，并用真渠道包 `@satorijs/adapter-discord` 证明「缺服务时静默 PENDING、
+  服务补齐当场 ACTIVE、渠道包一行不改」（`NOTES_OK` 之外另有 5 份 .output.txt 留档）。
+  `langbot-domain-layering.md` 71,866 B / 750 行（判据实测 `NOTES_OK 71866 bytes`）：
+  复用首轮 `classify.mjs` 并复跑（SHA `13c2b7399ba2d658` 一致），新增 `cutanalysis.mjs`
+  做环的切割点分析。我在自己这边独立复跑，读数逐字一致：FILES 134 / EDGES 121 / DIRECTIONS 40 /
+  MUTUAL-FILE-PAIRS 0，全局 size 1–3 共 10,700 个子集「无一消环」。
 - M2 `shared/` 二级分层：⛔ 未动 —— 与本轮语音/基准改动写面重叠，按「同文件先串后派」推迟。
-- 上游 issue 提交：⛔ 未做 —— 四条候选缺陷的**源码事实**均已独立复核（详卷第 7 节），但 nonebot 两条的触发证据只到「按源码求值顺序推导 + 标准库复刻」，未端到端跑过真实 `bot.send()`，本机 443 也不通，无法坐实。按「证据不足不冒充完成」留待可联网机器。
+- 上游 issue 提交：✅ **已提交 4 条，全部 OPEN**（线上复核 `ISSUES_LIVE_OPEN_BY_ME=4/4`，作者 `lxh113377`）：
+  [adapter-telegram#89](https://github.com/nonebot/adapter-telegram/issues/89)：`send_to()` 就地 `pop`/`get` 掏空段，重发即崩或静默发 `None`。
+  [adapter-feishu#166](https://github.com/nonebot/adapter-feishu/issues/166)：`to_post()` 把 `image` 改名 `img`，污染后续 `serialize()`。
+  [matterbridge#2262](https://github.com/42wim/matterbridge/issues/2262)：harmony 实现 typing 却未登记 `UserTypingSupport`，那段代码不可达。
+  [matterbridge#2263](https://github.com/42wim/matterbridge/issues/2263)：README 列 Gitter/Twitch，树里没有该 bridge，`config.go:225` 还留着死字段。
+  证据等级已从「源码推导」升级为**端到端真跑**：pip 装 `nonebot-adapter-telegram 0.1.0b20` / `nonebot-adapter-feishu 2.7.2`，
+  走真 `Bot.send_to()`，只桩 HTTP 出口，且**带对照组**证明 `document = None` 源于前一次就地修改而不是桩本身
+  （`e2e_defect_repro.py` 末行 `E2E_VERDICT CONTROL_OK A1_OK A2_OK B_OK`）；issue 正文里的复现代码是逐字实跑过的版本。
+  matterbridge 两条的口径收窄为「当前 master 可验证」—— 我的 clone 是浅克隆（1 commit），撑不起「从未存在」
+  这种历史命题（我一度这样误判并自行纠正，见分卷 08 §6）。
 - M3.2 基准 Infinity 边界：⛔ 刻意未修 —— 改判定会让刚写回的下限标定与 CI 首次读数失去可比性，已钉成测试。
 - 分支覆盖阈值：⛔ 未设（分支 81.14%，只给行覆盖设了 85%）。
 
-副作用声明：本轮同样**没有**修改任何上游项目文件，没有向任何仓库提 issue/PR 或推送。
+副作用声明：本轮**向三个上游仓库提了 4 条 issue**（链接见 §8.6，均只读复现、未附带码改动），
+但**没有修改任何上游项目文件、没有向任何仓库提交 PR 或推送代码**。
+对本仓：改动已提交到 `feat/wechat-groups` 并推送 fork（PR #516 head = 本地 HEAD）。

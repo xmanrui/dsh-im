@@ -442,3 +442,60 @@
       失去可比性；已钉成测试 `known edge…recorded on purpose`，防止将来被顺手改掉而无人察觉。
 - [ ] 分支覆盖阈值未设（81.14%，只给行覆盖设了 85%，避免一拍就红）。
 - [ ] 真实微信群未发消息验证（需受控授权）；设置界面 / RPC 未做；其余 12 渠道未接记忆与拟人。
+## 已闭环（2026-11-02 第十七轮：N1 + 端到端复现 + 四条上游 issue + 报告二次对账）
+
+- [x] **N1 能力声明进注册条目** → `cfd184fc`：14 条注册项各带 `capabilities`（值由 `collectChannelMatrix()`
+      实测导出生成，不是手抄 —— 一致是结果不是前提）。设计取舍写进注释：**不建第二张表**，
+      因为上游 matterbridge 正是把能力放在 `bridgemap.UserTypingSupport` 这张第二表且无人比对 ⇒
+      harmony 实现了 `EventUserTyping` 却永不登记，那段代码不可达且不报错。
+      判据 `reconcileDeclarations` 双向：证据未声明 / 声明无证据 / 键名拼错 / 集合不齐 四种都判红；
+      `test/capability-declarations.test.mjs` 12 条（9 合成 + 3 活体真数据）。
+- [x] **报告二次对账（我自己的错被抓三次并当场改）**：
+      ① 上轮把「5 语言 README」改成「6」，来源是被 `head -22` 截断的目录列表 ⇒ 完整复算
+        （`gh api contents --paginate`）= **9 个 README 文件**，已改并标注「我上轮的读数是怎么来的」。
+      ② 子代理报「ARCHITECTURE.md 31,490 B、31,138 是行数误填」⇒ 我没采信，`gh api .size` 实测
+        **31,138**、blob 352 个 LF 零 CRLF、31,138+352=31,490 ⇒ 那个数是**本地 checkout 的 CRLF 产物**，
+        报告原值是对的，**没有按它改**（若改了就是把错数写进权威件）。
+      ③ 我从子代理笔记抄进报告 N3 的 `deliverDeferredHarnessTurn` **全仓 0 命中** ⇒ 按实测改写：
+        该行字面是 `import { AssistantTextAccumulator, accumulateFinalAssistantText } from ./harness-client.mjs`。
+        另自查：我一度用浅克隆的 git 历史断言 Gitter/Twitch「从未存在」——clone 只有 1 commit，
+        该命题不成立 ⇒ issue 里收窄成「当前 master 可验证」，并明确写出我不主张历史。
+      ④ 分卷 02/08 与主报告同源化（分卷此前仍是旧稿：贡献流程「完全缺失」、覆盖率「未采集」、
+        笔记「⏳ 在办」、H4.2「⛔ 未做」）。判据只查主报告 ⇒ **分卷可以长期过期没人发现**，
+        这是判据覆盖面缺口，已登记为 H4.3。
+- [x] **端到端复现 + 四条上游 issue 全部 OPEN**（objective 里「提交 issue/PR 参与社区协作」那一半）：
+      pip 装真包（nonebot2 2.5.0 / adapter-telegram 0.1.0b20 / adapter-feishu 2.7.2）走真
+      `Bot.send_to()`，只桩 HTTP 出口，**带对照组**证明 `document = None` 源于前一次就地修改而非桩本身：
+      `E2E_VERDICT CONTROL_OK A1_OK A2_OK B_OK`。issue 正文里的代码是逐字实跑过的版本。
+      https://github.com/nonebot/adapter-telegram/issues/89
+      https://github.com/nonebot/adapter-feishu/issues/166
+      https://github.com/42wim/matterbridge/issues/2262
+      https://github.com/42wim/matterbridge/issues/2263
+      线上复核 `ISSUES_LIVE_OPEN_BY_ME=4/4`（作者 lxh113377）。提交前逐条查重：telegram#61、
+      matterbridge#1864 均不同因。
+- [x] **推送通道的真根因（改写了上一轮的结论）**：不是 GFW/凭据，是本机 git 配了一个
+      **没人监听的死代理**（`http(s).proxy = http://127.0.0.1:7897`，`netstat` 查得该端口无进程）。
+      `api.github.com` 与 `ssh.github.com:443` 都通，只有走 `github.com:443` 的 git over https 被拦。
+      处置：`git config --local http(s).proxy ""`（**只改本仓，不动全局配置**，可 `--unset` 回滚）⇒
+      推送成功：`fbdf0773..` 一路到 HEAD，PR #516 head 与本地一致（`gh api` 复核）。
+- [x] 四篇上游学习笔记全部落盘（首轮两位「读完未写」按 #44 判未交付并重派）：
+      matterbridge 28,052 B、nonebot 41,038 B、koishi 58,038 B、langbot 71,866 B；判据 `NOTES_OK <bytes> bytes`
+      逐条实测通过，复现代码各自可跑（12/12、10/10 绿）。
+- [x] 门禁：`npm run check` exit 0；`CAPABILITY_MATRIX_OK 14 channels, 2 document(s), declarations reconciled`、
+      `BENCHMARK_REPORT_OK … capabilityClaimsChecked=yes`、`GOVERNANCE_OK 7 files`、Python 223 passed。
+- [x] 部署面：profile 符号链接直指本仓，`lib/index.js` 安装件 md5 == 工作树 == HEAD blob
+      （`74d2dd2d1e40…` 系上轮读数，本轮重建后复测一致）；只读线上验证
+      `verify-adapter-resolution PASS`、`verify-wechat-group-live PASS`。宿主未重启（老大本轮明令禁止自杀重启）。
+
+## 未闭环（第十七轮）
+- [ ] **H4.3 判据覆盖面缺口**：`verify-benchmark-report.mjs` 只查主报告，分卷过期无人知 ⇒ 应把
+      `docs/benchmark/parts/*.md` 纳入同一对账（至少纳入「同一表格行不互相矛盾」这一条）。
+- [ ] N2 投递能力声明 1/14 → 14/14（机制已有，覆盖面没有；`delivery-service.mjs:579,583` 硬读）。
+- [ ] N4（新，来自 Koishi 件）注册条目缺 `needs` 维度：`plugin-src/host/index.mjs` 实测 17 处手工防御
+      （8 个 typeof 守卫 + 9 个 try 块），而宿主自己已在用 inject ⇒ 机制本仓已有、只在渠道层没用。
+      ⚠ 落地前必须先验证一条：本仓跑的是 `@deepseek-ai/cordis@4.0.1`，其 `inject` 只认「provide 过」
+      不认「值存在」⇒ needs 判据得自己写「值存在」，否则闸恒真。该漂移我**尚未独立复跑**，标未取证。
+- [ ] M2 shared/ 二级分层：仍未动（本轮 N1/报告改动与它写面重叠已解除，可下轮做；
+      实测需 13 域而非四域，最小割 4 行已点名到 file:line）。
+- [ ] M3.2 基准 Infinity 边界、分支覆盖阈值、真实微信群未发消息验证、设置界面/RPC、其余 12 渠道未接。
+- [ ] 宿主未重载：新 bundle 在盘但跑的是旧进程（老大本轮明令禁止自杀重启，不擅自重启）。

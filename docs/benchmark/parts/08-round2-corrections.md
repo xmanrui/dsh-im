@@ -64,10 +64,10 @@ BENCHMARK_REPORT_MATRIX_MISMATCH: 语音: report=3/14 matrix=2/14 | 流式/编�
 
 | 项 | 状态 | 卡点 |
 | --- | --- | --- |
-| Koishi 五节笔记落盘 | ⏳ 在办（第二轮已重派子代理，目标 `_research/bench2/koishi-adapter-di.md`） | 首轮子代理读完了但没写文件；另本机 GitHub 443 被代理阻断，真实 cordis 运行时实验能否跑起待实测 |
-| LangBot 五节笔记落盘 | ⏳ 在办（分类脚本 `classify.mjs` 37,996 B 与 `outputs/domain-mapping.md` 17,847 B 已在盘，缺的只是笔记本体） | 同上 |
+| Koishi 五节笔记落盘 | ✅ 已交付 | `_research/bench2/koishi-adapter-di.md` 58,038 B / 574 行，判据实测 `NOTES_OK 58038 bytes`。真实 cordis 3.18.1 实验跑通（卡点原文与绕法在 §4.1：cordis 是元包、`npm install` 被本机死代理毒化，改走 node fetch 直连 registry + tar 解包，未在本仓 npm install）；并用真渠道包证明「缺服务静默 PENDING、补齐当场 ACTIVE、渠道包一行不改」 |
+| LangBot 五节笔记落盘 | ✅ 已交付 | `langbot-domain-layering.md` 71,866 B / 750 行，判据实测 `NOTES_OK 71866 bytes`。复用首轮 `classify.mjs` 并复跑（SHA `13c2b7399ba2d658` 与留档一致）；新增 `cutanalysis.mjs` 做环的切割点分析，主进程独立复跑读数逐字一致（FILES 134 / EDGES 121 / DIRECTIONS 40 / MUTUAL 0；全局 size 1–3 共 10,700 子集无一消环） |
 | M2 `shared/` 二级分层 | ⛔ 未动 | 拆目录与本轮语音/基准改动落在同一批文件上（写面重叠），按「同文件先串后派」推迟 |
-| H4.2 上游 issue 提交 | ⛔ 未做 | 四条候选缺陷的**源码事实**均已独立复核（第 7 节），但 nonebot 两条的触发证据只到「按源码求值顺序推导 + 标准库复刻」，**未端到端跑过真实 bot.send()**；本机 443 不通也无法验证。按「证据不足不冒充完成」留待可联网机器坐实 |
+| H4.2 上游 issue 提交 | ✅ 已提交 4 条，全部 OPEN | [adapter-telegram#89](https://github.com/nonebot/adapter-telegram/issues/89)、[adapter-feishu#166](https://github.com/nonebot/adapter-feishu/issues/166)、[matterbridge#2262](https://github.com/42wim/matterbridge/issues/2262)、[matterbridge#2263](https://github.com/42wim/matterbridge/issues/2263)。线上复核 `ISSUES_LIVE_OPEN_BY_ME=4/4`（作者 `lxh113377`）。证据等级已升级：pip 装真包走真 `Bot.send_to()`／真 `serialize()`，只桩 HTTP 出口，**带对照组**证明 `document = None` 源于前一次就地修改；issue 正文里的复现代码是逐字实跑过的版本（`e2e_defect_repro.py`，末行 `E2E_VERDICT CONTROL_OK A1_OK A2_OK B_OK`）。matterbridge 两条口径收窄为「当前 master 可验证」——clone 是浅克隆（1 commit），撑不起「从未存在」的历史命题 |
 | M3.2 基准的 Infinity 边界 | ⛔ 未修 | `evaluateFloors` 对 `opsPerSecond = Infinity` 判绿（分母为 0 的坏读数）。本轮刻意不改：改判定会让刚写回的下限标定与 CI 首次读数失去可比性。已钉成测试 `known edge…recorded on purpose` |
 | 分支覆盖阈值 | ⛔ 未设 | M4 只给行覆盖率设 85%；分支 81.14% 暂无阈值，避免一拍就红 |
 
