@@ -49,7 +49,7 @@ test('normalizeInterfaceLanguageTag keeps BCP 47-style tags and rejects everythi
 });
 
 test('resolveHostLanguageTag prefers the plugin config, then DSH settings, then the mirror', () => {
-  assert.deepEqual(HOST_LANGUAGE_SOURCES, ['config', 'settings', 'mirror']);
+  assert.deepEqual(HOST_LANGUAGE_SOURCES, ['config', 'explicit', 'settings', 'mirror']);
   assert.deepEqual(
     resolveHostLanguageTag({ config: 'zh-CN', settings: 'en', mirror: 'en' }),
     { tag: 'zh-CN', source: 'config' },
@@ -57,6 +57,11 @@ test('resolveHostLanguageTag prefers the plugin config, then DSH settings, then 
   assert.deepEqual(
     resolveHostLanguageTag({ settings: 'en', mirror: 'zh' }),
     { tag: 'en', source: 'settings' },
+  );
+  // A language picked in the settings page outranks what DSH is set to.
+  assert.deepEqual(
+    resolveHostLanguageTag({ explicit: 'ru', settings: 'en', mirror: 'zh' }),
+    { tag: 'ru', source: 'explicit' },
   );
   assert.deepEqual(
     resolveHostLanguageTag({ mirror: 'en-GB' }),
@@ -255,6 +260,7 @@ test('the language RPC reports the resolved snapshot and mirrors the interface l
   assert.equal(HOST_LANGUAGE_RPC_CHANNEL, '/dsh-im-language');
   assert.deepEqual(HOST_LANGUAGE_ENDPOINTS, {
     get: 'settings.language.get',
+    set: 'settings.language.set',
     mirror: 'settings.language.mirror',
   });
 
@@ -291,6 +297,7 @@ test('the language RPC reports the resolved snapshot and mirrors the interface l
     controller: {
       apply: () => controller.apply(),
       snapshot: () => controller.snapshot(),
+      select: async () => controller.apply(),
       mirror: async () => { throw new Error('private-disk-failure'); },
     },
   });

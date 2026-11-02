@@ -169,6 +169,23 @@ export function consumeDshImInputOrigin(scope, rpcId) {
   return origins.delete(rpcId);
 }
 
+/**
+ * Whether a dsh-im prompt id is registered, without claiming it.
+ *
+ * An observer such as the Session sync coordinator must be able to ask "did a
+ * messenger start this turn?" without taking the id away from the channel that
+ * still owns it. The entry lives until its TTL or the size cap evicts it, so a
+ * repeated question keeps answering the same way, while the one-shot
+ * `consumeDshImInputOrigin` stays the only way to claim it.
+ */
+export function isDshImInputOrigin(scope, rpcId) {
+  if (!scope || !['object', 'function', 'string'].includes(typeof scope)
+    || typeof rpcId !== 'string' || !rpcId) return false;
+  const origins = interactionRegistry(scope).imInputOrigins;
+  pruneImInputOrigins(origins);
+  return origins.has(rpcId);
+}
+
 // A Host RPC may not accept cancellation itself. Bound the caller's wait
 // without retrying an operation that the Host may already have accepted.
 function callWithSignal(call, signal) {
@@ -1497,6 +1514,10 @@ export class HarnessClient {
     return false;
   }
 
+  async isSessionArchived(sessionId, options = {}) {
+    return this.#isSessionArchived(sessionId, options);
+  }
+
   async sessionExists(sessionId, options = {}) {
     // Archived Sessions still exist. Returning false here would silently bind
     // the conversation to a new Session; reading their active log can also fail.
@@ -1878,7 +1899,45 @@ export class HarnessClient {
     }
   }
 
-  async #ask(sessionId, prompt, options, diagnostic) {
+  /** Follow a prompt DS Bot carried to another Session, without submitting it again. */
+  async waitForTransferredReply(sessionId, { promptRpcId, ...options } = {}) {
+    if (typeof promptRpcId !== 'string' || !promptRpcId) {
+      throw new TypeError('Transferred prompt identity is required');
+    }
+    const diagnostic = { stage: 'reply.wait', submissionState: 'accepted', sessionId, promptRpcId };
+    try {
+      return await this.#ask(sessionId, null, options, diagnostic, promptRpcId);
+    } catch (error) {
+      if (options.signal?.aborted) throw options.signal.reason ?? error;
+      // Preflight failures must retain the accepted input's identity too. A
+      // fresh part may itself have rolled over before its watcher was opened.
+      error.promptAccepted = true;
+      error.details = { sessionId, promptRpcId, baselineSeq: -1, ...error.details };
+      throw messageDiagnosticError(error, diagnostic);
+    }
+  }
+
+  async #replyHistory(sessionId, afterSeq, transferred, signal) {
+    const events = [];
+    let beforeSeq;
+    for (let page = 0; page < 20; page += 1) {
+      signal?.throwIfAborted();
+      const history = await this.#sessionRpc('session.history', {
+        sessionId, maxMessages: 50,
+        ...(beforeSeq === undefined ? {} : { beforeSeq }),
+      }, 30_000, { signal });
+      signal?.throwIfAborted();
+      events.push(...(history.events ?? []));
+      const oldest = Math.min(...(history.events ?? []).map((entry) => (entry.event ?? entry).seq));
+      if (!transferred || !history.hasMore || oldest <= afterSeq + 1) return { events };
+      if (!Number.isSafeInteger(oldest) || oldest === beforeSeq) break;
+      beforeSeq = oldest;
+    }
+    // Do not attribute or complete a turn from an incomplete replay window.
+    return { events: [] };
+  }
+
+  async #ask(sessionId, prompt, options, diagnostic, transferredPromptRpcId = null) {
     const timeoutMs = options.timeoutMs ?? 600_000;
     const signal = options.signal;
     const onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : null;
@@ -1896,18 +1955,18 @@ export class HarnessClient {
       ? options.onInteractionResolved
       : undefined;
     const control = normalizeControl(options.control);
-    const inboundFiles = Array.isArray(options.files) ? options.files.filter(Boolean) : [];
-    const inboundImages = Array.isArray(options.images) ? options.images.filter(Boolean) : [];
+    const inboundFiles = !transferredPromptRpcId && Array.isArray(options.files) ? options.files.filter(Boolean) : [];
+    const inboundImages = !transferredPromptRpcId && Array.isArray(options.images) ? options.images.filter(Boolean) : [];
     await this.ensureRunning({ signal });
     if (await this.#isSessionArchived(sessionId, { signal })) throw sessionArchivedError(sessionId);
-    const before = await this.#sessionRpc(
+    const before = transferredPromptRpcId ? { events: [] } : await this.#sessionRpc(
       'session.history',
       { sessionId, maxMessages: 1 },
       30_000,
       { signal },
     );
     const baselineSeq = Math.max(-1, ...(before.events ?? []).map(({ event }) => event.seq ?? -1));
-    const promptRpcId = `${this.#rpcIdPrefix}-${randomUUID()}`;
+    const promptRpcId = transferredPromptRpcId ?? `${this.#rpcIdPrefix}-${randomUUID()}`;
     diagnostic.promptRpcId = promptRpcId;
     const releasePromptInputOrigin = registerImInputOrigin(this.#interactionRegistry, promptRpcId);
     const tracker = new HarnessReplyTracker({
@@ -1983,9 +2042,10 @@ export class HarnessClient {
     let artifactsDelivered = false;
     let deliveredArtifactCount = 0;
     let artifactHandoffError = null;
-    const stagedBatches = [];
-    let promptAccepted = false;
+    const stagedBatches = options.handoffResources?.stagedBatches ?? [];
+    let promptAccepted = Boolean(transferredPromptRpcId);
     let turnFinished = false;
+    let handedOff = false;
 
     const deliverArtifacts = async () => {
       if (!onArtifact || artifactsDelivered || tracker.turn === null) {
@@ -2076,87 +2136,86 @@ export class HarnessClient {
           }),
         ]);
       }
-      diagnostic.stage = 'prompt.prepare';
-      const content = typeof prompt === 'string'
-        ? [{ type: 'text', text: prompt }]
-        : prompt;
-      if (!Array.isArray(content) || content.length === 0) {
-        throw new TypeError('Harness prompt content is required');
-      }
-      // Publish the guidance the channel's own captured settings produced, so
-      // the Host materializes it once per Session as prompt context instead of
-      // per user message. It is passed in and never parsed back out of
-      // `content`: the prompt also carries whatever the user typed, and a
-      // message that merely looks like a guidance block is not configuration.
+      // Restore the channel's trusted guidance in a fresh part too; never
+      // derive it from the forwarded message's content.
       imSourceGuidance.publish(sessionId, options.sourceGuidance);
-      const timeZoneFields = clientTimeZoneFields();
-      const sendPrompt = (promptContent) => {
-        diagnostic.stage = 'prompt.submit';
-        diagnostic.submissionState = 'unknown';
-        return this.#sessionRpc('session.prompt', {
-          sessionId,
-          mode: 'queue',
-          content: promptContent,
-          ...timeZoneFields,
-        }, 30_000, { rpcId: promptRpcId, signal });
-      };
-      // 30 秒提交窗口到期只说明 Host 忙到没来得及应答，prompt 可能早已入队。
-      // 先按 promptRpcId 回查持久账本，确认入库就继续等回复；确认不到才把
-      // 原始超时错误向上抛，由文案层标注「提交请求超时、是否送达未知」。
-      const submitPrompt = async (promptContent) => {
+      if (!transferredPromptRpcId) {
+        diagnostic.stage = 'prompt.prepare';
+        const content = typeof prompt === 'string'
+          ? [{ type: 'text', text: prompt }]
+          : prompt;
+        if (!Array.isArray(content) || content.length === 0) {
+          throw new TypeError('Harness prompt content is required');
+        }
+        const timeZoneFields = clientTimeZoneFields();
+        const sendPrompt = (promptContent) => {
+          diagnostic.stage = 'prompt.submit';
+          diagnostic.submissionState = 'unknown';
+          return this.#sessionRpc('session.prompt', {
+            sessionId,
+            mode: 'queue',
+            content: promptContent,
+            ...timeZoneFields,
+          }, 30_000, { rpcId: promptRpcId, signal });
+        };
+        // 30 秒提交窗口到期只说明 Host 忙到没来得及应答，prompt 可能早已入队。
+        // 先按 promptRpcId 回查持久账本，确认入库就继续等回复；确认不到才把
+        // 原始超时错误向上抛，由文案层标注「提交请求超时、是否送达未知」。
+        const submitPrompt = async (promptContent) => {
+          try {
+            await sendPrompt(promptContent);
+          } catch (error) {
+            if (!isPromptSubmitTimeout(error) || signal?.aborted) throw error;
+            let confirmed = false;
+            try {
+              confirmed = await this.#confirmPromptSubmit(sessionId, promptRpcId, { signal });
+            } catch (confirmError) {
+              // 确认途中被取消时恢复调用方的取消语义（与图片暂存路径一致）。
+              if (signal?.aborted) throw signal.reason ?? confirmError;
+              throw error;
+            }
+            if (!confirmed) throw error;
+            diagnostic.submissionState = 'accepted';
+          }
+        };
         try {
-          await sendPrompt(promptContent);
+          await submitPrompt(content);
         } catch (error) {
-          if (!isPromptSubmitTimeout(error) || signal?.aborted) throw error;
-          let confirmed = false;
-          try {
-            confirmed = await this.#confirmPromptSubmit(sessionId, promptRpcId, { signal });
-          } catch (confirmError) {
-            // 确认途中被取消时恢复调用方的取消语义（与图片暂存路径一致）。
-            if (signal?.aborted) throw signal.reason ?? confirmError;
-            throw error;
+          // The Host refuses image blocks for a non-vision model before any
+          // durable user message exists. Re-deliver the same bytes the way
+          // ordinary uploads (zip, documents) already travel — staged into the
+          // Session workspace and named in a text manifest — then retry once
+          // with a text-only prompt. The retry reuses promptRpcId so reply
+          // tracking, control and interaction ownership stay bound to this ask.
+          const originalsStaged = inboundImages.length > 0 && isImageAdmissionRejection(error)
+            && content.some((part) => part.type === 'image');
+          const imageSources = !originalsStaged && isModelImageRejection(error)
+            ? imageFileSourcesFromContent(content) : [];
+          if (!originalsStaged && imageSources.length === 0) throw error;
+          if (!originalsStaged) {
+            let stagedImages;
+            try {
+              stagedImages = await this.#stageWorkspaceFiles(sessionId, imageSources, signal);
+            } catch (stagingError) {
+              if (signal?.aborted) throw signal.reason ?? stagingError;
+              console.warn(
+                '[dsh-im] unable to restage rejected images as workspace files:',
+                this.#logPrefix,
+                stagingError?.message ?? String(stagingError),
+              );
+              throw error;
+            }
+            stagedBatches.push(stagedImages);
           }
-          if (!confirmed) throw error;
-          diagnostic.submissionState = 'accepted';
+          const baseContent = typeof basePrompt === 'string'
+            ? [{ type: 'text', text: basePrompt }]
+            : basePrompt;
+          const fallbackPrompt = appendInboundFilesToPrompt([
+            ...contentWithoutImages(baseContent),
+            { type: 'text', text: t(isModelImageRejection(error) ? IMAGE_FILE_FALLBACK_PROMPT : IMAGE_HOST_LIMIT_FALLBACK_PROMPT) },
+          ], { files: stagedBatches.flatMap((batch) => batch?.files ?? []) });
+          await submitPrompt(fallbackPrompt);
         }
-      };
-      try {
-        await submitPrompt(content);
-      } catch (error) {
-        // The Host refuses image blocks for a non-vision model before any
-        // durable user message exists. Re-deliver the same bytes the way
-        // ordinary uploads (zip, documents) already travel — staged into the
-        // Session workspace and named in a text manifest — then retry once
-        // with a text-only prompt. The retry reuses promptRpcId so reply
-        // tracking, control and interaction ownership stay bound to this ask.
-        const originalsStaged = inboundImages.length > 0 && isImageAdmissionRejection(error)
-          && content.some((part) => part.type === 'image');
-        const imageSources = !originalsStaged && isModelImageRejection(error)
-          ? imageFileSourcesFromContent(content) : [];
-        if (!originalsStaged && imageSources.length === 0) throw error;
-        if (!originalsStaged) {
-          let stagedImages;
-          try {
-            stagedImages = await this.#stageWorkspaceFiles(sessionId, imageSources, signal);
-          } catch (stagingError) {
-            if (signal?.aborted) throw signal.reason ?? stagingError;
-            console.warn(
-              '[dsh-im] unable to restage rejected images as workspace files:',
-              this.#logPrefix,
-              stagingError?.message ?? String(stagingError),
-            );
-            throw error;
-          }
-          stagedBatches.push(stagedImages);
-        }
-        const baseContent = typeof basePrompt === 'string'
-          ? [{ type: 'text', text: basePrompt }]
-          : basePrompt;
-        const fallbackPrompt = appendInboundFilesToPrompt([
-          ...contentWithoutImages(baseContent),
-          { type: 'text', text: t(isModelImageRejection(error) ? IMAGE_FILE_FALLBACK_PROMPT : IMAGE_HOST_LIMIT_FALLBACK_PROMPT) },
-        ], { files: stagedBatches.flatMap((batch) => batch?.files ?? []) });
-        await submitPrompt(fallbackPrompt);
       }
       promptAccepted = true;
       diagnostic.submissionState = 'accepted';
@@ -2170,12 +2229,9 @@ export class HarnessClient {
         // active until turn/end and can therefore outlive a stalled turn.
         while (true) {
           await sleep(300, signal);
-          const history = await this.#sessionRpc(
-            'session.history',
-            { sessionId, maxMessages: 50 },
-            30_000,
-            { signal },
-          );
+          options.assertCurrent?.();
+          const history = await this.#replyHistory(sessionId, tracker.lastSeq, Boolean(transferredPromptRpcId), signal);
+          options.assertCurrent?.();
           const wasActive = ownership?.active === true;
           if (ownership) {
             this.#consumeInteractionOwnerships(sessionId, history.events ?? []);
@@ -2252,6 +2308,8 @@ export class HarnessClient {
           throw timeoutError;
         }
       } catch (error) {
+        handedOff = Boolean(options.handoffResources)
+          && ['turn-blocked', 'session-archived'].includes(error.code);
         if (error.code === 'session-archived') {
           error.promptAccepted = promptAccepted;
           error.details = { ...error.details, promptRpcId, baselineSeq, turn: tracker.turn, lastSeq: tracker.lastSeq };
@@ -2272,7 +2330,7 @@ export class HarnessClient {
       }
     } finally {
       releasePromptInputOrigin();
-      if (!promptAccepted || turnFinished) {
+      if (!promptAccepted || (turnFinished && !handedOff)) {
         for (const staged of stagedBatches) {
           try {
             await staged?.cleanup?.();

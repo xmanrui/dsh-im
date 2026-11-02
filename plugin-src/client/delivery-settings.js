@@ -346,6 +346,8 @@ function TargetForm({
   return h('form', { className: 'dim-targetForm', onSubmit: submit },
     h('div', { className: 'dim-targetFormHeading' },
       h('h3', null, editing ? '编辑投递目标' : '新建投递目标'),
+      h('p', { style: { color: '#92400e', background: '#fffbeb', padding: '8px 10px', borderRadius: '6px', fontSize: '12px', lineHeight: 1.5 } },
+        '目标是细粒度设置：某个机器人一旦配置了目标（哪怕关闭会话同步），该机器人的投递就按目标走。如需使用「通用设置 → 投递」里的简单开关，请先删除该机器人的全部目标。'),
       editing
         ? initialValue?.sessionSync?.enabled
           ? h('p', null, '修改接收位置会关闭会话双向同步。')

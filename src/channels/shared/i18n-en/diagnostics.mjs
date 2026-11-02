@@ -85,5 +85,10 @@ export default Object.freeze({
   "超时阈值（毫秒）": "Timeout (ms)",
   "Node 版本": "Node version",
   "运行平台": "Platform",
-  "无法访问 DSH 管理接口，请检查 DSH 连接或重新登录后重试。": "Cannot access the DSH management API. Check the DSH connection or sign in again."
+  "无法访问 DSH 管理接口，请检查 DSH 连接或重新登录后重试。": "Cannot access the DSH management API. Check the DSH connection or sign in again.",
+  "DSH 登录状态无效或已过期，请通过有效启动链接重新登录。": "Your DSH session is invalid or expired. Sign in again using a valid launch link.",
+  "DSH 拒绝了当前管理请求（HTTP 403）。请检查访问权限、可信地址配置及代理设置；若启用了仅本机访问，请按该限制访问。": "DSH denied this management request (HTTP 403). Check access permissions, trusted hosts and proxy settings. If local-only access is enabled, use an allowed local connection.",
+  "DSH 管理接口不存在（HTTP 404），请检查 Host 与插件版本及代理路径，重启后重试。": "The DSH management API was not found (HTTP 404). Check the Host and plugin versions and proxy path, then restart and retry.",
+  "DSH 管理服务暂时异常，请检查服务状态或稍后重试。": "The DSH management service encountered an error. Check its status or try again later.",
+  "DSH 管理请求失败，请检查服务状态和网络连接后重试。": "The DSH management request failed. Check the service status and network connection, then retry."
 });

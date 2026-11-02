@@ -1,9 +1,13 @@
 import { registerManagementRpc } from '../management-rpc.mjs';
-import { normalizeInterfaceLanguageTag } from '../../src/channels/shared/interface-language.mjs';
+import {
+  normalizeInterfaceLanguageTag,
+  normalizeMessageLanguageChoice,
+} from '../../src/channels/shared/interface-language.mjs';
 
 export const HOST_LANGUAGE_RPC_CHANNEL = '/dsh-im-language';
 export const HOST_LANGUAGE_ENDPOINTS = Object.freeze({
   get: 'settings.language.get',
+  set: 'settings.language.set',
   mirror: 'settings.language.mirror',
 });
 
@@ -13,6 +17,12 @@ export function validHostLanguagePayload(endpoint, payload) {
   if (!ENDPOINTS.has(endpoint)) return false;
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return false;
   const keys = Object.keys(payload);
+  if (endpoint === HOST_LANGUAGE_ENDPOINTS.set) {
+    if (keys.length !== 1 || keys[0] !== 'language') return false;
+    // 'auto' clears the explicit choice; a tag must be one the shipped
+    // dictionaries can serve, so the page cannot pin a language nobody wrote.
+    return normalizeMessageLanguageChoice(payload.language) !== null;
+  }
   if (endpoint === HOST_LANGUAGE_ENDPOINTS.mirror) {
     if (keys.length !== 1 || keys[0] !== 'locale') return false;
     // An explicit null clears the mirror; anything else must be a usable tag.
@@ -28,7 +38,7 @@ export function validHostLanguagePayload(endpoint, payload) {
  */
 export function createHostLanguageRpcHandler({ controller, logger = null } = {}) {
   if (!controller || typeof controller.snapshot !== 'function'
-    || typeof controller.mirror !== 'function') {
+    || typeof controller.mirror !== 'function' || typeof controller.select !== 'function') {
     throw new TypeError('createHostLanguageRpcHandler requires a host language controller');
   }
   return async (endpoint, payload, signal) => {
@@ -41,6 +51,10 @@ export function createHostLanguageRpcHandler({ controller, logger = null } = {})
     try {
       if (endpoint === HOST_LANGUAGE_ENDPOINTS.get) {
         return { ok: true, value: controller.snapshot() };
+      }
+      if (endpoint === HOST_LANGUAGE_ENDPOINTS.set) {
+        const choice = normalizeMessageLanguageChoice(payload.language);
+        return { ok: true, value: await controller.select(choice === 'auto' ? null : choice) };
       }
       return { ok: true, value: await controller.mirror(payload.locale) };
     } catch (error) {

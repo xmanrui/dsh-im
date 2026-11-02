@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 import {
+  conversationKeyMatchesTarget,
+  deliverySuggestionFromConversationKey,
   deliverySuggestionsFromSessions,
   privateConversationKeyMatchesTarget,
   privateDeliverySuggestionFromConversationKey,
-  resolvePrivateConversationKey,
+  resolveConversationKey,
 } from './delivery-suggestions.mjs';
 import { parseConversationKey } from '../../src/channels/shared/conversation/describe.mjs';
 import { withSessionBindingLock } from '../../src/channels/shared/session-binding-lock.mjs';
@@ -196,8 +198,8 @@ function sessionSyncConfigs(workspaces, botId) {
   return botId === undefined ? targets : targets.filter((target) => target.botId === botId);
 }
 
-/** Bindings own their private-chat sync while active. Ordinary delivery
- * settings remain saved and resume after unbinding, without duplicate mirrors. */
+/** Bindings own their chat sync while active. Ordinary delivery settings remain
+ * saved and resume after unbinding, without duplicate mirrors. */
 export function configuredSessionSyncTargets(workspaces, botId) {
   const bindings = (workspaces.listDsBotBindings?.(botId) ?? []).map((binding) => ({
     ...binding,
@@ -214,7 +216,7 @@ export function configuredSessionSyncTargets(workspaces, botId) {
 export function sessionSyncTarget(channel, workspaces, configured) {
   if (!configured) return null;
   if (!configured.dsBotId) return workspaces.deliveryTargetFor(configured.botId, configured.targetId);
-  const target = privateDeliverySuggestionFromConversationKey(channel, configured.conversationKey);
+  const target = deliverySuggestionFromConversationKey(channel, configured.conversationKey);
   return target ? { ...target, targetId: configured.targetId } : null;
 }
 
@@ -305,11 +307,7 @@ function stateSessions(state) {
 
 function sessionSyncView(channel, target, sessions, configured) {
   if (configured) {
-    const valid = privateConversationKeyMatchesTarget(
-      channel,
-      configured.conversationKey,
-      target,
-    );
+    const valid = conversationKeyMatchesTarget(channel, configured.conversationKey, target);
     if (!valid || !sessions) return { enabled: true, state: 'unavailable' };
     return {
       enabled: true,
@@ -320,7 +318,7 @@ function sessionSyncView(channel, target, sessions, configured) {
     };
   }
   const conversationKey = sessions
-    ? resolvePrivateConversationKey(channel, sessions, target)
+    ? resolveConversationKey(channel, sessions, target)
     : null;
   return { enabled: false, state: conversationKey ? 'off' : 'unavailable' };
 }
@@ -344,11 +342,20 @@ export function createDeliveryAdapter({
   if (typeof stateFor !== 'function') {
     throw new TypeError('delivery adapter requires a bot state getter');
   }
-  const syncTarget = async (botId, targetId, sessionId, { allowParts = true } = {}) => {
+  const syncTarget = async (botId, targetId, sessionId, { allowParts = true, privateOnly = false } = {}) => {
     const configured = configuredSessionSyncTargets(workspaces, botId).find((entry) => entry.targetId === targetId);
     const target = sessionSyncTarget(channel, workspaces, configured);
-    if (!configured || !target || !privateConversationKeyMatchesTarget(channel, configured.conversationKey, target)) {
-      throw sessionSyncUnavailable('Session sync target is no longer enabled');
+    // Mirrored text may follow any route the channel persists. A synced question
+    // or approval is different: it is answered by whoever reads the chat, so
+    // those two paths keep the private-only gate — a group, a thread or a forum
+    // topic never becomes a place where anyone can answer for the reader.
+    const keyMatches = privateOnly
+      ? privateConversationKeyMatchesTarget(channel, configured?.conversationKey, target)
+      : conversationKeyMatchesTarget(channel, configured?.conversationKey, target);
+    if (!configured || !target || !keyMatches) {
+      throw sessionSyncUnavailable(privateOnly
+        ? 'Session sync questions and approvals need one private chat'
+        : 'Session sync target is no longer enabled');
     }
     const sessions = stateSessions(await stateFor(botId));
     const bot = configured.dsBotId ? await dsBot?.resolve(configured.dsBotId) : null;
@@ -360,14 +367,15 @@ export function createDeliveryAdapter({
     }
     return { target, conversationKey: configured.conversationKey, dsBotId: configured.dsBotId };
   };
-  const describeSyncTarget = async (botId, targetId, sessionId) => {
-    const { conversationKey } = await syncTarget(botId, targetId, sessionId);
+  const describeSyncTarget = async (botId, targetId, sessionId, options = {}) => {
+    const { conversationKey } = await syncTarget(botId, targetId, sessionId, options);
     return { conversationKey };
   };
   const presentSyncInteraction = async (method, botId, targetId, sessionId, interaction, options = {}) => {
     // Text from an old part may finish delivery, but a new question answer must
-    // still belong to the Bot's current session.
-    const routeOptions = { allowParts: method !== 'presentSessionSyncQuestion' };
+    // still belong to the Bot's current session, and both interactions stay
+    // private-chat only.
+    const routeOptions = { allowParts: method !== 'presentSessionSyncQuestion', privateOnly: true };
     const original = await syncTarget(botId, targetId, sessionId, routeOptions);
     if (typeof coreController[method] !== 'function') return false;
     const validate = async () => {
@@ -568,7 +576,7 @@ export function createDeliveryAdapter({
         return sessionSyncView(channel, target, sessions, null);
       }
       const sessions = stateSessions(await stateFor(botId));
-      const conversationKey = resolvePrivateConversationKey(channel, sessions, target);
+      const conversationKey = resolveConversationKey(channel, sessions, target);
       if (!conversationKey) throw sessionSyncUnavailable();
       await workspaces.setDeliveryTargetSessionSync(botId, targetId, conversationKey);
       return { enabled: true, state: 'active' };
@@ -580,6 +588,9 @@ export function createDeliveryAdapter({
       const matches = [];
       for (const configured of configuredSessionSyncTargets(workspaces)) {
         const target = sessionSyncTarget(channel, workspaces, configured);
+        // Listed targets are the candidate range of synced questions and
+        // approvals only, so a non-private route never appears here even
+        // though mirrored text may be delivered to it.
         if (!target || !privateConversationKeyMatchesTarget(
           channel,
           configured.conversationKey,
@@ -599,8 +610,12 @@ export function createDeliveryAdapter({
       }
       return matches;
     },
-    describeSessionSyncApprovalTarget: describeSyncTarget,
-    describeSessionSyncQuestionTarget: describeSyncTarget,
+    // Both interaction paths resolve their target through the private-only gate,
+    // so a synced group or topic is never offered a question or an approval.
+    describeSessionSyncApprovalTarget: (botId, targetId, sessionId) =>
+      describeSyncTarget(botId, targetId, sessionId, { privateOnly: true }),
+    describeSessionSyncQuestionTarget: (botId, targetId, sessionId) =>
+      describeSyncTarget(botId, targetId, sessionId, { privateOnly: true }),
     async presentSessionSyncApproval(botId, targetId, sessionId, interaction, options = {}) {
       return presentSyncInteraction('presentSessionSyncApproval', botId, targetId, sessionId, interaction, options);
     },

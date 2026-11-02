@@ -60,6 +60,8 @@ function slackSuggestion(key) {
   return { kind: 'thread', route: { channelId: match[1], threadTs: match[2] } };
 }
 
+// Telegram-only: numeric chat/topic keys can safely prefill Telegram target fields.
+// Other channels must use their native route fields; never turn their keys into Telegram links.
 function telegramSuggestion(key) {
   const match = /^(direct|group):(-?\d+)(?::([1-9]\d*))?$/.exec(key);
   if (!match) return null;
@@ -187,6 +189,32 @@ export function resolvePrivateConversationKey(channel, sessions, target) {
   for (const [key, sessionId] of Object.entries(sessions)) {
     if (typeof sessionId !== 'string' || !sessionId) continue;
     if (privateConversationKeyMatchesTarget(channel, key, target)) matches.push(key);
+    if (matches.length > 1) return null;
+  }
+  return matches[0] ?? null;
+}
+
+/**
+ * Check that one saved conversation key still identifies this target route.
+ *
+ * Unlike the private variant this accepts every route the channel can persist —
+ * a Telegram forum topic (`group:<chatId>:<threadId>`), a Slack thread, a
+ * Discord channel — because mirrored text is not limited to private chat.
+ * Questions and approvals keep the private gate: they are resolved through
+ * `privateConversationKeyMatchesTarget` instead of this function.
+ */
+export function conversationKeyMatchesTarget(channel, key, target) {
+  const suggestionIdentity = routeIdentity(deliverySuggestionFromConversationKey(channel, key));
+  return suggestionIdentity !== null && suggestionIdentity === routeIdentity(target);
+}
+
+/** Resolve exactly one current conversation of any route kind for a normalized delivery target. */
+export function resolveConversationKey(channel, sessions, target) {
+  if (!CHANNELS.has(channel) || !isRecord(sessions)) return null;
+  const matches = [];
+  for (const [key, sessionId] of Object.entries(sessions)) {
+    if (typeof sessionId !== 'string' || !sessionId) continue;
+    if (conversationKeyMatchesTarget(channel, key, target)) matches.push(key);
     if (matches.length > 1) return null;
   }
   return matches[0] ?? null;
