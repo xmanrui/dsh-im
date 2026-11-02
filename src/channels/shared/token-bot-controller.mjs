@@ -2,6 +2,7 @@ import { extractConnectionEvidence, atConnectionStage, createConnectionDiagnosti
 import { connectionTestMessage } from './connection-test.mjs';
 import { t } from './i18n.mjs';
 import { publicMessageFailure } from './message-failure.mjs';
+import { deliveryAccountFingerprint, deliveryAccountView } from './delivery-account.mjs';
 
 function cleanString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -244,6 +245,37 @@ export class TokenBotController {
         throw error;
       }
       return runtime.sendProactiveText(target, text, options);
+    });
+  }
+
+  /**
+   * 主动投递的账号视图（基类一份，覆盖所有 TokenBotController 渠道）。
+   *
+   * 为什么放在基类：discord / imessage / telegram 的 sendProactiveText 就在本类里，
+   * 每家再抄一遍描述只是三份会各自漂移的副本。放这里一次，三家自动获得声明。
+   *
+   * 为什么要声明：delivery-service 拿不到 version=1 且含 proactive-text-checked 的
+   * 视图时**直接拒绝投递**（capability-unavailable）。这三家能力一直在，只是没声明，
+   * 于是永远进不了主动投递链路 —— r18 的对账判据正是这样把它们抓出来的。
+   *
+   * 指纹用身份字段派生，不用 token：token 会轮换，拿它做指纹会把正常轮换误判成换绑。
+   */
+  async describeDeliveryAccount(botId) {
+    const config = this.#configStore.get(botId);
+    if (!config) throw new Error(`Unknown ${this.#descriptor.label} bot`);
+    const runtime = this.#runtimes.get(botId);
+    const fingerprint = deliveryAccountFingerprint(this.#descriptor.key, {
+      botId: config.botId,
+      platformId: config.platformId,
+      ownerUserId: config.ownerUserId,
+    });
+    return deliveryAccountView({
+      channel: this.#descriptor.key,
+      botId,
+      fingerprint,
+      connected: runtime?.status?.ready === true,
+      // 只声明兑现得了的：主动发文本已实现；回执要求返回 messageId，本基类无此保证。
+      capabilities: ['proactive-text-checked'],
     });
   }
 

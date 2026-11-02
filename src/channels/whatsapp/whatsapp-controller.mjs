@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { connectionTestMessage } from '../shared/connection-test.mjs';
 import { t } from '../shared/i18n.mjs';
 import { publicMessageFailure } from '../shared/message-failure.mjs';
+import { deliveryAccountFingerprint, deliveryAccountView } from '../shared/delivery-account.mjs';
 import {
   deriveWhatsappBotId,
   maskWhatsappAccount,
@@ -245,6 +246,35 @@ export class WhatsappController {
         throw error;
       }
       return runtime.sendProactiveText(target, text, options);
+    });
+  }
+
+  /**
+   * 主动投递的账号视图：这个渠道现在能不能被主动投递、凭什么身份。
+   *
+   * 为什么必须显式声明：delivery-service 拿不到 version=1 且含 proactive-text-checked
+   * 的声明时**直接拒绝投递**（capability-unavailable）。本渠道早已实现 sendProactiveText，
+   * 却一直没声明 ⇒ 能力在、路不通（r18 实测：14 渠道里只有 feishu 声明过）。
+   *
+   * 指纹用身份字段（accountJid）派生，不用 token：
+   * token 会轮换，拿它做指纹会把正常轮换误判成换绑（account-changed）。
+   */
+  async describeDeliveryAccount(botId) {
+    const config = this.#configStore.get(botId);
+    if (!config) {
+      const error = new Error('Unknown Whatsapp bot');
+      error.code = 'unknown-bot';
+      throw error;
+    }
+    const runtime = this.#runtimes.get(botId);
+    const fingerprint = deliveryAccountFingerprint("whatsapp", { accountJid: config.accountJid });
+    return deliveryAccountView({
+      channel: "whatsapp",
+      botId,
+      fingerprint,
+      connected: runtime?.status?.ready === true,
+      // 只声明兑现得了的：主动发文本已实现；回执要求返回 messageId，本渠道无此保证。
+      capabilities: ['proactive-text-checked'],
     });
   }
 
