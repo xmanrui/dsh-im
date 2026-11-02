@@ -599,6 +599,30 @@ export function splitText(text, maxChars = 9000) {
   return chunks;
 }
 
+// Feishu cards parse Markdown images into `img` elements whose key must be an
+// uploaded Feishu image key. A local path (macOS `/tmp/x.png`, `~/x.png`,
+// `file:///x.png`, Windows `C:\\x.png`) is not one, and the whole card update is
+// rejected with 230099 / 200570 "card contains invalid image keys" — which
+// silently freezes a step card. Degrade those images to their alt text.
+const LOCAL_IMAGE_TARGET = /^(?:\/|\.{1,2}[\\/]|~[\\/]|file:|[A-Za-z]:[\\/]|\\\\)/;
+
+export function isLocalImageTarget(target) {
+  return typeof target === 'string' && LOCAL_IMAGE_TARGET.test(target.trim());
+}
+
+export function stripLocalImageMarkdown(text) {
+  if (typeof text !== 'string' || !text.includes('![')) return text;
+  return text.replace(/!\[([^\]]*)\]\(([^)\n]*)\)/g, (match, rawAlt, rawTarget) => {
+    const target = rawTarget.trim()
+      .replace(/\s+"[^"]*"\s*$/, '')
+      .trim()
+      .replace(/^<(.*)>$/, '$1')
+      .trim();
+    if (!isLocalImageTarget(target)) return match;
+    return rawAlt.trim() || target;
+  });
+}
+
 export function isBotSender(event) {
   return event?.sender?.sender_type === 'bot';
 }

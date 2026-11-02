@@ -17,6 +17,7 @@ import {
   managedTopicKey,
   managedTopicRoot,
   splitText,
+  stripLocalImageMarkdown,
 } from './message-utils.mjs';
 import {
   hasInboundImages,
@@ -4681,10 +4682,21 @@ export class FeishuHarnessBridge {
     if (round.finished) return;
     round.finished = true;
     this.#goalRounds.delete(round.key);
-    await this.#finishStepCard(round.key, {
+    const sealed = await this.#finishStepCard(round.key, {
       stopped: reason === 'stopped' || reason === 'aborted' || reason === 'cancelled',
       answerText: round.assistant.text,
     });
+    // Unlike an IM turn, a continuation round has no second delivery path:
+    // when the card cannot be sealed (broken render, lost message) the result
+    // would vanish, so post it as a plain reply instead.
+    if (sealed?.ok) return;
+    const answer = String(round.assistant.text ?? '').trim();
+    if (!answer) return;
+    this.#logger.warn?.(
+      '[dsh-feishu] goal round card seal failed; replying with the result:',
+      mirrorErrorText(sealed?.error),
+    );
+    await this.#send(round.chatId, answer, { replyTo: round.replyToMessageId }).catch(() => undefined);
   }
 
   #onHarnessEvent({ sessionId, event }) {
@@ -5170,12 +5182,17 @@ export class FeishuHarnessBridge {
 
   /** Replace the draft interval with `text` chunked into splitter-safe blocks. */
   #writeStepCardAnswer(card, text) {
+    // Feishu rejects the whole card update when a Markdown image points at a
+    // local file (`![x](/tmp/x.png)` -> 230099 / 200570), which freezes the
+    // card mid-turn. Images the reader must see are uploaded separately; the
+    // text keeps their caption instead.
+    const safeText = stripLocalImageMarkdown(text);
     // JSON can expand one UTF-16 unit to six bytes (for example a control
     // character). Leave room for the element wrapper, and let the existing
     // Markdown splitter reopen fences in each independently rendered block.
-    const chunks = Buffer.byteLength(JSON.stringify(text), 'utf8') + 128 <= STEP_STREAM_ANSWER_CHUNK_MAX_BYTES
-      ? [text]
-      : chunkMarkdownText(text, Math.floor((STEP_STREAM_ANSWER_CHUNK_MAX_BYTES - 128) / 6));
+    const chunks = Buffer.byteLength(JSON.stringify(safeText), 'utf8') + 128 <= STEP_STREAM_ANSWER_CHUNK_MAX_BYTES
+      ? [safeText]
+      : chunkMarkdownText(safeText, Math.floor((STEP_STREAM_ANSWER_CHUNK_MAX_BYTES - 128) / 6));
     const blocks = chunks
       .map((chunk) => ({ kind: 'message', text: chunk }));
     if (card.answerStart !== null) {
@@ -5330,7 +5347,14 @@ export class FeishuHarnessBridge {
     try {
       await card.renderChain?.catch?.(() => {});
     } catch { /* the seal below decides what the user sees */ }
-    if (card.broken) return { ok: false, error: card.lastError };
+    if (card.broken) {
+      // The card froze on an earlier failed render; callers must fall back.
+      this.#logger.warn?.(
+        '[dsh-feishu] step streaming card is broken; the seal was skipped:',
+        mirrorErrorText(card.lastError),
+      );
+      return { ok: false, error: card.lastError };
+    }
     const status = stopped ? 'stopped' : 'completed';
     const body = typeof answerText === 'string' ? answerText : '';
     // Whether the answer was already visible from a streamed draft render —

@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 飞书过程卡的最终答案若包含指向本地文件的 Markdown 图片（如 `![标题画面](/tmp/host_13.png)`），飞书会以 `230099 / 200570` 拒绝整张卡，卡片从此冻结在「运行中」；目标续跑轮由于没有第二条投递路径，本轮答案也会一并丢失。现在这类图片在写入卡片前降级为 caption 文本（远程图片与 `img_key` 不受影响），目标轮封卡失败时还会用纯文本回复补投本轮答案，并记录封卡失败的日志。方案见 `docs/方案/飞书过程卡本地图片降级与封卡回退方案.md`。
+  When a Feishu step card's final answer carried a Markdown image pointing at a local file (e.g. `![screenshot](/tmp/host_13.png)`), Feishu rejected the whole card update with `230099 / 200570` and the card froze at "running"; a Goal round then lost its answer too, because it has no second delivery path. Local image targets are now degraded to their caption before the text reaches the card (remote URLs and `img_key`s are untouched), a Goal round whose card cannot be sealed posts its result as a plain reply, and the skipped seal is logged. See `docs/方案/飞书过程卡本地图片降级与封卡回退方案.md`.
+
 ## [5.9.1] - 2026-11-01
 
 ### Fixed / 修复
