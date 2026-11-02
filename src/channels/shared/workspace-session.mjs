@@ -232,12 +232,24 @@ export async function askInWorkspaceSession({
         throw error;
       }
       return {
-        sessionId: binding.sessionId,
+        sessionId: binding.session.replySessionId ?? binding.sessionId,
         answer,
         ...(artifacts.length > 0 ? { artifacts } : {}),
       };
     } catch (error) {
       const failure = messageDiagnosticError(error, diagnostic);
+      if (dsBotSession && error?.code === 'session-archived'
+        && extractConnectionEvidence(failure).details.submissionState === 'not-submitted') {
+        let freshSessionId = null;
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          freshSessionId = await harness.resolveDsBotSession?.(key).catch(() => null);
+          if (freshSessionId && freshSessionId !== diagnostic.sessionId) break;
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+        if (freshSessionId && freshSessionId !== diagnostic.sessionId) {
+          continue;
+        }
+      }
       // Retry once, only with positive evidence that no prompt was submitted.
       // The binding lock rechecks identity so a concurrent /new or workspace
       // switch cannot be overwritten by recovery of the previous Session.

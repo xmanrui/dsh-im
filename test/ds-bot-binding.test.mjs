@@ -190,11 +190,19 @@ async function fixture(t, { channel = 'qq', key = 'c2c:user-one', target = { kin
     },
     async updateBotModel(id, selection) {
       modelCalls.push([id, selection]);
+      // Like DSH, a Session selected without a level runs the model's default
+      // one, while DS Bot's reply carries no level.
+      const reasoning = modelCatalog.groups[0].models
+        .find((entry) => entry.id === selection.model)?.reasoning;
+      const effort = selection.reasoningEffort ?? reasoning?.defaultEffort;
       selectedModel = {
         provider: selection.provider, model: selection.model,
-        ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
+        ...(effort ? { reasoningEffort: effort } : {}),
       };
-      return { selected: selectedModel };
+      return { selected: {
+        provider: selection.provider, model: selection.model,
+        ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
+      } };
     },
   };
   const sent = [];
@@ -264,13 +272,13 @@ test('bound Feishu model picker and reasoning command update DS Bot without crea
   assert.equal(f.state.sessionFor(f.key), bot.sessionId);
 
   const reasoning = await runModelCommand('/reasoning --default', f.scope.harness, f.scope.state, f.key);
-  assert.match(reasoning.message, /推理等级已切换为：/);
+  assert.match(reasoning.message, /推理等级已切换为：\nLow \(low\)/);
   assert.deepEqual(f.modelCalls[1], [bot.id, { provider: 'provider-one', model: 'new' }]);
   assert.equal(f.state.sessionFor(f.key), bot.sessionId);
 
   f.setCurrent({ ...bot, sessionId: 'session-two' });
   const rolled = await runModelCommand('/model 1', f.scope.harness, f.scope.state, f.key);
-  assert.match(rolled.message, /模型已切换为：/);
+  assert.match(rolled.message, /模型已切换为：\nprovider-one\/old\n推理等级：High \(high\)/);
   assert.equal(f.state.sessionFor(f.key), 'session-two');
   assert.deepEqual(f.modelCalls[2], [bot.id, { provider: 'provider-one', model: 'old' }]);
 });
@@ -373,6 +381,99 @@ test('rollover while preparing a prompt resolves again without sending to the ol
   await f.service.sendSessionSyncText('im-one', target.targetId, 'session-one', 'already in flight');
   assert.equal(f.sent.length, 1);
   assert.deepEqual(await f.service.listSessionSyncTargets('session-one'), []);
+});
+
+test('ordinary turn-blocked without handoff rollover preserves and throws the original error', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.ask = async () => {
+    const error = new Error('Turn blocked by policy');
+    error.code = 'turn-blocked';
+    throw error;
+  };
+  await assert.rejects(f.ask('blocked'), (error) => {
+    assert.equal(error.code, 'turn-blocked');
+    assert.match(error.message, /Turn blocked by policy/);
+    return true;
+  });
+  assert.equal(f.state.sessionFor(f.key), 'session-one');
+});
+
+test('turn-blocked exceeding the rollover polling window preserves the original error', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.ask = async () => {
+    const error = new Error('Turn blocked without timely switch');
+    error.code = 'turn-blocked';
+    throw error;
+  };
+  await assert.rejects(f.ask('timed out rollover'), (error) => {
+    assert.equal(error.code, 'turn-blocked');
+    return true;
+  });
+});
+
+test('transferred message during handoff turn-blocked is processed once without duplicate submission', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.waitForTransferredReply = async (id, options) => {
+    assert.equal(id, 'session-two');
+    assert.equal(options.promptRpcId, 'im-transferred');
+    return 'answer-transferred-from-session-two';
+  };
+  f.scope.harness.ask = async (id, text) => {
+    f.asks.push({ id, text });
+    f.setCurrent({ ...bot, sessionId: 'session-two', parts: ['session-one'] });
+    const error = new Error('Turn blocked');
+    error.code = 'turn-blocked';
+    error.promptAccepted = true;
+    error.details = { promptRpcId: 'im-transferred' };
+    throw error;
+  };
+  const result = await f.ask('hello');
+  assert.equal(result.sessionId, 'session-two');
+  assert.equal(result.answer, 'answer-transferred-from-session-two');
+  assert.deepEqual(f.asks, [{ id: 'session-one', text: 'hello' }]);
+  assert.equal(f.state.sessionFor(f.key), 'session-two');
+});
+
+test('an adapter without transferred prompt tracking preserves the error instead of guessing a reply', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.readSessionHistory = async () => ({
+    events: [
+      { event: { type: 'assistant/message', data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: 'history-answer' }] } }, seq: 0 } },
+      { event: { type: 'turn/end', data: { turn: 1, reason: 'completed' }, seq: 1 } },
+    ],
+  });
+  f.scope.harness.ask = async (id, text) => {
+    f.asks.push({ id, text });
+    f.setCurrent({ ...bot, sessionId: 'session-two', parts: ['session-one'] });
+    const error = new Error('Turn blocked');
+    error.code = 'turn-blocked';
+    error.promptAccepted = true;
+    error.details = { promptRpcId: 'im-transferred' };
+    throw error;
+  };
+  await assert.rejects(f.ask('hello'), { code: 'turn-blocked' });
+  assert.deepEqual(f.asks, [{ id: 'session-one', text: 'hello' }]);
+});
+
+test('unsubmitted archived session safely resubmits once to fresh session', async (t) => {
+  const f = await fixture(t);
+  await f.service.bindDsBot('im-one', f.key, bot.id);
+  f.scope.harness.isSessionArchived = async (id) => id === 'session-one';
+  setTimeout(() => {
+    f.setCurrent({ ...bot, sessionId: 'session-two', parts: ['session-one'] });
+  }, 100);
+  f.scope.harness.ask = async (id, text) => {
+    f.asks.push({ id, text });
+    return 'answer-from-session-two';
+  };
+  const result = await f.ask('hello');
+  assert.equal(result.sessionId, 'session-two');
+  assert.equal(result.answer, 'answer-from-session-two');
+  assert.deepEqual(f.asks, [{ id: 'session-two', text: 'hello' }]);
 });
 
 test('missing DS Bot fails closed, while delivery target CRUD leaves bindings intact', async (t) => {
