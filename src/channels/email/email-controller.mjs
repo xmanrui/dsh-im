@@ -350,8 +350,17 @@ export class EmailController {
    * 的声明时**直接拒绝投递**（capability-unavailable）。本渠道早已实现 sendProactiveText，
    * 却一直没声明 ⇒ 能力在、路不通（r18 实测：14 渠道里只有 feishu 声明过）。
    *
-   * 指纹用身份字段（address / user）派生，不用 token：
+   * 指纹用身份字段（platformId = 邮箱地址）派生，不用 token：
    * token 会轮换，拿它做指纹会把正常轮换误判成换绑（account-changed）。
+   *
+   * 为什么是 platformId 而不是 address / user（2026-11-02 实测 + 读码）：本渠道的配置存储继承
+   * `TokenBotConfigStore`，其 `#normalizeBot` 只持久化 platformId / botId / tokenRef / name /
+   * username 加扩展字段，**没有 address，也没有 user**（`token-config-store.mjs:157-166`；
+   * 邮箱扩展字段见 `config-store.mjs:113-138`，同样没有这两个键）。老写法读的正是这两个永远
+   * undefined 的字段 ⇒ 被 `deliveryAccountFingerprint` 的「跳过空值」规则过滤掉 ⇒ 序列化恒为
+   * `{"provider":"email","identity":[]}` ⇒ **所有邮箱账号指纹完全相同**。后果不是「少了个字段」，
+   * 而是换绑另一个邮箱后指纹不变，`delivery-service.mjs:582` 的 account-changed 永远不触发 ——
+   * 判据还在、已经失去意义，正是 shared helper 注释里点名要避免的那种「常量指纹」。
    */
   async describeDeliveryAccount(botId) {
     const config = this.#configStore.get(botId);
@@ -361,7 +370,7 @@ export class EmailController {
       throw error;
     }
     const runtime = this.#runtimes.get(botId);
-    const fingerprint = deliveryAccountFingerprint("email", { address: config.address, user: config.user });
+    const fingerprint = deliveryAccountFingerprint("email", { platformId: config.platformId });
     return deliveryAccountView({
       channel: "email",
       botId,

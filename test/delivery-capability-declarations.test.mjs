@@ -40,6 +40,27 @@ async function channelSource(name) {
  * @param {string} source 该渠道源码全文
  * @returns {boolean}
  */
+/**
+ * 声明里是否**真的**含 proactive-text-checked。
+ *
+ * 为什么不能直接 /proactive-text-checked/.test(source)（r18 实测踩到）：
+ * 那是全文子串匹配，**注释里出现该字样就算声明**。实测把 wecom 的数组清空、
+ * 只留一行 `// proactive-text-checked reserved for later`，旧写法仍然 pass 4 / fail 0，
+ * 而这个渠道实际上已经完全不能主动投递了 —— 判据对「静默降级」恒绿，
+ * 比没有判据更糟（它给人「已覆盖」的错觉）。
+ *
+ * 正确口径：只在 `capabilities: [...]` 的**数组字面量内容**里找该项。
+ *
+ * @param {string} source 该渠道源码全文
+ * @returns {boolean}
+ */
+function declaresProactive(source) {
+  const at = source.indexOf('describeDeliveryAccount');
+  if (at < 0) return false;
+  const capsMatch = source.slice(at).match(/capabilities:\s*\[([^\]]*)\]/);
+  if (!capsMatch) return false;
+  return /[~\x27"`]proactive-text-checked[~\x27"`]/.test(capsMatch[1]);
+}
 function inheritsTokenBotController(source) {
   return /extends\s+TokenBotController/.test(source);
 }
@@ -71,7 +92,7 @@ test('a declaration without the capability is also a gap', async () => {
     const source = await channelSource(name);
     const declares = /describeDeliveryAccount\s*\(/.test(source);
     const canSend = /sendProactiveText\s*\(/.test(source);
-    const claims = /proactive-text-checked/.test(source);
+    const claims = declaresProactive(source);
     if (declares && claims && !canSend) overclaimed.push(name);
   }
   assert.deepEqual(overclaimed, [], 'declared proactive but no implementation: ' + overclaimed.join(' | '));
@@ -96,6 +117,29 @@ test('new declarations go through the shared helper; the legacy one is grandfath
   assert.deepEqual(freelancers, [], 'new declarations must use shared helper: ' + freelancers.join(' | '));
   // 反向：legacy 集合不能偷偷扩张 —— 有人想新加一个绕开 helper 的渠道，就先来改这一行。
   assert.ok(LEGACY.has('feishu'), 'legacy set must stay explicit');
+});
+test('a capability that exists only in prose is not a declaration (r18 实测补丁)', async () => {
+  // 这条是补 r18 自己的洞：先前的 `claims = /proactive-text-checked/.test(source)` 是
+  // **全文子串匹配** —— 注释里出现该字样就算声明。实测把 wecom 的数组清空、
+  // 只留 `// proactive-text-checked reserved for later`，旧口径仍然 pass 4 / fail 0，
+  // 而渠道实际已经完全不能主动投递。判据对「静默降级」恒绿，比没判据更糟。
+  //
+  // 现在的口径：该渠道若有 describeDeliveryAccount，则 capabilities **数组字面量**里
+  // 必须能直接读到 proactive-text-checked；只出现在注释里不算。
+  const dirs = await channelDirectories();
+  const proseOnly = [];
+  for (const name of dirs) {
+    const source = await channelSource(name);
+    const at = source.indexOf('describeDeliveryAccount');
+    if (at < 0) continue;
+    const arrayMatch = source.slice(at).match(/capabilities:\s*\[([^\]]*)\]/);
+    const inArray = arrayMatch ? arrayMatch[1].includes('proactive-text-checked') : false;
+    const inProse = /proactive-text-checked/.test(source);
+    // office 没有 sendProactiveText，显式豁免（注册表 withoutDeliveryService: true）。
+    if (name === 'office') continue;
+    if (inProse && !inArray) proseOnly.push(name);
+  }
+  assert.deepEqual(proseOnly, [], 'capability appears only in prose, not in the array: ' + proseOnly.join(' | '));
 });
 test('declared capability keys are split into read and informational, never illegal', async () => {
   // 口径校正（r18 实测）：delivery-service 只 hard-read 两个键，但 feishu 另外声明了
