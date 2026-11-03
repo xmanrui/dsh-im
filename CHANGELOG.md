@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 目标续跑的轮次在「刚刚由 IM 消息创建/接续」时整轮静默：事件归属原先按 `#isImTurn()` 快照判断，而上一条 IM 回答还在投递、`#imTurnKeys` 尚未清空，Goal driver 已经在同一个 `turn/end` 后开了下一轮，于是这一轮被误判成 IM 回合整个丢弃——不开卡、不推工具、不推结果。现在归属由事件自身决定（`source.kind === "goal"` 才开轮，过程事件按 `turn` 精确匹配），人手回合改为只交还卡片不封卡，并在开卡前等待上一条 IM 回合封卡完成。
+  The first continuation round stayed silent when a Goal was created or continued straight out of an IM message: ownership was read from an `#isImTurn()` snapshot while the previous IM answer was still being delivered, so the round the Goal driver had already opened in the same tick was dropped as if it were an IM turn — no card, no tool progress, no result. Ownership now comes from the events themselves (`source.kind === "goal"` opens a round, process events match their `turn`), a human turn hands the card back without sealing it, and a new round waits for the previous IM turn to seal its card first.
+
 ## [5.9.1] - 2026-11-01
 
 ### Fixed / 修复
