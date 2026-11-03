@@ -135,11 +135,14 @@ export function modelCatalogHas(catalog, selection) {
   return modelCatalogEntry(catalog, selection) !== undefined;
 }
 
-export async function listModelCatalog(harness, options = {}) {
+export async function listModelCatalog(harness, { throwOnError = false, ...options } = {}) {
   try {
-    if (typeof harness?.listModels !== 'function') return normalizeModelCatalog(null);
+    if (typeof harness?.listModels !== 'function') throw new Error('Harness model catalog is unavailable');
     return normalizeModelCatalog(await harness.listModels(options));
-  } catch {
+  } catch (error) {
+    // Status reads may degrade; save validation must distinguish a failed read
+    // from a successful catalog that no longer contains the selected model.
+    if (throwOnError) throw error;
     return normalizeModelCatalog(null);
   }
 }

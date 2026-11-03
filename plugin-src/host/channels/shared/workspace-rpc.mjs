@@ -26,6 +26,7 @@ export function publicWorkspaceError(error) {
     'agent-preset-unavailable',
     'model-selection-invalid',
     'model-selection-unavailable',
+    'model-catalog-unavailable',
     'model-reasoning-unavailable',
     'context-enhancement-invalid',
     'access-policy-invalid',
