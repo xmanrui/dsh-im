@@ -4510,10 +4510,14 @@ export class FeishuHarnessBridge {
    * a conversation bound to that session stays silent for the whole round.
    * Announce the round and stream its tools/answer into the same live card
    * the IM turns use, so a long auto-run still shows progress and delivers
-   * each round's result. IM-owned turns and sessions already mirrored into a
-   * synced DM are skipped.
+   * each round's result.
+   *
+   * Ownership is decided from the event itself, never from `#imTurnKeys`: the
+   * goal driver opens the next round in the same tick as `turn/end`, while the
+   * previous IM ask is still sealing its card, so an `#isImTurn` snapshot taken
+   * then is stale and used to drop the whole round.
    */
-  async #feedGoalRoundTurn(sessionId, event, imOwned = false) {
+  async #feedGoalRoundTurn(sessionId, event) {
     if (this.#signal?.aborted) return;
     const type = event.type;
     if (type === 'turn/start') {
@@ -4525,7 +4529,12 @@ export class FeishuHarnessBridge {
     }
     if (type === 'user/message') {
       const source = event.data?.source;
-      if (source?.kind !== 'goal' || imOwned) return;
+      if (source?.kind !== 'goal') {
+        // A human turn took the conversation back: that turn's ask owns this
+        // conversation's card, so hand the open rounds over without sealing.
+        this.#releaseGoalRounds(sessionId);
+        return;
+      }
       const turn = this.#goalRoundTurn(sessionId, event);
       if (!Number.isSafeInteger(turn) || this.#goalRoundsFor(sessionId, turn).length > 0) return;
       await this.#openGoalRounds(sessionId, turn, source.round);
@@ -4533,55 +4542,71 @@ export class FeishuHarnessBridge {
     }
     if (type !== 'tool/call' && type !== 'assistant/message' && type !== 'turn/end') return;
     const turn = event.data?.turn;
-    // A later turn proves earlier rounds are over even when their turn/end was
-    // lost, so close them instead of leaving a card open forever.
-    if (Number.isSafeInteger(turn)) await this.#sealStaleGoalRounds(sessionId, turn);
-    const rounds = Number.isSafeInteger(turn)
-      ? this.#goalRoundsFor(sessionId, turn)
-      : this.#goalRoundsFor(sessionId);
-    if (!rounds.length) return;
-    if (imOwned) {
-      // The user took the conversation back with a real IM turn: that turn's
-      // ask owns this key's card now, so sealing it here would truncate the
-      // reply the user is waiting for. Hand the round over instead — whatever
-      // streamed so far stays on the card the ask continues.
-      for (const round of rounds) {
-        round.finished = true;
-        this.#goalRounds.delete(round.key);
+    if (!Number.isSafeInteger(turn)) {
+      // Older Harness payloads carry no turn on these events.
+      for (const round of this.#goalRoundsFor(sessionId)) {
+        await this.#applyGoalRoundEvent(round, sessionId, event);
       }
       return;
     }
-    for (const round of rounds) {
-      if (round.finished || event.seq <= round.lastSeq) continue;
-      if (this.#state.sessionFor?.(round.key) !== sessionId) {
-        // The conversation was rebound to another session: this session's
-        // later output must not land in the card the user now sees there.
-        await this.#sealGoalRound(round, 'completed');
-        continue;
+    const rounds = this.#goalRoundsFor(sessionId, turn);
+    if (!rounds.length) {
+      // A turn that is not a registered round means a human took over: hand
+      // the still-open rounds over so that ask keeps rendering its card.
+      this.#releaseGoalRounds(sessionId, turn);
+      return;
+    }
+    for (const round of rounds) await this.#applyGoalRoundEvent(round, sessionId, event);
+  }
+
+  /** Stream one round event into the round's card. */
+  async #applyGoalRoundEvent(round, sessionId, event) {
+    if (round.finished || event.seq <= round.lastSeq) return;
+    if (this.#state.sessionFor?.(round.key) !== sessionId) {
+      // The conversation was rebound to another session: this session's later
+      // output must not land in the card the user now sees there.
+      await this.#sealGoalRound(round, 'completed');
+      return;
+    }
+    round.lastSeq = event.seq;
+    const type = event.type;
+    if (type === 'tool/call') {
+      if (round.pendingStep) {
+        this.#morphStepCardAnswerToNote(round.key, round.pendingStep);
+        round.pendingStep = null;
       }
-      round.lastSeq = event.seq;
-      if (type === 'tool/call') {
-        if (round.pendingStep) {
-          this.#morphStepCardAnswerToNote(round.key, round.pendingStep);
-          round.pendingStep = null;
-        }
-        await this.#appendStepCardUpdate(round.key, round.chatId, round.replyToMessageId,
-          this.#stepCardToolBlock({
-            name: event.data?.name ?? '',
-            arguments: typeof event.data?.arguments === 'string' ? event.data.arguments : '',
-          }), { billable: false });
-      } else if (type === 'assistant/message'
-        && event.surfaceOp === 'append'
-        && event.data?.interrupted !== true) {
-        const text = textFromHarnessContent(event.data?.message?.content);
-        if (!text.trim()) continue;
-        round.assistant.setCanonical(event.data?.step, text);
-        round.pendingStep = text;
-        this.#streamStepCardAnswer(round.key, round.chatId, round.replyToMessageId, text);
-      } else if (type === 'turn/end') {
-        const reason = typeof event.data?.reason === 'string' ? event.data.reason : event.data?.reason?.kind;
-        await this.#sealGoalRound(round, reason);
-      }
+      await this.#appendStepCardUpdate(round.key, round.chatId, round.replyToMessageId,
+        this.#stepCardToolBlock({
+          name: event.data?.name ?? '',
+          arguments: typeof event.data?.arguments === 'string' ? event.data.arguments : '',
+        }), { billable: false });
+      return;
+    }
+    if (type === 'assistant/message'
+      && event.surfaceOp === 'append'
+      && event.data?.interrupted !== true) {
+      const text = textFromHarnessContent(event.data?.message?.content);
+      if (!text.trim()) return;
+      round.assistant.setCanonical(event.data?.step, text);
+      round.pendingStep = text;
+      this.#streamStepCardAnswer(round.key, round.chatId, round.replyToMessageId, text);
+      return;
+    }
+    if (type === 'turn/end') {
+      const reason = typeof event.data?.reason === 'string' ? event.data.reason : event.data?.reason?.kind;
+      await this.#sealGoalRound(round, reason);
+    }
+  }
+
+  /**
+   * Drop round bookkeeping without touching the cards, so an ask that is about
+   * to render into the same conversation keeps its own card.
+   */
+  #releaseGoalRounds(sessionId, beforeTurn = null) {
+    for (const round of this.#goalRoundsFor(sessionId)) {
+      if (beforeTurn !== null && round.turn >= beforeTurn) continue;
+      round.finished = true;
+      this.#goalRounds.delete(round.key);
     }
   }
 
@@ -4624,6 +4649,13 @@ export class FeishuHarnessBridge {
       }
       if (this.#isSyncedDmKey(key, syncedOpenIds)) continue;
       if (this.#goalRounds.has(key)) continue;
+      // The previous IM turn's ask may still be sealing its card: the goal
+      // driver starts the next round in the same tick as turn/end. Let the
+      // ask finish with its card instead of replacing it mid-delivery.
+      for (let waited = 0; waited < 60
+        && (this.#imTurnKeys.has(key) || this.#stepCards.has(key)); waited += 1) {
+        await this.#stepPushClock.delay(50);
+      }
       // A card left open by an abnormal exit is sealed before the new round
       // reuses the conversation's card slot.
       if (this.#stepCards.has(key)) await this.#finishStepCard(key);
@@ -4672,11 +4704,6 @@ export class FeishuHarnessBridge {
     return !peer.includes(':') && openIds.has(peer);
   }
 
-  async #sealStaleGoalRounds(sessionId, turn) {
-    const stale = this.#goalRoundsFor(sessionId).filter((round) => round.turn < turn);
-    for (const round of stale) await this.#sealGoalRound(round, 'completed');
-  }
-
   async #sealGoalRound(round, reason = 'completed') {
     if (round.finished) return;
     round.finished = true;
@@ -4708,7 +4735,7 @@ export class FeishuHarnessBridge {
     // no inbound message behind it, so it renders into the bound conversation
     // through this bridge instead of an ask callback. Same event ladder.
     if (this.#goalRounds.size > 0 || this.#hasConversationFor(sessionId)) {
-      void this.#queueEventTask(sessionId, () => this.#feedGoalRoundTurn(sessionId, event, imOwned));
+      void this.#queueEventTask(sessionId, () => this.#feedGoalRoundTurn(sessionId, event));
     }
     if (event.type !== 'turn/end') return;
     // Record before consulting state: /watch may still be resolving its target

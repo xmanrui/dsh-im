@@ -41,6 +41,7 @@ const end = (turn = 4, seq = 104, kind = 'completed') => ({
 async function fixture(t, {
   resolver = async () => [],
   keys = [[TOPIC, 'chat-1', 'om-topic-1']],
+  delay = async () => {},
 } = {}) {
   let listener;
   const controller = new AbortController();
@@ -60,6 +61,7 @@ async function fixture(t, {
     mirrorEntries: () => [],
   };
   const harness = {
+    ask: async () => 'IM answer',
     watchHarnessEvents: ({ onSessionEvent, signal }) => {
       listener = onSessionEvent;
       return new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
@@ -78,7 +80,7 @@ async function fixture(t, {
     allowedSenderOpenIds: new Set(['ou_owner']),
     logger: { warn() {}, debug() {}, error() {} },
     sessionSyncTargetsFor: resolver,
-    stepPushClock: { now: () => Date.now(), delay: async () => {} },
+    stepPushClock: { now: () => Date.now(), delay },
     client: {
       im: {
         v1: {
@@ -117,7 +119,7 @@ async function fixture(t, {
   };
   const cardFor = id => visible.get(id) ?? '';
   return {
-    bridge, emit, drain, creates, replies, patches, visible, cardFor,
+    bridge, harness, emit, drain, creates, replies, patches, visible, cardFor,
     bind: (key, sessionId) => bindings.set(key, sessionId),
   };
 }
@@ -324,4 +326,39 @@ test('a goal in a session with no Feishu conversation leaves bound cards alone',
   assert.match(f.cardFor('reply-1'), /bash/);
   assert.match(f.cardFor('reply-1'), /飞书会话的结果/);
   assert.match(f.cardFor('reply-1'), /已完成/);
+});
+
+test('a goal round still opens its card while the previous IM turn is delivering', async t => {
+  // The harness opens the next goal round in the same tick as `turn/end`,
+  // while the previous IM ask is still posting its answer. The round used to
+  // be dropped there because ownership was read from `#imTurnKeys`.
+  const f = await fixture(t, {
+    keys: [[DM, 'oc_dm', 'om-dm-1']],
+    delay: ms => new Promise(resolve => { setTimeout(resolve, ms); }),
+  });
+  let deliver;
+  f.harness.ask = () => new Promise(resolve => { deliver = resolve; });
+
+  const accepted = f.bridge.accept({
+    sender: { sender_type: 'user', sender_id: { open_id: 'ou_owner' } },
+    message: {
+      message_id: 'im-turn-1',
+      message_type: 'text',
+      chat_type: 'p2p',
+      chat_id: 'oc_dm',
+      content: JSON.stringify({ text: '创建一个目标' }),
+    },
+  });
+  await flush();
+
+  f.emit(start(4, 99));
+  f.emit(goal(1, 100));
+  await new Promise(resolve => { setTimeout(resolve, 30); });
+  deliver('目标已创建，开始第 1 轮。');
+  await accepted;
+  await new Promise(resolve => { setTimeout(resolve, 200); });
+
+  const roundCards = f.replies.filter(reply => reply.data.content.includes('目标自动续跑'));
+  assert.equal(roundCards.length, 1, 'the round opens its own card once the ask is done');
+  assert.match(roundCards[0].data.content, /第 1 轮/);
 });
