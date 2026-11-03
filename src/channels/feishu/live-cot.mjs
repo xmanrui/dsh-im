@@ -1,6 +1,12 @@
 const MAX_EVENTS_PER_WRITE = 50;
 const MAX_EVENT_CONTENT_CHARS = 4096;
 const MAX_TOOL_RESULT_CHARS = 1500;
+// Feishu publishes no COT-specific rate limit; space requests conservatively.
+const MIN_COT_REQUEST_INTERVAL_MS = 65;
+
+// The user stopped the turn: close it as interrupted, not as a failed run.
+const INTERRUPTED_KINDS = new Set(['interrupted', 'stopped', 'cancelled', 'canceled']);
+const INTERRUPTED_ERROR_CODES = new Set(['turn-stopped', 'turn-interrupted']);
 
 const TOOL_ICONS = Object.freeze({
   read: 'read',
@@ -62,15 +68,25 @@ function toolKind(name) {
   return '';
 }
 
-function turnFailure(reason) {
+function turnOutcome(reason) {
+  if (reason instanceof Error) {
+    return INTERRUPTED_ERROR_CODES.has(reason.code)
+      ? { status: 'interrupted' }
+      : { failure: reason.message || 'Turn failed' };
+  }
   const kind = typeof reason === 'string' ? reason : reason?.kind;
-  if (reason === null || reason === undefined || kind === 'completed') return null;
+  if (reason === null || reason === undefined || kind === 'completed') return { status: 'done' };
+  if (INTERRUPTED_KINDS.has(kind)) return { status: 'interrupted' };
   if (kind !== 'error') {
-    return kind ? `Turn ended: ${kind}` : 'Turn failed';
+    return { failure: kind ? `Turn ended: ${kind}` : 'Turn failed' };
   }
   const error = reason.error ?? reason.failure;
-  if (!error) return 'Turn failed';
-  return [error.code, error.message].filter(Boolean).join(': ') || 'Turn failed';
+  if (!error) return { failure: 'Turn failed' };
+  return { failure: [error.code, error.message].filter(Boolean).join(': ') || 'Turn failed' };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -81,12 +97,21 @@ export class FeishuLiveCot {
   #channel;
   #chatId;
   #replyTo;
+  #replyInThread;
+  #onReplyThreadId;
   #hidden;
   #onFailure;
+  #requestIntervalMs;
   #turn = null;
   #opening = null;
+  #handle = null;
+  #lastRequestAt = 0;
   #chain = Promise.resolve();
   #pending = [];
+  #closing = null;
+  // Set once the terminal event is queued: a stop can land while handle() is
+  // mid-update, and nothing may follow RUN_FINISHED/RUN_ERROR.
+  #sealed = false;
   #reasoningOpen = false;
   #heldAssistant = null;
   #finished = false;
@@ -95,14 +120,20 @@ export class FeishuLiveCot {
 
   constructor(channel, chatId, {
     replyTo,
+    replyInThread = false,
+    onReplyThreadId,
     hidden = false,
     onFailure = () => {},
+    requestIntervalMs = MIN_COT_REQUEST_INTERVAL_MS,
   } = {}) {
     this.#channel = channel;
     this.#chatId = chatId;
     this.#replyTo = replyTo;
+    this.#replyInThread = replyInThread === true && Boolean(replyTo);
+    this.#onReplyThreadId = onReplyThreadId;
     this.#hidden = hidden === true;
     this.#onFailure = onFailure;
+    this.#requestIntervalMs = requestIntervalMs;
   }
 
   async #start(turn) {
@@ -110,8 +141,21 @@ export class FeishuLiveCot {
     this.#turn = Number.isSafeInteger(turn) ? turn : 0;
     this.#opening = this.#channel.createCot(this.#chatId, {
       ...(this.#replyTo ? { replyTo: this.#replyTo } : {}),
+      // A topic turn keeps its process inside the topic (reply_in_thread).
+      ...(this.#replyInThread ? { replyInThread: true } : {}),
       hidden: this.#hidden,
-    }).catch((error) => {
+    }).then(async (handle) => {
+      this.#handle = handle;
+      this.#lastRequestAt = Date.now();
+      if (this.#replyInThread && typeof this.#onReplyThreadId === 'function') {
+        try {
+          await this.#onReplyThreadId(handle?.threadId ?? null);
+        } catch (error) {
+          this.#onFailure(error);
+        }
+      }
+      return handle;
+    }, (error) => {
       this.#broken = true;
       this.#onFailure(error);
       return null;
@@ -124,8 +168,15 @@ export class FeishuLiveCot {
     ]);
   }
 
+  /** Space requests on this process; deltas arriving meanwhile share a batch. */
+  async #throttle() {
+    const wait = this.#lastRequestAt + this.#requestIntervalMs - Date.now();
+    if (wait > 0) await delay(wait);
+    this.#lastRequestAt = Date.now();
+  }
+
   #write(events) {
-    if (this.#broken || events.length === 0) return;
+    if (this.#broken || this.#sealed || events.length === 0) return;
     this.#pending.push(...events);
     this.#chain = this.#chain.then(async () => {
       const handle = await this.#opening;
@@ -134,6 +185,7 @@ export class FeishuLiveCot {
         return;
       }
       while (this.#pending.length > 0) {
+        await this.#throttle();
         await this.#channel.writeCotEvents(
           handle,
           this.#pending.splice(0, MAX_EVENTS_PER_WRITE),
@@ -144,6 +196,22 @@ export class FeishuLiveCot {
       this.#pending.length = 0;
       this.#onFailure(error);
     });
+  }
+
+  /**
+   * Close the native process lifecycle. Terminal events alone leave the IM
+   * message spinning, so this runs even after an earlier write failed.
+   */
+  async #complete(reason) {
+    await this.#opening;
+    const handle = this.#handle;
+    if (!handle || typeof this.#channel.completeCot !== 'function') return;
+    try {
+      await this.#throttle();
+      await this.#channel.completeCot(handle, reason);
+    } catch (error) {
+      this.#onFailure(error);
+    }
   }
 
   async #closeReasoning() {
@@ -231,30 +299,41 @@ export class FeishuLiveCot {
     }
   }
 
-  async finish(reason) {
-    if (this.#finished) {
-      await this.#chain;
-      return;
-    }
+  /**
+   * Write the terminal event, then CompleteCOT. A user stop writes
+   * RUN_FINISHED(interrupted) and completes with reason=error instead of
+   * reporting RUN_ERROR; repeated calls share one close and never reject.
+   */
+  finish(reason) {
+    this.#closing ??= this.#close(reason);
+    return this.#closing;
+  }
+
+  async #close(reason) {
     this.#finished = true;
     this.#heldAssistant = null;
-    if (this.#turn === null || this.#broken) {
+    if (this.#turn === null) {
       await this.#chain;
       return;
     }
-    await this.#closeReasoning();
-    const failure = reason instanceof Error
-      ? reason.message
-      : turnFailure(reason);
-    await this.#write([
-      failure
-        ? cotEvent('RUN_ERROR', { message: failure, code: 'TURN_FAILED' })
+    const outcome = turnOutcome(reason);
+    if (!this.#broken) {
+      const events = [];
+      if (this.#reasoningOpen) {
+        this.#reasoningOpen = false;
+        events.push(cotEvent('REASONING_MESSAGE_END', { messageId: `reasoning-${this.#turn}` }));
+      }
+      events.push(outcome.failure
+        ? cotEvent('RUN_ERROR', { message: outcome.failure, code: 'TURN_FAILED' })
         : cotEvent('RUN_FINISHED', {
             threadId: this.#chatId,
             runId: `turn-${this.#turn}`,
-            status: 'done',
-          }),
-    ]);
+            status: outcome.status,
+          }));
+      this.#write(events);
+    }
+    this.#sealed = true;
     await this.#chain;
+    await this.#complete(outcome.status === 'done' ? 'done' : 'error');
   }
 }

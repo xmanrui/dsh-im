@@ -1776,6 +1776,8 @@ export class FeishuHarnessBridge {
       },
     );
     if (result?.stopped) {
+      // 文本 /stop（群聊 @bot /stop）与卡片停止按钮同一收口。
+      this.#markStepStopRequested(key);
       await Promise.allSettled([
         this.#cancelPendingInteraction(key),
         this.#approvals.closeRoute(key),
@@ -5374,10 +5376,15 @@ export class FeishuHarnessBridge {
     return { kind: 'tools', lines: [`✅ ${name}${summary ? ` — ${summary}` : ''}`], omitted: 0 };
   }
 
-  /** Flag the in-flight streaming-card turn as user-stopped (seals 已停止). */
+  /**
+   * Flag the in-flight step-push turn as user-stopped: the streaming card
+   * seals 已停止 and a native live process closes as interrupted right away.
+   */
   #markStepStopRequested(key) {
     const flag = this.#stepStopFlags.get(key);
-    if (flag) flag.requested = true;
+    if (!flag || flag.requested) return;
+    flag.requested = true;
+    void flag.onStop?.();
   }
 
   /**
@@ -5793,19 +5800,19 @@ export class FeishuHarnessBridge {
     });
     // 流式卡片模式：每轮一张过程卡（原地 patch），过程与最终答案都进卡；
     // post 模式维持逐条直推。先预建卡片状态，纯问答回合也能在收尾时开卡。
-    // 飞书原生思考过程按 chat_id 创建，不会落进话题（#244）；话题内的回合改用
-    // 实时过程卡（以 reply_in_thread 回复留在话题内），避免过程出现在话题外。
-    const liveCotInTopic = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.LIVE_COT
-      && this.#replyInThreadFor(messageId);
-    const streamingCard = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.STREAMING_CARD
-      || liveCotInTopic;
+    // 飞书原生思考过程：话题内的回合以 origin_message_id + reply_in_thread 创建，
+    // 过程留在话题内，不再回退到实时过程卡（#244）。
+    const streamingCard = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.STREAMING_CARD;
     const liveCot = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.LIVE_COT
-      && !liveCotInTopic
       && typeof this.#channel?.createCot === 'function'
       && typeof this.#channel?.writeCotEvents === 'function';
     const cot = liveCot
       ? new FeishuLiveCot(this.#channel, chatId, {
           replyTo: messageId,
+          ...(this.#replyInThreadFor(messageId) ? {
+            replyInThread: true,
+            onReplyThreadId: async (threadId) => this.#registerTopicReply(messageId, chatId, threadId),
+          } : {}),
           hidden: false,
           onFailure: (error) => this.#logger.warn?.(
             '[dsh-feishu] native live process failed; final answer will continue:',
@@ -5820,9 +5827,15 @@ export class FeishuHarnessBridge {
       }
       this.#ensureStepCard(key, chatId, messageId);
     }
-    // /stop 打标：回合进行中收到停止请求时，封存为「已停止」而非「已完成」。
-    const stepStopFlag = streamingCard ? { requested: false } : null;
-    if (streamingCard) this.#stepStopFlags.set(key, stepStopFlag);
+    // /stop 打标：回合进行中收到停止请求时，封存为「已停止」而非「已完成」；
+    // 原生思考过程立即写 RUN_FINISHED(interrupted) 并 CompleteCOT 收口。
+    const stepStopFlag = streamingCard || liveCot
+      ? {
+          requested: false,
+          ...(cot ? { onStop: () => cot.finish({ kind: 'interrupted' }) } : {}),
+        }
+      : null;
+    if (stepStopFlag) this.#stepStopFlags.set(key, stepStopFlag);
     const baseAskOptions = this.#interactionAskOptions(event, key, message.files, message.images);
 
     // 上下文注入动作在详细级别下也体现为一条步骤（注入细节可忽略）。
@@ -5949,9 +5962,10 @@ export class FeishuHarnessBridge {
       },
       });
     } catch (error) {
+      // 已请求 /stop 时 onStop 已收口为 interrupted，这里复用同一次收口。
       await cot?.finish(error);
+      if (stepStopFlag) this.#stepStopFlags.delete(key);
       if (streamingCard) {
-        this.#stepStopFlags.delete(key);
         await this.#finishStepCard(key, { stopped: true });
       }
       throw error;
@@ -5960,7 +5974,9 @@ export class FeishuHarnessBridge {
       await watchdog?.stop();
     }
     markAskComplete(completed.sessionId);
-    await cot?.finish();
+    // stop 后 ask 仍可能带着部分答案正常返回：过程按中断收口，而非已完成。
+    await cot?.finish(stepStopFlag?.requested === true ? { kind: 'interrupted' } : undefined);
+    if (liveCot) this.#stepStopFlags.delete(key);
     const finalStepText = pendingStep ? pendingStep.text : null;
     pendingStep = null;
     const finalText = (typeof finalStepText === 'string' && finalStepText.trim())

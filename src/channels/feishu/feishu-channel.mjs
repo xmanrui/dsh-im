@@ -9,6 +9,11 @@ const DEFAULT_INITIAL_TEXT = '已连接 DeepSeek Harness，正在思考…';
 const MAX_STREAM_CHARS = 28000;
 const MAX_FILE_OPERATION_TIMEOUT_MS = 120_000;
 const COT_API = '/open-apis/im/v1/message_cot';
+// Feishu publishes no COT-specific rate limit; keep one bot's requests spaced.
+const MIN_BOT_COT_REQUEST_INTERVAL_MS = 20;
+// A process the client already closed (e.g. its native stop button) rejects
+// CompleteCOT with this message; completing it again is an idempotent success.
+const COT_ALREADY_TERMINAL = /already in terminal (?:state|status)/i;
 
 const FILE_DELIVERY_ERRORS = new Map([
   [99991672, ['artifact-permission-required', 'Feishu file delivery requires the im:resource permission.']],
@@ -195,6 +200,8 @@ export class VerifiedFeishuChannel {
   #initialText;
   #fileUploadTimeoutMs;
   #fileMessageTimeoutMs;
+  #cotGate = Promise.resolve();
+  #cotLastRequestAt = 0;
 
   constructor({
     client,
@@ -375,13 +382,15 @@ export class VerifiedFeishuChannel {
   }
 
   /** Open one native Feishu thinking-process message. */
-  async createCot(chatId, { replyTo, hidden = false } = {}) {
-    const response = assertApiSuccess('Feishu message_cot.create', await this.#client.request({
+  async createCot(chatId, { replyTo, replyInThread = false, hidden = false } = {}) {
+    const response = assertApiSuccess('Feishu message_cot.create', await this.#cotRequest({
       method: 'POST',
       url: `${COT_API}?receive_id_type=chat_id`,
       data: {
         receive_id: chatId,
         ...(replyTo ? { origin_message_id: replyTo } : {}),
+        // A topic reply needs both the anchor and reply_in_thread to stay inside it.
+        ...(replyTo && replyInThread ? { reply_in_thread: true } : {}),
         cot_hidden: hidden === true,
         enable_badge: false,
         update_feed_rank: false,
@@ -392,12 +401,17 @@ export class VerifiedFeishuChannel {
     if (!cotId || !messageId) {
       throw new Error('Feishu message_cot.create returned no cot_id/message_id');
     }
-    return { cotId, messageId };
+    const threadId = response?.data?.thread_id;
+    return {
+      cotId,
+      messageId,
+      ...(typeof threadId === 'string' && threadId ? { threadId } : {}),
+    };
   }
 
   /** Append ordered AG-UI events to one native thinking process. */
   async writeCotEvents(handle, events) {
-    assertApiSuccess('Feishu message_cot.write', await this.#client.request({
+    assertApiSuccess('Feishu message_cot.write', await this.#cotRequest({
       method: 'PUT',
       url: COT_API,
       data: {
@@ -406,6 +420,35 @@ export class VerifiedFeishuChannel {
         cot_id: handle.cotId,
       },
     }));
+  }
+
+  /**
+   * End the native process lifecycle so the IM message stops showing as
+   * running. Only done or error is sent: `timeout` would show a stopped run
+   * as timed out.
+   */
+  async completeCot(handle, reason = 'done') {
+    const response = await this.#cotRequest({
+      method: 'POST',
+      url: `${COT_API}/complete/${encodeURIComponent(handle.cotId)}`,
+      params: {
+        message_id: handle.messageId,
+        reason: reason === 'error' ? 'error' : 'done',
+      },
+    });
+    if (response?.code && COT_ALREADY_TERMINAL.test(String(response.msg ?? ''))) return;
+    assertApiSuccess('Feishu message_cot.complete', response);
+  }
+
+  /** Serialize and space COT requests across every process this bot runs. */
+  #cotRequest(request) {
+    const gate = this.#cotGate.then(async () => {
+      const wait = this.#cotLastRequestAt + MIN_BOT_COT_REQUEST_INTERVAL_MS - Date.now();
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      this.#cotLastRequestAt = Date.now();
+    });
+    this.#cotGate = gate;
+    return gate.then(() => this.#client.request(request));
   }
 
   async #sendArtifact(chatId, file, {

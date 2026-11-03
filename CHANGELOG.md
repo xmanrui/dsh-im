@@ -6,6 +6,14 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 飞书「实时直播」补齐思考过程生命周期：每个回合写完终态事件后调用 CompleteCOT 收口，思考过程不再一直显示为运行中；用户停止任务时写入 `RUN_FINISHED`（`status: interrupted`）并以 `error` 收口，不再作为 `RUN_ERROR` 报告运行失败。文本 `/stop`、群聊 `@机器人 /stop` 与卡片停止按钮都会立即结束思考过程，迟到的过程事件不会写在终态之后；思考过程已在客户端结束时，重复收口视为成功。
+  Feishu Live process now closes its thinking-process lifecycle: every turn calls CompleteCOT after its terminal event, so the thinking process no longer keeps showing as running, and a user stop writes `RUN_FINISHED` (`status: interrupted`) and completes with `error` instead of reporting `RUN_ERROR` as a failed run. Text `/stop`, group `@bot /stop` and the card stop button all close the process right away, and late progress events are never written after the terminal event. Completing a process the client already closed counts as success.
+
+- 话题中的「实时直播」回合改用 `origin_message_id` + `reply_in_thread` 创建原生思考过程，过程留在话题内，不再回退到实时过程卡（[#244](https://github.com/xmanrui/dsh-im/issues/244)、[#265](https://github.com/xmanrui/dsh-im/pull/265)）。思考过程请求按机器人串行并保守间隔发送，降低触发频控的概率。
+  Live process turns in a topic now create the native thinking process with `origin_message_id` + `reply_in_thread`, keeping it inside the topic instead of falling back to the Live process card ([#244](https://github.com/xmanrui/dsh-im/issues/244), [#265](https://github.com/xmanrui/dsh-im/pull/265)). Thinking-process requests are serialized per bot and conservatively spaced to stay clear of rate limits.
+
 ## [5.9.1] - 2026-11-01
 
 ### Fixed / 修复

@@ -10181,6 +10181,7 @@ test('step push live_cot mode uses Feishu native process and sends the final ans
   const sent = [];
   const writes = [];
   const creates = [];
+  const completes = [];
   const channel = {
     ...stepPushChannel(),
     createCot: async (chatId, options) => {
@@ -10188,6 +10189,7 @@ test('step push live_cot mode uses Feishu native process and sends the final ans
       return { cotId: 'cot-live', messageId: 'om-cot-live' };
     },
     writeCotEvents: async (_handle, events) => writes.push(...events),
+    completeCot: async (handle, reason) => completes.push({ handle, reason }),
   };
   const bridge = new FeishuHarnessBridge({
     client: stepPushTextClient((text) => sent.push(text)),
@@ -10247,25 +10249,30 @@ test('step push live_cot mode uses Feishu native process and sends the final ans
     'TOOL_CALL_RESULT',
     'RUN_FINISHED',
   ]);
+  assert.deepEqual(completes, [{
+    handle: { cotId: 'cot-live', messageId: 'om-cot-live' },
+    reason: 'done',
+  }]);
   assert.deepEqual(sent, ['FINAL_MARKER_9f3a 过程候选']);
   assert.ok(!sent.at(-1).includes('PROCESS_MARKER_9f3a'));
 });
 
-test('step push live_cot mode keeps a topic turn inside the topic with the process card', async () => {
+test('step push live_cot mode keeps a topic turn inside the topic with the native process', async () => {
   const fixture = stateFixture();
   const cotCreates = [];
+  const completes = [];
   const replies = [];
   const creates = [];
-  const patches = [];
   const progressModes = [];
   const { stepPushClock } = stepPushClockFixture();
   const channel = {
     ...stepPushChannel(),
     createCot: async (chatId, options) => {
       cotCreates.push({ chatId, options });
-      return { cotId: 'cot-topic', messageId: 'om-cot-topic' };
+      return { cotId: 'cot-topic', messageId: 'om-cot-topic', threadId: 'omt_topic' };
     },
     writeCotEvents: async () => {},
+    completeCot: async (_handle, reason) => completes.push(reason),
   };
   const bridge = new FeishuHarnessBridge({
     client: { im: { v1: { message: {
@@ -10281,15 +10288,13 @@ test('step push live_cot mode keeps a topic turn inside the topic with the proce
         creates.push(request.data.msg_type);
         return { code: 0, data: { message_id: `om_topic_c_${creates.length}` } };
       },
-      patch: async (request) => {
-        patches.push(JSON.parse(request.data.content));
-        return { code: 0, data: {} };
-      },
     } } } },
     channel,
     harness: stepPushHarness(async (_sessionId, _text, options) => {
       progressModes.push(options.progressMode);
-      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      await options.onUpdate({ type: 'turn-start', turn: 1 });
+      await options.onUpdate({ type: 'tool', turn: 1, name: 'bash', arguments: '{"command":"ls"}' });
+      await options.onUpdate({ type: 'turn-end', turn: 1, reason: { kind: 'completed' } });
       return '话题内的最终答案';
     }),
     state: fixture.state,
@@ -10308,20 +10313,99 @@ test('step push live_cot mode keeps a topic turn inside the topic with the proce
   }));
   await bridge.waitForIdle();
 
-  assert.deepEqual(cotCreates, [], 'the native process cannot target a topic, so it is not opened');
-  assert.deepEqual(progressModes, ['all']);
-  assert.ok(replies.length >= 1, 'the process card is delivered as a reply');
+  assert.deepEqual(progressModes, ['live'], 'the topic turn keeps the native process');
+  assert.deepEqual(cotCreates, [{
+    chatId: 'oc_chat',
+    options: { replyTo: 'om_live_topic', replyInThread: true, hidden: false },
+  }], 'the native process is opened inside the topic');
+  assert.deepEqual(completes, ['done']);
+  assert.ok(replies.length >= 1, 'the final answer is delivered as a reply');
   for (const reply of replies) {
-    assert.equal(reply.msgType, 'interactive', 'the topic turn uses the process card');
-    assert.equal(reply.replyInThread, true, 'the process card stays inside the topic');
+    assert.notEqual(reply.msgType, 'interactive', 'no process card fallback');
+    assert.equal(reply.replyInThread, true, 'the answer stays inside the topic');
     assert.equal(reply.messageId, 'om_live_topic');
   }
   assert.deepEqual(creates, [], 'nothing is posted to the main group feed');
-  assert.ok(
-    JSON.stringify(patches.at(-1) ?? {}).includes('话题内的最终答案'),
-    'the final answer is sealed inside the topic card',
-  );
 });
+
+for (const via of ['text', 'card']) {
+  test(`step push live_cot mode: ${via} /stop closes the native process as interrupted`, async () => {
+    const fixture = stateFixture([['p2p:ou_owner', 'session-active']]);
+    const writes = [];
+    const completes = [];
+    const sent = [];
+    const { client, ids } = stepCardClient();
+    const { stepPushClock } = stepPushClockFixture();
+    const { harness, calls } = activeTurnHarness();
+    const release = deferred();
+    const toolStarted = deferred();
+    harness.ask = async (_sessionId, _text, options) => {
+      await options.onUpdate({ type: 'turn-start', turn: 2 });
+      await options.onUpdate({ type: 'tool', turn: 2, name: 'bash', arguments: '{"command":"sleep"}' });
+      toolStarted.resolve();
+      await release.promise;
+      // Harness may still return the partial answer of a stopped turn.
+      await options.onUpdate({ type: 'turn-end', turn: 2, reason: { kind: 'completed' } });
+      return '被停止的部分答案';
+    };
+    const bridge = new FeishuHarnessBridge({
+      client: {
+        ...client,
+        im: { v1: { message: {
+          ...client.im.v1.message,
+          create: async (request) => {
+            if (request.data.msg_type !== 'interactive') sent.push(stepPushMessageText(request));
+            return client.im.v1.message.create(request);
+          },
+          reply: async (request) => {
+            if (request.data.msg_type !== 'interactive') sent.push(stepPushMessageText(request));
+            return client.im.v1.message.reply(request);
+          },
+        } } },
+      },
+      channel: {
+        ...stepPushChannel({}),
+        createCot: async () => ({ cotId: 'cot-stop', messageId: 'om-cot-stop' }),
+        writeCotEvents: async (_handle, events) => writes.push(...events),
+        completeCot: async (_handle, reason) => completes.push(reason),
+      },
+      harness,
+      state: fixture.state,
+      status: bridgeStatus(),
+      allowedSenderOpenIds: new Set(['ou_owner']),
+      stepPush: true,
+      stepPushMode: 'live_cot',
+      stepPushClock,
+    });
+
+    let menuCardId;
+    if (via === 'card') {
+      await bridge.accept(event('om_cot_menu', '/m', { senderOpenId: 'ou_owner' }));
+      await bridge.waitForIdle();
+      menuCardId = ids[0];
+    }
+    const turn = bridge.accept(event('om_cot_turn', '跑长任务', { senderOpenId: 'ou_owner' }));
+    await toolStarted.promise;
+    if (via === 'card') {
+      await bridge.onCardAction(cardActionEvent(menuCardId, 'stop', 'ou_owner'));
+    } else {
+      await bridge.accept(event('om_cot_stop', '/stop', { senderOpenId: 'ou_owner' }));
+    }
+    await eventually(() => completes.length === 1, 'the stop closes the native process at once');
+    release.resolve();
+    await turn;
+    await bridge.waitForIdle();
+
+    assert.equal(calls.stop.length, 1);
+    const types = writes.map(({ event_type }) => event_type);
+    assert.ok(!types.includes('RUN_ERROR'), 'a user stop is not reported as a failure');
+    assert.equal(types.at(-1), 'RUN_FINISHED');
+    assert.equal(JSON.parse(writes.at(-1).content).status, 'interrupted');
+    assert.deepEqual(completes, ['error'], 'CompleteCOT runs once with reason=error');
+    assert.ok(sent.some((line) => line.includes('被停止的部分答案')),
+      'the partial answer is still delivered separately');
+  });
+}
 
 test('step push: tools and assistant notes push as discrete messages, final answer only in card', async () => {
   const fixture = stateFixture();
