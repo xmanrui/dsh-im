@@ -604,10 +604,19 @@ export function splitText(text, maxChars = 9000) {
 // `file:///x.png`, Windows `C:\\x.png`) is not one, and the whole card update is
 // rejected with 230099 / 200570 "card contains invalid image keys" — which
 // silently freezes a step card. Degrade those images to their alt text.
-const LOCAL_IMAGE_TARGET = /^(?:\/|\.{1,2}[\\/]|~[\\/]|file:|[A-Za-z]:[\\/]|\\\\)/;
+// Feishu renders an image element only from a hosted URL or an uploaded
+// `img_key`. Everything else — absolute paths, `file:` URLs, Windows drives,
+// bare relative paths such as `06-log/shot.png`, `data:` URIs — reaches the
+// card as an invalid image key: the whole card is rejected and the answer
+// degrades to plain text, so those targets become their alt text instead.
+const REMOTE_IMAGE_TARGET = /^(?:https?:)?\/\//i;
+const FEISHU_IMAGE_KEY = /^img_[A-Za-z0-9_-]+$/;
 
 export function isLocalImageTarget(target) {
-  return typeof target === 'string' && LOCAL_IMAGE_TARGET.test(target.trim());
+  if (typeof target !== 'string') return false;
+  const trimmed = target.trim();
+  if (!trimmed) return false;
+  return !REMOTE_IMAGE_TARGET.test(trimmed) && !FEISHU_IMAGE_KEY.test(trimmed);
 }
 
 export function stripLocalImageMarkdown(text) {

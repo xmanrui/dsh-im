@@ -350,6 +350,28 @@ test('a local image in the round answer is rendered as text so the seal complete
     'the answer is delivered in the card, not as a second message');
 });
 
+test('a bare relative image path is degraded too, so the round card still seals', async t => {
+  const f = await fixture(t);
+
+  f.emit(start(4, 99));
+  f.emit(goal(1, 100));
+  await f.drain();
+
+  // Agents usually write screenshots relative to the project root; Feishu
+  // rejects those as invalid image keys and used to break the whole card.
+  f.emit(answer('面板截图如下：\n![挑战任务面板](06-log/challenge_click_r108.png)\n结束时间 12:26。'));
+  await f.drain();
+  f.emit(end());
+  await f.drain();
+
+  const card = f.cardFor('reply-1');
+  assert.match(card, /挑战任务面板/);
+  assert.doesNotMatch(card, /06-log\//, 'the relative path never reaches the card');
+  assert.match(card, /已完成/);
+  assert.equal(f.replies.filter(reply => reply.data.msg_type !== 'interactive').length, 0,
+    'the answer is delivered in the card, not as a second message');
+});
+
 test('a card that fails to seal still delivers the round result as a reply', async t => {
   const f = await fixture(t, { failPatchWhen: 'SEALFAIL' });
 

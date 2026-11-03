@@ -4690,7 +4690,7 @@ export class FeishuHarnessBridge {
     // when the card cannot be sealed (broken render, lost message) the result
     // would vanish, so post it as a plain reply instead.
     if (sealed?.ok) return;
-    const answer = String(round.assistant.text ?? '').trim();
+    const answer = stripLocalImageMarkdown(String(round.assistant.text ?? '')).trim();
     if (!answer) return;
     this.#logger.warn?.(
       '[dsh-feishu] goal round card seal failed; replying with the result:',

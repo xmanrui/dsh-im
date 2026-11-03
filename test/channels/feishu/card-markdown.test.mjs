@@ -15,6 +15,9 @@ test('local image targets cover the paths an agent writes', () => {
     'C:\\shots\\a.png',
     'C:/shots/a.png',
     '\\\\server\\share\\a.png',
+    '06-log/challenge_click_r108.png',
+    'shots/a.png',
+    'data:image/png;base64,iVBORw0KGgo=',
   ]) {
     assert.equal(isLocalImageTarget(target), true, target);
   }
@@ -27,6 +30,13 @@ test('a local image degrades to its caption instead of breaking the card', () =>
   assert.equal(
     stripLocalImageMarkdown('截图如下：\n![标题画面](/tmp/host_13.png)\n后续说明'),
     '截图如下：\n标题画面\n后续说明',
+  );
+});
+
+test('a bare relative image path degrades instead of breaking the card', () => {
+  assert.equal(
+    stripLocalImageMarkdown('面板截图如下：\n![挑战任务面板](06-log/challenge_click_r108.png)\n结束时间'),
+    '面板截图如下：\n挑战任务面板\n结束时间',
   );
 });
 
