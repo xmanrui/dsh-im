@@ -407,6 +407,8 @@ export default {
   '任务失败': 'Failed',
   // feishu/bridge.mjs — step push context injection
   '📎 已注入会话上下文': '📎 Context injected',
+  // feishu/bridge.mjs — parked goal resumed on inbound message
+  '🔄 目标已恢复自动续跑': '🔄 Goal resumed automatically',
   // feishu/bridge.mjs — goal rounds opened outside the IM (issue #454)
   '🔄 目标自动续跑': '🔄 Goal auto-continued',
   '🔄 目标自动续跑（第 {round} 轮）': '🔄 Goal auto-continued (round {round})',
