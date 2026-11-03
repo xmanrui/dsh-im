@@ -6,6 +6,33 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [5.10.0] - 2026-11-04
+
+### Added / 新增
+
+- 新增「通用设置 → 投递」，可分别开启 Web 用户输入镜像与非本聊天发起回合的最终回答投递，并设置各自的前缀图标；两项默认关闭。无已保存投递目标时，可按 Session 当前绑定的聊天投递 Web、定时任务及子代理通知等来源的回答；已有目标继续遵循目标范围和同步开关。（[#480](https://github.com/xmanrui/dsh-im/pull/480)）
+  Added General Settings → Delivery with separate, default-off switches for mirroring Web user input and delivering final answers from turns initiated outside the chat, plus configurable prefixes. Bots without saved delivery targets can deliver Web, scheduled and subagent-triggered answers through current Session bindings; saved targets retain their scope and sync controls. ([#480](https://github.com/xmanrui/dsh-im/pull/480))
+- 消息语言可在跟随 DSH 界面语言与中文、英文、俄语之间选择，显式插件 `language` 配置仍优先。
+  Message language can follow the DSH interface or be explicitly set to Chinese, English or Russian; explicit plugin `language` configuration still takes precedence.
+- 为 Telegram 交互卡片新增有限 429 重试、按钮文字清理与截断的共享辅助函数，并支持校验不携带动作字段的禁用按钮，供卡片功能接入使用。（[#505](https://github.com/xmanrui/dsh-im/pull/505)）
+  Added shared helpers for bounded Telegram action-card 429 retries and button-label sanitization/truncation, plus validation for disabled buttons without action fields, for card implementations to adopt. ([#505](https://github.com/xmanrui/dsh-im/pull/505))
+
+### Fixed / 修复
+
+- 会话同步仅投递最后一次工具调用后的最终回答，不回显内部驱动提示，也不重复投递本聊天发起的回合。飞书与 DS Bot 同步优先确认原卡片已呈现回答，仅对未确认的目标补发文字；两个全局开关关闭时同步卡片和文字均停发。（[#480](https://github.com/xmanrui/dsh-im/pull/480)）
+  Session sync delivers only the final answer after the last tool call, without echoing internal prompts or duplicating chat-originated turns. Feishu and DS Bot sync confirm card delivery first and send text only to unconfirmed targets; disabling both global switches stops synchronized cards and text. ([#480](https://github.com/xmanrui/dsh-im/pull/480))
+- DS Bot 已接受的请求在阻塞、接管或会话归档后按原请求身份继续跟踪，避免重复提交或把其他回合的结果当作当前回复；保留取消、过程事件和暂存文件的正确生命周期。（[#499](https://github.com/xmanrui/dsh-im/pull/499)、[#498](https://github.com/xmanrui/dsh-im/issues/498)）
+  Accepted DS Bot requests continue to be tracked by their original request identity across blocked turns, handoffs and archived sessions, avoiding duplicate submissions and unrelated replies while preserving cancellation, progress and staged-file lifetime. ([#499](https://github.com/xmanrui/dsh-im/pull/499), [#498](https://github.com/xmanrui/dsh-im/issues/498))
+- DS Bot 绑定会话在切换模型但未指定推理级别，或使用 `/reasoning --default` 时，回读会话实际的默认级别，避免已切换成功却误报失败。（[#513](https://github.com/xmanrui/dsh-im/pull/513)）
+  DS Bot-bound model changes without an explicit reasoning level, including `/reasoning --default`, now report the Session's actual default effort instead of falsely reporting a failed switch. ([#513](https://github.com/xmanrui/dsh-im/pull/513))
+- 区分模型目录读取失败与模型不存在，保留诊断信息；模型保存失败时关闭菜单并显示错误，保留原设置并支持重试。（[#521](https://github.com/xmanrui/dsh-im/issues/521)）
+  Model catalog failures remain distinguishable from missing models and retain diagnostics. Failed model saves close the menu and show an inline error while preserving the previous settings and allowing retry. ([#521](https://github.com/xmanrui/dsh-im/issues/521))
+
+### Notes / 使用说明
+
+- 升级后请在「通用设置 → 投递」检查同步开关。依赖声明、Node.js 要求及 DSH 兼容声明保持不变；重启 Host 并刷新管理页面使更新生效。
+  After upgrading, review the sync switches under General Settings → Delivery. Dependency declarations, Node.js requirements and DSH compatibility declarations are unchanged; restart the Host and refresh management pages.
+
 ## [5.9.1] - 2026-11-01
 
 ### Fixed / 修复
@@ -2152,7 +2179,8 @@ Thanks to [@Dong09](https://github.com/Dong09) for the Matrix conversation-conte
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v5.9.1...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v5.10.0...HEAD
+[5.10.0]: https://github.com/xmanrui/dsh-im/compare/v5.9.1...v5.10.0
 [5.9.1]: https://github.com/xmanrui/dsh-im/compare/v5.9.0...v5.9.1
 [5.9.0]: https://github.com/xmanrui/dsh-im/compare/v5.8.0...v5.9.0
 [5.8.0]: https://github.com/xmanrui/dsh-im/compare/v5.7.0...v5.8.0
