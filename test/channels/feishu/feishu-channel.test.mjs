@@ -312,6 +312,7 @@ test('VerifiedFeishuChannel opens and writes a native thinking process', async (
     timestamp: '1',
   }];
   await channel.writeCotEvents(handle, events);
+  await channel.completeCot(handle, 'error');
 
   assert.deepEqual(handle, { cotId: 'cot-test', messageId: 'om-cot-test' });
   assert.deepEqual(calls.rawRequests, [
@@ -335,7 +336,90 @@ test('VerifiedFeishuChannel opens and writes a native thinking process', async (
         cot_id: 'cot-test',
       },
     },
+    {
+      method: 'POST',
+      url: '/open-apis/im/v1/message_cot/complete/cot-test',
+      params: { message_id: 'om-cot-test', reason: 'error' },
+    },
   ]);
+});
+
+test('VerifiedFeishuChannel opens a topic thinking process with reply_in_thread', async () => {
+  const requests = [];
+  const { client } = fakeClient({
+    rawRequest: async (request) => {
+      requests.push(request);
+      return { code: 0, data: { cot_id: 'cot-topic', message_id: 'om-cot-topic', thread_id: 'omt_topic' } };
+    },
+  });
+  const channel = new VerifiedFeishuChannel({ client });
+
+  const handle = await channel.createCot('oc_chat', { replyTo: 'om_user', replyInThread: true });
+
+  assert.deepEqual(handle, { cotId: 'cot-topic', messageId: 'om-cot-topic', threadId: 'omt_topic' });
+  assert.equal(requests[0].data.origin_message_id, 'om_user');
+  assert.equal(requests[0].data.reply_in_thread, true);
+});
+
+test('VerifiedFeishuChannel only sends done or error to CompleteCOT', async () => {
+  const { client, calls } = fakeClient();
+  const channel = new VerifiedFeishuChannel({ client });
+  const handle = { cotId: 'cot/1', messageId: 'om-cot-1' };
+
+  await channel.completeCot(handle);
+  // timeout would show a stopped run as timed out, so it is never sent.
+  await channel.completeCot(handle, 'timeout');
+
+  assert.deepEqual(calls.rawRequests.map(({ url, params }) => ({ url, params })), [
+    { url: '/open-apis/im/v1/message_cot/complete/cot%2F1', params: { message_id: 'om-cot-1', reason: 'done' } },
+    { url: '/open-apis/im/v1/message_cot/complete/cot%2F1', params: { message_id: 'om-cot-1', reason: 'done' } },
+  ]);
+});
+
+test('VerifiedFeishuChannel treats completing an already closed process as success', async () => {
+  const { client } = fakeClient({
+    rawRequest: async () => ({ code: 10001, msg: 'ext=CompleteCOT: already in terminal status' }),
+  });
+  const channel = new VerifiedFeishuChannel({ client });
+  const handle = { cotId: 'cot-1', messageId: 'om-cot-1' };
+
+  await channel.completeCot(handle, 'error');
+});
+
+test('VerifiedFeishuChannel reports other CompleteCOT failures', async () => {
+  const { client } = fakeClient({
+    rawRequest: async () => ({ code: 99991400, msg: 'request trigger frequency limit' }),
+  });
+  const channel = new VerifiedFeishuChannel({ client });
+
+  await assert.rejects(
+    channel.completeCot({ cotId: 'cot-1', messageId: 'om-cot-1' }),
+    /message_cot\.complete failed: request trigger frequency limit/,
+  );
+});
+
+test('VerifiedFeishuChannel spaces thinking-process requests across one bot', async () => {
+  const startedAt = [];
+  const { client } = fakeClient({
+    rawRequest: async (request) => {
+      startedAt.push(Date.now());
+      return request.method === 'POST'
+        ? { code: 0, data: { cot_id: 'cot-test', message_id: 'om-cot-test' } }
+        : { code: 0 };
+    },
+  });
+  const channel = new VerifiedFeishuChannel({ client });
+  const handles = await Promise.all([
+    channel.createCot('oc_a'),
+    channel.createCot('oc_b'),
+  ]);
+  await Promise.all(handles.map((handle) => channel.writeCotEvents(handle, [])));
+
+  assert.equal(startedAt.length, 4);
+  for (let index = 1; index < startedAt.length; index += 1) {
+    assert.ok(startedAt[index] - startedAt[index - 1] >= 15,
+      'concurrent processes share the per-bot request budget');
+  }
 });
 
 test('VerifiedFeishuChannel uploads a materialized result and replies with a native file message', async () => {
