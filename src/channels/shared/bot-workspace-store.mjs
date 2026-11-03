@@ -1782,6 +1782,12 @@ function unavailableModel() {
   return error;
 }
 
+function unavailableModelCatalog(cause) {
+  const error = new Error(t('无法读取所选模型的列表，模型设置未保存，请重试。'), { cause });
+  error.code = 'model-catalog-unavailable';
+  return connectionStageError(error, 'status.read', undefined, { method: 'llm.models' });
+}
+
 function assertCurrentBotScope(isCurrentScope) {
   if (isCurrentScope()) return;
   const error = new Error('找不到要修改的机器人。');
@@ -2822,9 +2828,18 @@ export function createWorkspaceAwareController(controller, {
         error.code = 'workspace-bot-not-found';
         throw error;
       }
-      const catalog = model && modelCatalog
-        ? await resolveModelCatalog(modelCatalog, { fresh: true })
-        : null;
+      let catalog = null;
+      if (model && modelCatalog) {
+        try {
+          catalog = await resolveModelCatalog(modelCatalog, { fresh: true, throwOnError: true });
+        } catch (error) {
+          if (error?.name === 'AbortError') throw error;
+          throw unavailableModelCatalog(error);
+        }
+        if (catalog?.failures.some((failure) => failure.id === model.provider)) {
+          throw unavailableModelCatalog();
+        }
+      }
       const entry = modelCatalogEntry(catalog, model);
       if (model && (!modelCatalog || !entry)) {
         throw unavailableModel();

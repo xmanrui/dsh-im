@@ -644,6 +644,7 @@ const EN = Object.freeze({
   '查看模型设置说明': 'View model setting help',
   '跟随默认模型': 'Follow the default model',
   '模型修改失败，请重试。': 'Could not update the model. Try again.',
+  '无法读取所选模型的列表，模型设置未保存，请重试。': 'Could not load the selected model’s catalog. The model setting was not saved. Try again.',
   '模型无效。': 'The model is invalid.',
   '模型不存在或不可用。': 'The model does not exist or is unavailable.',
   '当前模型已不可用，请选择其他模型或跟随默认模型。': 'The current model is unavailable. Choose another model or follow the default.',
