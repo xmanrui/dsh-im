@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- 新增构建期渠道选择：`DSH_IM_CHANNELS`（逗号分隔）或 `--channels=` 只把指定渠道打进 Host／Client 产物，其余渠道在构建期替换为空模块、不进入渠道列表与设置页；`npm run build:lite` 等价于只保留飞书。未设置时行为与体积不变。实测 `--channels=feishu`：Host 10.15 MB → 4.32 MB，Client 1.89 MB → 1.48 MB。
+  Added build-time channel selection: `DSH_IM_CHANNELS` (comma separated) or `--channels=` bundles only the named channels, replacing the rest with empty modules so they disappear from the channel list and the settings page; `npm run build:lite` keeps Feishu only. Unset keeps today's behavior and size. Measured with `--channels=feishu`: Host 10.15 MB → 4.32 MB, Client 1.89 MB → 1.48 MB.
+
 ## [5.10.0] - 2026-11-04
 
 ### Added / 新增

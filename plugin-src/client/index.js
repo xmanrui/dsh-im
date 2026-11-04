@@ -102,6 +102,13 @@ function callWorkspaceDirectoryApi(ctx, method, ...args) {
   return service[method](...args);
 }
 
+// A narrowed build (DSH_IM_CHANNELS / --channels) defines the channels it left
+// out, so the settings page never offers a tab whose Host channel is absent.
+// Undefined in dev, tests and the bundled-everything build.
+const disabledChannels = new Set(
+  typeof __DSH_IM_DISABLED_CHANNELS__ === 'undefined' ? [] : __DSH_IM_DISABLED_CHANNELS__,
+);
+
 const CHANNELS = Object.freeze([
   { id: 'weixin', label: '微信' },
   { id: 'feishu', label: '飞书' },
@@ -117,7 +124,7 @@ const CHANNELS = Object.freeze([
   { id: 'email', label: '邮箱', note: '（实验功能）' },
   { id: 'matrix', label: 'Matrix', note: '（实验功能）' },
   { id: 'office', label: 'AI Office', note: '（实验功能）' },
-]);
+].filter((channel) => !disabledChannels.has(channel.id)));
 
 function WeixinLogo() {
   return h('span', { className: 'dim-logo dim-logoWeixin', 'aria-hidden': 'true' },

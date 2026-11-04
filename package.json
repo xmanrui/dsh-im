@@ -101,6 +101,7 @@
   },
   "scripts": {
     "build": "node plugin-src/client/build.mjs && node plugin-src/host/build.mjs",
+    "build:lite": "node plugin-src/client/build.mjs --channels=feishu && node plugin-src/host/build.mjs --channels=feishu",
     "test": "node --test test/*.test.mjs test/channels/*/*.test.mjs",
     "check": "npm run build && npm test && node scripts/verify-package.mjs"
   },

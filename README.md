@@ -414,6 +414,20 @@ node bin/dsh-im.mjs install --source .
 
 `npm run check` 运行单元测试、构建 Host/Client 产物，并验证发布包不包含凭据或独立渠道设置页注册。
 
+### 只打包指定渠道（精简构建）
+
+默认构建把全部渠道打进同一个 Host bundle。如果一台机器只用一两个渠道，可以用 `DSH_IM_CHANNELS`（逗号分隔）或 `--channels=` 只保留它们：
+
+```sh
+DSH_IM_CHANNELS=feishu npm run build
+npm run build:lite   # 等价于上一条，不依赖 shell 环境变量语法
+```
+
+- 被排除的渠道在构建期替换成空模块：它们的实现和 SDK 不进入 bundle，也不出现在 Host 的渠道列表与设置页里；
+- 未知渠道名直接让构建失败，避免"少打包了却没发现"；
+- 发布包的 `dependencies` 不变，精简构建只减小产物体积；按下发渠道裁剪依赖属于发布方的后续处理；
+- 实测（v5.10.0，`--channels=feishu`）：`lib/index.js` 10.15 MB → 4.32 MB，`lib/client.js` 1.89 MB → 1.48 MB。
+
 构建后运行 `node scripts/verify-injected-context.mjs /path/to/built/deepseek-harness`，验证发布产物中的上下文钩子能通过真实 DSH v4 JSONL 持久化，覆盖普通消息、来源信息、引导词、引用、组合和多段文本，以及关闭后重新读取、继续写入下一轮。脚本从指定宿主加载组件，使用并清理临时会话目录，无需机器人凭据或模型请求。
 
 IM 管理接口默认沿用 Harness 的浏览器认证和 Host／Origin 信任检查。只要 Harness 已允许并认证当前局域网访问，便可直接查看和配置 IM 机器人，无需额外修改 dsh-im 配置。

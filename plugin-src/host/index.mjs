@@ -77,7 +77,7 @@ export function createImHostPlugin(internals = {}) {
   const startIMessage = internals.applyIMessage ?? applyIMessage;
   const startEmail = internals.applyEmail ?? applyEmail;
   const startMatrix = internals.applyMatrix ?? applyMatrix;
-  const channels = [
+  const allChannels = [
     ['feishu', startFeishu],
     ['weixin', startWeixin],
     ['dingtalk', startDingtalk],
@@ -93,6 +93,14 @@ export function createImHostPlugin(internals = {}) {
     ['matrix', startMatrix],
     ['office', startOffice],
   ];
+  // A narrowed build (DSH_IM_CHANNELS / --channels) stubs every channel it drops
+  // and defines this list; the entries leave the array here, so a stubbed channel
+  // is never reported as an available one. Undefined in dev, tests and the
+  // bundled-everything build.
+  const disabledChannels = new Set(
+    typeof __DSH_IM_DISABLED_CHANNELS__ === 'undefined' ? [] : __DSH_IM_DISABLED_CHANNELS__,
+  );
+  const channels = allChannels.filter(([channel]) => !disabledChannels.has(channel));
   return Object.freeze({
     name,
     inject,
