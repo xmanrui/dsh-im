@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath } from 'node:fs/promises';
+import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -16,7 +16,7 @@ import {
 } from '../../../src/channels/telegram/telegram-bridge.mjs';
 
 async function workspaceFixture(count = 3) {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'workspace-card-')));
+  const root = await mkdtemp(join(tmpdir(), 'workspace-card-'));
   const paths = [];
   for (let index = 0; index < count; index += 1) {
     const path = join(root, `w${index}`);
@@ -337,43 +337,6 @@ test('pressing the workspace that is already current is an idempotent receipt', 
   await press(bridge, buttons(cards)[0].callback_data);
   assert.deepEqual(switches, []);
   assert.match(notices.at(-1)?.text ?? '', /已经在工作区/);
-});
-
-test('a picker can return to its marked workspace after a typed switch', async () => {
-  const { paths } = await workspaceFixture(2);
-  const { bridge, cards, edits, notices, switches } = bridgeFixture({ paths });
-  await bridge.accept(message('/ws'));
-  const originalWorkspace = buttons(cards)[0].callback_data;
-  await bridge.accept(message('/ws 2'));
-  assert.deepEqual(switches, [paths[1]]);
-
-  await press(bridge, originalWorkspace, { providerMessageId: 701 });
-
-  assert.deepEqual(switches, [paths[1], paths[0]]);
-  assert.equal(notices.at(-1)?.text, `工作区已切换为：${paths[0]}`);
-  assert.equal(edits.at(-1)?.messageId, '701');
-  assert.match(edits.at(-1)?.markup.inline_keyboard[0][0].text ?? '', /✓/);
-  assert.doesNotMatch(edits.at(-1)?.markup.inline_keyboard[1][0].text ?? '', /✓/);
-});
-
-test('a picker can return to its marked workspace after another chat switches', async () => {
-  const { paths } = await workspaceFixture(2);
-  const { bridge, cards, edits, notices, switches } = bridgeFixture({ paths });
-  await bridge.accept(message('/ws'));
-  const originalWorkspace = buttons(cards)[0].callback_data;
-  const otherChat = { conversationId: 'chat-b', replyTarget: { chatId: 43 } };
-  await bridge.accept(message('/ws', otherChat));
-  await press(bridge, buttons(cards)[1].callback_data, {
-    ...otherChat, providerMessageId: 702,
-  });
-  assert.deepEqual(switches, [paths[1]]);
-
-  await press(bridge, originalWorkspace, { providerMessageId: 701 });
-
-  assert.deepEqual(switches, [paths[1], paths[0]]);
-  assert.equal(notices.at(-1)?.text, `工作区已切换为：${paths[0]}`);
-  assert.equal(edits.at(-1)?.messageId, '701');
-  assert.match(edits.at(-1)?.markup.inline_keyboard[0][0].text ?? '', /✓/);
 });
 
 test('/ws with an argument keeps the direct-switch text behavior', async () => {

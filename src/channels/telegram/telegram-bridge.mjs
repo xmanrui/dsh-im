@@ -3,6 +3,14 @@ import { t } from '../shared/i18n.mjs';
 import { TextHarnessBridge, createTextBridgeStatus } from '../shared/text-harness-bridge.mjs';
 import { workspaceLabels } from '../shared/workspace-labels.mjs';
 import { TelegramApprovalCard } from './approval-card.mjs';
+import { TelegramModelCard } from './model-card.mjs';
+import { TelegramPresetCard } from './preset-card.mjs';
+import { TelegramClearCard } from './clear-card.mjs';
+import { TelegramMenuCard } from './menu-card.mjs';
+import { TelegramHelpCard } from './help-card.mjs';
+import { TelegramStatusCard } from './status-card.mjs';
+import { TelegramConvCard } from './conv-card.mjs';
+import { TelegramSessionCard } from './session-card.mjs';
 
 export const TELEGRAM_DESCRIPTOR = Object.freeze({
   key: 'telegram',
@@ -139,6 +147,43 @@ export class TelegramHarnessBridge extends TextHarnessBridge {
       interactionCard: TELEGRAM_INTERACTION_CARD,
       workspaceCard: TELEGRAM_WORKSPACE_CARD,
       ...options,
+      // Model/reasoning picker cards are on by default; `modelCard: null` keeps
+      // the plain-text /models and /reasoninglist (tests/tools).
+      modelCard: options && Object.hasOwn(options, 'modelCard')
+        ? options.modelCard
+        : new TelegramModelCard({ logger: options?.logger }),
+      // Agent Preset picker: `presetCard: null` keeps the plain-text /presetlist.
+      presetCard: options && Object.hasOwn(options, 'presetCard')
+        ? options.presetCard
+        : new TelegramPresetCard({ logger: options?.logger }),
+      // `/menu` hub: one summary plus entries into the pickers above. `menuCard:
+      // null` keeps the plain text menu (tests/tools) or a channel that prefers it.
+      menuCard: options && Object.hasOwn(options, 'menuCard')
+        ? options.menuCard
+        : new TelegramMenuCard({ logger: options?.logger }),
+      // `/conv` conversation-scoped workspace picker: `convCard: null` keeps text.
+      convCard: options && Object.hasOwn(options, 'convCard')
+        ? options.convCard
+        : new TelegramConvCard({ logger: options?.logger }),
+      // Actionable `/status`: `statusCard: null` keeps the exact text status.
+      statusCard: options && Object.hasOwn(options, 'statusCard')
+        ? options.statusCard
+        : new TelegramStatusCard({ logger: options?.logger }),
+      // Sectioned `/help`: `helpCard: null` keeps the exact text help.
+      helpCard: options && Object.hasOwn(options, 'helpCard')
+        ? options.helpCard
+        : new TelegramHelpCard({ logger: options?.logger }),
+      // /clear asks once before throwing the context away. `clearCard: null`
+      // keeps the immediate (pre-card) behaviour for tests/tools.
+      clearCard: options && Object.hasOwn(options, 'clearCard')
+        ? options.clearCard
+        : new TelegramClearCard({ logger: options?.logger }),
+      // The session picker owns the action-card registry, so it lives per bridge
+      // (one bot has one set of conversations). `sessionCard: null` keeps the
+      // plain-text /sessionlist flow for a caller that wants it (tests/tools).
+      sessionCard: options && Object.hasOwn(options, 'sessionCard')
+        ? options.sessionCard
+        : new TelegramSessionCard({ logger: options?.logger }),
       approvalCard: options && Object.hasOwn(options, 'approvalCard')
         ? options.approvalCard
         : new TelegramApprovalCard({ logger: options?.logger }),
