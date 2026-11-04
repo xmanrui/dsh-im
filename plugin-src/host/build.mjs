@@ -4,11 +4,20 @@ import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
 
+import {
+  channelSelectionArgument,
+  describeSelection,
+  disabledChannelStubs,
+  parseChannelSelection,
+} from './channel-selection.mjs';
 import { larkSdkHandshakePatch } from './lark-sdk-handshake-patch.mjs';
 
 const sourceDirectory = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(sourceDirectory, '../..');
 const outputPath = resolve(packageRoot, 'lib/index.js');
+// `--channels=feishu` or DSH_IM_CHANNELS=feishu builds a Host bundle with only
+// those channels; unset keeps every channel (what the npm package ships).
+const selection = parseChannelSelection(channelSelectionArgument(process.argv.slice(2)));
 const externalRuntimePackages = [
   '@tencent-connect/qqbot-connector',
   '@tencent-connect/qqbot-nodejs',
@@ -32,7 +41,10 @@ await build({
   target: ['node22'],
   mainFields: ['module', 'main'],
   external,
-  plugins: [larkSdkHandshakePatch],
+  plugins: [larkSdkHandshakePatch, ...(selection.disabled.length ? [disabledChannelStubs(selection.disabled)] : [])],
+  define: {
+    __DSH_IM_DISABLED_CHANNELS__: JSON.stringify(selection.disabled),
+  },
   outfile: outputPath,
   banner: {
     js: [
@@ -49,4 +61,4 @@ await build({
   legalComments: 'eof',
 });
 
-console.log(`Wrote ${outputPath}`);
+console.log(`Wrote ${outputPath} (${describeSelection(selection)})`);

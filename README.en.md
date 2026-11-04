@@ -400,6 +400,20 @@ node bin/dsh-im.mjs install --source .
 
 `npm run check` runs unit tests, builds the Host and Client artifacts, and verifies that the published package contains neither credentials nor standalone channel settings-page registrations.
 
+### Building only the channels you use
+
+The default build packs every channel into one Host bundle. When a host only runs one or two of them, `DSH_IM_CHANNELS` (comma separated) or `--channels=` keeps just those:
+
+```sh
+DSH_IM_CHANNELS=feishu npm run build
+npm run build:lite   # same thing, without shell-specific env syntax
+```
+
+- A dropped channel is replaced by an empty module at build time: its implementation and SDK never enter the bundle, and it is absent from the Host channel list and the settings page;
+- an unknown channel name fails the build instead of shipping a bundle that quietly lacks it;
+- the published `dependencies` are unchanged — this shrinks the artifact only; trimming dependencies per deployment stays a packaging decision;
+- measured on v5.10.0 with `--channels=feishu`: `lib/index.js` 10.15 MB → 4.32 MB, `lib/client.js` 1.89 MB → 1.48 MB.
+
 After building, run `node scripts/verify-injected-context.mjs /path/to/built/deepseek-harness` to exercise the bundled context hook against real DSH V4 JSONL persistence. It covers plain messages, source details, guidance, quoted replies, combined blocks, and multipart text, including reopening the log and appending another turn. The script loads components from the supplied host and cleans up its temporary Session directory; no bot credentials or model requests are needed.
 
 IM management uses Harness browser authentication and Host/Origin trust checks by default. Once Harness allows and authenticates access from your LAN address, you can view and configure IM bots without any extra dsh-im configuration.
