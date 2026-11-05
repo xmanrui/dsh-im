@@ -41,6 +41,7 @@ export const SLASH_COMMAND_MANIFEST = Object.freeze([
   { command: 'workspace', icon: 'folder_outlined', default: '查看并切换工作区', en_us: 'View and switch workspace' },
   { command: 'conv', icon: 'folder_outlined', default: '设置当前对话专属工作区', en_us: 'Set the workspace for this conversation' },
   { command: 'session', icon: 'chat-ai_outlined', default: '绑定已有会话', en_us: 'Bind an existing session' },
+  { command: 'sessionarchive', icon: 'folder_outlined', default: '归档一个会话', en_us: 'Archive a session' },
   { command: 'models', icon: 'ai-functions_outlined', default: '列出可用模型', en_us: 'List available models' },
   { command: 'model', icon: 'ai-agent_outlined', default: '查看或切换当前模型', en_us: 'Show or switch the current model' },
   { command: 'reasoninglist', icon: 'ai-deepthink_outlined', default: '列出可用推理等级', en_us: 'List available reasoning efforts' },
