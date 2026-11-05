@@ -1,4 +1,5 @@
 import { deferredStateAccess, normalizeDeferredState } from '../shared/deferred-state.mjs';
+import { createSessionRingSupport, normalizePendingTitles, normalizeSessionRings } from '../shared/session-ring-support.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -112,6 +113,10 @@ function normalizeState(value) {
     }
   }
 
+  // A file written before the navigation ring existed loads unchanged: the keys
+  // are only added when they hold something.
+  const rings = normalizeSessionRings(value.rings);
+  const pendingTitles = normalizePendingTitles(value.pendingTitles);
   return {
     version: 1,
     sessions,
@@ -121,6 +126,8 @@ function normalizeState(value) {
       : [],
     pendingSenders,
     recentOutboundMessages: recentOutboundMessages(value.recentOutboundMessages),
+    ...(Object.keys(rings).length ? { rings } : {}),
+    ...(Object.keys(pendingTitles).length ? { pendingTitles } : {}),
   };
 }
 
@@ -140,6 +147,12 @@ export class DingtalkStateStore {
     this.#path = path;
     this.#idFactory = idFactory;
     this.#now = now;
+    // The navigation ring is a view over this store's state, shared with the
+    // channels that inherit `ConversationStateStore`.
+    Object.assign(this, createSessionRingSupport({
+      state: () => this.#state,
+      persist: () => this.#persist(),
+    }));
   }
 
   async load() {
