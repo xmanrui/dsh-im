@@ -289,7 +289,10 @@ A binding change is announced synchronously, so a subscriber keeps its own sessi
 | `dsh-im/session-unbind` | the conversation no longer points at its session: it moved to another one, or the binding was cleared | the same fields without the author; `sessionId` is the old session that was detached |
 
 - Both are synchronous, and the order is detach-then-bind, so a subscriber reads one straight line.
+- Every chat channel emits both events: Telegram, Discord, Email and iMessage through the shared production controller; DingTalk, Feishu, Matrix, QQ, Slack, WeCom (`wecom` and `wecom-app`), Weixin and WhatsApp assemble their own controllers but load their state through the same wrapper. `office` is a job connector with no conversations and emits neither event.
+- A channel with its own controller must not call `new StateStore(path).load()` directly: `createAnnouncedStateStore({ announcer, StateStore, statePath })` loads once per bot, hands back the wrapped store and the `stateForSync` the delivery adapter needs. Prime it at start-up, or the first prompt has nothing to answer from.
 - Only committed writes announce anything: a refused write (`false`) or a rewrite of the same session emits no `unbind`.
+- A subscriber has to be idempotent per `(conversationKey, sessionId)`: a rewritten binding announces the bind again, and nothing in the protocol distinguishes that repeat from a first bind.
 - Clearing one binding (`clearSession`) or every binding (`clearSessions`) emits a `session-unbind` per conversation.
 - A throwing subscriber never breaks message handling.
 - A detach does not erase the session's identity: keeping the row (with a `superseded_at`, for instance) still lets a scheduled task that owns that session deliver into the original chat — only "who owns this conversation" has to be answered from the latest bind.

@@ -302,7 +302,10 @@ const info = dshIm.describeConversationSync(sessionId);
 | `dsh-im/session-unbind` | 对话不再指向原会话：切换到另一个会话，或绑定被清除 | 同上，但没有作者字段；`sessionId` 是被解绑的旧会话 |
 
 - 两个事件同步发出，顺序是「先解绑旧的、再绑定新的」，订阅方能一条线读完。
+- 所有聊天通道都会发这两个事件：Telegram、Discord、Email、iMessage 走共用的生产控制器；DingTalk、飞书、Matrix、QQ、Slack、企业微信（`wecom` 与 `wecom-app`）、微信（`weixin`）和 WhatsApp 各自组装控制器，但状态同样经过同一层封装。`office` 是任务连接器，没有对话，因此不发这两个事件。
+- 自己组装生产控制器的通道不要直接 `new StateStore(path).load()`：用 `createAnnouncedStateStore({ announcer, StateStore, statePath })`，它按机器人只加载一次并返回已包装的 store，同时给出投递适配器需要的 `stateForSync`；启动时用 `prime()` 预热，第一次提示词组装才能同步拿到身份。
 - 只有真正提交的写入才会发事件：写入被拒绝（返回 `false`）或写成同一个会话时不发 `unbind`。
+- 订阅方必须按 `(conversationKey, sessionId)` 做到幂等：重复写入同一条绑定会再发一次绑定事件，协议上分不出这次重复和第一次。
 - 清除一个会话绑定（`clearSession`）和清除全部绑定（`clearSessions`）同样会按对话逐个发 `session-unbind`。
 - 订阅方抛错不影响消息处理。
 - 解绑不代表会话的身份消失：把它留在自己的表里（例如带 `superseded_at`）仍可让独占该会话的定时任务继续投递到原来的对话，只是「谁拥有这个对话」要按最新一次绑定算。
