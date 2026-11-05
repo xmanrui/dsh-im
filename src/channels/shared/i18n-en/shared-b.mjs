@@ -1,10 +1,10 @@
 // English translations (shared-b area). Keys are exact Chinese literals passed to t().
 export default {
   // workspace-command.mjs
-  '用法：/session Session ID 或当前工作区序号（/session N）':
-    'Usage: /session Session ID or the session index in the current Workspace (/session N)',
-  '用法：\n/sessionlist  列出当前工作区会话\n/sessionlist --limit N  列出当前工作区前 N 个会话（N 为正整数）\n/sessionlist 工作区序号  按 /workspacelist 序号列出会话\n/sessionlist 工作区绝对路径  列出指定工作区会话\n不带工作区参数时，默认列出当前对话的有效工作区（未设置对话专属工作区时即 bot 默认工作区）。':
-    'Usage:\n/sessionlist  List Sessions in the current Workspace\n/sessionlist --limit N  List the first N Sessions in the current Workspace (N must be a positive integer)\n/sessionlist Workspace index  List Sessions by /workspacelist index\n/sessionlist Workspace absolute path  List Sessions in the given Workspace\nWithout a workspace argument it lists the workspace this conversation effectively uses (the bot default when no conversation workspace is set).',
+  '用法：/session Session ID、当前工作区序号（/session N）或会话标题关键词':
+    'Usage: /session Session ID, the Session index in the current Workspace (/session N), or a Session title keyword',
+  '用法：\n/sessionlist  列出当前工作区会话\n/sessionlist --all  跨工作区汇总列出会话（每个工作区默认显示 10 个）\n/sessionlist --all --limit N  跨工作区汇总列出会话，每个工作区显示前 N 个\n/sessionlist --limit N  列出当前工作区前 N 个会话（N 为正整数）\n/sessionlist --archived  一并列出已归档会话（序号仍只对应未归档会话）\n/sessionlist 工作区序号  按 /workspacelist 序号列出会话\n/sessionlist 工作区绝对路径  列出指定工作区会话\n不带工作区参数时，默认列出当前对话的有效工作区（未设置对话专属工作区时即 bot 默认工作区）。':
+    'Usage:\n/sessionlist  List Sessions in the current Workspace\n/sessionlist --all  List Sessions across all Workspaces (10 per Workspace by default)\n/sessionlist --all --limit N  List Sessions across all Workspaces, the first N per Workspace\n/sessionlist --limit N  List the first N Sessions in the current Workspace (N must be a positive integer)\n/sessionlist --archived  Also list archived Sessions (indices still cover non-archived Sessions only)\n/sessionlist Workspace index  List Sessions by /workspacelist index\n/sessionlist Workspace absolute path  List Sessions in the given Workspace\nWithout a workspace argument it lists the workspace this conversation effectively uses (the bot default when no conversation workspace is set).',
   '工作区必须是绝对路径。\n{usage}': 'The Workspace must be an absolute path.\n{usage}',
   '工作区路径包含不支持的字符或长度超过限制。\n{usage}':
     'The Workspace path contains unsupported characters or exceeds the length limit.\n{usage}',
@@ -51,6 +51,40 @@ export default {
     'The bot is being removed or has been reconnected; cannot list Workspace Sessions of the original Session.',
   '暂时无法获取工作区会话列表，请稍后重试。':
     'Unable to get the Workspace Session list right now; please try again later.',
+  '（当前绑定）': '(currently bound)',
+  '跨工作区会话（{workspaces} 个工作区，共 {sessions} 个会话）：':
+    'Sessions across Workspaces ({workspaces} Workspaces, {sessions} Sessions in total):',
+  '当前工作区：{workspace}': 'Current Workspace: {workspace}',
+  '另有 {count} 个工作区暂时无法读取，未包含在汇总中。':
+    '{count} more Workspace(s) could not be read and are not included in the summary.',
+  '{workspace}（{count} 个会话）': '{workspace} ({count} Sessions)',
+  '（共 {total} 个，显示前 {shown} 个；用 --limit N 调整）':
+    '(of {total} total, showing the first {shown}; use --limit N to change)',
+  '该工作区暂无会话。': 'This Workspace has no Sessions yet.',
+  '（已隐藏 {count} 条归档会话，用 --archived 查看）':
+    '(hid {count} archived Session(s); use --archived to see them)',
+  '归档会话（只能用完整 Session ID 绑定）：':
+    'Archived Sessions (bind them with the full Session ID):',
+  '（{count} 条会话记录无效，已跳过）':
+    '({count} invalid Session records skipped)',
+  '当前机器人暂不支持跨工作区列出会话。':
+    'This bot does not support listing Sessions across Workspaces yet.',
+  '标题包含「{keyword}」的会话有多个，请改用完整 Session ID 绑定：':
+    'Several Sessions have titles containing "{keyword}"; bind with the full Session ID instead:',
+  '标题包含「{keyword}」的会话位于其他工作区，请使用完整 Session ID 绑定：':
+    'Sessions whose titles contain "{keyword}" are in other Workspaces; bind with the full Session ID:',
+  '部分工作区暂时无法读取，搜索结果可能不完整；请使用完整 Session ID 绑定：':
+    'Some Workspaces could not be read, so the search may be incomplete; bind with the full Session ID:',
+  '部分工作区暂时无法读取，未能确认标题包含「{keyword}」的会话。请稍后重试或使用完整 Session ID。':
+    'Some Workspaces could not be read, so no Session title containing "{keyword}" could be confirmed. Try again later or use the full Session ID.',
+  '匹配较多，只显示前 {count} 个，请使用更精确的关键词。':
+    'Many matches; only the first {count} are shown. Please use a more specific keyword.',
+  '标题包含「{keyword}」的会话已归档，按标题绑定不会接管归档会话，请用完整 Session ID 绑定：':
+    'Sessions whose titles contain "{keyword}" are archived, and a title keyword never takes over an archived Session; bind one with its full Session ID:',
+  '按标题匹配到「{title}」（ID: {sessionId}，工作区: {workspace}），但 Harness 当前无法接管这个会话，请稍后重试或用完整 Session ID 绑定。':
+    'The keyword matched "{title}" (ID: {sessionId}, Workspace: {workspace}), but Harness cannot take over that Session right now. Try again later or bind it with the full Session ID.',
+  '没有标题包含「{keyword}」的会话，请先执行 /sessionlist --all 查看完整 Session ID。':
+    'No Session title contains "{keyword}"; run /sessionlist --all to find the full Session ID.',
   'Session ID 格式无效。\n{usage}': 'Invalid Session ID format.\n{usage}',
   '未找到该会话，请先执行 /sessionlist 确认 Session ID。':
     'Session not found; please run /sessionlist to confirm the Session ID.',

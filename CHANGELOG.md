@@ -6,6 +6,30 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Changed / 变更
+
+- `/sessionlist` 与 `/sessionlist --all` 默认不再列出已归档会话，只提示隐藏了几条；新增 `--archived` 把它们列在末尾且不编号。序号只对应可按下标绑定的未归档会话，归档会话仍可用完整 Session ID 绑定。
+  `/sessionlist` and `/sessionlist --all` no longer list archived Sessions by default; they report how many were hidden, and the new `--archived` flag appends them unnumbered. Indices only cover the non-archived Sessions that `/session N` can bind; archived Sessions remain bindable by full Session ID.
+
+- `/session` 新增短别名 `/sess`：部分客户端有同名原生斜杠命令会抢占输入框，被抢时改用 `/sess` 即可，参数与行为完全一致（Session ID、工作区序号、标题关键词）。`/sess` 列在 `/help` 里，原生命令菜单只注册主命令。
+  `/session` gains the short alias `/sess`: some clients own a native slash command of the same name and grab the input box, so `/sess` takes exactly the same arguments (Session ID, workspace index, title keyword) and behaves identically. It appears in `/help` while the native menu registers the primary name only.
+
+### Fixed / 修复
+
+- `/session <关键词>` 不再接管已归档会话：归档会话不参与标题搜索，只有归档标题命中时会列出这些会话并要求改用完整 Session ID；用完整 ID 绑定归档会话的行为保持不变。
+  `/session <keyword>` no longer takes over archived Sessions: they are excluded from title search, an answer that matches only archived titles names them and asks for the full Session ID, and binding an archived Session by its full ID keeps working.
+
+- 单工作区 `/sessionlist` 遇到 Harness 返回的无效会话记录（没有可用 Session ID）时不再整条失败，改为计数并跳过该行、保留其余会话的原始序号；`--all` 的无效记录计数改为覆盖整个工作区，不再只统计 `--limit` 窗口内的记录。
+  A single-workspace `/sessionlist` no longer fails on a Session record the Harness cannot describe (no usable Session ID): the row is counted and skipped, the remaining rows keep their original indices, and `--all` counts invalid records across the whole workspace instead of only inside the `--limit` window.
+
+- 修复会话选择的完整 ID 优先级与标题绑定隔离：无前缀 ID 的精确匹配不再受标题内容或候选数量限制；在对话专属工作区内按标题绑定时保留 bot 默认目录及其他聊天的绑定，搜索期间工作区变化则拒绝旧选择。飞书接入 `/sessionlist --all` 汇总及卡片当前绑定标记；汇总跳过无效记录时保留原始序号，确保与 `/session N` 一致。
+  Session selection now resolves exact non-prefixed IDs independently of titles and the candidate cap. Binding by title in a conversation workspace preserves the bot default and other chats' bindings, and rejects selections if the workspace changes during the search. Feishu now handles `/sessionlist --all` and marks the bound session in cards. Skipping invalid rows in summaries preserves the original indices used by `/session N`.
+
+### Added / 新增
+
+- `/sessionlist --all` 跨工作区汇总列出会话，每个工作区默认显示 10 个并可用 `--limit N` 调整；单个工作区读取失败时跳过该分组并提示未包含的工作区数量，无效会话记录只跳过该行，均不影响其余结果。`/sessionlist` 用「（当前绑定）」标出本对话已绑定的会话，生产作用域也能正确读取该标记。`/session <关键词>` 按标题不区分大小写模糊匹配：仅在当前对话有效工作区内唯一命中时直接绑定；唯一命中位于其他工作区、命中多个、或部分工作区读取失败时只列出候选并要求完整 Session ID，避免误切换 bot 工作区并清除其他聊天的旧绑定；零命中保留原有按 Session ID 绑定的行为。标题关键词限制为单个连续词，未知旗标返回用法；对话专属工作区目录已不存在时回退到 bot 默认工作区。全部新增文案已同步英文与俄文词典。
+  `/sessionlist --all` summarizes sessions across all workspaces, 10 per workspace unless `--limit N` says otherwise. A workspace whose list cannot be read is skipped and the number of omitted workspaces is reported; invalid session rows are skipped individually without hiding the rest. `/sessionlist` marks the session this chat is already bound to, and the production scope now exposes that binding correctly. `/session <keyword>` matches session titles case-insensitively and binds directly only when a single match is in the conversation's effective workspace. A unique match in another workspace, several matches, or a partial search list candidates and require the full Session ID, so an accidental keyword cannot move the bot workspace and clear other chats' bindings. When nothing matches, the previous Session-ID behaviour is preserved. Keywords are limited to a single token, unknown flags return usage, and a missing conversation workspace directory falls back to the bot default. Every new string ships with English and Russian translations.
+
 ## [5.10.0] - 2026-11-04
 
 ### Added / 新增

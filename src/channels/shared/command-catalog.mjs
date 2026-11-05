@@ -67,11 +67,13 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   }),
   defineCatalogCommand('sessionlist', '列出会话 ID 和标题', [
     '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题',
+    '/sessionlist --all  跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）',
     '/sessionlist --limit N  仅列出当前工作区前 N 个会话',
   ], { aliases: [{ name: 'sessions', menuVisible: false }] }),
   defineCatalogCommand('session', '将当前聊天绑定到指定会话', [
-    '/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话',
-  ]),
+    '/session Session ID、当前工作区序号或标题关键词  将当前聊天绑定到指定会话',
+    '/sess  同一命令的别名（/session 被客户端同名命令抢占时使用）',
+  ], { aliases: [{ name: 'sess', menuVisible: false }] }),
   defineCatalogCommand('models', '按序号列出所有可用模型', [
     '/models  按序号列出所有可用模型',
   ]),

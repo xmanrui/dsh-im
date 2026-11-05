@@ -22,6 +22,8 @@ const MAIN_MENU_NAMES = [
 ];
 const HIDDEN_ALIASES = [
   'ws', 'conversation', 'thread', 'workspaces', 'wsl', 'sessions',
+  // The short alias of /session: typeable, listed in /help, not in the menu.
+  'sess',
   'reasonings', 'presets',
 ];
 
@@ -49,11 +51,11 @@ for (const alias of HIDDEN_ALIASES) {
 // against fixtures/command-help.json; this only checks the documented aliases
 // still appear there after leaving the native menu.
 const DOCUMENTED_ALIASES = [
-  'ws', 'conversation', 'workspaces', 'wsl', 'sessions', 'reasonings', 'presets',
+  'ws', 'conversation', 'workspaces', 'wsl', 'sessions', 'sess', 'reasonings', 'presets',
 ];
 test('hiding aliases from the native menu leaves the documented /help lines intact', () => {
   const help = commandHelpLines('telegram');
-  assert.equal(help.length, 30);
+  assert.equal(help.length, 32);
   for (const alias of DOCUMENTED_ALIASES) {
     assert.ok(help.some((line) => line.includes(`/${alias}`)), alias);
   }
