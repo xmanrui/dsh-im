@@ -47,6 +47,11 @@ function safeCodeFence(text, info) {
   return backticks.length <= tildes.length ? backticks : tildes;
 }
 
+// Exposed for callers that fence arbitrary, untrusted text verbatim (e.g. the
+// /tail export): pick a delimiter longer than any leading run in the body, so
+// the body can never close its own fence.
+export { longestLeadingRun, safeCodeFence };
+
 function removeFenceIndent(line, indent) {
   let index = 0;
   let column = 0;
