@@ -300,11 +300,11 @@ class ChannelListPage extends React.Component {
     const copyState = copyStatus?.sessionId === selected.sessionId ? copyStatus : null;
     let body;
     if (detailLoading && !detail) {
-      body = h('p', { style: styles.muted }, '正在读取会话正文…');
+      body = h('p', { style: styles.muted }, '加载中…');
     } else if (!detail) {
       body = null;
     } else if (detail.messages.length === 0) {
-      body = h('p', { style: styles.muted }, '该会话尚无可见的用户或助手正文。');
+      body = h('p', { style: styles.muted }, '没有可显示的用户或助手正文。');
     } else {
       body = h('div', { className: 'im-channel-message-list', style: styles.messageList },
         detail.messages.map(message => this.renderMessage(message)));

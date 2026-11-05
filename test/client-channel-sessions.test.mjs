@@ -7,6 +7,7 @@ import {
   ChannelSessionsPanel,
   installChannelSessionsPage,
 } from '../plugin-src/client/im-channels.js';
+import { en, setImTranslator } from '../plugin-src/client/i18n.js';
 
 const { act, create } = TestRenderer;
 const h = React.createElement;
@@ -24,7 +25,9 @@ const sessionId = 'session-11111111-1111-4111-8111-111111111111';
 const channelKey = 'group:room:!example:test.invalid';
 const row = { key: channelKey, sessionId, botId: 'matrix_test' };
 
-function installPage(t) {
+function installPage(t, translate = (key) => key) {
+  setImTranslator(translate);
+  t.after(() => setImTranslator());
   const registrations = new Map();
   const slots = {
     inject(name, install) { return install(); },
@@ -34,7 +37,7 @@ function installPage(t) {
     },
   };
   const ctx = { inject: (_services, install) => install({
-    slots, locale: { bind: () => (key) => key },
+    slots, locale: { bind: () => translate },
   }) };
   const stop = installChannelSessionsPage(ctx, { channelListRpcCall: async () => {} });
   t.after(stop);
@@ -197,4 +200,34 @@ test('unmount aborts and ignores a late detail response', async (t) => {
     await flush();
   });
   assert.equal(instance.state.detail, null);
+});
+
+test('detail loading and empty states use exact localized dictionary entries', async (t) => {
+  const Page = installPage(t, (key) => en[key] ?? key);
+  const pending = deferred();
+  const channelListRpcCall = async (method) => {
+    if (method === 'list.channels') {
+      return { ok: true, value: { channels: [{ channel: 'matrix', sessions: [row] }] } };
+    }
+    return pending.promise;
+  };
+  let renderer;
+  await act(async () => {
+    renderer = create(h(Page, { channelListRpcCall }));
+    await flush();
+  });
+  t.after(() => renderer.unmount());
+  act(() => {
+    renderer.root.findByProps({ className: 'im-channel-session-open' }).props.onClick();
+  });
+  assert.ok(JSON.stringify(renderer.toJSON()).includes(en['加载中…']));
+
+  await act(async () => {
+    pending.resolve({ ok: true, value: {
+      channel: 'matrix', key: channelKey, botId: row.botId, sessionId,
+      total: 0, offset: 0, limit: 100, hasMore: false, nextOffset: 0, messages: [],
+    } });
+    await flush();
+  });
+  assert.ok(JSON.stringify(renderer.toJSON()).includes(en['没有可显示的用户或助手正文。']));
 });
