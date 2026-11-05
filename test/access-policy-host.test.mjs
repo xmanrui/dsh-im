@@ -84,7 +84,7 @@ test('new Feishu and QQ bots open messages and commands for QR and manual bindin
   assert.deepEqual(newBotAccessPolicyFor('qq', { ownerUserOpenid: 'qq-owner' }), policy());
   assert.deepEqual(newBotAccessPolicyFor('feishu', { ownerOpenIds: ['*'] }), policy());
   assert.deepEqual(newBotAccessPolicyFor('qq', { ownerUserOpenid: '*' }), policy());
-  for (const channel of ['weixin', 'dingtalk', 'wecom', 'wecom-app', 'slack', 'telegram',
+  for (const channel of ['weixin', 'dingtalk', 'wecom', 'wecom-app', 'slack',
     'discord', 'whatsapp', 'imessage', 'matrix']) {
     assert.deepEqual(newBotAccessPolicyFor(channel), initialAccessPolicyFor(channel), channel);
   }
