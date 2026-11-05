@@ -18,6 +18,7 @@ import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-pr
 import { listModelCatalog } from '../../../../src/channels/shared/model-setting.mjs';
 import { commandsForChannel } from '../../../../src/channels/shared/command-catalog.mjs';
 import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
+import { createAnnouncedStateStore, createBindingAnnouncer } from '../shared/binding-events.mjs';
 import { createTokenConnectionSupervisor } from '../shared/connection-supervisor.mjs';
 import { pluginPaths } from '../shared/production.mjs';
 import { createHarnessCommandExecutor } from '../../harness-command-executor.mjs';
@@ -71,14 +72,29 @@ export async function createProductionController(ctx, config = {}, internals = {
   const sidecarPath = (botId) => resolve(paths.bots, botId, 'matrix.json');
   const cryptoPath = (botId) => matrixCryptoPathFor(resolve(paths.bots, botId));
   const historyPath = (botId) => matrixRoomHistoryPathFor(resolve(paths.bots, botId));
-  const stateFor = async (botId) => {
-    let state = stateStores.get(botId);
-    if (!state) {
-      state = await new ResolvedStateStore(statePath(botId)).load();
-      stateStores.set(botId, state);
-    }
-    return state;
-  };
+  /**
+   * Every binding change is announced the moment it is written: a bind before the
+   * Session exists, an unbind when the conversation moves to another session or
+   * its binding is cleared. Listeners run synchronously.
+   */
+  const announcer = createBindingAnnouncer({
+    channel: 'matrix',
+    emit: (event, payload) => ctx.emit(event, payload),
+    authorsOf: (botId) => (typeof stateStores.get(botId)?.snapshot === 'function'
+      ? stateStores.get(botId).snapshot()?.authors ?? null
+      : null),
+  });
+  const { stateFor, stateForSync, prime, forget } = createAnnouncedStateStore({
+    announcer,
+    StateStore: ResolvedStateStore,
+    statePath,
+    states: stateStores,
+    logger,
+  });
+  // Warm the per-bot state memo now: the synchronous identity lookup can only
+  // answer from state that is already loaded in this process, and the first prompt
+  // of a session arrives long before any delivery call would load it.
+  await prime(configuredBots.map((bot) => bot.botId));
   const sidecarFor = async (botId) => {
     let sidecar = sidecarStores.get(botId);
     if (!sidecar) {
@@ -177,8 +193,8 @@ export async function createProductionController(ctx, config = {}, internals = {
       });
     },
     deleteState: async ({ botId }) => {
-      const state = stateStores.get(botId);
-      stateStores.delete(botId);
+      const state = stateForSync(botId);
+      forget(botId);
       const sidecar = sidecarStores.get(botId);
       sidecarStores.delete(botId);
       const crypto = cryptoStores.get(botId);
@@ -231,6 +247,8 @@ export async function createProductionController(ctx, config = {}, internals = {
     controller,
     deliveryAdapter: createDeliveryAdapter({
       channel: 'matrix', workspaces, coreController, stateFor,
+      // The same store, without the await: it is a memo of already loaded bots.
+      stateForSync,
     }),
     ready: supervisor.ready,
     async close() {
