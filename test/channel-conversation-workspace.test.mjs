@@ -28,6 +28,7 @@ async function fixture(t, { sessionCount = 1, beforeList } = {}) {
   const state = await new StateStore(join(root, 'state.json')).load();
   const listedWorkspaces = [];
   const adoptedSessions = [];
+  const archivedSessionCalls = [];
   const target = {
     async ensureRunning() {},
     async listWorkspaces() { return [workspaceA, workspaceB]; },
@@ -48,9 +49,22 @@ async function fixture(t, { sessionCount = 1, beforeList } = {}) {
       adoptedSessions.push(sessionId);
       return { sessionId, workspace: sessionId === 'session-B' ? workspaceB : workspaceA };
     },
+    async archiveWorkspaceSession(sessionId, options = {}) {
+      archivedSessionCalls.push({ sessionId, stopActivity: options.stopActivity === true });
+      return { archivedSessionIds: [sessionId] };
+    },
   };
   const scope = createBotWorkspaceScope(target, { botId, workspaces, state });
-  return { ...scope, workspaces, botId, workspaceA, workspaceB, listedWorkspaces, adoptedSessions };
+  return {
+    ...scope,
+    workspaces,
+    botId,
+    workspaceA,
+    workspaceB,
+    listedWorkspaces,
+    adoptedSessions,
+    archivedSessionCalls,
+  };
 }
 
 function feishuMessage(messageId, text) {
@@ -331,4 +345,23 @@ test('QQ rejects an actor\'s old session menu after another group actor changes 
   assert.equal(f.harness.currentConversationWorkspace(key), f.workspaceA);
   assert.equal(f.state.sessionFor(key), null);
   assert.match(JSON.stringify(sent.at(-1)), /会话或工作区已变化/u);
+});
+
+test('the production scope exposes archiveWorkspaceSession for /sessionarchive', async (t) => {
+  const f = await fixture(t, { sessionCount: 2 });
+  assert.equal(typeof f.harness.archiveWorkspaceSession, 'function');
+
+  const result = await runWorkspaceCommand('/sessionarchive session-A-2', f.harness, 'p2p:ou_owner');
+  assert.deepEqual(f.archivedSessionCalls, [{ sessionId: 'session-A-2', stopActivity: false }]);
+  assert.match(result.message, /^已归档会话：/);
+  assert.match(result.message, /ID：session-A-2/);
+
+  // An index only previews; the destructive call needs the explicit id.
+  const preview = await runWorkspaceCommand('/sessionarchive 1', f.harness, 'p2p:ou_owner');
+  assert.match(preview.message, /按序号归档只做预览/);
+  assert.equal(f.archivedSessionCalls.length, 1);
+
+  const withStop = await runWorkspaceCommand('/sessionarchive session-A --stop', f.harness, 'p2p:ou_owner');
+  assert.deepEqual(f.archivedSessionCalls.at(-1), { sessionId: 'session-A', stopActivity: true });
+  assert.match(withStop.message, /ID：session-A/);
 });

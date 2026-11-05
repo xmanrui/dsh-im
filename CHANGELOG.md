@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- 新增 `/sessionarchive <Session ID>`（别名 `/sessarchive`）：通过 Discord 等渠道触发 DSH 的会话归档（`workspace.archiveSession`）。传序号只做预览（标题、工作区、ID），不会执行归档——会话列表随新会话出现而位移，按序号直接归档会归档到错误会话；破坏性操作必须点名完整 ID。机器人只负责解析目标并转达 Host 结果，拒绝归档本对话当前绑定的会话与已归档会话；`--stop` 让 Host 先停止该会话正在运行的任务。归档后的会话不再出现在默认的 `/sessionlist`。
+  Added `/sessionarchive <Session ID>` (alias `/sessarchive`) to trigger DSH Session archiving; a numerical argument only previews the Session behind that index (title, workspace, ID) and never archives, because the list shifts and archiving by index would hit the wrong Session — destructive actions must name the full ID (`workspace.archiveSession`) from the chat. The bot only resolves the target and relays the Host result; it refuses the Session this chat is bound to and one that is already archived, and `--stop` lets the Host stop that Session's running work. Archived Sessions leave the default `/sessionlist`.
+
 ### Changed / 变更
 
 - `/sessionlist` 与 `/sessionlist --all` 默认不再列出已归档会话，只提示隐藏了几条；新增 `--archived` 把它们列在末尾且不编号。序号只对应可按下标绑定的未归档会话，归档会话仍可用完整 Session ID 绑定。
@@ -2113,8 +2118,8 @@ Thanks to [@Dong09](https://github.com/Dong09) for the Matrix conversation-conte
 
 - 飞书新增持久化 Session 关注、完成推送和菜单入口。
   Added persistent Session watches, completion notifications, and a watch menu entry for Feishu.
-- 飞书 Session 列表支持关注按钮、归档标记和 `/archived on|off` 切换。
-  Feishu Session lists now include watch buttons, archived badges, and the `/archived on|off` toggle.
+- 飞书 Session 列表支持关注按钮、归档标记和 `/sessarchived on|off` 切换。
+  Feishu Session lists now include watch buttons, archived badges, and the `/sessarchived on|off` toggle.
 
 ### Fixed / 修复
 

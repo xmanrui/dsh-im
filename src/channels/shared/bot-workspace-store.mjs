@@ -2104,6 +2104,24 @@ export function createBotWorkspaceScope(
           }
         };
       }
+      if (property === 'archiveWorkspaceSession' && typeof target[property] === 'function') {
+        // Archiving mutates Harness state, so it checks the bot scope on both
+        // sides of the call like every other write this scope exposes.
+        return async (...args) => {
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          const result = await target.archiveWorkspaceSession(...args);
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          return result;
+        };
+      }
       if ((property === 'listWorkspaces'
         || property === 'listWorkspaceEntries'
         || property === 'listWorkspaceSessions'

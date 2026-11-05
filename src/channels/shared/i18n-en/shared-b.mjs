@@ -69,6 +69,24 @@ export default {
     '({count} invalid Session records skipped)',
   '当前机器人暂不支持跨工作区列出会话。':
     'This bot does not support listing Sessions across Workspaces yet.',
+  '用法：/sessionarchive Session ID 归档一个会话；/sessionarchive 序号 只预览该序号对应的会话（编号会随列表变化，归档请用完整 ID）。加 --stop 可让 DSH 先停止该会话正在运行的任务':
+    'Usage: /sessionarchive <Session ID> archives a Session; /sessionarchive <index> only previews the Session behind that index (indices shift, so archiving needs the full ID). Add --stop to let DSH stop that Session\'s running work first',
+  '按序号归档只做预览：/sessionarchive {index} 现在对应这条会话。':
+    'Archiving by index is preview-only: /sessionarchive {index} currently points at this Session.',
+  '（编号会随会话列表变化，所以不按序号直接归档；确认归档请发送：/sessionarchive {sessionId}）':
+    '(Indices shift as the list changes, so archiving by index is never executed; to confirm, send: /sessionarchive {sessionId})',
+  '当前机器人暂不支持归档会话。': 'This bot does not support archiving Sessions yet.',
+  '该会话已经归档。': 'This Session is already archived.',
+  '这是本对话当前绑定的会话，请先 /new 或绑定其他会话，再归档它。':
+    'This is the Session this chat is bound to; send /new or bind another Session before archiving it.',
+  '已归档会话：': 'Archived Session:',
+  '机器人正在移除或已重新接入，无法归档原会话的会话。':
+    'The bot is being removed or has been reconnected; cannot archive Sessions of the original conversation.',
+  '当前 DSH 版本不支持通过机器人归档会话。':
+    'This DSH version does not expose Session archiving to the bot.',
+  '该会话仍有任务在运行，请先 /stop，或使用 /sessionarchive <目标> --stop。':
+    'That Session still has running work; send /stop first, or use /sessionarchive <target> --stop.',
+  '暂时无法归档该会话，请稍后重试。': 'Unable to archive that Session right now; please try again later.',
   '标题包含「{keyword}」的会话有多个，请改用完整 Session ID 绑定：':
     'Several Sessions have titles containing "{keyword}"; bind with the full Session ID instead:',
   '标题包含「{keyword}」的会话位于其他工作区，请使用完整 Session ID 绑定：':

@@ -194,6 +194,11 @@ export default {
     '/session <Session ID, workspace index, or title keyword>  Bind this chat to the specified session',
   '/sess  同一命令的别名（/session 被客户端同名命令抢占时使用）':
     '/sess  Alias of the same command (use it when a client claims /session)',
+  '归档指定会话（DSH 能力）': 'Archive a session (a DSH capability)',
+  '/sessionarchive（或 /sessarchive）Session ID  归档一个会话；序号只做预览':
+    '/sessionarchive (or /sessarchive) <Session ID>  Archive one session; an index only previews',
+  '/sessionarchive <Session ID> --stop  归档前先停止该会话正在运行的任务':
+    '/sessionarchive <Session ID> --stop  Stop that session\'s running work before archiving it',
   '/models  按序号列出所有可用模型': '/models  List all available models by index',
   '/reasoninglist 或 /reasonings  按序号列出当前模型可用推理等级':
     '/reasoninglist or /reasonings  List reasoning efforts for the current model by index',

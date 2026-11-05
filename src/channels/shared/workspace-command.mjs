@@ -31,6 +31,16 @@ const SESSION_LIST_USAGE = [
   '/sessionlist 工作区绝对路径  列出指定工作区会话',
   '不带工作区参数时，默认列出当前对话的有效工作区（未设置对话专属工作区时即 bot 默认工作区）。',
 ].join('\n');
+// Archiving is a Harness capability (workspace.archiveSession); the command only
+// carries the request, so an older Host answers with a clear "not supported".
+const SESSION_ARCHIVE_PREFIX = /^\/(?:sessionarchive|sessarchive)(?=$|\s)/i;
+const SESSION_ARCHIVE_COMMAND = /^\/(?:sessionarchive|sessarchive)(?:[ \t]+([^\s]+))?(?:[ \t]+(--?stop))?$/i;
+const SESSION_ARCHIVE_USAGE = '用法：/sessionarchive Session ID 归档一个会话；/sessionarchive 序号 只预览该序号对应的会话（编号会随列表变化，归档请用完整 ID）。加 --stop 可让 DSH 先停止该会话正在运行的任务';
+// An index is resolved against a list that shifts as soon as a new Session
+// appears (the command's own turn can add one), so an index only previews the
+// target: archiving is destructive and has to name the Session explicitly.
+const SESSION_ARCHIVE_PREVIEW = '按序号归档只做预览：/sessionarchive {index} 现在对应这条会话。';
+const SESSION_ARCHIVE_PREVIEW_HINT = '（编号会随会话列表变化，所以不按序号直接归档；确认归档请发送：/sessionarchive {sessionId}）';
 const SESSION_LIST_ALL_FLAG = '--all';
 const SESSION_LIST_LIMIT_FLAG = '--limit';
 const SESSION_LIST_ARCHIVED_FLAG = '--archived';
@@ -866,6 +876,96 @@ async function runSessionBindCommand(command, harness, conversationKey) {
   }
 }
 
+/**
+ * `/sessionarchive <Session ID | 序号>`: asks the Harness to archive one Session.
+ * The bot never archives on its own: it resolves the target, refuses the two
+ * cases that would leave this chat in a broken state, and reports what the Host
+ * said.
+ */
+async function runSessionArchiveCommand(command, harness, conversationKey) {
+  const match = SESSION_ARCHIVE_COMMAND.exec(command);
+  const target = match?.[1];
+  const stopActivity = Boolean(match?.[2]);
+  if (!validSessionId(target)) return commandResult(t(SESSION_ARCHIVE_USAGE));
+  if (typeof harness?.archiveWorkspaceSession !== 'function'
+    || typeof harness?.listWorkspaceSessions !== 'function') {
+    return commandResult(t('当前机器人暂不支持归档会话。'));
+  }
+  try {
+    const boundSessionId = boundSessionIdFor(harness, conversationKey);
+    let sessionId = target;
+    let title = '';
+    let archived = false;
+
+    if (/^\d+$/u.test(target)) {
+      const resolved = await resolveSessionListWorkspace('', harness, { conversationKey });
+      if (resolved.error) return commandResult(resolved.error);
+      const listed = await harness.listWorkspaceSessions(resolved.workspace);
+      if (!listed || !Array.isArray(listed.sessions)) {
+        throw new TypeError('Harness returned an invalid workspace session list');
+      }
+      const { live } = splitArchived(listed.sessions);
+      const position = Number(target);
+      if (!Number.isSafeInteger(position) || position < 1 || position > live.length) {
+        return commandResult(t('会话序号不存在，请先执行 /sessionlist 查看序号。'));
+      }
+      const picked = live[position - 1];
+      const pickedId = picked?.sessionId;
+      if (!validSessionId(pickedId)) {
+        throw new TypeError('Harness returned an invalid session id');
+      }
+      harness.assertWorkspaceScope?.();
+      const preview = [
+        t(SESSION_ARCHIVE_PREVIEW, { index: target }),
+        t('标题：{title}', { title: safeDisplayText(picked?.title) || t('暂无标题') }),
+        t('工作区：{workspace}', { workspace: resolved.workspace }),
+        `ID：${pickedId}`,
+        t(SESSION_ARCHIVE_PREVIEW_HINT, { sessionId: pickedId }),
+      ].join('\n');
+      return commandResult(preview, splitWorkspaceCommandMessage(preview));
+    } else {
+      // Best-effort lookup for a receipt title and the already-archived check;
+      // an id no listing shows is still handed to the Host.
+      const { paths } = await workspacePathSnapshot(harness, { includeTitles: true });
+      for (const workspace of paths) {
+        const sessions = await listWorkspaceSessionsOrNull(harness, workspace);
+        if (!sessions) continue;
+        const found = sessions.find((session) => session?.sessionId === sessionId);
+        if (!found) continue;
+        title = safeDisplayText(found.title);
+        archived = found.archived === true;
+        break;
+      }
+    }
+
+    harness.assertWorkspaceScope?.();
+    if (archived) return commandResult(t('该会话已经归档。'));
+    if (boundSessionId && boundSessionId === sessionId) {
+      return commandResult(t('这是本对话当前绑定的会话，请先 /new 或绑定其他会话，再归档它。'));
+    }
+
+    await harness.archiveWorkspaceSession(sessionId, { stopActivity });
+    harness.assertWorkspaceScope?.();
+    const message = [
+      t('已归档会话：'),
+      t('标题：{title}', { title: title || t('暂无标题') }),
+      `ID：${sessionId}`,
+    ].join('\n');
+    return commandResult(message, splitWorkspaceCommandMessage(message));
+  } catch (error) {
+    if (error?.code === 'workspace-bot-not-found') {
+      return commandResult(t('机器人正在移除或已重新接入，无法归档原会话的会话。'));
+    }
+    if (error?.code === 'harness-api-not-found') {
+      return commandResult(t('当前 DSH 版本不支持通过机器人归档会话。'));
+    }
+    if (['agent-busy', 'turn-blocked', 'session-archived'].includes(error?.code)) {
+      return commandResult(t('该会话仍有任务在运行，请先 /stop，或使用 /sessionarchive <目标> --stop。'));
+    }
+    return commandResult(t('暂时无法归档该会话，请稍后重试。'));
+  }
+}
+
 async function runConversationWorkspaceCommand(command, harness, conversationKey) {
   if (typeof harness?.currentConversationWorkspace !== 'function') {
     return commandResult(t('当前机器人暂不支持按对话设置专属工作区。'));
@@ -974,6 +1074,9 @@ export async function runWorkspaceCommand(text, harness, conversationKey) {
   if (threadMatch) {
     return runConversationWorkspaceCommand(command, harness, conversationKey);
   }
+  if (SESSION_ARCHIVE_PREFIX.test(command)) {
+    return runSessionArchiveCommand(command, harness, conversationKey);
+  }
   if (SESSION_BIND_PREFIX.test(command)) {
     return runSessionBindCommand(command, harness, conversationKey);
   }
@@ -1016,6 +1119,7 @@ export function isWorkspaceCommand(text) {
   if (typeof text !== 'string') return false;
   const command = text.trim();
   return SESSION_BIND_PREFIX.test(command)
+    || SESSION_ARCHIVE_PREFIX.test(command)
     || SESSION_LIST_COMMAND.test(command)
     || WORKSPACE_LIST_COMMAND.test(command)
     || WORKSPACE_COMMAND.test(command)
