@@ -16,13 +16,17 @@ import { telegramCommandMenu } from '../../../src/channels/telegram/telegram-run
 // out of the native menu: /workspace (alias /ws) covers listing and switching.
 const MAIN_MENU_NAMES = [
   'new', 'fork', 'reset', 'compact', 'clear', 'history', 'workspace', 'conv',
-  'sessionlist', 'session', 'ls', 'go', 'prev', 'next', 'drop', 'title', 'tail',
+  'sessionlist', 'session', 'sessionarchive', 'ls', 'go', 'prev', 'next', 'drop', 'title', 'tail',
   'models', 'reasoninglist', 'reasoning', 'model',
   'presetlist', 'preset', 'stop', 'steer', 'batch', 'send', 'cancel',
   'status', 'version', 'help',
 ];
 const HIDDEN_ALIASES = [
   'ws', 'conversation', 'thread', 'workspaces', 'wsl', 'sessions',
+  // The short alias of /session: typeable, listed in /help, not in the menu.
+  'sess',
+  // The short alias of /sessionarchive.
+  'sessarchive',
   'reasonings', 'presets',
 ];
 
@@ -50,12 +54,12 @@ for (const alias of HIDDEN_ALIASES) {
 // against fixtures/command-help.json; this only checks the documented aliases
 // still appear there after leaving the native menu.
 const DOCUMENTED_ALIASES = [
-  'ws', 'conversation', 'workspaces', 'wsl', 'sessions', 'reasonings', 'presets',
+  'ws', 'conversation', 'workspaces', 'wsl', 'sessions', 'sess', 'sessarchive', 'reasonings', 'presets',
   'list', 'peek',
 ];
 test('hiding aliases from the native menu leaves the documented /help lines intact', () => {
   const help = commandHelpLines('telegram');
-  assert.equal(help.length, 43);
+  assert.equal(help.length, 47);
   for (const alias of DOCUMENTED_ALIASES) {
     assert.ok(help.some((line) => line.includes(`/${alias}`)), alias);
   }

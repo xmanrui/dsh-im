@@ -13,7 +13,7 @@ import {
 // the native menu: /workspace with no argument already lists the workspaces.
 const MAIN_MENU_NAMES = [
   'new', 'fork', 'reset', 'compact', 'clear', 'history', 'workspace', 'conv',
-  'sessionlist', 'session', 'ls', 'go', 'prev', 'next', 'drop', 'title', 'tail',
+  'sessionlist', 'session', 'sessionarchive', 'ls', 'go', 'prev', 'next', 'drop', 'title', 'tail',
   'models', 'reasoninglist', 'reasoning', 'model',
   'presetlist', 'preset', 'stop', 'steer', 'batch', 'send', 'cancel',
   'status', 'version', 'help',

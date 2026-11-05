@@ -83,9 +83,9 @@ test('default registration adds missing commands to an old panel and preserves e
   const options = { appId: 'a', appSecret: 's', httpInstance: http };
   const first = await registerSlashCommands(options);
   assert.deepEqual(first.failed, []);
-  assert.equal(first.created.length, 29);
-  assert.equal(SLASH_COMMAND_MANIFEST.length, 40);
-  assert.equal(remoteItems.size, 44);
+  assert.equal(first.created.length, 30);
+  assert.equal(SLASH_COMMAND_MANIFEST.length, 41);
+  assert.equal(remoteItems.size, 45);
   assert.deepEqual(SLASH_COMMAND_MANIFEST.slice(0, 12).map((entry) => entry.command), [
     'menu', 'new', 'fork', 'reset', 'help', 'status', 'compact', 'clear', 'sessionlist', 'ws',
     'watch', 'unwatch',
@@ -95,12 +95,12 @@ test('default registration adds missing commands to an old panel and preserves e
 
   const creationCount = () => requests.filter((request) => request.method === 'POST'
     && request.url.endsWith('/app_slash_commands')).length;
-  assert.equal(creationCount(), 29);
+  assert.equal(creationCount(), 30);
   const second = await registerSlashCommands(options);
   assert.deepEqual(second.failed, []);
   assert.deepEqual(second.created, []);
-  assert.equal(creationCount(), 29);
-  assert.equal(second.existing.length, 44);
+  assert.equal(creationCount(), 30);
+  assert.equal(second.existing.length, 45);
   for (const entry of initialItems) assert.deepEqual(remoteItems.get(entry.command), entry);
   assert.ok(requests.every((request) => ['GET', 'POST'].includes(request.method)));
 });

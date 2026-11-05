@@ -1201,6 +1201,33 @@ export class HarnessClient {
     return workspaceEntries(await this.rpc('workspace.list', {}, 30_000, options));
   }
 
+  /**
+   * Hide one known Session from the Workspace grouping surfaces. Archiving is a
+   * Harness capability: this only carries the request, so an older Host that
+   * does not expose it fails loudly instead of silently doing nothing.
+   *
+   * @param {string} sessionId - Session to archive.
+   * @param {object} [options] - `stopActivity` lets the Host stop running work.
+   */
+  async archiveWorkspaceSession(sessionId, options = {}) {
+    const { stopActivity = false, ...rpcOptions } = options;
+    await this.ensureRunning(rpcOptions);
+    const value = await this.rpc('workspace.archiveSession', {
+      sessionId,
+      ...(stopActivity === true ? { stopActivity: true } : {}),
+    }, 30_000, rpcOptions);
+    if (value === null || typeof value !== 'object') {
+      throw new Error('Harness returned an invalid response for workspace.archiveSession');
+    }
+    const archivedSessionIds = value.archivedSessionIds;
+    if (archivedSessionIds !== undefined
+      && (!Array.isArray(archivedSessionIds)
+        || archivedSessionIds.some((id) => typeof id !== 'string' || !id))) {
+      throw new Error('Harness returned invalid archived ids for workspace.archiveSession');
+    }
+    return { archivedSessionIds: archivedSessionIds ?? null };
+  }
+
   async listWorkspaceSessions(workspacePath, options = {}) {
     await this.ensureRunning(options);
     const workspaceList = await this.rpc('workspace.list', {}, 30_000, options);
@@ -1555,15 +1582,6 @@ export class HarnessClient {
       if (error instanceof HarnessRpcError && isSessionNotFound(error.code)) return false;
       throw error;
     }
-  }
-
-  /**
-   * Whether the Session is archived. Unlike sessionExists, this distinguishes
-   * "archived" (still listed, not bindable) from "active"; a Session that does
-   * not exist simply reports false, so callers should check existence first.
-   */
-  async isSessionArchived(sessionId, options = {}) {
-    return this.#isSessionArchived(sessionId, options);
   }
 
   async respondInteraction(rpcId, result, options = {}) {

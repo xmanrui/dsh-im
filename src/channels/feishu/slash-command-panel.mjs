@@ -43,6 +43,7 @@ export const SLASH_COMMAND_MANIFEST = Object.freeze([
   { command: 'workspace', icon: 'folder_outlined', default: '查看并切换工作区', en_us: 'View and switch workspace' },
   { command: 'conv', icon: 'folder_outlined', default: '设置当前对话专属工作区', en_us: 'Set the workspace for this conversation' },
   { command: 'session', icon: 'chat-ai_outlined', default: '绑定已有会话', en_us: 'Bind an existing session' },
+  { command: 'sessionarchive', icon: 'folder_outlined', default: '归档一个会话', en_us: 'Archive a session' },
   { command: 'ls', icon: 'chat-ai_outlined', default: '列出本聊天使用过的会话（按聊天/话题隔离）', en_us: "List this chat's sessions (per chat / per topic)" },
   { command: 'go', icon: 'chat-ai_outlined', default: '切换到指定编号的会话', en_us: 'Switch to a session by number' },
   { command: 'prev', icon: 'chat-ai_outlined', default: '回到上一个会话', en_us: 'Go back to the previous session' },

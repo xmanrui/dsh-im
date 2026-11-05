@@ -17,7 +17,7 @@ import { normalizeSnapshot } from '../../../plugin-src/client/channels/qq/api.js
 
 const credentials = { resolve: async () => ({ value: 'test-secret' }), set: async () => {}, unset: async () => {} };
 
-async function productionFixture(t, count = 1) {
+async function productionFixture(t, { count = 1, before = null } = {}) {
   const root = await fs.mkdtemp(join(tmpdir(), 'dsh-qq-recovery-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const configs = await new QqConfigStore(join(root, 'config.json')).load();
@@ -29,6 +29,10 @@ async function productionFixture(t, count = 1) {
   }
   const started = [];
   const warnings = [];
+  const bots = configs.list();
+  // The channel reads every configured bot's state at start-up, before its first
+  // prompt: a corrupt file or an unreadable one is met there, not at initialize.
+  if (before) await before({ root, bots, path: id => join(root, 'bots', id, 'state.json') });
   const production = await createProductionController({
     credentials, typertGateway: { invoke() {}, stream() {} }, logger: () => ({ warn: (...args) => warnings.push(args) }),
   }, { dataDir: root, workspace: root }, {
@@ -43,14 +47,13 @@ async function productionFixture(t, count = 1) {
     createConnectionSupervisor: () => ({ ready: Promise.resolve(), start() { return this; }, async close() {} }),
   });
   t.after(() => production.close());
-  const bots = configs.list();
   return { ...production, root, bots, started, warnings, path: id => join(root, 'bots', id, 'state.json') };
 }
 
 test('QQ production recovers a corrupt state before starting its runtime and reports through the host logger', async (t) => {
-  const f = await productionFixture(t);
-  const path = f.path(f.bots[0].botId);
-  await fs.writeFile(path, Buffer.alloc(449));
+  const f = await productionFixture(t, {
+    before: async ({ bots, path }) => fs.writeFile(path(bots[0].botId), Buffer.alloc(449)),
+  });
   const status = await f.controller.initialize();
   assert.equal(status.totals.connected, 1);
   assert.deepEqual(f.started, [f.bots[0].botId]);
@@ -61,18 +64,24 @@ test('QQ production recovers a corrupt state before starting its runtime and rep
 });
 
 test('QQ production retries a failed state load without blocking other bots or caching the failed store', async (t) => {
-  const f = await productionFixture(t, 2);
-  const path = f.path(f.bots[0].botId);
-  await fs.writeFile(path, Buffer.alloc(449));
-  const original = fs.readFile;
   let reads = 0;
-  const failure = t.mock.method(fs, 'readFile', async (...args) => {
-    if (args[0] === path) {
-      reads++;
-      throw Object.assign(new Error('private-path'), { code: 'EACCES' });
-    }
-    return original(...args);
+  let failure;
+  const f = await productionFixture(t, {
+    count: 2,
+    before: async ({ bots, path }) => {
+      const failed = path(bots[0].botId);
+      await fs.writeFile(failed, Buffer.alloc(449));
+      const original = fs.readFile;
+      failure = t.mock.method(fs, 'readFile', async (...args) => {
+        if (args[0] === failed) {
+          reads++;
+          throw Object.assign(new Error('private-path'), { code: 'EACCES' });
+        }
+        return original(...args);
+      });
+    },
   });
+  assert.equal(reads, 1, 'the start-up prime reads the state and does not cache the failure');
   for (let attempt = 0; attempt < 2; attempt++) {
     const status = await f.controller.initialize();
     assert.equal(status.totals.connected, 1);
@@ -80,7 +89,7 @@ test('QQ production retries a failed state load without blocking other bots or c
     assert.equal(status.bots[0].health.summary, status.bots[0].error.message);
     assert.equal(status.bots[1].connected, true);
   }
-  assert.equal(reads, 2);
+  assert.equal(reads, 3, 'each initialize retries the failed read');
   failure.mock.restore();
   const restored = await f.controller.initialize();
   assert.equal(restored.totals.connected, 2);

@@ -94,6 +94,28 @@ function buttons(value, result = []) {
   return result;
 }
 
+test('session cards translate the binding marker and preserve archived and watched states', () => {
+  setImHostLanguage('en');
+  try {
+    const card = JSON.parse(sessionListCard('/work', [
+      { sessionId: 'session-bound', title: 'Bound', archived: true },
+      { sessionId: 'session-other', title: 'Other' },
+    ], 0, 2, new Set(['session-bound']), 'session-bound'));
+    const rendered = JSON.stringify(card);
+    assert.match(rendered, /Bound\(archived\)\(currently bound\)/);
+    assert.equal(rendered.match(/currently bound/g)?.length, 1);
+    assert.doesNotMatch(rendered, /当前绑定/);
+    const actions = buttons(card).flatMap((button) => (
+      button.behaviors?.map((behavior) => behavior?.value?.action) ?? []
+    ));
+    assert.ok(actions.includes('use:session-bound'));
+    assert.ok(actions.includes('unwatch:session-bound'));
+    assert.ok(actions.includes('watch:session-other'));
+  } finally {
+    setImHostLanguage('zh');
+  }
+});
+
 function selects(value, result = []) {
   if (Array.isArray(value)) {
     for (const item of value) selects(item, result);
@@ -244,6 +266,8 @@ test('menu and card help advertise Agent Preset, reasoning, and batch commands',
   assert.match(help, /\/presetlist/);
   assert.match(help, /\/presets/);
   assert.match(help, /\/sessions/);
+  assert.match(help, /\/sessionlist --all/);
+  assert.match(help, /\/session .*标题关键词/);
   assert.match(help, /\/workspace 工作区序号或绝对路径/);
   assert.match(help, /\/ws、\/wsl、\/workspaces/);
   assert.match(help, /\/preset \[序号或完整ID\]/);
@@ -260,6 +284,9 @@ test('menu and card help advertise Agent Preset, reasoning, and batch commands',
   const card = helpCard();
   assert.match(card, /\/presets/);
   assert.match(card, /\/sessions/);
+  assert.match(card, /\/sessionlist --all/);
+  assert.match(card, /\/sessions --all/);
+  assert.match(card, /\/session .*标题关键词/);
   assert.match(card, /\/workspace 工作区序号或绝对路径/);
   assert.match(card, /\/ws、\/wsl、\/workspaces/);
   assert.match(card, /\/reasoninglist/);
@@ -443,8 +470,12 @@ test('reachable Feishu cards contain no Chinese literals in English mode', () =>
   try {
     const englishMenuHelp = menuHelpText();
     const englishCardHelp = helpCard(['Additional help']);
+    assert.match(englishMenuHelp, /\/sessionlist --all/);
+    assert.match(englishMenuHelp, /title keyword/);
     assert.match(englishMenuHelp, /\/workspace <workspace index or absolute path>/);
     assert.match(englishMenuHelp, /\/ws, \/wsl, \/workspaces/);
+    assert.match(englishCardHelp, /\/sessionlist --all/);
+    assert.match(englishCardHelp, /title keyword/);
     assert.match(englishCardHelp, /\/workspace <workspace index or absolute path>/);
     assert.match(englishCardHelp, /\/ws, \/wsl, \/workspaces/);
     rendered.push(

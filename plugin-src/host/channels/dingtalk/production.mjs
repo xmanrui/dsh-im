@@ -19,6 +19,7 @@ import { prepareBotWorkspace } from '../../../../src/channels/shared/default-wor
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
 import { listModelCatalog } from '../../../../src/channels/shared/model-setting.mjs';
 import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
+import { createAnnouncedStateStore, createBindingAnnouncer } from '../shared/binding-events.mjs';
 import { createConnectionSupervisor } from './connection-supervisor.mjs';
 import { createHarnessCommandExecutor } from '../../harness-command-executor.mjs';
 import { harnessConnection } from '../../harness-connection.mjs';
@@ -82,14 +83,29 @@ export async function createProductionController(ctx, config = {}, internals = {
   const stateStores = new Map();
 
   const statePath = (botId) => resolve(paths.bots, botId, 'state.json');
-  const stateFor = async (botId) => {
-    let state = stateStores.get(botId);
-    if (!state) {
-      state = await new StateStore(statePath(botId)).load();
-      stateStores.set(botId, state);
-    }
-    return state;
-  };
+  /**
+   * Every binding change is announced the moment it is written: a bind before the
+   * Session exists, an unbind when the conversation moves to another session or
+   * its binding is cleared. Listeners run synchronously.
+   */
+  const announcer = createBindingAnnouncer({
+    channel: 'dingtalk',
+    emit: (event, payload) => ctx.emit(event, payload),
+    authorsOf: (botId) => (typeof stateStores.get(botId)?.snapshot === 'function'
+      ? stateStores.get(botId).snapshot()?.authors ?? null
+      : null),
+  });
+  const { stateFor, stateForSync, prime, forget } = createAnnouncedStateStore({
+    announcer,
+    StateStore,
+    statePath,
+    states: stateStores,
+    logger,
+  });
+  // Warm the per-bot state memo now: the synchronous identity lookup can only
+  // answer from state that is already loaded in this process, and the first prompt
+  // of a session arrives long before any delivery call would load it.
+  await prime(configuredBots.map((bot) => bot.botId));
   const commandExecutor = createHarnessCommandExecutor(ctx, internals.commandExecutor);
   const inboundTtl = internals.inboundTtl ?? getInboundTtlRuntime(ctx, config);
   const inboundTtlService = inboundTtl?.service ?? inboundTtl;
@@ -153,8 +169,8 @@ export async function createProductionController(ctx, config = {}, internals = {
       });
     },
     deleteState: async ({ botId }) => {
-      const state = stateStores.get(botId);
-      stateStores.delete(botId);
+      const state = stateForSync(botId);
+      forget(botId);
       if (state && typeof state.remove === 'function') {
         await state.remove();
       } else {
@@ -184,6 +200,8 @@ export async function createProductionController(ctx, config = {}, internals = {
     controller,
     deliveryAdapter: createDeliveryAdapter({ dsBot: config.deliveryService?.dsBot,
       channel: 'dingtalk', workspaces, coreController, stateFor,
+      // The same store, without the await: it is a memo of already loaded bots.
+      stateForSync,
     }),
     ready: supervisor.ready,
     async close() {
