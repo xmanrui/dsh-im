@@ -27,9 +27,14 @@ function slotLedger(ready) {
     },
     register(options, component) {
       assert.ok(declarations.has(options.name));
-      assert.ok(!entries.has(options.name), 'no duplicate registrations');
-      entries.set(options.name, { options, component });
-      return () => entries.delete(options.name);
+      const key = entries.has(options.name)
+        ? `${options.name}:${options.key ?? options.id}` : options.name;
+      assert.ok(!entries.has(key), 'no duplicate registrations');
+      entries.set(key, { options, component });
+      const owner = [...waiting].reverse().find(item =>
+        item.name === options.name && item.registration === undefined);
+      if (owner) owner.registration = options;
+      return () => entries.delete(key);
     },
     declare(name, available) {
       if (available === declarations.has(name)) return;
@@ -38,6 +43,7 @@ function slotLedger(ready) {
       for (const item of [...waiting]) {
         if (item.name !== name) continue;
         item.cleanup?.();
+        item.registration = undefined;
         item.cleanup = available ? item.install() : undefined;
       }
     },
@@ -233,6 +239,8 @@ test('client startup waits for configuration before showing the sidebar', async 
   ]) await t.test(scenario, async (t) => {
     const root = new Context();
     const slots = slotLedger(true);
+    const hasImSidebar = () => [...slots.entries.values()].some(({ options }) =>
+      options.name === 'sidebar.panellist' && options.id === IM_MAIN_PANEL_ID);
     let finishInitial;
     const calls = [];
     root.provide('slots', slots);
@@ -249,19 +257,21 @@ test('client startup waits for configuration before showing the sidebar', async 
     t.after(() => plugin.dispose());
     await plugin.await();
     await flush();
-    assert.equal(slots.entries.size, 3, 'only main, plugin details and settings are registered while loading');
-    assert.equal(slots.entries.has('sidebar.panellist'), false);
-    assert.equal([...slots.waiting].some((item) => item.name === 'sidebar.panellist'), false,
-      'loading must not enqueue a sidebar registration that could flash when the slot arrives');
+    assert.equal(slots.entries.size, 5,
+      'both main panels, the channel sidebar, plugin details and settings are registered while loading');
+    assert.equal(hasImSidebar(), false);
+    assert.equal([...slots.waiting].some(item => item.name === 'sidebar.panellist'
+      && item.registration?.id === IM_MAIN_PANEL_ID), false,
+    'loading must not enqueue the IM sidebar registration that could flash when the slot arrives');
     finishInitial(initial);
     await flush();
-    assert.equal(slots.entries.has('sidebar.panellist'), visible);
-    assert.equal(slots.entries.size, visible ? 4 : 3);
+    assert.equal(hasImSidebar(), visible);
+    assert.equal(slots.entries.size, visible ? 6 : 5);
     const { globalSettingsRpcCall } = slots.entries.get('settings.section').options.inject();
     await globalSettingsRpcCall('settings.sidebar-entry.set', { mode: 'show' });
-    assert.equal(slots.entries.size, 4);
+    assert.equal(slots.entries.size, 6);
     await globalSettingsRpcCall('settings.sidebar-entry.set', { mode: 'hide' });
-    assert.equal(slots.entries.size, 3);
+    assert.equal(slots.entries.size, 5);
     assert.ok(calls.filter(({ method }) => method.startsWith('settings.sidebar-entry.'))
       .every(({ channel }) => channel === 'dsh-im/dsh-im-sidebar'));
     await globalSettingsRpcCall('settings.group-history.get', {});

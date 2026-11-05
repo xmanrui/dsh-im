@@ -30,6 +30,7 @@ import { deliverySwitchesOff } from '../../src/channels/shared/delivery-sync-set
 import { getDeliverySyncSettingsStore } from '../../src/channels/shared/delivery-sync-settings-store.mjs';
 import { installSessionTitlePrefix } from './session-title-prefix.mjs';
 import { installUpdateRpc } from './update-rpc.mjs';
+import { installChannelListRpc } from './channel-list-rpc.mjs';
 
 export const name = 'dsh-im-host';
 export const inject = [
@@ -241,6 +242,11 @@ export function createImHostPlugin(internals = {}) {
         startDelivery(ctx, deliveryService, { authority: config.rpcAuthority });
       } catch (error) {
         logger.error?.('[dsh-im] failed to activate delivery management; continuing with channels', error);
+      }
+      try {
+        installChannelListRpc(ctx, config.rpcAuthority, { dshHome: config.dshHome });
+      } catch (error) {
+        logger.error?.('[dsh-im] failed to activate channel list; continuing with channels', error);
       }
     }
     const failures = [];

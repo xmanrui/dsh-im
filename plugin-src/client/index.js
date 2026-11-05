@@ -88,6 +88,7 @@ import { IMPanelErrorBoundary } from './panel-error-boundary.js';
 import { installImPluginPage } from './plugin-page.js';
 import { installSidebarVisibilitySync, SIDEBAR_SETTINGS_ENDPOINTS, SIDEBAR_SETTINGS_RPC_CHANNEL } from './sidebar-settings.js';
 
+import { installChannelSessionsPage, CHANNEL_LIST_RPC_CHANNEL } from './im-channels.js';
 export const name = 'im-settings';
 export const inject = ['slots', 'connection', 'locale', 'workspaces'];
 export const IM_PLUGIN_VERSION = manifest.version;
@@ -569,6 +570,8 @@ export function apply(ctx) {
     managementRpc(ctx.connection, DELIVERY_SYNC_SETTINGS_RPC_CHANNEL, endpoint, payload, signal);
   const languageRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, HOST_LANGUAGE_RPC_CHANNEL, endpoint, payload, signal);
+  const channelListRpcCall = (endpoint, payload, signal) =>
+    managementRpc(ctx.connection, CHANNEL_LIST_RPC_CHANNEL, endpoint, payload, signal);
   const workspaceDirectoryPicker = Object.freeze({
     listDirectory: (path, signal) =>
       callWorkspaceDirectoryApi(ctx, 'listDirectory', path, signal),
@@ -595,6 +598,7 @@ export function apply(ctx) {
     globalSettingsRpcCall,
     languageRpcCall,
     deliverySyncRpcCall,
+    channelListRpcCall,
     workspaceDirectoryPicker,
   };
   const subscribeLocale = (listener) => typeof ctx.on === 'function'
@@ -616,6 +620,7 @@ export function apply(ctx) {
     packageName: manifest.name,
     renderPanel: buildPanelElement,
   });
+  installChannelSessionsPage(ctx, { channelListRpcCall });
 
   ctx.effect(() => {
     sidebarSync = installSidebarVisibilitySync({
