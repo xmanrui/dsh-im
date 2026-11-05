@@ -569,6 +569,7 @@ export class WeixinHarnessBridge {
       isQueued: () => this.#queues.has(key),
       enqueue: (options) => this.#enqueueMessage(message, messageId, key, options),
       send: (reply) => this.#sendOutOfBand(key, sender, reply, contextToken, runId),
+      steerReceipt: false,
       onError: (error) => this.#handleInteractionFailure(message, messageId, error),
     });
   }

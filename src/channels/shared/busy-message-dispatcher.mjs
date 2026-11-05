@@ -23,7 +23,7 @@ export class BusyMessageDispatcher {
     key, messageId, text, commandText = text, eligible, harness, state, status,
     control, signal, enhancement, pendingInteraction, acceptedMessageIds,
     mode = harness.currentBusyMessageMode?.(), onFailure,
-    enqueue, isQueued, send, logger = console, onSteered, onError,
+    enqueue, isQueued, send, logger = console, onSteered, onError, steerReceipt = true,
   }) {
     // Read once, before any await: a settings change cannot reinterpret this input.
     const steer = normalizeBusyMessageMode(mode) === 'steer'
@@ -61,7 +61,7 @@ export class BusyMessageDispatcher {
       });
       if (!submitted) return queue(true);
       // Submission is final even if its receipt fails.
-      await send(t('已提交补充指令，Agent 会在下一步读取。'));
+      if (steerReceipt) await send(t('已提交补充指令，Agent 会在下一步读取。'));
       await onSteered?.();
       status.lastError = null;
       return {};
