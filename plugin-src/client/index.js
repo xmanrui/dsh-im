@@ -241,6 +241,7 @@ export function IMSettingsTab({
   deliverySyncRpcCall,
   languageRpcCall,
   workspaceDirectoryPicker,
+  onOpenSessionHistory,
   preferredSectionId,
   browserLocation = globalThis.location,
   navigateToRecoveryUrl = replacePageLocation,
@@ -363,6 +364,11 @@ export function IMSettingsTab({
           className: 'dim-githubTooltip',
           role: 'tooltip',
         }, '帮助与反馈 · 前往 GitHub')),
+      onOpenSessionHistory ? h('button', {
+        type: 'button',
+        className: 'dim-pluginOpen dim-sessionHistoryButton',
+        onClick: onOpenSessionHistory,
+      }, '会话记录') : null,
       h('span', { className: 'dim-generalSettingsAction' },
         h('button', {
           type: 'button',
@@ -609,8 +615,14 @@ export function apply(ctx) {
   // new component type and reset the reader's selected tab or unsaved input.
   function IMPanel({ preferredSectionId }) {
     React.useSyncExternalStore(subscribeLocale, localeSnapshot, localeSnapshot);
+    const historyAvailable = React.useSyncExternalStore(
+      channelSessionsPage.subscribe, channelSessionsPage.available, channelSessionsPage.available,
+    );
     return h(IMPanelErrorBoundary, null,
-      h(IMSettingsTab, { ...panelDependencies, preferredSectionId }));
+      h(IMSettingsTab, {
+        ...panelDependencies, preferredSectionId,
+        onOpenSessionHistory: historyAvailable ? channelSessionsPage.open : undefined,
+      }));
   }
   const buildPanelElement = (props = {}) => h(IMPanel, {
     preferredSectionId: props.preferredSectionId,
@@ -620,7 +632,7 @@ export function apply(ctx) {
     packageName: manifest.name,
     renderPanel: buildPanelElement,
   });
-  installChannelSessionsPage(ctx, { channelListRpcCall });
+  const channelSessionsPage = installChannelSessionsPage(ctx, { channelListRpcCall });
 
   ctx.effect(() => {
     sidebarSync = installSidebarVisibilitySync({

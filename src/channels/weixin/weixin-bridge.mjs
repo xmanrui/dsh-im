@@ -23,6 +23,7 @@ import {
   isBatchInputCommand,
 } from '../shared/batch-input.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
+import { runPlanCommand, runGoalCommand } from '../shared/plan-goal-command.mjs';
 import { isClearCommand, runClearCommand } from '../shared/clear-command.mjs';
 import { isResetCommand, runResetCommand } from '../shared/reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
@@ -101,6 +102,8 @@ const HELP_TEXT = () => [
   t('/new  开启一个全新会话'),
   t('/compact  压缩当前会话的较早上下文'),
   t('/clear  清空当前会话上下文（保留 Session 绑定和历史记录）'),
+  t('/plan  进入计划模式（/plan off 退出，可附带说明文字）'),
+  t('/goal [目标]  设置目标（clear 清除、edit 修改、pause 暂停、resume 恢复；不带参数查看）'),
   t('/history [数量]  查看最近历史消息（默认 3 条，最多 5 条）'),
   t('/workspace 工作区序号或绝对路径  切换工作区'),
   t('/workspacelist  列出工作区绝对路径'),
@@ -878,6 +881,36 @@ export class WeixinHarnessBridge {
           );
       if (compactCommand) {
         await this.#send(sender, compactCommand.message, contextToken, runId);
+        await this.#state.markSeen(messageId);
+        return;
+      }
+
+      const planCommand = hasImages || hasFiles
+        ? null
+        : await runPlanCommand(
+            text,
+            this.#harness,
+            this.#state,
+            key,
+            { signal: this.#signal },
+          );
+      if (planCommand) {
+        await this.#send(sender, planCommand.message, contextToken, runId);
+        await this.#state.markSeen(messageId);
+        return;
+      }
+
+      const goalCommand = hasImages || hasFiles
+        ? null
+        : await runGoalCommand(
+            text,
+            this.#harness,
+            this.#state,
+            key,
+            { signal: this.#signal },
+          );
+      if (goalCommand) {
+        await this.#send(sender, goalCommand.message, contextToken, runId);
         await this.#state.markSeen(messageId);
         return;
       }

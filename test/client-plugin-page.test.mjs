@@ -6,6 +6,7 @@ import TestRenderer from 'react-test-renderer';
 import { en } from '../plugin-src/client/i18n.js';
 import { IM_MAIN_PANEL_ID, installImPluginPage } from '../plugin-src/client/plugin-page.js';
 import { apply as applyClient } from '../plugin-src/client/index.js';
+import { CHANNEL_SESSIONS_PANEL_ID } from '../plugin-src/client/im-channels.js';
 
 const { act, create } = TestRenderer;
 const packageName = '@xmanrui/dsh-im';
@@ -243,10 +244,11 @@ test('client startup waits for configuration before showing the sidebar', async 
       options.name === 'sidebar.panellist' && options.id === IM_MAIN_PANEL_ID);
     let finishInitial;
     const calls = [];
+    const selected = [];
     root.provide('slots', slots);
     root.provide('locale', { register: () => () => {}, bind: () => (key) => key });
     root.provide('workspaces', {});
-    root.provide('layout', { selectPanel() {} });
+    root.provide('layout', { selectPanel: (id) => selected.push(id) });
     root.provide('connection', { rpc: { call: async (_path, _channel, { method, payload }) => {
       calls.push({ channel: _channel, method });
       if (method === 'settings.sidebar-entry.get') return new Promise((resolve) => { finishInitial = resolve; });
@@ -257,8 +259,10 @@ test('client startup waits for configuration before showing the sidebar', async 
     t.after(() => plugin.dispose());
     await plugin.await();
     await flush();
-    assert.equal(slots.entries.size, 5,
-      'both main panels, the channel sidebar, plugin details and settings are registered while loading');
+    assert.equal(slots.entries.size, 4,
+      'both main panels, plugin details and settings are registered without a history sidebar');
+    assert.equal([...slots.entries.values()].some(({ options }) =>
+      options.name === 'sidebar.panellist' && options.id === CHANNEL_SESSIONS_PANEL_ID), false);
     assert.equal(hasImSidebar(), false);
     assert.equal([...slots.waiting].some(item => item.name === 'sidebar.panellist'
       && item.registration?.id === IM_MAIN_PANEL_ID), false,
@@ -266,12 +270,25 @@ test('client startup waits for configuration before showing the sidebar', async 
     finishInitial(initial);
     await flush();
     assert.equal(hasImSidebar(), visible);
-    assert.equal(slots.entries.size, visible ? 6 : 5);
+    assert.equal(slots.entries.size, visible ? 5 : 4);
+    if (scenario === 'always hide') {
+      const page = [...slots.entries.values()].find(({ options }) => options.key === IM_MAIN_PANEL_ID);
+      let renderer;
+      await act(async () => {
+        renderer = create(React.createElement(page.component, page.options.inject()));
+        await flush();
+      });
+      const entry = renderer.root.findByProps({ className: 'dim-pluginOpen dim-sessionHistoryButton' });
+      assert.deepEqual(entry.children, ['会话记录']);
+      act(() => entry.props.onClick());
+      assert.deepEqual(selected, [CHANNEL_SESSIONS_PANEL_ID]);
+      act(() => renderer.unmount());
+    }
     const { globalSettingsRpcCall } = slots.entries.get('settings.section').options.inject();
     await globalSettingsRpcCall('settings.sidebar-entry.set', { mode: 'show' });
-    assert.equal(slots.entries.size, 6);
-    await globalSettingsRpcCall('settings.sidebar-entry.set', { mode: 'hide' });
     assert.equal(slots.entries.size, 5);
+    await globalSettingsRpcCall('settings.sidebar-entry.set', { mode: 'hide' });
+    assert.equal(slots.entries.size, 4);
     assert.ok(calls.filter(({ method }) => method.startsWith('settings.sidebar-entry.'))
       .every(({ channel }) => channel === 'dsh-im/dsh-im-sidebar'));
     await globalSettingsRpcCall('settings.group-history.get', {});

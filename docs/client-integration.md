@@ -8,6 +8,10 @@ The optional `dshImClient` service exposes the existing IM management panel to a
 
 On DSH versions with plugin detail actions, **Open IM bots** opens the same management panel in the main area. The panel has no back button; use the host sidebar to switch panels. This entry uses the optional `layout` service and the `plugins.detail.actions` slot. Older DSH versions retain the Settings entry.
 
+「IM机器人」页面右上角的「会话记录」按钮与「通用设置」并列，打开各 IM 通道已绑定会话的只读列表；点击 Session ID 可查看用户与助手正文、刷新或加载更早消息。列表和正文页均提供「返回 IM机器人」。会话记录不注册独立侧边栏入口；只有宿主提供导航服务与主面板槽位时才显示按钮。目录覆盖标准机器人状态路径、微信账号状态和已配置的飞书旧版状态，不推断自定义 `dataDir` / `botsDir`。
+
+**Session history**, next to **General settings** in the IM bots toolbar, opens a read-only list of bound IM sessions. Select a Session ID to read user and assistant text, refresh, or load earlier messages. Both the list and transcript provide **Back to IM bots**. History has no separate sidebar entry, and the toolbar action appears only when the host provides navigation and a main-panel slot. Discovery covers standard bot state, Weixin accounts, and configured Feishu legacy state; custom `dataDir` / `botsDir` overrides are not inferred.
+
 支持 `sidebar.panellist` 的宿主同时提供左侧「IM机器人」入口，与插件详情操作共用同一个 `main` 面板。侧栏沿用插件页的双对话框造型，在 16×16 矢量画布上使用与宿主普通图标一致的 1px 描边，通过 `currentColor` 跟随侧栏颜色和传入尺寸；插件页仍使用原彩色图标。此入口不调用 `setSettingsVisible()`，设置入口和插件详情操作均保留。侧栏槽位消失时只移除侧栏入口，主面板或依赖服务退出时清理全部对应注册。
 
 Hosts with `sidebar.panellist` also show **IM bots** in the left sidebar, targeting the same `main` panel as the detail action. The sidebar retains the catalog's linked speech bubbles as a 16×16 vector with the host's regular 1px stroke, using `currentColor` and the requested icon size; the catalog keeps its original color image. This entry does not call `setSettingsVisible()`: both existing entry points remain available. Sidebar withdrawal removes only its entry, while main-slot or navigation-service withdrawal cleans up all related registrations.

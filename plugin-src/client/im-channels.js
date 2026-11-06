@@ -1,8 +1,9 @@
 // Read-only directory of every DSH-IM channel and its bound DSH sessions.
-// This is a global main/sidebar page, parallel to the existing IM settings page.
+// Opened from the IM settings toolbar; it has no permanent sidebar entry.
 import * as React from 'react';
 import { callManagementRpc } from '../management-rpc.mjs';
 import { h, IM_LOCALE_NAMESPACE, imLocale, localizeTemplate, localizeText } from './i18n.js';
+import { IM_MAIN_PANEL_ID } from './plugin-page.js';
 export const CHANNEL_LIST_RPC_CHANNEL = '/dsh-im-channels';
 export const CHANNEL_SESSIONS_PANEL_ID = 'xmanrui-dsh-im-channels';
 
@@ -317,6 +318,7 @@ class ChannelListPage extends React.Component {
           h('code', { style: styles.code }, selected.sessionId),
           h('p', { style: styles.description }, '只读显示用户与助手正文；系统提示、工具调用和内部推理不显示。')),
         h('div', { style: styles.actions },
+          this.renderBackToIm(),
           h('button', { type: 'button', className: 'im-channel-back', style: styles.button, onClick: this.backToList }, '返回列表'),
           h('button', {
             type: 'button', className: 'im-channel-detail-refresh', style: styles.button,
@@ -341,6 +343,13 @@ class ChannelListPage extends React.Component {
       body);
   }
 
+  renderBackToIm() {
+    return this.props.onBackToIm ? h('button', {
+      type: 'button', className: 'im-channel-back-to-im', style: styles.button,
+      onClick: this.props.onBackToIm,
+    }, '返回 IM机器人') : null;
+  }
+
   render() {
     const { channels, error, refreshing, selected } = this.state;
     if (selected) {
@@ -360,12 +369,14 @@ class ChannelListPage extends React.Component {
     }
     return h('div', { className: 'dim-pluginPage im-channel-sessions-page' },
       h('div', { className: 'dim-pluginPageContent' },
-        h('header', { style: styles.header },
+        h('header', { style: { ...styles.header, flexWrap: 'wrap' } },
           h('div', null,
-            h('h1', { style: styles.title }, '通道会话'),
+            h('h1', { style: styles.title }, '会话记录'),
             h('p', { style: styles.description }, '只读列出各 IM 通道当前绑定的 DSH 会话；点击会话 ID 查看正文，不会修改绑定。')),
-          h('button', { type: 'button', className: 'im-channel-refresh', style: styles.button, onClick: this.reload, disabled: refreshing },
-            refreshing ? '刷新中…' : '刷新')),
+          h('div', { style: styles.actions },
+            this.renderBackToIm(),
+            h('button', { type: 'button', className: 'im-channel-refresh', style: styles.button, onClick: this.reload, disabled: refreshing },
+              refreshing ? '刷新中…' : '刷新'))),
         body));
   }
 }
@@ -374,28 +385,35 @@ export function ChannelSessionsPanel(props) {
   return h(ChannelListPage, props);
 }
 
-function SidebarIcon({ size = 16 }) {
-  return h('svg', { width: size, height: size, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.25, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' },
-    h('rect', { x: 2, y: 2.5, width: 12, height: 9, rx: 2 }),
-    h('path', { d: 'M5 12v2l3-2M5 6h6M5 8.5h4' }));
-}
-
 export function installChannelSessionsPage(ctx, { channelListRpcCall }) {
-  if (typeof ctx.inject !== 'function') return () => {};
-  return ctx.inject(['layout'], pageCtx => {
-    const stopMain = pageCtx.slots.inject('main', () => pageCtx.slots.register({
-      name: 'main',
-      key: CHANNEL_SESSIONS_PANEL_ID,
-      locale: IM_LOCALE_NAMESPACE,
-      inject: () => ({ channelListRpcCall }),
-    }, ChannelSessionsPanel));
-    const stopSidebar = pageCtx.slots.inject('sidebar.panellist', () => pageCtx.slots.register({
-      name: 'sidebar.panellist',
-      id: CHANNEL_SESSIONS_PANEL_ID,
-      order: 11,
-      label: () => pageCtx.locale.bind(IM_LOCALE_NAMESPACE)('通道会话'),
-      locale: IM_LOCALE_NAMESPACE,
-    }, SidebarIcon));
-    return () => { stopSidebar(); stopMain(); };
-  });
+  let navigate = null;
+  const listeners = new Set();
+  const publish = (value) => {
+    navigate = value;
+    for (const listener of listeners) listener();
+  };
+  // Only offer the toolbar action while both navigation and its target slot
+  // exist. Late services and plugin disposal must not leave a dead button.
+  const controller = {
+    available: () => navigate !== null,
+    open: () => navigate?.(),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['layout'], pageCtx => pageCtx.slots.inject('main', () => {
+      const stopMain = pageCtx.slots.register({
+        name: 'main', key: CHANNEL_SESSIONS_PANEL_ID, locale: IM_LOCALE_NAMESPACE,
+        inject: () => ({
+          channelListRpcCall,
+          onBackToIm: () => pageCtx.layout.selectPanel(IM_MAIN_PANEL_ID),
+        }),
+      }, ChannelSessionsPanel);
+      publish(() => pageCtx.layout.selectPanel(CHANNEL_SESSIONS_PANEL_ID));
+      return () => { publish(null); stopMain(); };
+    }));
+  }
+  return controller;
 }

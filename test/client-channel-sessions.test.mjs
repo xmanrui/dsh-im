@@ -8,6 +8,7 @@ import {
   installChannelSessionsPage,
 } from '../plugin-src/client/im-channels.js';
 import { en, setImTranslator } from '../plugin-src/client/i18n.js';
+import { IM_MAIN_PANEL_ID } from '../plugin-src/client/plugin-page.js';
 
 const { act, create } = TestRenderer;
 const h = React.createElement;
@@ -36,13 +37,19 @@ function installPage(t, translate = (key) => key) {
       return () => registrations.delete(options.name);
     },
   };
-  const ctx = { inject: (_services, install) => install({
-    slots, locale: { bind: () => translate },
-  }) };
-  const stop = installChannelSessionsPage(ctx, { channelListRpcCall: async () => {} });
-  t.after(stop);
+  let stop;
+  const selected = [];
+  const ctx = { inject: (_services, install) => {
+    stop = install({ slots, layout: { selectPanel: (id) => selected.push(id) } });
+    return stop;
+  } };
+  const navigation = installChannelSessionsPage(ctx, { channelListRpcCall: async () => {} });
+  t.after(() => stop());
   assert.equal(registrations.get('main').options.key, CHANNEL_SESSIONS_PANEL_ID);
-  assert.equal(registrations.get('sidebar.panellist').options.id, CHANNEL_SESSIONS_PANEL_ID);
+  assert.equal(registrations.has('sidebar.panellist'), false);
+  navigation.open();
+  registrations.get('main').options.inject().onBackToIm();
+  assert.deepEqual(selected, [CHANNEL_SESSIONS_PANEL_ID, IM_MAIN_PANEL_ID]);
   return registrations.get('main').component;
 }
 
@@ -56,8 +63,64 @@ function transcript(count) {
   }));
 }
 
-test('channel sessions register one matching global main/sidebar panel pair', (t) => {
+test('session history opens as a secondary panel without a sidebar entry', (t) => {
   assert.equal(installPage(t), ChannelSessionsPanel);
+});
+
+test('history navigation follows late layout and main-slot availability', () => {
+  let installLayout;
+  let installMain;
+  const navigation = installChannelSessionsPage({
+    inject(_services, install) { installLayout = install; },
+  }, { channelListRpcCall: async () => {} });
+  const snapshots = [];
+  const unsubscribe = navigation.subscribe(() => snapshots.push(navigation.available()));
+  assert.equal(navigation.available(), false);
+  const selected = [];
+  const stopLayout = installLayout({
+    layout: { selectPanel: (id) => selected.push(id) },
+    slots: {
+      inject(name, install) {
+        assert.equal(name, 'main');
+        installMain = install;
+        return () => {};
+      },
+      register() { return () => {}; },
+    },
+  });
+  assert.equal(navigation.available(), false);
+  const stopMain = installMain();
+  navigation.open();
+  stopMain();
+  navigation.open();
+  assert.deepEqual(selected, [CHANNEL_SESSIONS_PANEL_ID]);
+  assert.deepEqual(snapshots, [true, false]);
+  unsubscribe();
+  stopLayout();
+});
+
+test('both the history list and transcript offer a return to IM bots', async (t) => {
+  const Page = installPage(t);
+  let returned = 0;
+  let renderer;
+  await act(async () => {
+    renderer = create(h(Page, {
+      onBackToIm: () => { returned++; },
+      channelListRpcCall: async (method) => method === 'list.channels'
+        ? { ok: true, value: { channels: [{ channel: 'matrix', sessions: [row] }] } }
+        : { ok: true, value: { messages: transcript(1), total: 1, hasMore: false } },
+    }));
+    await flush();
+  });
+  t.after(() => renderer.unmount());
+  assert.deepEqual(renderer.root.findByType('h1').children, ['会话记录']);
+  act(() => renderer.root.findByProps({ className: 'im-channel-back-to-im' }).props.onClick());
+  await act(async () => {
+    renderer.root.findByProps({ className: 'im-channel-session-open' }).props.onClick();
+    await flush();
+  });
+  act(() => renderer.root.findByProps({ className: 'im-channel-back-to-im' }).props.onClick());
+  assert.equal(returned, 2);
 });
 
 test('loading every earlier page keeps each transcript message exactly once', async (t) => {
