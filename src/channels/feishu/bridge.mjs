@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { chunkMarkdownText } from '../shared/markdown-chunks.mjs';
 import QRCode from 'qrcode';
 import { waitForFeishuOperation } from './feishu-channel.mjs';
-import { startNewConversation } from '../shared/new-command.mjs';
+import { startNewConversation, isNewCommand, newCommandTitle } from '../shared/new-command.mjs';
 import {
   conversationKey,
   conversationScope,
@@ -49,6 +49,7 @@ import {
 } from '../shared/batch-input.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
 import { isClearCommand, runClearCommand } from '../shared/clear-command.mjs';
+import { isResetCommand, runResetCommand } from '../shared/reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
 import {
   isControlCommand,
@@ -64,12 +65,17 @@ import {
   runPresetCommand,
 } from '../shared/preset-command.mjs';
 import {
+  boundSessionIdFor,
   parseSessionListArgument,
   resolveSessionListWorkspace,
   runWorkspaceCommand,
   workspacePathSnapshot,
 } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import {
+  isSessionNavCommand,
+  runSessionNavTextCommand,
+} from '../shared/session-nav-command.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import {
   captureContextEnhancement,
@@ -252,51 +258,25 @@ const STEP_STREAM_PANEL_MAX_BYTES = 12_000;
 /** One thinking note is excerpted to this many characters inside its panel. */
 const STEP_STREAM_NOTE_MAX_CHARS = 500;
 
-/** Split one markdown answer into post-sized chunks at paragraph bounds,
- *  budgeted by the encoded rich-text content rather than the source string.
- *  This accounts for both CJK bytes and JSON escape expansion. */
+/** Split independently rendered posts with the shared structure-aware splitter.
+ * Budget the serialized payload, including reopened fences and JSON escapes.
+ * Retry from the original source when lowering the character bound so that
+ * generated fences are never mistaken for source content on a second split. */
 function splitStepPostMarkdown(text, limit = STEP_PUSH_POST_CHUNK_MAX_BYTES) {
   const source = String(text ?? '');
   const encodedBytes = (markdown) => Buffer.byteLength(JSON.stringify({
     zh_cn: { content: [[{ tag: 'md', text: markdown }]] },
   }), 'utf8');
   if (encodedBytes(source) <= limit) return [source];
-  const chunks = [];
-  let remaining = source;
-  while (encodedBytes(remaining) > limit) {
-    let lo = 0;
-    let hi = remaining.length;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (encodedBytes(remaining.slice(0, mid)) <= limit) lo = mid;
-      else hi = mid - 1;
-    }
-    let cut = lo;
-    const preferFrom = Math.floor(cut * 0.6);
-    const softCut = remaining.lastIndexOf('\n\n', cut);
-    if (softCut >= preferFrom) {
-      cut = softCut;
-    } else {
-      const lineCut = remaining.lastIndexOf('\n', cut);
-      if (lineCut >= preferFrom) cut = lineCut;
-    }
-    if (cut <= 0) cut = lo;
-    // JavaScript indexes strings by UTF-16 code unit. Never split between a
-    // high and low surrogate, which would turn one emoji into two replacement
-    // characters across adjacent messages.
-    const before = remaining.charCodeAt(cut - 1);
-    const after = remaining.charCodeAt(cut);
-    if (before >= 0xD800 && before <= 0xDBFF && after >= 0xDC00 && after <= 0xDFFF) {
-      cut -= 1;
-    }
-    if (cut <= 0) {
-      throw new RangeError('Feishu step push post byte limit is too small');
-    }
-    chunks.push(remaining.slice(0, cut));
-    remaining = remaining.slice(cut).trimStart();
+  const overhead = encodedBytes('');
+  let bound = limit - overhead;
+  while (bound > 0) {
+    const chunks = chunkMarkdownText(source, bound);
+    const largest = chunks.reduce((size, chunk) => Math.max(size, encodedBytes(chunk)), 0);
+    if (largest <= limit) return chunks;
+    bound = Math.min(bound - 1, Math.floor(bound * (limit - overhead) / (largest - overhead)));
   }
-  if (remaining) chunks.push(remaining);
-  return chunks;
+  throw new RangeError('Feishu step push post byte limit is too small');
 }
 /** Salient tool-argument fields for the intent summary, in priority order. */
 const STEP_PUSH_INTENT_FIELDS = [
@@ -398,9 +378,10 @@ function isBareMentionMessage(event) {
 /** Canonical workspace/session help advertised by every bridge family. */
 const WORKSPACE_HELP_LINES = [
   '/workspace 工作区序号或绝对路径  切换工作区',
-  '/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话',
+  '/session Session ID、当前工作区序号或标题关键词  将当前聊天绑定到指定会话',
   '/workspacelist  列出工作区绝对路径',
   '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题',
+  '/sessionlist --all  跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）',
   '/sessionlist --limit N  仅列出当前工作区前 N 个会话',
 ];
 
@@ -1890,7 +1871,7 @@ export class FeishuHarnessBridge {
       await this.#sendMenuCard(key, event.message.chat_id, { replyTo: event.message.message_id });
       return;
     }
-    if (commandText === '/new') {
+    if (isNewCommand(commandText)) {
       if (this.#queues.has(key) || this.#hasPendingInteraction(key)) {
         await this.#send(
           event.message.chat_id,
@@ -1901,12 +1882,43 @@ export class FeishuHarnessBridge {
       }
       await this.#send(event.message.chat_id, await startNewConversation({
         state: this.#state, harness: this.#harness, key,
+        title: newCommandTitle(commandText),
       }), { replyTo: event.message.message_id });
       await this.#sendMenuCard(key, event.message.chat_id, { replyTo: event.message.message_id });
       return;
     }
     if (commandText === '/status') {
       await this.#showStatusText(key, event.message.chat_id, event.message.message_id);
+      return;
+    }
+    if (isSessionNavCommand(commandText)) {
+      const nav = await runSessionNavTextCommand(commandText, this.#harness, this.#state, key, {
+        signal: this.#signal,
+      });
+      if (nav) {
+        for (const reply of nav.messages ?? [nav.message]) {
+          await this.#send(event.message.chat_id, reply, { replyTo: event.message.message_id });
+        }
+        if (nav.askText) {
+          const followUp = this.#enqueueMessage(
+            {
+              ...event,
+              message: {
+                ...event.message,
+                message_type: 'text',
+                content: JSON.stringify({ text: nav.askText }),
+              },
+            },
+            `${messageId}-ask`,
+            key,
+            null,
+          );
+          followUp.catch((error) => {
+            this.#logger.warn?.(`[dsh-im:feishu] follow-up ask after a nav command failed:`, error?.message ?? error);
+            this.#send(event.message.chat_id, t('切换后的提问发送失败，请重试。'), { replyTo: event.message.message_id }).catch(() => undefined);
+          });
+        }
+      }
       return;
     }
     if (commandText === '/compact') {
@@ -1929,11 +1941,31 @@ export class FeishuHarnessBridge {
       }
       return;
     }
+    if (isResetCommand(rawCommandText)) {
+      const resetCommand = await runResetCommand(rawCommandText, this.#harness, this.#state, key, {
+        signal: this.#signal,
+        hasImages,
+        hasFiles,
+        pendingInteraction: this.#hasPendingInteraction(key),
+        busy: this.#queues.has(key),
+      });
+      if (resetCommand) {
+        await this.#send(event.message.chat_id, resetCommand.message, { replyTo: event.message.message_id });
+      }
+      return;
+    }
     if (SESSION_LIST_PREFIX.test(commandText)) {
       const argument = commandText.replace(/^\/(?:sessionlist|sessions)/i, '').trim();
       const request = parseSessionListArgument(argument);
       if (request.error) {
         await this.#send(event.message.chat_id, request.error, { replyTo: event.message.message_id });
+        return;
+      }
+      if (request.all) {
+        const result = await runWorkspaceCommand(text, this.#harness, key);
+        for (const reply of result.messages ?? [result.message]) {
+          await this.#send(event.message.chat_id, reply, { replyTo: event.message.message_id });
+        }
         return;
       }
       await this.#showSessions(
@@ -3225,7 +3257,7 @@ export class FeishuHarnessBridge {
       });
       await this.#sendCard(
         chatId,
-        sessionListCard(workspace, sessions, safePage, sessions.length, watchedSet),
+        sessionListCard(workspace, sessions, safePage, sessions.length, watchedSet, boundSessionIdFor(this.#state, key)),
         {
           key,
           updateMessageId,
@@ -4893,6 +4925,18 @@ export class FeishuHarnessBridge {
     });
   }
 
+  async #sendAnswerMarkdown(chatId, answer, { deliveryId, presentation, replyTo }) {
+    const providerMessageIds = [];
+    // 最终答案保留 Markdown；复用富文本投递的限流重试、话题路由与纯文本兜底。
+    for (const chunk of splitStepPostMarkdown(answer)) {
+      this.#signal?.throwIfAborted();
+      const result = await this.#sendStepPost(chatId, replyTo, [[{ tag: 'md', text: chunk }]], chunk);
+      if (!result.ok) throw result.error ?? new Error('Feishu final answer delivery failed');
+      if (result.messageId) providerMessageIds.push(result.messageId);
+    }
+    return createDeliveryReceipt({ deliveryId, presentation, providerMessageIds });
+  }
+
   // 语音回复(渠道能力):同回合转写过语音消息的会话,在完整答案投递后追加
   // 音频回复。回合按会话 key 登记并消费——同群不同话题各自只消费自己的
   // 回合;登记随消息处理结束(finally)清除,命令类回复(菜单、会话列表等)
@@ -6165,7 +6209,7 @@ export class FeishuHarnessBridge {
       let textReceipt;
       let textSendError = null;
       try {
-        textReceipt = await this.#sendAnswerText(
+        textReceipt = await this.#sendAnswerMarkdown(
           chatId,
           answerTextForDelivery(answer, artifacts),
           {
@@ -6267,7 +6311,7 @@ export class FeishuHarnessBridge {
         let textReceipt;
         let textSendError = null;
         try {
-          textReceipt = await this.#sendAnswerText(
+          textReceipt = await this.#sendAnswerMarkdown(
             chatId,
             answerTextForDelivery(completedAnswer, completedArtifacts),
             {
@@ -6325,7 +6369,7 @@ export class FeishuHarnessBridge {
       let textReceipt;
       let textSendError = null;
       try {
-        textReceipt = await this.#sendAnswerText(
+        textReceipt = await this.#sendAnswerMarkdown(
           chatId,
           answerTextForDelivery(answer, artifacts),
           {

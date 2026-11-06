@@ -4923,12 +4923,16 @@ function issue86RotationFixture({
     try {
       const content = JSON.parse(request.data.content);
       parsedText = typeof content.text === 'string' ? content.text : '';
+      if (request.data.msg_type === 'post') {
+        parsedText = content.zh_cn.content.flat().map((element) => element.text ?? '').join('');
+      }
       if (request.data.msg_type === 'interactive') card = content;
     } catch {
       // 保持默认空文本
     }
     timeline.push({
-      kind: request.data.msg_type === 'text' ? 'text-message' : 'card-message',
+      kind: request.data.msg_type === 'post' ? 'post-message'
+        : request.data.msg_type === 'text' ? 'text-message' : 'card-message',
       messageId,
       text: parsedText,
       ...(card ? { card } : {}),
@@ -5179,14 +5183,14 @@ test('issue #86: an approval interaction also rotates the stream card', async ()
   assert.ok(approvalCardIndex < finalCreatedIndex, 'approval card must precede the rotated card');
 });
 
-test('issue #86: a failure after rotation still falls back to plain text', async () => {
+test('issue #86: a failure after rotation retains Markdown in the final answer', async () => {
   const context = issue86RotationFixture({ failFinishCardId: 'card-86-2' });
   await bridge_accept_and_answer(context);
   assert.ok(
     context.timeline.some(
-      (entry) => entry.kind === 'text-message' && entry.text.includes('最终回答：选择了测试环境'),
+      (entry) => entry.kind === 'post-message' && entry.text.includes('最终回答：选择了测试环境'),
     ),
-    'the final answer must be delivered as fallback text',
+    '最终答案应以富文本降级投递',
   );
 });
 
@@ -5803,9 +5807,9 @@ for (const withFollowingMessage of [false, true]) {
     await bridge.waitForIdle();
 
     assert.deepEqual(order, withFollowingMessage
-      ? ['ask:session-existing', 'finished', 'clear', 'create', 'ask:session-new']
-      : ['ask:session-existing', 'finished', 'clear']);
-    assert.equal(fixture.state.sessionFor('p2p:ou_user'), withFollowingMessage ? 'session-new' : null);
+      ? ['ask:session-existing', 'finished', 'create', 'ask:session-new']
+      : ['ask:session-existing', 'finished', 'create']);
+    assert.equal(fixture.state.sessionFor('p2p:ou_user'), 'session-new');
     const replies = sent.filter(({ msgType }) => msgType === 'text').map(({ content }) => JSON.parse(content).text);
     assert.ok(replies.includes('已开启全新 Harness 会话。'));
     assert.equal(replies.some((text) => text.includes('当前任务仍在运行')), false);
@@ -12244,7 +12248,11 @@ test('step push streaming_card mode: failed overflow creation falls back with th
   });
   await bridge.accept(event('om_overflow_failure', '长答案降级'));
   await bridge.waitForIdle();
-  assert.equal(fx.text.join('\n\n'), answer);
+  assert.deepEqual(
+    fx.text.flatMap((text) => text.split(/\n+/)).filter(Boolean),
+    answer.split(/\n+/),
+    'every numbered paragraph survives in order across independent posts',
+  );
   assert.equal(status.messagesReplied, 1);
   assert.ok(!deliveredCardContents(fx.interactiveCreates, fx.patches, fx.ids).join('').includes('_已完成_'));
 });
@@ -13500,7 +13508,9 @@ for (const referenceField of ['parent_id', 'root_id']) {
     assert.equal(asked.length, 1);
     assert.equal(asked[0].sessionId, 'session-quoted-mention');
     assert.match(JSON.stringify(asked[0].content), /引用的正文 PR254/);
-    assert.deepEqual(sent, [{ type: 'text', body: { text: '引用内容已收到' } }]);
+    assert.deepEqual(sent, [{
+      type: 'post', body: { zh_cn: { content: [[{ tag: 'md', text: '引用内容已收到' }]] } },
+    }]);
     assert.equal(fixture.sessions.get('p2p:ou_user'), 'session-quoted-mention');
   });
 }

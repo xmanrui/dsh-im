@@ -1397,6 +1397,9 @@ test('production assembly uses ctx credentials and the modern Host gateway witho
 
   await constructed.controller.createRuntime({
     config: {
+      // Every bot a real config store hands over carries an id (`normalizeBot`
+      // derives one even for the pre-v2 bot), and the state memo is keyed by it.
+      id: 'fs_created',
       appId: 'cli_created',
       domain: 'feishu',
       ownerOpenId: 'ou_owner',

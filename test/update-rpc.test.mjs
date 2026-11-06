@@ -88,7 +88,7 @@ test('Host update initialization failure leaves all channel activations availabl
   internals.installHostLanguageRpc = () => {};
   const errors = [];
   await createImHostPlugin(internals).apply({
-    connection: { fetch: {} }, logger: { error: (...args) => errors.push(args) },
+    connection: { fetch: { register: () => () => {} } }, logger: { error: (...args) => errors.push(args) },
   });
   assert.deepEqual(calls, channels);
   assert.equal(errors.length, 1);

@@ -1999,6 +1999,12 @@ export function createBotWorkspaceScope(
 
   const scopedHarness = new Proxy(harness, {
     get(target, property) {
+      if (property === 'sessionFor') {
+        // Read-only state lookup used by /sessionlist to mark the binding. The
+        // state proxy owns the generation checks, so delegate instead of
+        // exposing the raw mapping.
+        return (key, ...args) => scopedState.sessionFor(key, ...args);
+      }
       if (property === 'resolveDsBotSession') {
         return async (key) => {
           assertCurrentBotScope(isCurrentScope);
@@ -2096,6 +2102,24 @@ export function createBotWorkspaceScope(
             error.code = 'workspace-bot-not-found';
             throw error;
           }
+        };
+      }
+      if (property === 'archiveWorkspaceSession' && typeof target[property] === 'function') {
+        // Archiving mutates Harness state, so it checks the bot scope on both
+        // sides of the call like every other write this scope exposes.
+        return async (...args) => {
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          const result = await target.archiveWorkspaceSession(...args);
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          return result;
         };
       }
       if ((property === 'listWorkspaces'
@@ -2299,7 +2323,8 @@ export function createBotWorkspaceScope(
         };
       }
       if (property === 'bindWorkspaceSession') {
-        return async (conversationKey, sessionId) => {
+        return async (conversationKey, sessionId, options = {}) => {
+          const { expectedWorkspace } = options;
           assertNoDsBinding(conversationKey);
           if (typeof conversationKey !== 'string' || !conversationKey
             || typeof sessionId !== 'string' || !sessionId) {
@@ -2336,17 +2361,27 @@ export function createBotWorkspaceScope(
             || adopted.sessionId !== sessionId || typeof adopted.workspace !== 'string') {
             throw new TypeError('Harness returned an invalid adopted workspace session');
           }
+          // Title selection is local to the Workspace observed by the search.
+          // Recheck it here before committing; explicit IDs retain their
+          // existing bot-wide switching behavior.
+          const localBinding = expectedWorkspace !== undefined;
+          if (localBinding
+            && (!(await sameWorkspacePath(adopted.workspace, expectedWorkspace))
+              || !(await sameWorkspacePath(adopted.workspace,
+                await scopedHarness.resolveConversationWorkspace(conversationKey))))) {
+            throw workspaceSessionStale('The conversation workspace changed during session selection.');
+          }
           // Selecting another session in the current automatic group must not
           // turn that group into the bot's manual directory and clear every
           // other conversation. Explicit cross-workspace selection keeps its
           // existing bot-wide semantics.
           const baseWorkspace = workspaces.workspaceFor(botId);
-          const preserveBotWorkspace = !workspaces.hasConversationWorkspaceOverride(botId, conversationKey)
+          const preserveBotWorkspace = localBinding || (!workspaces.hasConversationWorkspaceOverride(botId, conversationKey)
             && normalizeAgentPresetId(basename(adopted.workspace)) !== null
             && await target.isUngroupedWorkspace?.(baseWorkspace)
             && await sameWorkspacePath(dirname(adopted.workspace), join(baseWorkspace, 'presets'))
             && await sameWorkspacePath(adopted.workspace,
-              await scopedHarness.resolveConversationWorkspace(conversationKey));
+              await scopedHarness.resolveConversationWorkspace(conversationKey)));
           const bound = await workspaces.bindWorkspaceSession(botId, adopted.workspace, {
             conversationKey,
             sessionId,
@@ -2377,6 +2412,22 @@ export function createBotWorkspaceScope(
             conversationKey,
             conversationGeneration: bound.conversationGeneration ?? 0,
           });
+          // /session, /go, /prev and /next all bind through this one path, so the
+          // navigation ring records the bind here and stays in sync with the
+          // Session binding itself. Best-effort: a ring write must not fail a bind.
+          // A non-navigation bind (/session adopt) appends the Session as the
+          // ring's current position; /go, /prev and /next manage the visit stack
+          // themselves and pass { navigation: true } to skip this.
+          try {
+            const registered = await state.ensureSessionRing?.(conversationKey, sessionId, {
+              title: typeof adopted.title === 'string' && adopted.title ? adopted.title : undefined,
+            });
+            if (options.navigation !== true && registered?.entry) {
+              await state.appendRing?.(conversationKey, registered.entry.n);
+            }
+          } catch (error) {
+            console.warn('[dsh-im] unable to record the session in the navigation ring:', error?.message ?? error);
+          }
           return {
             ...adopted,
             workspace: bound.workspace,
@@ -2662,6 +2713,26 @@ export function createBotWorkspaceScope(
             return false;
           }
           return target.sessionExists(sessionId, ...args);
+        };
+      }
+      if (property === 'forkSession') {
+        return async (sessionId, options = {}) => {
+          if (!isCurrentScope()) {
+            throw workspaceSessionStale('The bot workspace changed before the fork.');
+          }
+          if (generationIsStale(sessionGenerations.get(sessionId))) {
+            throw workspaceSessionStale('The session is no longer in the current workspace.');
+          }
+          if (typeof target.forkSession !== 'function') {
+            const error = new Error('The Host does not support forking sessions');
+            error.code = 'harness-api-not-found';
+            throw error;
+          }
+          const result = await target.forkSession(sessionId, options);
+          if (!isCurrentScope()) {
+            throw workspaceSessionStale('The bot workspace changed while the fork was running.');
+          }
+          return result;
         };
       }
       if (property === 'ask') {
