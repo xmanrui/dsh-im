@@ -85,4 +85,8 @@ export default {
   '微信服务拒绝了文件上传请求。': 'The WeChat service rejected the file upload request.',
   '微信服务拒绝了文件消息。': 'The WeChat service rejected the file message.',
   '微信账号连接启动失败。': 'Failed to start the WeChat account connection.',
+  '/plan  进入计划模式（/plan off 退出，可附带说明文字）':
+    '/plan  Enter plan mode (/plan off to leave; an optional note can be attached)',
+  '/goal [目标]  设置目标（clear 清除、edit 修改、pause 暂停、resume 恢复；不带参数查看）':
+    '/goal [objective]  Set the goal (clear to remove, edit to change, pause to suspend, resume to continue; no argument to view)',
 };
