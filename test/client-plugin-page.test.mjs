@@ -6,6 +6,7 @@ import TestRenderer from 'react-test-renderer';
 import { en } from '../plugin-src/client/i18n.js';
 import { IM_MAIN_PANEL_ID, installImPluginPage } from '../plugin-src/client/plugin-page.js';
 import { apply as applyClient } from '../plugin-src/client/index.js';
+import { CHANNEL_SESSIONS_PANEL_ID } from '../plugin-src/client/im-channels.js';
 
 const { act, create } = TestRenderer;
 const packageName = '@xmanrui/dsh-im';
@@ -27,9 +28,14 @@ function slotLedger(ready) {
     },
     register(options, component) {
       assert.ok(declarations.has(options.name));
-      assert.ok(!entries.has(options.name), 'no duplicate registrations');
-      entries.set(options.name, { options, component });
-      return () => entries.delete(options.name);
+      const key = entries.has(options.name)
+        ? `${options.name}:${options.key ?? options.id}` : options.name;
+      assert.ok(!entries.has(key), 'no duplicate registrations');
+      entries.set(key, { options, component });
+      const owner = [...waiting].reverse().find(item =>
+        item.name === options.name && item.registration === undefined);
+      if (owner) owner.registration = options;
+      return () => entries.delete(key);
     },
     declare(name, available) {
       if (available === declarations.has(name)) return;
@@ -38,6 +44,7 @@ function slotLedger(ready) {
       for (const item of [...waiting]) {
         if (item.name !== name) continue;
         item.cleanup?.();
+        item.registration = undefined;
         item.cleanup = available ? item.install() : undefined;
       }
     },
@@ -233,12 +240,15 @@ test('client startup waits for configuration before showing the sidebar', async 
   ]) await t.test(scenario, async (t) => {
     const root = new Context();
     const slots = slotLedger(true);
+    const hasImSidebar = () => [...slots.entries.values()].some(({ options }) =>
+      options.name === 'sidebar.panellist' && options.id === IM_MAIN_PANEL_ID);
     let finishInitial;
     const calls = [];
+    const selected = [];
     root.provide('slots', slots);
     root.provide('locale', { register: () => () => {}, bind: () => (key) => key });
     root.provide('workspaces', {});
-    root.provide('layout', { selectPanel() {} });
+    root.provide('layout', { selectPanel: (id) => selected.push(id) });
     root.provide('connection', { rpc: { call: async (_path, _channel, { method, payload }) => {
       calls.push({ channel: _channel, method });
       if (method === 'settings.sidebar-entry.get') return new Promise((resolve) => { finishInitial = resolve; });
@@ -249,19 +259,36 @@ test('client startup waits for configuration before showing the sidebar', async 
     t.after(() => plugin.dispose());
     await plugin.await();
     await flush();
-    assert.equal(slots.entries.size, 3, 'only main, plugin details and settings are registered while loading');
-    assert.equal(slots.entries.has('sidebar.panellist'), false);
-    assert.equal([...slots.waiting].some((item) => item.name === 'sidebar.panellist'), false,
-      'loading must not enqueue a sidebar registration that could flash when the slot arrives');
+    assert.equal(slots.entries.size, 4,
+      'both main panels, plugin details and settings are registered without a history sidebar');
+    assert.equal([...slots.entries.values()].some(({ options }) =>
+      options.name === 'sidebar.panellist' && options.id === CHANNEL_SESSIONS_PANEL_ID), false);
+    assert.equal(hasImSidebar(), false);
+    assert.equal([...slots.waiting].some(item => item.name === 'sidebar.panellist'
+      && item.registration?.id === IM_MAIN_PANEL_ID), false,
+    'loading must not enqueue the IM sidebar registration that could flash when the slot arrives');
     finishInitial(initial);
     await flush();
-    assert.equal(slots.entries.has('sidebar.panellist'), visible);
-    assert.equal(slots.entries.size, visible ? 4 : 3);
+    assert.equal(hasImSidebar(), visible);
+    assert.equal(slots.entries.size, visible ? 5 : 4);
+    if (scenario === 'always hide') {
+      const page = [...slots.entries.values()].find(({ options }) => options.key === IM_MAIN_PANEL_ID);
+      let renderer;
+      await act(async () => {
+        renderer = create(React.createElement(page.component, page.options.inject()));
+        await flush();
+      });
+      const entry = renderer.root.findByProps({ className: 'dim-sessionHistoryButton' });
+      assert.equal(entry.props['aria-label'], '会话记录');
+      act(() => entry.props.onClick());
+      assert.deepEqual(selected, [CHANNEL_SESSIONS_PANEL_ID]);
+      act(() => renderer.unmount());
+    }
     const { globalSettingsRpcCall } = slots.entries.get('settings.section').options.inject();
     await globalSettingsRpcCall('settings.sidebar-entry.set', { mode: 'show' });
-    assert.equal(slots.entries.size, 4);
+    assert.equal(slots.entries.size, 5);
     await globalSettingsRpcCall('settings.sidebar-entry.set', { mode: 'hide' });
-    assert.equal(slots.entries.size, 3);
+    assert.equal(slots.entries.size, 4);
     assert.ok(calls.filter(({ method }) => method.startsWith('settings.sidebar-entry.'))
       .every(({ channel }) => channel === 'dsh-im/dsh-im-sidebar'));
     await globalSettingsRpcCall('settings.group-history.get', {});
