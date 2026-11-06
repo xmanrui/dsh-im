@@ -599,6 +599,39 @@ export function splitText(text, maxChars = 9000) {
   return chunks;
 }
 
+// Feishu cards parse Markdown images into `img` elements whose key must be an
+// uploaded Feishu image key. A local path (macOS `/tmp/x.png`, `~/x.png`,
+// `file:///x.png`, Windows `C:\\x.png`) is not one, and the whole card update is
+// rejected with 230099 / 200570 "card contains invalid image keys" — which
+// silently freezes a step card. Degrade those images to their alt text.
+// Feishu renders an image element only from a hosted URL or an uploaded
+// `img_key`. Everything else — absolute paths, `file:` URLs, Windows drives,
+// bare relative paths such as `06-log/shot.png`, `data:` URIs — reaches the
+// card as an invalid image key: the whole card is rejected and the answer
+// degrades to plain text, so those targets become their alt text instead.
+const REMOTE_IMAGE_TARGET = /^(?:https?:)?\/\//i;
+const FEISHU_IMAGE_KEY = /^img_[A-Za-z0-9_-]+$/;
+
+export function isLocalImageTarget(target) {
+  if (typeof target !== 'string') return false;
+  const trimmed = target.trim();
+  if (!trimmed) return false;
+  return !REMOTE_IMAGE_TARGET.test(trimmed) && !FEISHU_IMAGE_KEY.test(trimmed);
+}
+
+export function stripLocalImageMarkdown(text) {
+  if (typeof text !== 'string' || !text.includes('![')) return text;
+  return text.replace(/!\[([^\]]*)\]\(([^)\n]*)\)/g, (match, rawAlt, rawTarget) => {
+    const target = rawTarget.trim()
+      .replace(/\s+"[^"]*"\s*$/, '')
+      .trim()
+      .replace(/^<(.*)>$/, '$1')
+      .trim();
+    if (!isLocalImageTarget(target)) return match;
+    return rawAlt.trim() || target;
+  });
+}
+
 export function isBotSender(event) {
   return event?.sender?.sender_type === 'bot';
 }
