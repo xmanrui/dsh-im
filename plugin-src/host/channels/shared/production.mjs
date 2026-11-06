@@ -23,6 +23,10 @@ import { prepareBotWorkspace } from '../../../../src/channels/shared/default-wor
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
 import { listModelCatalog } from '../../../../src/channels/shared/model-setting.mjs';
 import {
+  SHARED_COMMAND_CATALOG,
+  availableCommandCatalog,
+} from '../../../../src/channels/shared/command-catalog.mjs';
+import {
   createDeliveryAdapter,
   supportsDeliveryChannel,
 } from '../../delivery-adapter.mjs';
@@ -208,6 +212,10 @@ export async function createTokenProductionController(ctx, config, internals, de
         ...(typeof createTransport === 'function' ? { createTransport } : {}),
         harness: workspaceScope.harness,
         state: workspaceScope.state,
+        // Hide /fork when the host facade cannot actually branch a session.
+        commandCatalog: availableCommandCatalog(SHARED_COMMAND_CATALOG, {
+          supportsFork: harness.supportsSessionFork?.(),
+        }),
         groupHistory: internals.groupHistory ?? (['telegram', 'discord'].includes(channel) ? getGroupHistoryStore(ctx, config) : undefined),
         // A transport that carries voice notes composes its own transcriber
         // from Host services; without one voice messages stay textless.

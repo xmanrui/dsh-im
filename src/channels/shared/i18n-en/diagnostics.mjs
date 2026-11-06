@@ -1,4 +1,5 @@
 export default Object.freeze({
+  '无法读取所选模型的列表，模型设置未保存，请重试。': 'Could not load the selected model’s catalog. The model setting was not saved. Try again.',
   '异常类型': 'Exception types',
   '二维码编码器': 'QR encoder',
   '二维码图片格式': 'QR image format',

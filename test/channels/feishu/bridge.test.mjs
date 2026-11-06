@@ -5803,9 +5803,9 @@ for (const withFollowingMessage of [false, true]) {
     await bridge.waitForIdle();
 
     assert.deepEqual(order, withFollowingMessage
-      ? ['ask:session-existing', 'finished', 'clear', 'create', 'ask:session-new']
-      : ['ask:session-existing', 'finished', 'clear']);
-    assert.equal(fixture.state.sessionFor('p2p:ou_user'), withFollowingMessage ? 'session-new' : null);
+      ? ['ask:session-existing', 'finished', 'create', 'ask:session-new']
+      : ['ask:session-existing', 'finished', 'create']);
+    assert.equal(fixture.state.sessionFor('p2p:ou_user'), 'session-new');
     const replies = sent.filter(({ msgType }) => msgType === 'text').map(({ content }) => JSON.parse(content).text);
     assert.ok(replies.includes('已开启全新 Harness 会话。'));
     assert.equal(replies.some((text) => text.includes('当前任务仍在运行')), false);

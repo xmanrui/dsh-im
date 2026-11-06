@@ -6,6 +6,62 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- 新增 `/sessionarchive <Session ID>`（别名 `/sessarchive`）：通过 Discord 等渠道触发 DSH 的会话归档（`workspace.archiveSession`）。传序号只做预览（标题、工作区、ID），不会执行归档——会话列表随新会话出现而位移，按序号直接归档会归档到错误会话；破坏性操作必须点名完整 ID。机器人只负责解析目标并转达 Host 结果，拒绝归档本对话当前绑定的会话与已归档会话；`--stop` 让 Host 先停止该会话正在运行的任务。归档后的会话不再出现在默认的 `/sessionlist`。
+  Added `/sessionarchive <Session ID>` (alias `/sessarchive`) to trigger DSH Session archiving; a numerical argument only previews the Session behind that index (title, workspace, ID) and never archives, because the list shifts and archiving by index would hit the wrong Session — destructive actions must name the full ID (`workspace.archiveSession`) from the chat. The bot only resolves the target and relays the Host result; it refuses the Session this chat is bound to and one that is already archived, and `--stop` lets the Host stop that Session's running work. Archived Sessions leave the default `/sessionlist`.
+
+### Changed / 变更
+
+- `/sessionlist` 与 `/sessionlist --all` 默认不再列出已归档会话，只提示隐藏了几条；新增 `--archived` 把它们列在末尾且不编号。序号只对应可按下标绑定的未归档会话，归档会话仍可用完整 Session ID 绑定。
+  `/sessionlist` and `/sessionlist --all` no longer list archived Sessions by default; they report how many were hidden, and the new `--archived` flag appends them unnumbered. Indices only cover the non-archived Sessions that `/session N` can bind; archived Sessions remain bindable by full Session ID.
+
+- `/session` 新增短别名 `/sess`：部分客户端有同名原生斜杠命令会抢占输入框，被抢时改用 `/sess` 即可，参数与行为完全一致（Session ID、工作区序号、标题关键词）。`/sess` 列在 `/help` 里，原生命令菜单只注册主命令。
+  `/session` gains the short alias `/sess`: some clients own a native slash command of the same name and grab the input box, so `/sess` takes exactly the same arguments (Session ID, workspace index, title keyword) and behaves identically. It appears in `/help` while the native menu registers the primary name only.
+
+### Fixed / 修复
+
+- `/session <关键词>` 不再接管已归档会话：归档会话不参与标题搜索，只有归档标题命中时会列出这些会话并要求改用完整 Session ID；用完整 ID 绑定归档会话的行为保持不变。
+  `/session <keyword>` no longer takes over archived Sessions: they are excluded from title search, an answer that matches only archived titles names them and asks for the full Session ID, and binding an archived Session by its full ID keeps working.
+
+- 单工作区 `/sessionlist` 遇到 Harness 返回的无效会话记录（没有可用 Session ID）时不再整条失败，改为计数并跳过该行、保留其余会话的原始序号；`--all` 的无效记录计数改为覆盖整个工作区，不再只统计 `--limit` 窗口内的记录。
+  A single-workspace `/sessionlist` no longer fails on a Session record the Harness cannot describe (no usable Session ID): the row is counted and skipped, the remaining rows keep their original indices, and `--all` counts invalid records across the whole workspace instead of only inside the `--limit` window.
+
+- 修复会话选择的完整 ID 优先级与标题绑定隔离：无前缀 ID 的精确匹配不再受标题内容或候选数量限制；在对话专属工作区内按标题绑定时保留 bot 默认目录及其他聊天的绑定，搜索期间工作区变化则拒绝旧选择。飞书接入 `/sessionlist --all` 汇总及卡片当前绑定标记；汇总跳过无效记录时保留原始序号，确保与 `/session N` 一致。
+  Session selection now resolves exact non-prefixed IDs independently of titles and the candidate cap. Binding by title in a conversation workspace preserves the bot default and other chats' bindings, and rejects selections if the workspace changes during the search. Feishu now handles `/sessionlist --all` and marks the bound session in cards. Skipping invalid rows in summaries preserves the original indices used by `/session N`.
+
+### Added / 新增
+
+- `/sessionlist --all` 跨工作区汇总列出会话，每个工作区默认显示 10 个并可用 `--limit N` 调整；单个工作区读取失败时跳过该分组并提示未包含的工作区数量，无效会话记录只跳过该行，均不影响其余结果。`/sessionlist` 用「（当前绑定）」标出本对话已绑定的会话，生产作用域也能正确读取该标记。`/session <关键词>` 按标题不区分大小写模糊匹配：仅在当前对话有效工作区内唯一命中时直接绑定；唯一命中位于其他工作区、命中多个、或部分工作区读取失败时只列出候选并要求完整 Session ID，避免误切换 bot 工作区并清除其他聊天的旧绑定；零命中保留原有按 Session ID 绑定的行为。标题关键词限制为单个连续词，未知旗标返回用法；对话专属工作区目录已不存在时回退到 bot 默认工作区。全部新增文案已同步英文与俄文词典。
+  `/sessionlist --all` summarizes sessions across all workspaces, 10 per workspace unless `--limit N` says otherwise. A workspace whose list cannot be read is skipped and the number of omitted workspaces is reported; invalid session rows are skipped individually without hiding the rest. `/sessionlist` marks the session this chat is already bound to, and the production scope now exposes that binding correctly. `/session <keyword>` matches session titles case-insensitively and binds directly only when a single match is in the conversation's effective workspace. A unique match in another workspace, several matches, or a partial search list candidates and require the full Session ID, so an accidental keyword cannot move the bot workspace and clear other chats' bindings. When nothing matches, the previous Session-ID behaviour is preserved. Keywords are limited to a single token, unknown flags return usage, and a missing conversation workspace directory falls back to the bot default. Every new string ships with English and Russian translations.
+
+## [5.10.0] - 2026-11-04
+
+### Added / 新增
+
+- 新增「通用设置 → 投递」，可分别开启 Web 用户输入镜像与非本聊天发起回合的最终回答投递，并设置各自的前缀图标；两项默认关闭。无已保存投递目标时，可按 Session 当前绑定的聊天投递 Web、定时任务及子代理通知等来源的回答；已有目标继续遵循目标范围和同步开关。（[#480](https://github.com/xmanrui/dsh-im/pull/480)）
+  Added General Settings → Delivery with separate, default-off switches for mirroring Web user input and delivering final answers from turns initiated outside the chat, plus configurable prefixes. Bots without saved delivery targets can deliver Web, scheduled and subagent-triggered answers through current Session bindings; saved targets retain their scope and sync controls. ([#480](https://github.com/xmanrui/dsh-im/pull/480))
+- 消息语言可在跟随 DSH 界面语言与中文、英文、俄语之间选择，显式插件 `language` 配置仍优先。
+  Message language can follow the DSH interface or be explicitly set to Chinese, English or Russian; explicit plugin `language` configuration still takes precedence.
+- 为 Telegram 交互卡片新增有限 429 重试、按钮文字清理与截断的共享辅助函数，并支持校验不携带动作字段的禁用按钮，供卡片功能接入使用。（[#505](https://github.com/xmanrui/dsh-im/pull/505)）
+  Added shared helpers for bounded Telegram action-card 429 retries and button-label sanitization/truncation, plus validation for disabled buttons without action fields, for card implementations to adopt. ([#505](https://github.com/xmanrui/dsh-im/pull/505))
+
+### Fixed / 修复
+
+- 会话同步仅投递最后一次工具调用后的最终回答，不回显内部驱动提示，也不重复投递本聊天发起的回合。飞书与 DS Bot 同步优先确认原卡片已呈现回答，仅对未确认的目标补发文字；两个全局开关关闭时同步卡片和文字均停发。（[#480](https://github.com/xmanrui/dsh-im/pull/480)）
+  Session sync delivers only the final answer after the last tool call, without echoing internal prompts or duplicating chat-originated turns. Feishu and DS Bot sync confirm card delivery first and send text only to unconfirmed targets; disabling both global switches stops synchronized cards and text. ([#480](https://github.com/xmanrui/dsh-im/pull/480))
+- DS Bot 已接受的请求在阻塞、接管或会话归档后按原请求身份继续跟踪，避免重复提交或把其他回合的结果当作当前回复；保留取消、过程事件和暂存文件的正确生命周期。（[#499](https://github.com/xmanrui/dsh-im/pull/499)、[#498](https://github.com/xmanrui/dsh-im/issues/498)）
+  Accepted DS Bot requests continue to be tracked by their original request identity across blocked turns, handoffs and archived sessions, avoiding duplicate submissions and unrelated replies while preserving cancellation, progress and staged-file lifetime. ([#499](https://github.com/xmanrui/dsh-im/pull/499), [#498](https://github.com/xmanrui/dsh-im/issues/498))
+- DS Bot 绑定会话在切换模型但未指定推理级别，或使用 `/reasoning --default` 时，回读会话实际的默认级别，避免已切换成功却误报失败。（[#513](https://github.com/xmanrui/dsh-im/pull/513)）
+  DS Bot-bound model changes without an explicit reasoning level, including `/reasoning --default`, now report the Session's actual default effort instead of falsely reporting a failed switch. ([#513](https://github.com/xmanrui/dsh-im/pull/513))
+- 区分模型目录读取失败与模型不存在，保留诊断信息；模型保存失败时关闭菜单并显示错误，保留原设置并支持重试。（[#521](https://github.com/xmanrui/dsh-im/issues/521)）
+  Model catalog failures remain distinguishable from missing models and retain diagnostics. Failed model saves close the menu and show an inline error while preserving the previous settings and allowing retry. ([#521](https://github.com/xmanrui/dsh-im/issues/521))
+
+### Notes / 使用说明
+
+- 升级后请在「通用设置 → 投递」检查同步开关。依赖声明、Node.js 要求及 DSH 兼容声明保持不变；重启 Host 并刷新管理页面使更新生效。
+  After upgrading, review the sync switches under General Settings → Delivery. Dependency declarations, Node.js requirements and DSH compatibility declarations are unchanged; restart the Host and refresh management pages.
+
 ## [5.9.1] - 2026-11-01
 
 ### Fixed / 修复
@@ -2062,8 +2118,8 @@ Thanks to [@Dong09](https://github.com/Dong09) for the Matrix conversation-conte
 
 - 飞书新增持久化 Session 关注、完成推送和菜单入口。
   Added persistent Session watches, completion notifications, and a watch menu entry for Feishu.
-- 飞书 Session 列表支持关注按钮、归档标记和 `/archived on|off` 切换。
-  Feishu Session lists now include watch buttons, archived badges, and the `/archived on|off` toggle.
+- 飞书 Session 列表支持关注按钮、归档标记和 `/sessarchived on|off` 切换。
+  Feishu Session lists now include watch buttons, archived badges, and the `/sessarchived on|off` toggle.
 
 ### Fixed / 修复
 
@@ -2152,7 +2208,8 @@ Thanks to [@Dong09](https://github.com/Dong09) for the Matrix conversation-conte
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v5.9.1...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v5.10.0...HEAD
+[5.10.0]: https://github.com/xmanrui/dsh-im/compare/v5.9.1...v5.10.0
 [5.9.1]: https://github.com/xmanrui/dsh-im/compare/v5.9.0...v5.9.1
 [5.9.0]: https://github.com/xmanrui/dsh-im/compare/v5.8.0...v5.9.0
 [5.8.0]: https://github.com/xmanrui/dsh-im/compare/v5.7.0...v5.8.0

@@ -1,4 +1,5 @@
 import { BusyMessageDispatcher, canAutomaticallySteer } from '../shared/busy-message-dispatcher.mjs';
+import { SESSION_NAV_HELP_LINES } from '../shared/command-catalog.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import {
   DINGTALK_DONE_REACTION_NAME,
@@ -17,6 +18,7 @@ import {
 import { HarnessApprovalQueue } from '../shared/harness-approval.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
 import { isClearCommand, runClearCommand } from '../shared/clear-command.mjs';
+import { isResetCommand, runResetCommand } from '../shared/reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
 import {
   isControlCommand,
@@ -32,6 +34,11 @@ import {
 } from '../shared/preset-command.mjs';
 import { conversationSessionWorkspace, runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import {
+  isSessionNavCommand,
+  runSessionNavTextCommand,
+} from '../shared/session-nav-command.mjs';
+import { createConversationSession, isNewCommand, newCommandTitle } from '../shared/new-command.mjs';
 import {
   captureContextEnhancement,
   captureContextEnhancementSource,
@@ -95,8 +102,10 @@ const HELP_TEXT_LINES = [
   '/workspacelist  列出工作区绝对路径',
   '/ws、/wsl、/workspaces  工作区命令别名',
   '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题',
+  '/sessionlist --all  跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）',
   '/sessionlist --limit N  仅列出当前工作区前 N 个会话',
-  '/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话',
+  '/session Session ID、当前工作区序号或标题关键词  将当前聊天绑定到指定会话',
+  ...SESSION_NAV_HELP_LINES,
   '/models  按序号列出所有可用模型',
   '/reasoninglist 或 /reasonings  按序号列出当前模型可用推理等级',
   '/reasoning [序号、等级ID或 --default]  查看或切换当前推理等级',
@@ -721,6 +730,7 @@ export class DingtalkHarnessBridge {
       && !hasInboundFiles(promptMessage) && !hasInboundImages(promptMessage)
       ? async () => { await this.#showMenu(message, key); }
       : isClearCommand(commandText) ? runClearCommand
+      : isResetCommand(commandText) ? runResetCommand
       : isHistoryCommand(commandText) ? runHistoryCommand
       : hasInboundFiles(promptMessage) ? null : isControlCommand(commandText)
       ? runControlCommand
@@ -949,8 +959,8 @@ export class DingtalkHarnessBridge {
       && !['/stop', '/help', '/status', '/history'].includes(command)) {
       result = { message: t('当前任务尚未结束，请先停止任务或等待完成后再操作。') };
     } else if (command === '/new') {
-      await this.#state.clearSession(key);
-      result = { message: t('已开启新会话。请发送你的问题。') };
+      const created = await createConversationSession({ state: this.#state, harness: this.#harness, key });
+      result = { message: created.failed ? t('暂时无法创建新会话，请稍后重试。') : t('已开启新会话。请发送你的问题。') };
     } else if (command === '/status') {
       await this.#harness.ensureRunning({ signal: this.#signal });
       result = { message: t('钉钉机器人与 DeepSeek Harness 连接正常。') };
@@ -959,6 +969,7 @@ export class DingtalkHarnessBridge {
     } else {
       result = await runWorkspaceCommand(command, this.#harness, key)
         ?? await runClearCommand(command, this.#harness, this.#state, key, options)
+        ?? await runResetCommand(command, this.#harness, this.#state, key, options)
         ?? await runCompactCommand(command, this.#harness, this.#state, key, options)
         ?? await runControlCommand(command, this.#harness, this.#state, key, options)
         ?? await runHistoryCommand(command, this.#harness, this.#state, key, options)
@@ -1334,9 +1345,33 @@ export class DingtalkHarnessBridge {
         await this.#send(sessionWebhook, t('钉钉机器人与 DeepSeek Harness 连接正常。'), this.#atUsersFor(message));
         return;
       }
-      if (isPlainText && !hasImages && !hasFiles && command === '/new') {
-        await this.#state.clearSession(key);
-        await this.#send(sessionWebhook, t('已开启新会话。请发送你的问题。'), this.#atUsersFor(message));
+      if (isPlainText && !hasImages && !hasFiles && isNewCommand(text)) {
+        const created = await createConversationSession({ state: this.#state, harness: this.#harness, key, title: newCommandTitle(text) });
+        await this.#send(sessionWebhook, created.failed ? t('暂时无法创建新会话，请稍后重试。') : t('已开启新会话。请发送你的问题。'), this.#atUsersFor(message));
+        return;
+      }
+      if (isPlainText && !hasImages && !hasFiles && isSessionNavCommand(text)) {
+        const nav = await runSessionNavTextCommand(text, this.#harness, this.#state, key, {
+          signal: this.#signal,
+        });
+        if (nav) {
+          for (const reply of nav.messages ?? [nav.message]) {
+            await this.#send(sessionWebhook, reply, this.#atUsersFor(message));
+          }
+          if (nav.askText) {
+            const followUp = this.#enqueueMessage(
+              { ...message, msgtype: 'text', text: { content: nav.askText } },
+              `${messageId}-ask`,
+              sender,
+              key,
+              { statusReaction },
+            );
+            followUp.catch((error) => {
+              this.#logger.warn?.(`[dsh-im:dingtalk] follow-up ask after a nav command failed:`, error?.message ?? error);
+              this.#send(sessionWebhook, t('切换后的提问发送失败，请重试。'), this.#atUsersFor(message)).catch(() => undefined);
+            });
+          }
+        }
         return;
       }
       const workspaceCommand = isPlainText && !hasImages && !hasFiles

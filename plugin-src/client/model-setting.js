@@ -9,6 +9,7 @@ import {
   sameModelSelection,
 } from '../../src/channels/shared/model-setting.mjs';
 import { h, localizeText } from './i18n.js';
+import { ConnectionError, normalizeConnectionError } from './connection-error.js';
 
 export const SET_MODEL_ENDPOINT = 'bot.model.set';
 export { EMPTY_MODEL_CATALOG, normalizeModelCatalog, normalizeModelSelection };
@@ -87,7 +88,8 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
       await onSave?.(next);
       close(true);
     } catch (cause) {
-      setError(cause?.message ?? '模型修改失败，请重试。');
+      setError(normalizeConnectionError(cause, 'model-update-failed', '模型修改失败，请重试。'));
+      close(true);
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -146,6 +148,7 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
           '只影响新建会话；若当前聊天已有会话，先发送 /new，再发送普通消息生效。'))),
     saving ? h('span', { className: 'dim-presetStatus', role: 'status' }, '保存中…') : null),
   row('model', '模型', entry?.name ?? (current ? modelSelectionId(current) : localizeText('跟随默认模型'))),
+  error ? h('div', { role: 'alert' }, h(ConnectionError, { error })) : null,
   row('effort', '思考强度', effortLabel, effortDisabled),
   pane ? h('div', { ref: menuRef, id: `${id}-menu`, role: 'menu',
     'aria-label': pane === 'model' ? '模型' : '思考强度', 'aria-busy': saving,
@@ -167,6 +170,6 @@ export function ModelEditor({ model = null, disabled = false, onSave }) {
   ]) : null,
   effortHint && effortUnavailable ? h('p', { id: `${id}-hint`, className: 'dim-modelHint',
     role: 'status' }, effortHint) : null,
-  error || !currentAvailable ? h('p', { className: 'dim-presetError', role: error ? 'alert' : 'status' },
-    error ?? '当前模型已不可用，请选择其他模型或跟随默认模型。') : null);
+  !error && !currentAvailable ? h('p', { className: 'dim-presetError', role: 'status' },
+    '当前模型已不可用，请选择其他模型或跟随默认模型。') : null);
 }

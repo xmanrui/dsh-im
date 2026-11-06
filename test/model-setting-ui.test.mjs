@@ -232,12 +232,13 @@ test('default or non-reasoning models explain the disabled effort control', asyn
 
 test('failed saves keep the selection and allow retry, with duplicate saves locked', async (t) => {
   let reject;
+  let resolve;
   let calls = 0;
   const renderer = await mount(t, ModelCatalogContext.Provider, {
     value: CATALOG,
     children: React.createElement(ModelEditor, {
       model: { ...MODEL, reasoningEffort: 'high' },
-      onSave() { calls += 1; return new Promise((_, fail) => { reject = fail; }); },
+      onSave() { calls += 1; return new Promise((done, fail) => { resolve = done; reject = fail; }); },
     }),
   });
   await openMenu(renderer.root, '思考强度');
@@ -246,10 +247,29 @@ test('failed saves keep the selection and allow retry, with duplicate saves lock
   await act(async () => { maximum.props.onClick(); maximum.props.onClick(); await flush(); });
   assert.equal(calls, 1);
   assert.equal(maximum.props.disabled, true);
-  await act(async () => { reject(new Error('Save failed')); await flush(); });
-  assert.equal(textOf(renderer.root.findByProps({ role: 'alert' })), 'Save failed');
+  await act(async () => {
+    reject(Object.assign(new Error('Save failed'), { code: 'model-catalog-unavailable', details: {
+      stage: 'status.read', method: 'llm.models', reason: 'ECONNRESET', referenceId: 'IM-CONN-12345678',
+    } }));
+    await flush();
+  });
+  const alert = renderer.root.findByProps({ role: 'alert' });
+  assert.match(textOf(alert), /Save failed/u);
+  assert.match(textOf(alert), /ECONNRESET/u);
+  assert.match(textOf(alert), /IM-CONN-12345678/u);
+  assert.equal(renderer.root.findAllByProps({ role: 'menu' }).length, 0);
+  const children = renderer.toJSON().children;
+  assert.equal(children.findIndex(node => node.props?.role === 'alert'),
+    children.findIndex(node => node.props?.['aria-label'] === '模型') + 1);
+  assert.equal(renderer.root.findByProps({ 'aria-label': '模型' }).props.disabled, false);
+  await openMenu(renderer.root, '思考强度');
   assert.match(textOf(renderer.root.findByProps({ 'aria-checked': true })), /^High/u);
-  assert.equal(maximum.props.disabled, false);
+  await choose(renderer.root, 'Maximum');
+  assert.equal(calls, 2);
+  assert.equal(renderer.root.findAllByProps({ role: 'alert' }).length, 0);
+  await act(async () => { resolve(); await flush(); });
+  assert.equal(renderer.root.findAllByProps({ role: 'menu' }).length, 0);
+  assert.equal(renderer.root.findByProps({ 'aria-label': '模型' }).props.disabled, false);
 });
 
 test('English model and effort settings translate defaults and explanatory text', async (t) => {
@@ -261,4 +281,35 @@ test('English model and effort settings translate defaults and explanatory text'
   assert.match(textOf(renderer.root), /Model default · High/u);
   await openMenu(renderer.root, 'Reasoning effort');
   assert.match(textOf(renderer.root), /Use the default reasoning effort from the model or provider/u);
+});
+
+test('WeCom releases the card after a model save failure and retries without changing the old selection', async (t) => {
+  mockWindow(t);
+  const channel = channels.find(({ name }) => name === 'wecom');
+  let current = snapshot('wecom');
+  let attempts = 0;
+  const renderer = await mount(t, channel.Settings, { rpcCall: async (endpoint, payload) => {
+    if (endpoint === 'connection.status') return { ok: true, value: current };
+    assert.equal(endpoint, 'bot.model.set');
+    if (++attempts === 1) return { ok: false, error: {
+      code: 'model-catalog-unavailable', message: 'Could not load models',
+      details: { reason: 'ECONNRESET', method: 'llm.models' },
+    } };
+    current = { ...current, revision: current.revision + 1,
+      bots: current.bots.map(bot => bot.botId === payload.botId ? { ...bot, model: payload.model } : bot) };
+    return { ok: true, value: current };
+  } });
+  const first = () => renderer.root.findByProps({ 'data-bot-id': 'wecom_0' });
+  await openMenu(first(), '模型');
+  await choose(first(), 'GPT-5openai/gpt-5');
+  assert.equal(first().findAllByProps({ role: 'menu' }).length, 0);
+  assert.equal(first().findByType(ModelEditor).props.model, null);
+  assert.equal(first().findByProps({ 'aria-label': '模型' }).props.disabled, false);
+  assert.match(textOf(first().findByProps({ role: 'alert' })), /ECONNRESET/u);
+  await openMenu(first(), '模型');
+  assert.match(textOf(first().findByProps({ 'aria-checked': true })), /跟随默认模型/u);
+  await choose(first(), 'GPT-5openai/gpt-5');
+  assert.equal(attempts, 2);
+  assert.deepEqual(first().findByType(ModelEditor).props.model, MODEL);
+  assert.equal(first().findAllByProps({ role: 'alert' }).length, 0);
 });

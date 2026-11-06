@@ -6,6 +6,7 @@ import { isHistoryCommand } from './history-command.mjs';
 import { isModelCommand } from './model-command.mjs';
 import { isPresetCommand } from './preset-command.mjs';
 import { isPlanCommand, isGoalCommand } from './plan-goal-command.mjs';
+import { isResetCommand } from './reset-command.mjs';
 import { isWorkspaceCommand } from './workspace-command.mjs';
 
 const SIMPLE_TEXT_COMMANDS = new Set(['/help', '/status', '/new']);
@@ -22,7 +23,7 @@ export function isSharedLocalCommand(text, {
   const command = text.trim();
   if (!command) return false;
   if (isBatchInputCommand(command) || isHistoryCommand(command)) return true;
-  if (isClearCommand(command)) return true;
+  if (isClearCommand(command) || isResetCommand(command)) return true;
   if (!hasFiles && (
     isControlCommand(command)
     || isModelCommand(command)

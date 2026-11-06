@@ -1201,6 +1201,33 @@ export class HarnessClient {
     return workspaceEntries(await this.rpc('workspace.list', {}, 30_000, options));
   }
 
+  /**
+   * Hide one known Session from the Workspace grouping surfaces. Archiving is a
+   * Harness capability: this only carries the request, so an older Host that
+   * does not expose it fails loudly instead of silently doing nothing.
+   *
+   * @param {string} sessionId - Session to archive.
+   * @param {object} [options] - `stopActivity` lets the Host stop running work.
+   */
+  async archiveWorkspaceSession(sessionId, options = {}) {
+    const { stopActivity = false, ...rpcOptions } = options;
+    await this.ensureRunning(rpcOptions);
+    const value = await this.rpc('workspace.archiveSession', {
+      sessionId,
+      ...(stopActivity === true ? { stopActivity: true } : {}),
+    }, 30_000, rpcOptions);
+    if (value === null || typeof value !== 'object') {
+      throw new Error('Harness returned an invalid response for workspace.archiveSession');
+    }
+    const archivedSessionIds = value.archivedSessionIds;
+    if (archivedSessionIds !== undefined
+      && (!Array.isArray(archivedSessionIds)
+        || archivedSessionIds.some((id) => typeof id !== 'string' || !id))) {
+      throw new Error('Harness returned invalid archived ids for workspace.archiveSession');
+    }
+    return { archivedSessionIds: archivedSessionIds ?? null };
+  }
+
   async listWorkspaceSessions(workspacePath, options = {}) {
     await this.ensureRunning(options);
     const workspaceList = await this.rpc('workspace.list', {}, 30_000, options);
@@ -1403,6 +1430,31 @@ export class HarnessClient {
     if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
     if (typeof title !== 'string' || !title.trim()) throw new TypeError('session title is required');
     return this.rpc('session.rename', { sessionId, title }, 30_000, options);
+  }
+
+  /**
+   * Branch a Session at the latest completed turn (or atSeq when given). The
+   * Host answers with the child session id; a Session with no completed turn is
+   * reported as fork-unavailable. Throws harness-api-not-found when the Host
+   * has no session.fork primitive.
+   */
+  async forkSession(sessionId, options = {}) {
+    if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
+    const { atSeq, timeoutMs = 30_000, ...rpcOptions } = options;
+    return this.rpc('session.fork', {
+      sessionId,
+      ...(atSeq === undefined ? {} : { atSeq }),
+    }, timeoutMs, rpcOptions);
+  }
+
+  /**
+   * Whether the connected Host can fork sessions. With the host-api transport
+   * this is the facade's sessions.fork member; the http transport reaches the
+   * Host endpoint directly, so a missing member here is not observable.
+   */
+  supportsSessionFork() {
+    if (this.#apiProxy) return typeof this.#apiProxy?.sessions?.fork === 'function';
+    return true;
   }
 
   async executeCommand(sessionId, line, options = {}) {
