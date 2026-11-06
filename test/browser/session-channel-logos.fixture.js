@@ -20,7 +20,7 @@ async function until(predicate, message) {
 const titles = [
   '整理今天的项目进度', '分析本周的客户反馈', '跟进产品发布清单', '汇总团队讨论结果',
   '检查订单处理状态', 'Review the launch checklist', 'Plan the next release',
-  'Summarize community feedback', '确认下周会议安排', '处理跨团队协作任务', '测试 iMessage 渠道',
+  'Summarize community feedback', '确认下周会议安排', '测试 iMessage 渠道', '测试 Matrix 渠道', '处理跨团队协作任务',
 ];
 const initial = Object.entries(SESSION_CHANNEL_LABELS).map(([channel, labels], index) => ({
   id: channel, title: `${labels[0]} · ${titles[index]}`, channel,
@@ -99,6 +99,46 @@ async function run() {
   assert(menus === 1 && opens === 1, 'row action click propagation changed');
   assert(document.getElementById('row-qq').draggable, 'drag support was changed');
   checks.push('original row clicks, menu propagation, and draggable state');
+
+  // DSH's useTitleMarquee scrolls this same span and publishes these fade hooks.
+  // A fixed, ellipsized replacement must not hide the tail during that scroll.
+  const longTitle = '检查滚动标题的完整内容与最后字符 · '.repeat(8) + 'END';
+  rows = initial.map((row) => row.id === 'weixin' ? { ...row, title: `微信 · ${longTitle}` } : row);
+  render();
+  await until(() => title('weixin').getAttribute(text) === longTitle, 'long title was not reflected');
+  const scrolling = title('weixin');
+  const scrollingNode = scrolling.firstChild;
+  const range = scrolling.scrollWidth - scrolling.clientWidth;
+  assert(range > 16, 'long title does not overflow');
+  const place = (left) => {
+    scrolling.scrollTo({ left, behavior: 'instant' });
+    scrolling.toggleAttribute('data-scrolled', left > 0);
+    scrolling.toggleAttribute('data-clipped', left < range);
+  };
+  const context = document.createElement('canvas').getContext('2d');
+  context.font = getComputedStyle(scrolling).font;
+  const visibleWidth = context.measureText(longTitle).width;
+  for (const left of [0, range / 2, range]) {
+    place(left);
+    const visual = getComputedStyle(scrolling, '::after');
+    assert(Number.parseFloat(visual.width) >= visibleWidth - 1,
+      `scrolling replacement still clips the title at ${left}: ${visual.width} < ${visibleWidth}`);
+    assert(visual.textOverflow !== 'ellipsis', 'scrolling replacement still draws an ellipsis');
+    // scrollWidth/clientWidth are integers, but scrollLeft may clamp at a
+    // fractional CSS pixel on high-DPI displays. Allow only rounding error.
+    assert(Math.abs(scrolling.scrollLeft - left) <= 1, 'Host scroll position was overridden');
+    assert(scrolling.firstChild === scrollingNode, 'scrolling replaced the React text node');
+    if (left === range) {
+      const tail = Number.parseFloat(visual.left) + Number.parseFloat(visual.width) - scrolling.scrollLeft;
+      assert(tail > 0 && tail <= scrolling.clientWidth + 1, 'the final title characters are outside the viewport');
+    }
+  }
+  scrolling.scrollTo({ left: 0, behavior: 'instant' });
+  scrolling.removeAttribute('data-scrolled');
+  scrolling.removeAttribute('data-clipped');
+  assert(getComputedStyle(scrolling, '::after').textOverflow === 'ellipsis', 'leaving did not restore the resting ellipsis');
+  assert(scrolling.scrollLeft === 0, 'leaving did not return the title to its start');
+  checks.push('long-title marquee start, middle, far edge, and resting ellipsis');
 
   rows = initial.map((row) => row.id === 'weixin' ? { ...row, title: '微信 · 更新后的标题 👨‍👩‍👧‍👦 <img src=x> "原样显示"' } : row);
   render();

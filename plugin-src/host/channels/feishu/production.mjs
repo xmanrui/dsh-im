@@ -33,6 +33,8 @@ import { prepareBotWorkspace } from '../../../../src/channels/shared/default-wor
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
 import { listModelCatalog } from '../../../../src/channels/shared/model-setting.mjs';
 import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
+import { createAnnouncedStateStore, createBindingAnnouncer } from '../shared/binding-events.mjs';
+import { createSessionSyncTargetsFor } from '../../session-sync-targets.mjs';
 import {
   accessPolicyProvider,
   initialAccessPolicyFor,
@@ -125,7 +127,7 @@ export async function createProductionController(ctx, config = {}, internals = {
   const { defaultWorkspace, ungroupedWorkspace } = await prepareBotWorkspace(config);
   const WorkspaceStore = internals.WorkspaceStore ?? BotWorkspaceStore;
   const workspaces = internals.workspaces
-    ?? await new WorkspaceStore(paths.workspaces, { defaultWorkspace, ungroupedWorkspace }).load();
+    ?? await new WorkspaceStore(paths.workspaces, { defaultWorkspace, ungroupedWorkspace, groupByAgentPreset: config.groupByAgentPreset }).load();
   const canListConfiguredBots = typeof configStore.list === 'function';
   const listConfiguredBots = () => canListConfiguredBots ? configStore.list() : [];
   const configuredBots = listConfiguredBots();
@@ -153,15 +155,41 @@ export async function createProductionController(ctx, config = {}, internals = {
     || botConfig.secretRef === LEGACY_FEISHU_SECRET_REF
     ? paths.legacyState
     : resolve(paths.bots, botConfig.id, 'state.json');
-  const stateFor = async (botConfig) => {
-    const stateKey = botConfig.id ?? '__legacy__';
-    let state = stateStores.get(stateKey);
-    if (!state) {
-      state = await new SessionStateStore(statePathFor(botConfig)).load();
-      stateStores.set(stateKey, state);
-    }
-    return state;
-  };
+  /**
+   * Every binding change is announced the moment it is written: a bind before the
+   * Session exists, an unbind when the conversation moves to another session or
+   * its binding is cleared. Listeners run synchronously.
+   */
+  const announcer = createBindingAnnouncer({
+    channel: 'feishu',
+    emit: (event, payload) => ctx.emit(event, payload),
+    authorsOf: (botId) => (typeof stateStores.get(botId)?.snapshot === 'function'
+      ? stateStores.get(botId).snapshot()?.authors ?? null
+      : null),
+  });
+  // The memo key is the bot id, and it is also the id the announcer puts into the
+  // event, so a subject without one has to fail loudly: keying it as something
+  // else would announce a bot no rule can match and answer `stateForSync` with
+  // null. `normalizeBot` always assigns an id - the pre-v2 bot gets a derived one
+  // - so this only fires on a programming mistake.
+  const { stateFor, stateForSync, prime, forget } = createAnnouncedStateStore({
+    announcer,
+    StateStore: SessionStateStore,
+    statePath: statePathFor,
+    keyOf: (subject) => {
+      const id = typeof subject === 'string' ? subject : subject?.id;
+      if (typeof id !== 'string' || id === '') {
+        throw new TypeError('a Feishu bot subject needs an id');
+      }
+      return id;
+    },
+    states: stateStores,
+    logger,
+  });
+  // Warm the per-bot state memo now: the synchronous identity lookup can only
+  // answer from state that is already loaded in this process, and the first prompt
+  // of a session arrives long before any delivery call would load it.
+  await prime(configuredBots);
   const stateForBotId = async (botId) => {
     const botConfig = listConfiguredBots().find((bot) => bot.id === botId);
     if (!botConfig) throw new Error('Unknown Feishu bot');
@@ -169,25 +197,15 @@ export async function createProductionController(ctx, config = {}, internals = {
   };
   // Session-sync mirror targets: which synced DMs (openId) belong to a
   // Session. Resolved lazily per turn start so rebinding a delivery target
-  // takes effect without a restart.
-  const sessionSyncTargetsFor = async (sessionId) => {
-    if (typeof workspaces.listSessionSyncTargets !== 'function') return [];
-    const matches = [];
-    for (const entry of workspaces.listSessionSyncTargets()) {
-      let state;
-      try {
-        state = await stateForBotId(entry.botId);
-      } catch {
-        continue;
-      }
-      const bound = state?.snapshot?.().sessions?.[entry.conversationKey];
-      if (bound !== sessionId) continue;
-      const target = workspaces.deliveryTargetFor(entry.botId, entry.targetId);
-      const openId = target?.route?.openId;
-      if (openId) matches.push({ openId, botId: entry.botId, targetId: entry.targetId });
-    }
-    return matches;
-  };
+  // takes effect without a restart. The resolver also reads the global delivery
+  // switches, so the card mirror is silenced by the same predicate as the
+  // coordinator's target path.
+  const sessionSyncTargetsFor = createSessionSyncTargetsFor({
+    channel: 'feishu',
+    workspaces,
+    config,
+    stateForBotId,
+  });
   const commandExecutor = createHarnessCommandExecutor(ctx, internals.commandExecutor);
   const inboundTtl = internals.inboundTtl ?? getInboundTtlRuntime(ctx, config);
   const inboundTtlService = inboundTtl?.service ?? inboundTtl;
@@ -235,6 +253,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         initialAccessPolicy: newBotAccessPolicyFor('feishu', botConfig),
       });
       const workspaceScope = createBotWorkspaceScope(harness, {
+        dsBot: config.deliveryService?.dsBot,
         botId: id, workspaces, state, agentPresetCatalog,
       });
       // 语音是可选渠道能力:凭据读取失败时静默禁用,不阻断机器人连接。
@@ -285,7 +304,7 @@ export async function createProductionController(ctx, config = {}, internals = {
       });
     },
     deleteState: async ({ botId, config: botConfig }) => {
-      stateStores.delete(botId);
+      forget(botId);
       try {
         await unlink(statePathFor(botConfig));
       } catch (error) {
@@ -294,6 +313,7 @@ export async function createProductionController(ctx, config = {}, internals = {
     },
   });
   const controller = createWorkspaceAwareController(coreController, {
+    harness,
     workspaces,
     stateFor: stateForBotId,
     agentPresetCatalog,
@@ -319,8 +339,10 @@ export async function createProductionController(ctx, config = {}, internals = {
   }).start();
   return {
     controller,
-    deliveryAdapter: createDeliveryAdapter({
+    deliveryAdapter: createDeliveryAdapter({ dsBot: config.deliveryService?.dsBot,
       channel: 'feishu', workspaces, coreController, stateFor: stateForBotId,
+      // The same store, without the await: it is a memo of already loaded bots.
+      stateForSync,
     }),
     ready: supervisor.ready,
     async close() {

@@ -4,7 +4,7 @@ import * as React from 'react';
 
 import { CredentialActionIcon, CredentialBindingPanel } from '../../credential-binding.js';
 import { AccountSettingsToggle, CollapsibleAccountSection } from './collapsible-account.js';
-import { h } from '../../i18n.js';
+import { channelName, h, localizeTemplate, localizeText } from '../../i18n.js';
 import { installDingtalkStyles } from '../dingtalk/styles.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
@@ -74,7 +74,7 @@ export function createTokenChannelSettings(definition) {
     platformLabel,
     CredentialPanel = null,
     credentialPayload = ({ secret }) => ({ token: secret }),
-    credentialAriaLabel = `使用 Bot Token 接入 ${channel} 机器人`,
+    credentialAriaLabel = localizeTemplate('使用 Bot Token 接入 {channel} 机器人', { channel: channelName(channel) }),
     credentialOpenLabel = '手动接入',
     credentialCloseLabel = '收起凭据',
     credentialNoun = 'Bot Token',
@@ -179,8 +179,11 @@ export function createTokenChannelSettings(definition) {
         ),
       ),
       removing ? h('div', { className: 'ddt-confirm dim-confirm', role: 'alertdialog' },
-        h('strong', null, `从 DeepSeek Harness 移除“${account.bot.name}”？`),
-        h('p', null, `这会停止消息连接，并删除本机保存的 ${credentialNoun}、机器人配置及会话映射。${platformLabel}中的机器人不会被自动删除。`),
+        h('strong', null, localizeTemplate('从 DeepSeek Harness 移除“{name}”？', { name: account.bot.name })),
+        h('p', null, localizeTemplate('这会停止消息连接，并删除本机保存的 {credentials}、机器人配置及会话映射。{platform}中的机器人不会被自动删除。', {
+          credentials: localizeText(credentialNoun),
+          platform: localizeText(platformLabel),
+        })),
         h('div', { className: 'ddt-actions dim-viewActions' },
           h(Button, { onClick: onCancelRemove, disabled: Boolean(busy) }, '保留机器人'),
           h(Button, { kind: 'danger', onClick: onConfirmRemove, disabled: Boolean(busy) },
@@ -215,7 +218,7 @@ export function createTokenChannelSettings(definition) {
     }, []);
 
     const invoke = React.useCallback(async (endpoint, payload = {}, signal) => {
-      if (typeof rpcCall !== 'function') throw new TypeError(`${channel} 设置页缺少 RPC 连接`);
+      if (typeof rpcCall !== 'function') throw new TypeError(localizeTemplate('{channel} 设置页缺少 RPC 连接', { channel: channelName(channel) }));
       const operation = !['connection.status', 'provision.poll', 'provision.begin', 'provision.cancel'].includes(endpoint);
       if (operation && mounted.current) setOperationError(null);
       try {
@@ -343,7 +346,7 @@ export function createTokenChannelSettings(definition) {
       ? h('section', { className: 'dim-listSection' },
           h(ChannelListHeading, {
             className: 'ddt-listHeading',
-            title: `已接入的 ${channel} 机器人`,
+            title: localizeTemplate('已接入的 {channel} 机器人', { channel: channelName(channel) }),
             connectionLabel,
           }),
           h('ul', { className: 'ddt-list dim-botList' }, model.bots.map((account) =>
@@ -416,7 +419,7 @@ export function createTokenChannelSettings(definition) {
       value: model.agentPresetCatalog ?? EMPTY_AGENT_PRESET_CATALOG,
     }, h('section', {
       className: `ddt-page ${pageClass} dim-channelPage`,
-      'aria-label': `${channel} 设置`,
+      'aria-label': localizeTemplate('{channel} 设置', { channel: channelName(channel) }),
     },
     operationError ? h(ConnectionError, { error: operationError }) : null,
     h('div', { className: 'ddt-heading' },
@@ -432,17 +435,21 @@ export function createTokenChannelSettings(definition) {
           }, h(CredentialActionIcon), credentialOpen ? credentialCloseLabel : credentialOpenLabel)),
         model.totals.configured > 0
           ? h('div', { className: 'ddt-badge dim-onlineBadge' },
-              h('span', null, `${model.totals.connected} / ${model.totals.configured} 在线`))
+              h('span', null, localizeTemplate('{connected} / {configured} 在线', {
+                connected: model.totals.connected,
+                configured: model.totals.configured,
+              })))
           : null)),
     model.phase === 'loading'
       ? h('div', {
           className: 'ddt-card ddt-loading dim-surfaceCard dim-loadingView',
           'aria-busy': 'true',
-        }, h('div', { className: 'ddt-spinner dim-spinner' }), `正在读取 ${channel} 机器人状态…`)
+        }, h('div', { className: 'ddt-spinner dim-spinner' }),
+          localizeTemplate('正在读取 {channel} 机器人状态…', { channel: channelName(channel) }))
       : model.phase === 'error'
         ? h('div', { className: 'ddt-card dim-surfaceCard' },
             h('div', { className: 'ddt-inlineError dim-inlineError' },
-              h('h3', null, `无法读取 ${channel} 机器人状态`),
+              h('h3', null, localizeTemplate('无法读取 {channel} 机器人状态', { channel: channelName(channel) })),
               h(ConnectionError, { error: model.error }),
               h(Button, { onClick: () => void loadStatus() }, '重新读取')))
         : h(React.Fragment, null,
@@ -475,7 +482,7 @@ export function createTokenChannelSettings(definition) {
                     h('div', { className: 'dim-emptyCopy' },
                       h('div', { className: 'ddt-stateLabel dim-stateLabel' },
                         h('span', { className: 'ddt-dot dim-stateDot' }),
-                        h('span', null, `尚未接入 ${channel} 机器人`)),
+                        h('span', null, localizeTemplate('尚未接入 {channel} 机器人', { channel: channelName(channel) }))),
                       h('h3', null, emptyTitle),
                       h('p', null, emptyDescription),
                       h('div', { className: 'ddt-actions dim-viewActions' },

@@ -1,5 +1,9 @@
 // English translations (wecom area). Keys are exact Chinese literals passed to t().
 export default {
+  '▣ 第 {segment} 段 · 任务仍在进行，继续见下一条 ↓':
+    '▣ Part {segment} · Task still running, continuing in the next message ↓',
+  '继续执行中…': 'Continuing…',
+  '仍在执行中…': 'Still working…',
   '/menu 或 /m  打开可点击的功能菜单': '/menu or /m  Open the interactive menu',
   '保持当前': 'Keep current',
   '会话': 'Session',

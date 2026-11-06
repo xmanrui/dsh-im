@@ -35,9 +35,12 @@ export class WecomRuntime {
   #logger;
   #diagnostics;
   #replyTimeoutMs;
+  #streamRotateAfterMs;
+  #streamSilentProbeMs;
   #connectTimeoutMs;
   #maxReconnectAttempts;
   #createClient;
+  #createBridge;
   #status = createWecomRuntimeStatus();
   #client = null;
   #bridge = null;
@@ -54,9 +57,12 @@ export class WecomRuntime {
     accessPolicy,
     logger = console,
     replyTimeoutMs = 600_000,
+    streamRotateAfterMs = 510_000,
+    streamSilentProbeMs = 120_000,
     connectTimeoutMs = 20_000,
     maxReconnectAttempts = 10,
     createClient = (options) => new WSClient(options),
+    createBridge = (options) => new WecomHarnessBridge(options),
   }) {
     if (!config || !secret || !harness || !state) {
       throw new TypeError('WecomRuntime requires config, secret, Harness, and state');
@@ -68,7 +74,10 @@ export class WecomRuntime {
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
     this.#logger = logger; this.#diagnostics = createConnectionDiagnostics({ channel: 'wecom', logger });
+    this.#createBridge = createBridge;
     this.#replyTimeoutMs = replyTimeoutMs;
+    this.#streamRotateAfterMs = streamRotateAfterMs;
+    this.#streamSilentProbeMs = streamSilentProbeMs;
     this.#connectTimeoutMs = connectTimeoutMs;
     this.#maxReconnectAttempts = maxReconnectAttempts;
     this.#createClient = createClient;
@@ -119,7 +128,7 @@ export class WecomRuntime {
       throw new TypeError('Enterprise WeChat client factory returned an invalid client');
     }
     this.#client = client;
-    this.#bridge = new WecomHarnessBridge({
+    this.#bridge = this.#createBridge({
       client,
       harness: this.#harness,
       state: this.#state,
@@ -128,6 +137,8 @@ export class WecomRuntime {
       status: this.#status,
       logger: this.#logger,
       replyTimeoutMs: this.#replyTimeoutMs,
+      streamRotateAfterMs: this.#streamRotateAfterMs,
+      streamSilentProbeMs: this.#streamSilentProbeMs,
       signal,
     });
 

@@ -5,7 +5,7 @@ import * as React from "react";
 import { FeishuLogoGlyph } from "../../channel-logos.js";
 import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from "../../credential-binding.js";
 import { AccountSettingsToggle, CollapsibleAccountSection } from "../shared/collapsible-account.js";
-import { h } from "../../i18n.js";
+import { h, localizeTemplate, localizeText } from "../../i18n.js";
 import {
   FEISHU_ENDPOINTS,
   FEISHU_REGISTRATION_OPERATIONS,
@@ -186,8 +186,14 @@ function Heading({ totals, onAdd, onCredential, credentialOpen, adding, busy, ad
       hasBots
         ? h("div", {
             className: "bxf-totalBadge dim-onlineBadge",
-            "aria-label": `已接入 ${totals.configured} 个机器人，其中 ${totals.connected} 个在线`,
-          }, h("span", null, `${totals.connected} / ${totals.configured} 在线`))
+            "aria-label": localizeTemplate('已接入 {configured} 个机器人，其中 {connected} 个在线', {
+              configured: totals.configured,
+              connected: totals.connected,
+            }),
+          }, h("span", null, localizeTemplate('{connected} / {configured} 在线', {
+            connected: totals.connected,
+            configured: totals.configured,
+          })))
         : null,
     ),
   );
@@ -272,9 +278,9 @@ function QrPane({ provision, now, onRefresh, onCancel, busy }) {
               ? h("img", {
                 src: qrSource,
                 alt: repairing
-                  ? `用于为${botName}补全权限与回调的一次性授权二维码`
+                  ? localizeTemplate('用于为{bot}补全权限与回调的一次性授权二维码', { bot: botName })
                   : grantingGroupMessages
-                    ? `用于为${botName}开通群消息权限的一次性授权二维码`
+                    ? localizeTemplate('用于为{bot}开通群消息权限的一次性授权二维码', { bot: botName })
                     : "用于新增 DeepSeek Harness 飞书机器人的一次性授权二维码",
                 onError: () => setImageFailed(true),
               })
@@ -287,7 +293,9 @@ function QrPane({ provision, now, onRefresh, onCancel, busy }) {
         ),
         h("div", {
           className: "bxf-countdown dim-countdown",
-          "aria-label": expired ? "二维码已失效" : `二维码剩余 ${formatRemaining(remaining)}`,
+          "aria-label": expired
+            ? "二维码已失效"
+            : localizeTemplate('二维码剩余 {remaining}', { remaining: formatRemaining(remaining) }),
         },
           h("div", { className: "bxf-countdownTop dim-countdownTop", "aria-hidden": "true" },
             h("span", null, expired ? "等待刷新" : "二维码有效时间"),
@@ -300,9 +308,9 @@ function QrPane({ provision, now, onRefresh, onCancel, busy }) {
         h("div", { className: "bxf-stateLabel dim-stateLabel" },
           h("span", { className: "bxf-dot dim-stateDot", "data-tone": "warning" }),
           h("span", null, repairing
-            ? `正在为「${botName}」补全权限与回调`
+            ? localizeTemplate('正在为「{bot}」补全权限与回调', { bot: botName })
             : grantingGroupMessages
-              ? `正在为「${botName}」开通群消息权限`
+              ? localizeTemplate('正在为「{bot}」开通群消息权限', { bot: botName })
               : "正在添加新机器人")),
         h("h3", null, expired
           ? "刷新二维码后继续"
@@ -456,7 +464,7 @@ function RemoveConfirmation({ bot, busy, onConfirm, onCancel }) {
       }
     },
   },
-    h("h4", { id: titleId }, `从 DeepSeek Harness 移除“${bot.bot.name}”？`),
+    h("h4", { id: titleId }, localizeTemplate('从 DeepSeek Harness 移除“{name}”？', { name: bot.bot.name })),
     h("p", { id: descriptionId },
       "此操作会停止这个机器人的连接，并删除保存在本机的接入配置和凭据。飞书开放平台中的应用不会被自动删除，其他机器人也不受影响。"),
     h("div", { className: "bxf-actions dim-viewActions" },
@@ -641,6 +649,7 @@ export function BotCard({
       },
         h(WorkspaceEditor, {
           workspace: connection.workspace,
+          locked: connection.conversationDirectory?.enabled === true,
           disabled: Boolean(busy),
           onSave: onWorkspaceSave,
         }),
@@ -669,7 +678,7 @@ export function BotCard({
       provisionContent
         ? h("section", {
             className: "bxf-botProvision dim-botProvision",
-            "aria-label": `${bot.name}的飞书授权流程`,
+            "aria-label": localizeTemplate('{bot}的飞书授权流程', { bot: bot.name }),
             "data-provision-for": connection.botId,
             ref: provisionRef,
             tabIndex: -1,
@@ -681,7 +690,7 @@ export function BotCard({
             h(Button, {
               className: "dim-cardAction", onClick: onReconnect,
               disabled: Boolean(busy), "aria-busy": busy === "reconnect" ? "true" : undefined,
-              "aria-label": `${connected ? "检查连接" : "重试连接"}${bot.name}`,
+              "aria-label": localizeTemplate(connected ? '检查连接{name}' : '重试连接{name}', { name: bot.name }),
             }, busy === "reconnect" ? (connected ? "检查中…" : "正在连接…") : connected ? "检查连接" : "重试连接"),
             h("span", { className: "bxf-repairAction" },
               h(Button, {
@@ -689,7 +698,7 @@ export function BotCard({
                 onClick: onRepairCallback,
                 disabled: Boolean(busy) || repairDisabled,
                 "aria-busy": busy === "callback-repair" ? "true" : undefined,
-                "aria-label": `为${bot.name}补全权限与回调`,
+                "aria-label": localizeTemplate('为{bot}补全权限与回调', { bot: bot.name }),
                 "aria-describedby": repairTooltipId,
               }, busy === "callback-repair" ? "等待扫码…" : "补全权限"),
               h("span", {
@@ -702,7 +711,7 @@ export function BotCard({
             h(Button, {
               className: "dim-cardAction", kind: "danger", onClick: onRequestRemove,
               disabled: Boolean(busy), ref: removeButtonRef,
-              "aria-label": `从 DeepSeek Harness 移除${bot.name}`,
+              "aria-label": localizeTemplate('从 DeepSeek Harness 移除{name}', { name: bot.name }),
             }, "移除接入")),
           summary ? h("div", { className: "bxf-healthSummary dim-cardSummary", "data-error": actionError || connection.error ? "true" : undefined },
             summary) : null,
@@ -1025,9 +1034,9 @@ export function FeishuSettingsTab({ rpcCall }) {
         },
       }));
       announce(repairing
-        ? `${botName ?? "机器人"}的权限补全二维码已生成，请使用飞书扫码。`
+        ? localizeTemplate('{bot}的权限补全二维码已生成，请使用飞书扫码。', { bot: botName ?? "机器人" })
         : grantingGroupMessages
-          ? `${botName ?? "机器人"}的群消息权限二维码已生成，请使用飞书确认。`
+          ? localizeTemplate('{bot}的群消息权限二维码已生成，请使用飞书确认。', { bot: botName ?? "机器人" })
           : "授权二维码已生成，请使用飞书扫码。");
     } catch (error) {
       setModel((current) => ({
@@ -1116,8 +1125,8 @@ export function FeishuSettingsTab({ rpcCall }) {
           const targetBotName = targetBot?.bot.name ?? activeProvision.botName ?? "机器人";
           setModel((current) => ({ ...current, provisioning: null }));
           announce(grantingGroupMessages
-            ? `${targetBotName}已开通群消息权限，并启用“响应所有群消息”。`
-            : `${targetBotName}的权限与回调已补全。`);
+            ? localizeTemplate('{bot}已开通群消息权限，并启用“响应所有群消息”。', { bot: targetBotName })
+            : localizeTemplate('{bot}的权限与回调已补全。', { bot: targetBotName }));
           if (activeProvision.botId) setFocusBotId(activeProvision.botId);
           await loadStatus({ silent: true, restoreProvisioning: false });
           return;
@@ -1207,11 +1216,11 @@ export function FeishuSettingsTab({ rpcCall }) {
           }
           setModel((current) => ({ ...current, provisioning: null }));
           announce(isCallbackRepair(provision)
-            ? `${targetBot.bot.name}的权限与回调已补全。`
+            ? localizeTemplate('{bot}的权限与回调已补全。', { bot: targetBot.bot.name })
             : isGroupMessagePermission(provision)
-              ? `${targetBot.bot.name}已开通群消息权限，并启用“响应所有群消息”。`
+              ? localizeTemplate('{bot}已开通群消息权限，并启用“响应所有群消息”。', { bot: targetBot.bot.name })
               : targetBot
-                ? `${targetBot.bot.name}已连接，可以在飞书中开始聊天。`
+                ? localizeTemplate('{bot}已连接，可以在飞书中开始聊天。', { bot: targetBot.bot.name })
                 : "新飞书机器人已连接，可以开始聊天。");
           if (result.botId) setFocusBotId(result.botId);
           return;
@@ -1327,8 +1336,8 @@ export function FeishuSettingsTab({ rpcCall }) {
         setTestNoticesByBot((current) => ({ ...current, [botId]: testNotice }));
       }
       announce(testNotice ?? (connection.connected
-        ? `${bot.name}连接检查完成。`
-        : `${bot.name}已重新连接。`));
+        ? localizeTemplate('{bot}连接检查完成。', { bot: bot.name })
+        : localizeTemplate('{bot}已重新连接。', { bot: bot.name })));
     } catch (error) {
       const failure = new Error("连接检查失败，请稍后重试。");
       failure.code = error?.code;
@@ -1405,11 +1414,11 @@ export function FeishuSettingsTab({ rpcCall }) {
       if (mountedRef.current && workspaceFence.canCommitMutation(snapshotVersion)) {
         mergeSnapshot(snapshot);
       }
-      announce(`${bot.name}已从此 DeepSeek Harness 移除；飞书开放平台中的应用未被删除。`);
+      announce(localizeTemplate('{bot}已从此 DeepSeek Harness 移除；飞书开放平台中的应用未被删除。', { bot: bot.name }));
       scheduleAnimationFrame(() => addButtonRef.current?.focus(), "focus");
     } catch (error) {
       setBotError(botId, error);
-      announce(`${bot.name}移除失败，请重试。`);
+      announce(localizeTemplate('{bot}移除失败，请重试。', { bot: bot.name }));
     } finally {
       const shouldRefresh = workspaceFence.endMutation();
       if (shouldRefresh && mountedRef.current) void loadStatus({ silent: true });
@@ -1523,7 +1532,7 @@ export function FeishuSettingsTab({ rpcCall }) {
     model.statusError
       ? h("div", { className: "bxf-statusNotice dim-statusNotice", role: "status" },
           h(AlertIcon, { size: 16 }),
-          h("span", null, `状态自动刷新失败：${model.statusError.message}`),
+          h("span", null, localizeTemplate('状态自动刷新失败：{error}', { error: localizeText(model.statusError.message) })),
           h(Button, { size: "small", onClick: () => void loadStatus({ silent: true }), disabled: pageBusy }, "立即重试"))
       : null,
     model.phase === "loading"

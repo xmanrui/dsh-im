@@ -77,3 +77,31 @@ test('the first terminal reaction wins', async () => {
 
   assert.deepEqual(added, ['eyes', 'error']);
 });
+
+test('a channel can end a turn with no reaction at all', async () => {
+  const calls = [];
+  const status = {};
+  const reaction = beginStatusReaction({
+    adapter: {
+      addReaction: async (target, emoji) => {
+        calls.push(['add', target, emoji]);
+        return `key:${emoji}`;
+      },
+      removeReaction: async (target, key) => calls.push(['remove', target, key]),
+    },
+    target: 'source-message',
+    reactions: { processing: 'eyes', success: null, error: 'error' },
+    status,
+    logger: { warn() {} },
+  });
+
+  reaction.success();
+  await reaction.settled();
+
+  assert.deepEqual(calls, [
+    ['add', 'source-message', 'eyes'],
+    ['remove', 'source-message', 'key:eyes'],
+  ], 'the processing reaction is removed and nothing takes its place');
+  assert.equal(status.reactionsAdded, 1);
+  assert.equal(status.reactionsRemoved, 1);
+});

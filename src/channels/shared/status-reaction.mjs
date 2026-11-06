@@ -66,6 +66,8 @@ export function beginStatusReaction({
     }
   };
 
+  // `emoji` may be null: the transition then only removes the previous
+  // reaction, which is how a channel asks for a clean message at the end.
   const transition = async (emoji) => {
     if (currentReaction !== null) {
       const previous = currentReaction;

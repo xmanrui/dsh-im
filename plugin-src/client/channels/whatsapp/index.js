@@ -5,7 +5,7 @@ import * as React from 'react';
 import { WhatsappLogoGlyph } from '../../channel-logos.js';
 import { QrActionIcon } from '../../credential-binding.js';
 import { AccountSettingsToggle, CollapsibleAccountSection } from '../shared/collapsible-account.js';
-import { h } from '../../i18n.js';
+import { channelName, h, localizeTemplate } from '../../i18n.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
 import {
@@ -87,7 +87,7 @@ function Heading({ totals, busy, onAdd, addButtonRef }) {
         }, h(QrActionIcon), busy ? '正在接入' : '扫码接入机器人')),
       totals.configured > 0
         ? h('div', { className: 'ddt-badge dim-onlineBadge' },
-            h('span', null, `${totals.connected} / ${totals.configured} 在线`))
+            h('span', null, localizeTemplate('{connected} / {configured} 在线', { connected: totals.connected, configured: totals.configured })))
         : null));
 }
 
@@ -95,7 +95,7 @@ function LoadingView() {
   return h('div', {
     className: 'ddt-card ddt-loading dim-surfaceCard dim-loadingView',
     'aria-busy': 'true',
-  }, h('div', { className: 'ddt-spinner dim-spinner' }), '正在读取 WhatsApp 机器人状态…');
+  }, h('div', { className: 'ddt-spinner dim-spinner' }), localizeTemplate('正在读取 {channel} 机器人状态…', { channel: channelName('WhatsApp') }));
 }
 
 export function EmptyView({ busy, onStart }) {
@@ -104,7 +104,7 @@ export function EmptyView({ busy, onStart }) {
       h('div', { className: 'dim-emptyCopy' },
         h('div', { className: 'ddt-stateLabel dim-stateLabel' },
           h('span', { className: 'ddt-dot dim-stateDot' }),
-          h('span', null, '尚未接入 WhatsApp 机器人')),
+          h('span', null, localizeTemplate('尚未接入 {channel} 机器人', { channel: channelName('WhatsApp') }))),
         h('h3', null, '扫码绑定 WhatsApp 机器人'),
         h('p', null, '使用手机 WhatsApp 扫描二维码即可接入。'),
         h('div', { className: 'ddt-actions dim-viewActions' },
@@ -178,7 +178,7 @@ export function ProvisionView({ provision, busy, onRetry, onClose }) {
 
 function RemoveConfirmation({ account, busy, onConfirm, onCancel }) {
   return h('div', { className: 'ddt-confirm dim-confirm', role: 'alertdialog' },
-    h('strong', null, `从 DeepSeek Harness 移除“${account.bot.name}”？`),
+    h('strong', null, localizeTemplate('从 DeepSeek Harness 移除“{name}”？', { name: account.bot.name })),
     h('p', null, '这会停止消息连接，并删除本机保存的 WhatsApp 关联设备和会话映射。'),
     h('div', { className: 'ddt-actions dim-viewActions' },
       h(Button, { onClick: onCancel, disabled: busy }, '保留机器人'),
@@ -583,7 +583,7 @@ export function WhatsappSettingsTab({ rpcCall }) {
     : model.phase === 'error'
       ? h('div', { className: 'ddt-card dim-surfaceCard' },
           h('div', { className: 'ddt-inlineError dim-inlineError' },
-            h('h3', null, '无法读取 WhatsApp 机器人状态'),
+            h('h3', null, localizeTemplate('无法读取 {channel} 机器人状态', { channel: channelName('WhatsApp') })),
             h(ConnectionError, { error: model.error }),
             h(Button, { onClick: () => void loadStatus() }, '重新读取')))
       : h(React.Fragment, null,

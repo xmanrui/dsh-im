@@ -320,6 +320,32 @@ export class GroupHistoryStore {
       coverage: 'Only messages actually received by this plugin; not complete platform history.' };
   }
 
+  /**
+   * Groups this channel has archived, newest activity first.
+   *
+   * Used by channel settings that are scoped per chat (Telegram's per-group
+   * reply rules) so the panel can offer real chat IDs with their titles.
+   */
+  async listGroups({ channel } = {}) {
+    await this.ready();
+    if (!GROUP_HISTORY_CHANNELS.includes(channel)) return [];
+    const rows = this.#db.prepare(`SELECT g.platform_group_id AS chat_id, g.name AS title,
+        g.last_received_at AS last_received_at, g.capability AS capability,
+        (SELECT m.sender_name FROM messages m WHERE m.group_id = g.id
+          ORDER BY m.sent_at DESC, m.received_at DESC LIMIT 1) AS last_sender_name
+      FROM groups g WHERE g.channel = ? ORDER BY coalesce(g.last_received_at, 0) DESC`).all(channel);
+    return rows.map((row) => ({
+      chatId: String(row.chat_id),
+      title: typeof row.title === 'string' && row.title ? row.title : null,
+      // The archive stores no chat type; the platform reported a group.
+      type: null,
+      lastSeenAt: Number.isSafeInteger(row.last_received_at) && row.last_received_at > 0
+        ? new Date(row.last_received_at).toISOString() : null,
+      lastSenderName: typeof row.last_sender_name === 'string' && row.last_sender_name
+        ? row.last_sender_name : null,
+    }));
+  }
+
   async materialize(groupId, attachmentId, workspace) {
     await this.ready();
     if (this.#settingsError) throw invalid(this.#settingsError);

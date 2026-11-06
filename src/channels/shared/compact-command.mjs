@@ -1,3 +1,4 @@
+import { isSessionNotFound } from './session-error.mjs';
 import { t } from './i18n.mjs';
 import { WORKSPACE_SESSION_STALE } from './workspace-session.mjs';
 
@@ -51,7 +52,7 @@ function compactResultText(result) {
 
 function compactErrorMessage(error) {
   const code = error?.code ?? error?.failure?.code;
-  if (code === 'session-not-found') {
+  if (isSessionNotFound(code)) {
     return t('当前聊天绑定的会话已不存在，请发送新消息开启会话。');
   }
   if (code === 'agent-busy') return t('当前会话正在生成回复，请稍后重试。');

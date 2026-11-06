@@ -206,6 +206,8 @@ test('management transport failures stay distinct from provider failures and can
     assert.equal(error.details.stage, 'management.request');
     assert.equal(error.details.referenceId, undefined);
     assert.equal(error.details.httpStatus, 403);
+    assert.match(error.message, /HTTP 403.*权限/);
+    assert.doesNotMatch(error.message, /重新登录/);
     assert.doesNotMatch(error.message, /private-token/);
     return true;
   });

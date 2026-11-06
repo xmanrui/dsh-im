@@ -5,7 +5,7 @@ import * as React from 'react';
 import { WeixinLogoGlyph } from '../../channel-logos.js';
 import { QrActionIcon } from '../../credential-binding.js';
 import { AccountSettingsToggle, CollapsibleAccountSection } from '../shared/collapsible-account.js';
-import { h } from '../../i18n.js';
+import { h, localizeTemplate } from '../../i18n.js';
 import {
   WEIXIN_ENDPOINTS,
   managementRequestError,
@@ -63,7 +63,7 @@ function Heading({ totals, adding, busy, onAdd, addButtonRef }) {
       }, h(QrActionIcon), adding ? '正在接入' : '扫码接入机器人'),
       totals.configured > 0
         ? h('div', { className: 'dxw-badge dim-onlineBadge' },
-            h('span', null, `${totals.connected} / ${totals.configured} 在线`))
+            h('span', null, localizeTemplate('{connected} / {configured} 在线', { connected: totals.connected, configured: totals.configured })))
         : null,
     ),
   );

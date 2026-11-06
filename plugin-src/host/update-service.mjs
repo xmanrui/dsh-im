@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import semver from 'semver';
 
 import manifest from '../../package.json' with { type: 'json' };
@@ -12,6 +13,8 @@ const JOB_STATES = new Set([...ACTIVE_STATES, 'restart-required', 'completed', '
 const MAX_METADATA_BYTES = 256 * 1024;
 const SNAPSHOT_FILES = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'];
 const NO_LOCK = Symbol('no update lock');
+// Shared across Host instances; keep network and installer work outside these transactions.
+const stateIoQueue = {};
 
 export function updateError(code) {
   return Object.assign(new Error(code), { code });
@@ -76,7 +79,17 @@ function pathsFor(environment) {
   };
 }
 
-async function readJson(path, missing = null) {
+function withStateIo(path, operation) {
+  const absolute = resolve(path);
+  const key = process.platform === 'win32' ? absolute.toLowerCase() : absolute;
+  return withSessionBindingLock(stateIoQueue, key, operation);
+}
+
+function readJson(path, missing = null) {
+  return withStateIo(path, () => readJsonUnlocked(path, missing));
+}
+
+async function readJsonUnlocked(path, missing = null) {
   try {
     if ((await stat(path)).size > 10 * 1024 * 1024) throw updateError('state-unavailable');
     return JSON.parse(await readFile(path, 'utf8'));
@@ -86,11 +99,25 @@ async function readJson(path, missing = null) {
   }
 }
 
-async function writeJson(path, value) {
+function writeJson(path, value) {
+  return withStateIo(path, () => writeJsonUnlocked(path, value));
+}
+
+async function writeJsonUnlocked(path, value) {
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-    await rename(temporary, path);
+    for (let retry = 0; ; retry++) {
+      try {
+        await rename(temporary, path);
+        break;
+      } catch (error) {
+        // Windows readers can temporarily deny replacement. Keep the old journal
+        // and retry the same atomic rename; never remove the destination first.
+        if (process.platform !== 'win32' || error.code !== 'EPERM' || retry >= 5) throw error;
+        await delay(10 * 2 ** retry);
+      }
+    }
   } catch {
     throw updateError('state-unavailable');
   } finally {
@@ -255,8 +282,10 @@ export function createUpdateService({
   }
 
   async function releaseLock(paths, id) {
-    const lock = await readJson(paths.lock);
-    if (lock?.id === id) await unlink(paths.lock);
+    await withStateIo(paths.lock, async () => {
+      const lock = await readJsonUnlocked(paths.lock);
+      if (lock?.id === id) await unlink(paths.lock);
+    });
   }
 
   async function backupProfile(environment, paths, job) {
@@ -348,13 +377,15 @@ export function createUpdateService({
       let locked = false;
       try {
         await mkdir(paths.directory, { recursive: true, mode: 0o700 });
-        const lock = await open(paths.lock, 'wx', 0o600);
-        locked = true;
-        try {
-          await lock.writeFile(JSON.stringify({ id: job.id, pid: process.pid, startedAt: now() }));
-        } finally {
-          await lock.close();
-        }
+        await withStateIo(paths.lock, async () => {
+          const lock = await open(paths.lock, 'wx', 0o600);
+          locked = true;
+          try {
+            await lock.writeFile(JSON.stringify({ id: job.id, pid: process.pid, startedAt: now() }));
+          } finally {
+            await lock.close();
+          }
+        });
         const currentRelease = await fetchNpmRelease(fetchImpl, checkTimeoutMs);
         if (JSON.stringify(currentRelease) !== JSON.stringify(confirmation.release)) throw updateError('check-expired');
         environment = await runtime.inspect({ preflight: true });

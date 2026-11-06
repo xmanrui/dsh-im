@@ -42,11 +42,14 @@ function sendPlainText(bot, target, content, msgSeq) {
  * 以 markdown（msg_type=2）发送回复；单条被平台拒绝时回退纯文本（msg_type=0）。
  * 返回每条消息的平台响应，供调用方提取 provider message ids。
  */
-export async function sendMarkdownReply(bot, target, text, { logger, signal, requireComplete = false } = {}) {
+export async function sendMarkdownReply(bot, target, text, { logger, signal, requireComplete = false, passiveRepliesUsed = 0 } = {}) {
   const chunks = chunkMarkdownParts(text);
   const results = [];
   const firstMsgSeq = nextMsgSeq();
-  const passiveLimit = target?.msgId ? PASSIVE_REPLY_LIMIT[target.scope] : null;
+  // Earlier replies to the same msg_id (for example a timeout notice) spend
+  // part of QQ's passive budget; at least one slot is kept for this reply.
+  const passiveLimit = target?.msgId
+    ? Math.max(1, PASSIVE_REPLY_LIMIT[target.scope] - passiveRepliesUsed) : null;
   const overflow = passiveLimit !== null && chunks.length > passiveLimit;
   const passiveContentCount = overflow ? passiveLimit - 1 : chunks.length;
   const proactiveTarget = target?.msgId

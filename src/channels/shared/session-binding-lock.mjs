@@ -1,4 +1,5 @@
 const bindingLocks = new WeakMap();
+export const SESSION_BINDING_STATE_IDENTITY = Symbol('session-binding-state-identity');
 
 function stateLocks(state) {
   let locks = bindingLocks.get(state);
@@ -21,6 +22,7 @@ export async function withSessionBindingLock(state, key, operation) {
   if (typeof key !== 'string' || !key) throw new TypeError('conversation key is required');
   if (typeof operation !== 'function') throw new TypeError('operation is required');
 
+  state = state[SESSION_BINDING_STATE_IDENTITY] ?? state;
   const locks = stateLocks(state);
   const previous = locks.get(key) ?? Promise.resolve();
   let release;

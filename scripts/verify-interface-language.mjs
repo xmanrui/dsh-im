@@ -8,8 +8,13 @@
  * user-settings document.
  *
  * Set DSH_IM_TELEGRAM_TOKEN to additionally bind a real bot and assert the
- * command menu Telegram itself stores. That step is skipped without a token,
- * and it restores the bot's original menu when it finishes.
+ * command menu Telegram itself stores. That step is skipped without a token.
+ * The plugin registers its menu per BotCommandScope, so the live check saves,
+ * polls and restores all three scopes (default, all_private_chats,
+ * all_group_chats); polling only the default scope would wait forever.
+ *
+ * Offline: `node scripts/verify-interface-language.mjs --check-scopes` prints
+ * the scope plan and exits without a Harness checkout, network or token.
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -18,11 +23,34 @@ import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
+import {
+  GROUP_COMMAND_SCOPE,
+  PRIVATE_COMMAND_SCOPE,
+  VERIFY_COMMAND_SCOPES,
+  restoreScopedMenus,
+  saveScopedMenus,
+} from './telegram-menu-scopes.mjs';
+
 const harnessRoot = process.argv[2];
-if (!harnessRoot || process.argv.includes('--help')) {
+if (process.argv.includes('--help')) {
   console.log('Usage: node scripts/verify-interface-language.mjs /path/to/built/deepseek-harness');
+  console.log('       node scripts/verify-interface-language.mjs --check-scopes   (offline scope self-check)');
   console.log('       DSH_IM_TELEGRAM_TOKEN=<token> node scripts/verify-interface-language.mjs ... (adds the live menu check)');
-  process.exit(harnessRoot ? 0 : 1);
+  process.exit(0);
+}
+if (process.argv.includes('--check-scopes')) {
+  console.table(VERIFY_COMMAND_SCOPES.map(({ name, scope }) => ({
+    scope: name,
+    payload: JSON.stringify(scope ? { scope } : {}),
+  })));
+  console.log(`Offline self-check passed: ${VERIFY_COMMAND_SCOPES.length} Telegram command scopes`
+    + ' (default/private/group) are saved, polled and restored.');
+  process.exit(0);
+}
+if (!harnessRoot) {
+  console.log('Usage: node scripts/verify-interface-language.mjs /path/to/built/deepseek-harness');
+  console.log('       node scripts/verify-interface-language.mjs --check-scopes   (offline scope self-check)');
+  process.exit(1);
 }
 const pluginRoot = resolve(import.meta.dirname, '..');
 await access(join(pluginRoot, 'lib/index.js'));
@@ -56,7 +84,7 @@ async function resolveHarness(root) {
 const harness = await resolveHarness(harnessRoot);
 const cli = harness.cli;
 const botToken = process.env.DSH_IM_TELEGRAM_TOKEN;
-let telegramMenu;
+let savedMenus;
 const directory = await mkdtemp(join(tmpdir(), 'dsh-im-language-test-'));
 const home = join(directory, 'home');
 const profile = join(home, 'profiles/web');
@@ -264,7 +292,9 @@ try {
   record('the language route refuses malformed payloads', '4 cases');
 
   if (botToken) {
-    telegramMenu = await telegram('getMyCommands');
+    // The plugin writes per scope; save every scope it may touch before binding
+    // so the original state can be restored exactly.
+    savedMenus = await saveScopedMenus(telegram);
     const bound = await rpc(browser, 'telegram', 'bot.bind-credentials', { token: botToken });
     assert.equal(bound.ok, true, 'the bot must bind');
     const botId = bound.value.bots.at(-1).botId;
@@ -272,16 +302,32 @@ try {
       const status = await rpc(browser, 'telegram', 'connection.status');
       return status.value?.bots?.find(item => item.botId === botId)?.connected ? true : null;
     });
-    const english = await waitFor('Telegram stores the English menu', async () => {
-      const commands = await telegram('getMyCommands');
+    const english = await waitFor('Telegram stores the English menu in the private-chat scope', async () => {
+      const commands = await telegram('getMyCommands', { scope: PRIVATE_COMMAND_SCOPE });
       const help = commands.find(item => item.command === 'help');
       return help && !HAN.test(help.description) ? commands : null;
     });
-    record('Telegram stores the English command menu while DSH is English', `${english.length} commands`);
+    record('Telegram stores the English command menu in the private-chat scope',
+      `${english.length} commands`);
+
+    await waitFor('the legacy default-scope menu is cleared', async () => {
+      const commands = await telegram('getMyCommands');
+      return commands.length === 0 ? true : null;
+    });
+    record('the scoped registration clears the legacy default-scope menu', 'default scope empty');
+
+    const groupCommands = await telegram('getMyCommands', { scope: GROUP_COMMAND_SCOPE });
+    for (const directOnly of ['history', 'batch', 'send', 'cancel']) {
+      assert.equal(groupCommands.some(item => item.command === directOnly), false,
+        `the group menu must not advertise /${directOnly}`);
+    }
+    assert.equal(groupCommands.length, english.length - 4,
+      'the group menu is the private menu without the four direct-chat-only commands');
+    record('the group scope omits direct-chat-only commands', `${groupCommands.length} commands`);
 
     await selectInterfaceLanguage('zh');
     const chinese = await waitFor('Telegram stores the Chinese menu after the switch', async () => {
-      const commands = await telegram('getMyCommands');
+      const commands = await telegram('getMyCommands', { scope: PRIVATE_COMMAND_SCOPE });
       const help = commands.find(item => item.command === 'help');
       return help && HAN.test(help.description) ? commands : null;
     });
@@ -316,17 +362,16 @@ try {
   console.table(results);
   console.log(`Passed ${results.length} real HTTP checks against an unmodified DSH CLI (${harness.kind} layout).`);
   console.log(botToken
-    ? 'The live Telegram menu was exercised and the bot\'s original menu was restored.'
+    ? 'The live Telegram menu was exercised; the bot\'s original menus were restored in all three scopes.'
     : 'Set DSH_IM_TELEGRAM_TOKEN to additionally assert the menu Telegram itself stores.');
   console.log('The temporary home contains no bot credentials and is removed after the server stops.');
 } finally {
   await stop();
-  if (botToken && telegramMenu !== undefined) {
+  if (botToken && savedMenus !== undefined) {
     try {
-      if (telegramMenu.length > 0) await telegram('setMyCommands', { commands: telegramMenu });
-      else await telegram('deleteMyCommands');
+      await restoreScopedMenus(telegram, savedMenus);
     } catch {
-      console.error('could not restore the bot\'s original command menu');
+      console.error('could not restore the bot\'s original command menus');
     }
   }
   await rm(directory, { recursive: true, force: true });

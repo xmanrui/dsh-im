@@ -181,12 +181,191 @@ test('DeliveryService tests a validated draft route without reading or persistin
   assert.equal(sends.length, 1);
 });
 
+test('a Session delivery follows the binding instead of a configured target', async () => {
+  const warnings = [];
+  const service = createDeliveryService({ logger: { warn: (line) => warnings.push(line) } });
+  const sends = [];
+  service.registerAdapter(createDeliveryAdapter({
+    channel: 'telegram',
+    workspaces: {
+      has: (botId) => botId === 'bot_one',
+      listBotIds: () => ['bot_one'],
+      listDeliveryTargets: () => [],
+      listSessionSyncTargets: () => [],
+    },
+    coreController: {
+      async sendProactiveText(...args) { sends.push(args); },
+    },
+    stateFor: async () => ({
+      snapshot: () => ({
+        sessions: {
+          'group:-1004337494578:42': 'session-topic',
+          'direct:777': 'session-direct',
+          // A key the channel can persist but no delivery route covers.
+          'unroutable-key': 'session-unroutable',
+          // A legacy Telegram key that once carried a thread after the chat id.
+          'direct:777:42': 'session-legacy',
+        },
+      }),
+    }),
+  }));
+
+  // A forum topic keeps its thread: the conversation key becomes the draft
+  // route the ordinary delivery path already accepts.
+  assert.deepEqual(
+    await service.deliverSessionText('session-topic', 'topic text', { format: 'markdown' }),
+    { sent: true },
+  );
+  assert.deepEqual(sends, [[
+    'bot_one',
+    {
+      targetId: '__test__',
+      kind: 'topic',
+      route: { chatId: '-1004337494578', messageThreadId: 42 },
+    },
+    'topic text',
+    { signal: undefined, format: 'markdown' },
+  ]]);
+
+  assert.deepEqual(await service.deliverSessionText('session-direct', 'direct text'), { sent: true });
+  assert.deepEqual(sends[1], [
+    'bot_one',
+    { targetId: '__test__', kind: 'chat', route: { chatId: '777' } },
+    'direct text',
+    { signal: undefined },
+  ]);
+
+  // Nowhere to go is a result, not a failure, but it is never silent: the log
+  // names the Session, the channel and the key, and never the body itself.
+  const body = 'body that must not be logged';
+  assert.deepEqual(await service.deliverSessionText('session-unbound', body), {
+    sent: false,
+    reason: 'unbound',
+  });
+  assert.deepEqual(await service.deliverSessionText('session-unroutable', body), {
+    sent: false,
+    reason: 'unroutable',
+  });
+  // A legacy `direct:<chatId>:<threadId>` key is reported, never reinterpreted
+  // as a chat: guessing a recipient would drop the thread and message the wrong
+  // place.
+  assert.deepEqual(await service.deliverSessionText('session-legacy', body), {
+    sent: false,
+    reason: 'unroutable',
+  });
+
+test('deliverSessionText resolves a rolled-over DS Bot session through dsBot.status()', async () => {
+  const service = createDeliveryService({
+    dsBot: { status: async () => ({ state: 'ready', bots: [{ id: 'dsbot-1', name: 'Bot', sessionId: 'session-rolled' }] }) },
+  });
+  const sends = [];
+  service.registerAdapter(createDeliveryAdapter({
+    channel: 'telegram',
+    workspaces: {
+      has: (botId) => botId === 'bot_one',
+      listBotIds: () => ['bot_one'],
+      listDeliveryTargets: () => [],
+      listSessionSyncTargets: () => [],
+      listDsBotBindings: () => [{ botId: 'bot_one', conversationKey: 'direct:777', dsBotId: 'dsbot-1' }],
+    },
+    coreController: {
+      async sendProactiveText(...args) { sends.push(args); },
+    },
+    stateFor: async () => ({ snapshot: () => ({ sessions: {} }) }),
+  }));
+
+  assert.deepEqual(await service.deliverSessionText('session-rolled', 'answer'), { sent: true });
+  assert.deepEqual(sends, [[
+    'bot_one',
+    { targetId: '__test__', kind: 'chat', route: { chatId: '777' } },
+    'answer',
+    { signal: undefined },
+  ]]);
+});
+  assert.equal(sends.length, 2, 'no legacy key reached a chat');
+  assert.deepEqual(warnings, [
+    '[dsh-im] Session text was not delivered [unbound] session=session-unbound',
+    '[dsh-im] Session text was not delivered [unroutable] session=session-unroutable'
+      + ' channel=telegram conversationKey=unroutable-key',
+    '[dsh-im] Session text was not delivered [unroutable] session=session-legacy'
+      + ' channel=telegram conversationKey=direct:777:42',
+  ]);
+  assert.doesNotMatch(warnings.join('\n'), /body that must not be logged/);
+
+  await assert.rejects(service.deliverSessionText('', 'text'), { code: 'bad-request' });
+  await assert.rejects(service.deliverSessionText('session-topic', '   '), { code: 'bad-request' });
+  await assert.rejects(service.deliverSessionText('session-topic', 'text', { format: 'html' }), {
+    code: 'bad-request',
+  });
+  const abort = new AbortController();
+  abort.abort();
+  await assert.rejects(service.deliverSessionText('session-topic', 'text', { signal: abort.signal }), {
+    code: 'cancelled',
+  });
+  assert.equal(sends.length, 2);
+});
+
+test('a group Session receives mirrored text but never a synced question or approval', async () => {
+  const target = {
+    targetId: 'topic', name: 'Team topic', kind: 'topic',
+    route: { chatId: '-1001234567890', messageThreadId: 42 },
+  };
+  const sessions = { 'group:-1001234567890:42': 'session-topic' };
+  const calls = [];
+  const offer = (name) => async (...args) => { calls.push([name, ...args]); return true; };
+  const workspaces = {
+    has: () => true,
+    listBotIds: () => ['bot-telegram'],
+    listDeliveryTargets: () => [structuredClone(target)],
+    deliveryTargetFor: (_botId, targetId) => (targetId === target.targetId ? structuredClone(target) : null),
+    listSessionSyncTargets: () => [{
+      botId: 'bot-telegram',
+      targetId: target.targetId,
+      conversationKey: 'group:-1001234567890:42',
+    }],
+    createDeliveryTarget() {},
+    updateDeliveryTarget() {},
+    deleteDeliveryTarget() {},
+  };
+  const service = createDeliveryService({ logger: { warn: () => {} } });
+  service.registerAdapter(createDeliveryAdapter({
+    channel: 'telegram',
+    workspaces,
+    coreController: {
+      async sendProactiveText(...args) { calls.push(['text', ...args]); },
+      presentSessionSyncApproval: offer('approval'),
+      presentSessionSyncQuestion: offer('question'),
+    },
+    stateFor: async () => ({ snapshot: () => ({ sessions }) }),
+  }));
+
+  // Mirrored text follows the group route...
+  assert.deepEqual(
+    await service.deliverSessionText('session-topic', 'mirrored', { format: 'markdown' }),
+    { sent: true },
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'text');
+
+  // ...while a question or an approval would be answerable by any group member,
+  // so the group is not a candidate and nothing is offered there — not even the
+  // "answer on the desktop" notice that private targets receive.
+  assert.deepEqual(await service.listSessionSyncTargets('session-topic'), []);
+  assert.equal(await service.presentSessionSyncQuestion('session-topic', { kind: 'question' }), false);
+  assert.equal(
+    await service.presentSessionSyncApproval('session-topic', { payload: { toolName: 'bash' } }),
+    false,
+  );
+  assert.deepEqual(calls.map((entry) => entry[0]), ['text']);
+});
+
 test('DeliveryService revalidates suggestions before exposing adapter output', async () => {
   const service = createDeliveryService();
   const adapter = memoryAdapter();
   service.registerAdapter(adapter);
 
   adapter.listSuggestions = () => [{
+
     kind: 'chat',
     route: { chatId: '123' },
     sessionId: 'secret-session',
@@ -476,6 +655,31 @@ function approvalAdapter(channel, keys, { present = async () => true } = {}) {
     presentSessionSyncApproval: async (...args) => { offers.push(args); return present(...args); },
   });
   return { adapter, offers, notices };
+}
+
+for (const scenario of ['aliases', 'multiple-chats', 'unresolved', 'unsupported', 'failed']) {
+  test(`synced questions: ${scenario} routes to one private chat or sends a desktop notice`, async () => {
+    const service = createDeliveryService();
+    const keys = scenario === 'multiple-chats' ? ['p2p:a', 'p2p:b'] : ['p2p:a', 'p2p:a'];
+    const { adapter, notices } = approvalAdapter('feishu', keys);
+    const offered = [];
+    adapter.describeSessionSyncQuestionTarget = (_bot, id) => {
+      if (scenario === 'unresolved' && id === 'target1') throw new Error('binding unavailable');
+      return { conversationKey: keys[Number(id.slice(6))] };
+    };
+    if (scenario !== 'unsupported') adapter.presentSessionSyncQuestion = async (...args) => {
+      offered.push(args);
+      return scenario !== 'failed';
+    };
+    service.registerAdapter(adapter);
+    assert.equal(await service.presentSessionSyncQuestion('session', { kind: 'question' }), scenario === 'aliases');
+    assert.equal(offered.length, ['aliases', 'failed'].includes(scenario) ? 1 : 0);
+    if (scenario === 'aliases') assert.equal(notices.length, 0);
+    else {
+      assert.equal(notices.length, 2);
+      assert.match(notices[0][3], /桌面端回答/);
+    }
+  });
 }
 
 for (const channel of ['feishu', 'weixin', 'dingtalk', 'wecom', 'wecom-app', 'qq', 'telegram', 'slack', 'discord', 'whatsapp', 'matrix']) {

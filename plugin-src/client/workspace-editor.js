@@ -5,7 +5,7 @@ import { WorkspaceDirectoryPicker } from './workspace-directory-picker.js';
 
 export const WorkspaceDirectoryPickerContext = React.createContext(null);
 
-export function WorkspaceEditor({ workspace, directoryPicker, disabled = false, onSave }) {
+export function WorkspaceEditor({ workspace, directoryPicker, disabled = false, locked = false, onSave }) {
   const sharedDirectoryPicker = React.useContext(WorkspaceDirectoryPickerContext);
   const activeDirectoryPicker = directoryPicker ?? sharedDirectoryPicker;
   const [open, setOpen] = React.useState(false);
@@ -21,7 +21,7 @@ export function WorkspaceEditor({ workspace, directoryPicker, disabled = false, 
   }, []);
 
   const pick = React.useCallback(async (value) => {
-    if (!value || savingRef.current || disabled) return;
+    if (!value || savingRef.current || disabled || locked) return;
     if (value === workspace) {
       close();
       return;
@@ -38,7 +38,7 @@ export function WorkspaceEditor({ workspace, directoryPicker, disabled = false, 
       savingRef.current = false;
       setSaving(false);
     }
-  }, [close, disabled, onSave, workspace]);
+  }, [close, disabled, locked, onSave, workspace]);
 
   return h('div', { className: 'dim-workspace' },
     h('div', { className: 'dim-workspaceHeader' },
@@ -48,7 +48,8 @@ export function WorkspaceEditor({ workspace, directoryPicker, disabled = false, 
         ref: editButtonRef,
         className: 'dim-workspaceEdit',
         onClick: () => { setOpen(true); setError(null); },
-        disabled: disabled || !activeDirectoryPicker,
+        disabled: disabled || locked || !activeDirectoryPicker,
+        title: locked ? '会话目录隔离已开启，工作区由对话自动分配。' : undefined,
       }, '选择目录')),
     workspace
       ? React.createElement('code', {
@@ -60,7 +61,7 @@ export function WorkspaceEditor({ workspace, directoryPicker, disabled = false, 
       open,
       startPath: workspace,
       picker: activeDirectoryPicker,
-      busy: saving || disabled,
+      busy: saving || disabled || locked,
       saveError: error,
       onPicked: pick,
       onCancel: close,

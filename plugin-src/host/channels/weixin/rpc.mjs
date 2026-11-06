@@ -2,6 +2,7 @@ import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload } from '../../../../
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import QRCode from 'qrcode';
+import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 import { createWeixinDiagnostics, weixinStageError } from '../../../../src/channels/weixin/connection-error.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
@@ -170,8 +171,8 @@ export function createWeixinRpcHandler(controller, { encodeQr = qrDataUrl, logge
     if (!encoded) {
       if (qrCache.size >= 16) qrCache.delete(qrCache.keys().next().value);
       encoded = Promise.resolve().then(() => encodeQr(url)).catch(error => {
-        qrCache.delete(url);
-        throw weixinStageError('qr-encode-failed', error);
+        if (qrCache.get(url) === encoded) qrCache.delete(url);
+        throw weixinStageError('qr-encode-failed', qrEncodingError(error));
       });
       qrCache.set(url, encoded);
     }

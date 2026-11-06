@@ -3,7 +3,8 @@ import test from 'node:test';
 import { HarnessClient, HarnessRpcError, HarnessTransportError } from '../src/channels/shared/harness-client.mjs';
 import { askInWorkspaceSession } from '../src/channels/shared/workspace-session.mjs';
 import { classifyMessageFailure } from '../src/channels/shared/message-failure.mjs';
-import { getImHostLanguage, setImHostLanguage } from '../src/channels/shared/i18n.mjs';
+import { getImHostLanguage, setImHostLanguage, t as translate } from '../src/channels/shared/i18n.mjs';
+import { COMMAND_PERMISSION_DENIED_MESSAGE } from '../src/channels/shared/inbound-access.mjs';
 
 const SESSION = 'archive-session';
 const event = (seq, type, data) => ({ event: { seq, type, data } });
@@ -234,8 +235,16 @@ test('archive notices and blocked notices translate and retain references withou
         cause: new Error('private Zstandard detail') }, { referenceId: 'MF-ARCHIVE' });
       assert.equal(failure.code, 'SESSION_ARCHIVED');
       assert.equal(failure.message.includes(language === 'en' ? 'queued' : '队列'), accepted);
+      assert.match(failure.message, language === 'en'
+        ? /If you have command permission.*\/new.*administrator.*unarchive.*grant/u
+        : /有命令权限.*\/new.*管理员.*取消归档.*开启命令权限/u);
       assert.doesNotMatch(JSON.stringify(failure), /private Zstandard/);
       if (language === 'en') assert.doesNotMatch(failure.message, /[\u4e00-\u9fff]/);
     }
+    const denied = translate(COMMAND_PERMISSION_DENIED_MESSAGE);
+    assert.match(denied, language === 'en'
+      ? /administrator.*command permission.*direct or group chat.*Access Settings/u
+      : /管理员.*访问设置.*私聊或群聊.*命令权限/u);
+    if (language === 'en') assert.doesNotMatch(denied, /[\u4e00-\u9fff]/u);
   }
 });

@@ -1,6 +1,7 @@
+import { isSessionNotFound } from './session-error.mjs';
 import { connectionHint, extractConnectionEvidence, messageDiagnosticError, runtimeDiagnosticDetails } from './connection-error.mjs';
+import { createFailureReferenceId } from './delivery-failure-log.mjs';
 import { diagnosticFields } from './diagnostic-details.mjs';
-import { randomUUID } from 'node:crypto';
 
 import { t } from './i18n.mjs';
 
@@ -24,6 +25,11 @@ const PROVIDER_FAILURES = Object.freeze({
   CONTENT_FILTER: 'MODEL_CONTENT_REJECTED',
   UNSUPPORTED_CONTENT: 'MODEL_CONFIG',
 });
+
+// 提交超时（stage=prompt.submit 且 harness-timeout）单列文案：与「已提交、结果
+// 未知」区分，明确「提交请求本身超时、是否送达未知」，避免用户误以为任务已运行。
+const PROMPT_SUBMIT_UNCONFIRMED_MESSAGE =
+  '消息提交请求超时，未能确认消息是否已送达 DSH。请稍后到 DSH 查看该会话状态，不要立即重复提交；若持续发生，请将参考号提供给管理员。';
 
 const FAILURE_MESSAGES = Object.freeze({
   HARNESS_INTERACTION_TIMEOUT:
@@ -74,8 +80,10 @@ const FAILURE_MESSAGES = Object.freeze({
     '任务被意外中断，本次未完成。请重试。',
   SESSION_NOT_FOUND:
     '当前会话已不存在。请发送 /new 创建新会话后重试。',
+  SESSION_UNREADABLE:
+    '当前会话日志已损坏，无法继续读取。请先到 DSH 查看任务状态，再发送 /new 创建新会话；原会话记录会保留。',
   SESSION_ARCHIVED:
-    '当前会话已归档，无法继续处理。请在 DSH 中取消归档，或发送 /new 创建新会话。',
+    '当前会话已归档，无法继续处理。有命令权限时可发送 /new 创建新会话；否则请联系管理员在 DSH 中取消归档，或为你开启命令权限。',
   SESSION_BUSY:
     '当前会话仍在处理上一项任务。请等待完成，或发送 /stop 后重试。',
   SESSION_STALE:
@@ -145,7 +153,8 @@ function failureCode(error, details) {
   if (code === 'model-max-tokens') return 'MODEL_OUTPUT_LIMIT';
   if (code === 'turn-blocked') return 'TURN_BLOCKED';
   if (['turn-interrupted', 'turn-aborted'].includes(code)) return 'TURN_INTERRUPTED';
-  if (code === 'session-not-found') return 'SESSION_NOT_FOUND';
+  if (isSessionNotFound(code)) return 'SESSION_NOT_FOUND';
+  if (code === 'session-unreadable') return 'SESSION_UNREADABLE';
   if (code === 'session-archived') return 'SESSION_ARCHIVED';
   if (code === 'agent-busy') return 'SESSION_BUSY';
   if (code === 'workspace-session-stale') return 'SESSION_STALE';
@@ -197,7 +206,7 @@ function transportFailureCode(error, details) {
 function safeReferenceId(value) {
   return typeof value === 'string' && /^[A-Z0-9-]{6,40}$/u.test(value)
     ? value
-    : `MF-${randomUUID().slice(0, 8).toUpperCase()}`;
+    : createFailureReferenceId();
 }
 
 function safeFailureReason(value) {
@@ -226,6 +235,9 @@ export function classifyMessageFailure(error, {
   if (code === 'REQUEST_TIMEOUT' || code === 'NETWORK_ERROR') details.hint = connectionHint(details);
   if (details.stage || details.submissionState) Object.assign(details, runtimeDiagnosticDetails());
   let message = FAILURE_MESSAGES[code];
+  if (code === 'HARNESS_RESULT_UNCERTAIN' && error?.code === 'harness-timeout' && details.stage === 'prompt.submit') {
+    message = PROMPT_SUBMIT_UNCONFIRMED_MESSAGE;
+  }
   if (['INTERNAL_UNKNOWN', 'REQUEST_TIMEOUT', 'NETWORK_ERROR'].includes(code)) {
     if (details.submissionState === 'not-submitted') {
       message = code === 'REQUEST_TIMEOUT'

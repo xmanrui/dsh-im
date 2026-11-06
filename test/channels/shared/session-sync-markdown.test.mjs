@@ -77,17 +77,24 @@ test('Slack sync posts safe standard Markdown blocks and falls back only for the
   assert.ok(calls[0].blocks);
   assert.ok(calls[1].blocks);
   assert.equal(calls[2].blocks, undefined);
+  assert.equal(calls[2].text, undefined);
+  assert.equal(calls[2].markdown_text, calls[1].text);
   for (const call of calls) {
+    const body = call.markdown_text ?? call.text;
     assert.equal(call.channel, 'D12345678');
     assert.equal(call.thread_ts, '123.456');
-    assert.doesNotMatch(call.text, /<@|<!here>/);
+    assert.doesNotMatch(body, /<@|<!here>/);
     if (call.blocks) {
       assert.ok(call.blocks[0].text.length <= 12_000);
       assert.equal(call.blocks[0].text, call.text);
       assert.equal((call.text.match(/^```/gm) ?? []).length, 2);
     }
+    if (call.markdown_text) {
+      assert.ok(call.markdown_text.length <= 12_000);
+      assert.equal((call.markdown_text.match(/^```/gm) ?? []).length, 2);
+    }
   }
-  const accepted = calls.filter((_, i) => i !== 1).map(call => call.text).join('\n');
+  const accepted = calls.filter((_, i) => i !== 1).map(call => call.markdown_text ?? call.text).join('\n');
   for (let i = 0; i < rows.length; i++) assert.equal(accepted.split(`row_${i} =`).length - 1, 1);
   assert.equal(result.providerMessageIds.length, calls.length - 1);
   rejectSecond = false;

@@ -12,7 +12,7 @@ import { ConversationStateStore } from '../src/channels/shared/conversation-stat
 import { FeishuHarnessBridge } from '../src/channels/feishu/bridge.mjs';
 import { WecomHarnessBridge } from '../src/channels/wecom/wecom-bridge.mjs';
 import { WeixinHarnessBridge } from '../src/channels/weixin/weixin-bridge.mjs';
-import { QqHarnessBridge } from '../src/channels/qq/qq-bridge.mjs';
+import { QqHarnessBridge, deferredDeliveryTarget } from '../src/channels/qq/qq-bridge.mjs';
 import { DingtalkHarnessBridge } from '../src/channels/dingtalk/dingtalk-bridge.mjs';
 import { TelegramHarnessBridge } from '../src/channels/telegram/telegram-bridge.mjs';
 import { DiscordHarnessBridge } from '../src/channels/discord/discord-bridge.mjs';
@@ -70,7 +70,7 @@ function channelFixture(channel, record) {
     } }),
     message: (id, text) => ({ headers: { req_id: id }, body: { msgid: id, chattype: 'single', from: { userid: 'owner' }, msgtype: 'text', text: { content: text } } }),
   };
-  if (channel === 'qq') return { Store: QqStateStore, target: { scope: 'c2c', targetId: 'owner' },
+  if (channel === 'qq') return { Store: QqStateStore, target: { scope: 'c2c', targetId: 'owner', msgId: 'input' },
     create: (options) => new QqHarnessBridge({ ...options, ownerUserOpenid: 'owner', bot: { sendText: async (target, text) => record(target, text) } }),
     message: (messageId, content) => ({ kind: 'c2c', rawEventType: 'C2C_MESSAGE_CREATE', senderId: 'owner', senderIsBot: false, messageId, content,
       replyTarget: { scope: 'c2c', targetId: 'owner', msgId: messageId } }),
@@ -161,3 +161,61 @@ for (const channel of ['feishu', 'wecom', 'weixin', 'dingtalk', 'qq', ...Object.
     assert.equal(asks, 1, 'recovery must not submit the prompt again');
   });
 }
+
+test('qq: a deferred result replies passively only while the QQ msg_id window is open', () => {
+  const receivedAt = Date.parse('2026-10-26T10:00:00Z');
+  const c2c = { scope: 'c2c', targetId: 'owner', msgId: 'input', receivedAt };
+  assert.deepEqual(deferredDeliveryTarget(c2c, receivedAt + 30 * 60_000),
+    { scope: 'c2c', targetId: 'owner', msgId: 'input' });
+  assert.deepEqual(deferredDeliveryTarget(c2c, receivedAt + 60 * 60_000),
+    { scope: 'c2c', targetId: 'owner' });
+  const group = { scope: 'group', targetId: 'group', msgId: 'input', receivedAt };
+  assert.deepEqual(deferredDeliveryTarget(group, receivedAt + 2 * 60_000),
+    { scope: 'group', targetId: 'group', msgId: 'input' });
+  assert.deepEqual(deferredDeliveryTarget(group, receivedAt + 5 * 60_000),
+    { scope: 'group', targetId: 'group' });
+  // Entries persisted before this change carry no msg_id and stay proactive.
+  assert.deepEqual(deferredDeliveryTarget({ scope: 'c2c', targetId: 'owner' }, receivedAt),
+    { scope: 'c2c', targetId: 'owner' });
+});
+
+test('qq: a refused passive deferred reply falls back to one proactive send', async (t) => {
+  const { ApiError } = await import('@tencent-connect/qqbot-nodejs');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-deferred-qq-refused-'));
+  const sent = [];
+  const listeners = [];
+  let history = openHistory;
+  const harness = {
+    sessionExists: async () => true, createSession: async () => 'session', ensureRunning: async () => true,
+    ask: async () => { throw Object.assign(new Error('Harness stalled'), { code: 'harness-reply-timeout',
+      details: { sessionId: 'session', promptRpcId: 'im-prompt', turn: 3, baselineSeq: 0 } }); },
+    rpc: async () => ({ events: history, hasMore: false }),
+    watchHarnessEvents: (listener) => { listeners.push(listener); },
+  };
+  harness.workspaceSession = (sessionId) => ({ sessionId, sessionExists: harness.sessionExists, ask: harness.ask });
+  const abort = new AbortController();
+  const state = await new QqStateStore(join(dir, 'state.json')).load();
+  const bridge = new QqHarnessBridge({ ownerUserOpenid: 'owner', harness, state, logger, signal: abort.signal,
+    bot: {
+      sendText: async (target, text) => { sent.push({ target, text, kind: 'notice' }); return { id: 'notice' }; },
+      send: async ({ target, markdown, content }) => {
+        const text = markdown?.content ?? content;
+        sent.push({ target, text });
+        if (target.msgId) throw new ApiError('passive reply window closed', 400, '/v2/users/owner/messages', 304103);
+        return { id: 'out' };
+      },
+    } });
+  t.after(async () => { abort.abort(); await bridge.waitForIdle(); await rm(dir, { recursive: true, force: true }); });
+  await bridge.accept({ kind: 'c2c', rawEventType: 'C2C_MESSAGE_CREATE', senderId: 'owner', senderIsBot: false,
+    messageId: 'input', content: 'please compute', replyTarget: { scope: 'c2c', targetId: 'owner', msgId: 'input' } });
+  await bridge.waitForIdle();
+  history = completeHistory;
+  await listeners.at(-1).onSessionEvent({ sessionId: 'session', event: end });
+  await bridge.waitForIdle();
+  const results = sent.filter((row) => row.text === ANSWER);
+  assert.deepEqual(results.map((row) => row.target), [
+    { scope: 'c2c', targetId: 'owner', msgId: 'input' },
+    { scope: 'c2c', targetId: 'owner' },
+  ]);
+  assert.deepEqual(state.deferredEntries(), []);
+});

@@ -94,6 +94,28 @@ function buttons(value, result = []) {
   return result;
 }
 
+test('session cards translate the binding marker and preserve archived and watched states', () => {
+  setImHostLanguage('en');
+  try {
+    const card = JSON.parse(sessionListCard('/work', [
+      { sessionId: 'session-bound', title: 'Bound', archived: true },
+      { sessionId: 'session-other', title: 'Other' },
+    ], 0, 2, new Set(['session-bound']), 'session-bound'));
+    const rendered = JSON.stringify(card);
+    assert.match(rendered, /Bound\(archived\)\(currently bound\)/);
+    assert.equal(rendered.match(/currently bound/g)?.length, 1);
+    assert.doesNotMatch(rendered, /当前绑定/);
+    const actions = buttons(card).flatMap((button) => (
+      button.behaviors?.map((behavior) => behavior?.value?.action) ?? []
+    ));
+    assert.ok(actions.includes('use:session-bound'));
+    assert.ok(actions.includes('unwatch:session-bound'));
+    assert.ok(actions.includes('watch:session-other'));
+  } finally {
+    setImHostLanguage('zh');
+  }
+});
+
 function selects(value, result = []) {
   if (Array.isArray(value)) {
     for (const item of value) selects(item, result);
@@ -244,6 +266,8 @@ test('menu and card help advertise Agent Preset, reasoning, and batch commands',
   assert.match(help, /\/presetlist/);
   assert.match(help, /\/presets/);
   assert.match(help, /\/sessions/);
+  assert.match(help, /\/sessionlist --all/);
+  assert.match(help, /\/session .*标题关键词/);
   assert.match(help, /\/workspace 工作区序号或绝对路径/);
   assert.match(help, /\/ws、\/wsl、\/workspaces/);
   assert.match(help, /\/preset \[序号或完整ID\]/);
@@ -260,6 +284,9 @@ test('menu and card help advertise Agent Preset, reasoning, and batch commands',
   const card = helpCard();
   assert.match(card, /\/presets/);
   assert.match(card, /\/sessions/);
+  assert.match(card, /\/sessionlist --all/);
+  assert.match(card, /\/sessions --all/);
+  assert.match(card, /\/session .*标题关键词/);
   assert.match(card, /\/workspace 工作区序号或绝对路径/);
   assert.match(card, /\/ws、\/wsl、\/workspaces/);
   assert.match(card, /\/reasoninglist/);
@@ -320,6 +347,53 @@ test('menu session dropdown highlights the currently bound session via initial_i
   assert.ok(pick, 'menu must render a session dropdown');
   // initial_index is 1-based; the currently bound session sits at index 2.
   assert.equal(pick.initial_index, 2);
+});
+
+test('model cards expose reasoning levels for the selected model', () => {
+  const card = JSON.parse(modelCard({
+    groups: [{ id: 'provider', name: 'Provider', models: [{
+      id: 'model', name: 'Model', reasoning: {
+        defaultEffort: 'balanced', efforts: [
+          { id: 'fast', name: 'Fast' }, { id: 'balanced', name: 'Balanced' },
+        ],
+      },
+    }] }],
+    current: { provider: 'provider', model: 'model', reasoningEffort: 'balanced' },
+  }));
+  const pick = selects(card).find((s) => s.name === 'reasoning_pick');
+  assert.deepEqual(pick?.options.map((option) => option.value), ['__reasoning_default__', 'fast', 'balanced']);
+  assert.equal(pick?.initial_index, 3);
+});
+
+test('menu model picker remains capped at the compact-menu limit', () => {
+  const models = Array.from({ length: 35 }, (_, index) => ({ id: `model-${index}`, name: `Model ${index}` }));
+  const card = JSON.parse(menuCard({
+    currentSession: { id: 'session-one', title: 'Session one' },
+    sessions: [{ id: 'session-one', title: 'Session one' }],
+    modelCatalog: { groups: [{ id: 'provider', name: 'Provider', models }], current: null },
+  }));
+  const pick = selects(card).find((select) => select.name === 'model_pick');
+  assert.equal(pick?.options.length, 30);
+});
+
+test('model cards paginate large catalogs and expose navigation actions', () => {
+  const models = Array.from({ length: 45 }, (_, index) => ({ id: `model-${index}`, name: `Model ${index}` }));
+  const first = JSON.parse(modelCard({ groups: [{ id: 'provider', name: 'Provider', models }], current: null }, { page: 0 }));
+  assert.equal(selects(first).find((s) => s.name === 'model_pick')?.options.length, 20);
+  assert.match(JSON.stringify(first), /models:1/);
+  const third = JSON.parse(modelCard({ groups: [{ id: 'provider', name: 'Provider', models }], current: null }, { page: 2 }));
+  assert.equal(selects(third).find((s) => s.name === 'model_pick')?.options.length, 5);
+  assert.match(JSON.stringify(third), /最后一页/);
+});
+
+test('model cards keep the full model catalog available across pages', () => {
+  const models = Array.from({ length: 35 }, (_, index) => ({ id: `model-${index}`, name: `Model ${index}` }));
+  const card = JSON.parse(modelCard({ groups: [{ id: 'provider', name: 'Provider', models }], current: null }));
+  const pick = selects(card).find((s) => s.name === 'model_pick');
+  assert.equal(pick?.options.length, 20);
+  assert.equal(pick?.options.at(-1)?.value, 'provider/model-19');
+  const later = JSON.parse(modelCard({ groups: [{ id: 'provider', name: 'Provider', models }], current: null }, { page: 1 }));
+  assert.equal(selects(later).find((s) => s.name === 'model_pick')?.options.at(-1)?.value, 'provider/model-34');
 });
 
 test('model card dropdown highlights the current model via initial_index', () => {
@@ -396,8 +470,12 @@ test('reachable Feishu cards contain no Chinese literals in English mode', () =>
   try {
     const englishMenuHelp = menuHelpText();
     const englishCardHelp = helpCard(['Additional help']);
+    assert.match(englishMenuHelp, /\/sessionlist --all/);
+    assert.match(englishMenuHelp, /title keyword/);
     assert.match(englishMenuHelp, /\/workspace <workspace index or absolute path>/);
     assert.match(englishMenuHelp, /\/ws, \/wsl, \/workspaces/);
+    assert.match(englishCardHelp, /\/sessionlist --all/);
+    assert.match(englishCardHelp, /title keyword/);
     assert.match(englishCardHelp, /\/workspace <workspace index or absolute path>/);
     assert.match(englishCardHelp, /\/ws, \/wsl, \/workspaces/);
     rendered.push(

@@ -209,14 +209,15 @@ test('the composed host serves other real channels while Feishu is loading and a
     return [key, f.config(id, { internals: { ConfigStore } })];
   }));
   const internals = Object.fromEntries([
-    'installUpdateRpc', 'installInboundTtlRpc', 'installDeliveryRpc', 'installDeliveryHttp',
+    'installUpdateRpc', 'installInboundTtlRpc', 'installDeliverySyncRpc', 'installDeliveryRpc', 'installDeliveryHttp',
     'installSessionSyncCoordinator', 'installHostLanguage', 'installHostLanguageRpc',
   ].map(name => [name, () => {}]));
   const fiber = f.start(createImHostPlugin(internals).apply, config);
   try {
     // Allow Cordis to enter its activation callback; Feishu stays gated.
     await new Promise(setImmediate);
-    assert.equal(f.routes.size, channels.length);
+    assert.equal(f.routes.size, channels.length + 2);
+    assert.equal(f.routes.has('/dsh-im-sidebar'), true);
     await allLoaded.promise;
     assert.equal((await f.call('feishu')).error.code, 'feishu-initializing');
     // Let the other channels finish their local workspace reconciliation.

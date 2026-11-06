@@ -3,6 +3,7 @@ import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../sr
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import QRCode from 'qrcode';
+import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
@@ -149,7 +150,10 @@ export function createWecomRpcHandler(controller, { encodeQr = qrDataUrl } = {})
     let encoded = qrCache.get(url);
     if (!encoded) {
       if (qrCache.size >= 16) qrCache.delete(qrCache.keys().next().value);
-      encoded = Promise.resolve().then(() => encodeQr(url));
+      encoded = Promise.resolve().then(() => encodeQr(url)).catch(error => {
+        if (qrCache.get(url) === encoded) qrCache.delete(url);
+        throw qrEncodingError(error);
+      });
       qrCache.set(url, encoded);
     }
     return encoded;

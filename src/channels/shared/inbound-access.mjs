@@ -1,7 +1,7 @@
 import { evaluateAccessPolicy } from './access-policy.mjs';
 import { isSharedLocalCommand } from './command-permission.mjs';
 
-export const COMMAND_PERMISSION_DENIED_MESSAGE = '你可以发送普通消息，但没有执行命令的权限。';
+export const COMMAND_PERMISSION_DENIED_MESSAGE = '你可以发送普通消息，但没有执行命令的权限。请联系管理员在 DSH 设置 → IM机器人 → 对应机器人 → 访问设置中，为你开启当前私聊或群聊场景的命令权限后重试。';
 
 const POLICY_NOT_CONFIGURED = Object.freeze({ allowed: true, reason: 'policy-not-configured' });
 const PRIVILEGED_SENDER = Object.freeze({ allowed: true, reason: 'privileged-sender' });

@@ -33,6 +33,20 @@ test('QQ loads normal conversation and deferred state without rewriting it', asy
   assert.equal(f.warnings.length, 0);
 });
 
+test('QQ persists the last conversation author', async (t) => {
+  const f = await fixture(t);
+  await f.store.load();
+  await f.store.rememberAuthor('group:chat:thread-1', {
+    senderId: 'user-1', senderName: 'User One', isBot: false,
+  });
+  assert.deepEqual(f.store.authorFor('group:chat:thread-1'), {
+    senderId: 'user-1', senderName: 'User One', isBot: false,
+    at: f.store.snapshot().authors['group:chat:thread-1'].at,
+  });
+  const reloaded = await new QqStateStore(f.path).load();
+  assert.equal(reloaded.authorFor('group:chat:thread-1').senderId, 'user-1');
+});
+
 test('QQ creates a missing state file', async (t) => {
   const f = await fixture(t);
   await f.store.load();

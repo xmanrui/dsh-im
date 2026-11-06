@@ -1,5 +1,10 @@
 // English translations (shared-a area). Keys are exact Chinese literals passed to t().
 export default {
+  '请发送你的问题。': 'Please send your question.',
+  '会话目录未生效：无法创建目录（权限或磁盘空间不足）；本次仍在原工作区运行。':
+    'Conversation directory isolation did not take effect: the directory could not be created. This session will use the original workspace.',
+  '会话目录未生效：无法切换目录；本次仍在原工作区运行。':
+    'Conversation directory isolation did not take effect: the directory could not be selected. This session will use the original workspace.',
   '这个问题已在其他客户端处理，无需再次回答。':
     'This question has already been answered from another client; no further reply is needed.',
   '任务已完成。': 'Task completed.',
@@ -80,8 +85,8 @@ export default {
     'The model reached its output limit without producing a displayable result. Reduce the task scope and try again.',
   '本轮处理被阻止，未能完成。请在 DSH 中查看会话状态和相关提示。':
     'This turn was blocked and did not finish. Check the Session status and related notices in DSH.',
-  '当前会话已归档，无法继续处理。请在 DSH 中取消归档，或发送 /new 创建新会话。':
-    'The current Session is archived and cannot continue. Unarchive it in DSH, or send /new to create a new Session.',
+  '当前会话已归档，无法继续处理。有命令权限时可发送 /new 创建新会话；否则请联系管理员在 DSH 中取消归档，或为你开启命令权限。':
+    'The current Session is archived and cannot continue. If you have command permission, send /new to create a new Session. Otherwise, ask an administrator to unarchive it in DSH or grant you command permission.',
   '本条消息可能仍在会话队列中，请先到 DSH 查看状态，避免重复提交。':
     'This message may still be queued in the Session. Check its status in DSH before submitting it again.',
   '任务被意外中断，本次未完成。请重试。':
@@ -181,10 +186,19 @@ export default {
     '/sessionlist [workspace index or absolute path]  List session IDs and titles',
   '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题':
     '/sessionlist or /sessions [workspace index or absolute path]  List session IDs and titles',
+  '/sessionlist --all  跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）':
+    '/sessionlist --all  Summarize sessions across Workspaces (10 per Workspace by default; use --limit N to change)',
   '/sessionlist --limit N  仅列出当前工作区前 N 个会话':
     '/sessionlist --limit N  List only the first N sessions in the current workspace',
-  '/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话':
-    '/session <Session ID or workspace index>  Bind this chat to the specified session',
+  '/session Session ID、当前工作区序号或标题关键词  将当前聊天绑定到指定会话':
+    '/session <Session ID, workspace index, or title keyword>  Bind this chat to the specified session',
+  '/sess  同一命令的别名（/session 被客户端同名命令抢占时使用）':
+    '/sess  Alias of the same command (use it when a client claims /session)',
+  '归档指定会话（DSH 能力）': 'Archive a session (a DSH capability)',
+  '/sessionarchive（或 /sessarchive）Session ID  归档一个会话；序号只做预览':
+    '/sessionarchive (or /sessarchive) <Session ID>  Archive one session; an index only previews',
+  '/sessionarchive <Session ID> --stop  归档前先停止该会话正在运行的任务':
+    '/sessionarchive <Session ID> --stop  Stop that session\'s running work before archiving it',
   '/models  按序号列出所有可用模型': '/models  List all available models by index',
   '/reasoninglist 或 /reasonings  按序号列出当前模型可用推理等级':
     '/reasoninglist or /reasonings  List reasoning efforts for the current model by index',
@@ -211,6 +225,15 @@ export default {
   '/help  显示本帮助': '/help  Show this help',
   '{label}机器人与 DeepSeek Harness 连接正常。':
     'The {label} bot is connected to DeepSeek Harness and working normally.',
+  // /status details (shared by every text channel that uses TextHarnessBridge).
+  '绑定会话：{session}': 'Session: {session}',
+  '绑定会话：未绑定（发送消息后自动创建）':
+    'Session: not bound yet (created after you send a message)',
+  '当前模型：暂无（创建会话后显示）':
+    'Current model: not available yet (shown after a Session is created)',
+  'Agent Preset（预设）：{preset}': 'Agent Preset: {preset}',
+  '运行中任务：有（发送 /stop 可停止）':
+    'Running task: yes (send /stop to stop it)',
   '{label}机器人凭据缺失，请移除后重新接入。':
     '{label} bot credentials are missing. Remove the bot and connect it again.',
   '{label}连接未就绪，插件会自动重试。':

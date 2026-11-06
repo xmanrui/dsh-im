@@ -1,3 +1,5 @@
+import { setTimeout as delay } from 'node:timers/promises';
+import { ensurePresetWorkspace } from './preset-workspaces.mjs';
 import { t } from './i18n.mjs';
 import { normalizeBusyMessageMode, validateBusyMessageMode } from './message-mode.mjs';
 import { atConnectionStage, connectionStageError, extractConnectionEvidence } from './connection-error.mjs';
@@ -12,10 +14,11 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 import {
   normalizeAgentPresetCatalog,
+  normalizeAgentPresetId,
   validateAgentPresetId,
 } from './agent-preset.mjs';
 import {
@@ -23,6 +26,7 @@ import {
   validateAccessPolicy,
 } from './access-policy.mjs';
 import { CONNECTION_TEST_STATE_IDENTITY } from './connection-test.mjs';
+import { SESSION_BINDING_STATE_IDENTITY, withSessionBindingLock } from './session-binding-lock.mjs';
 import {
   DEFAULT_CONTEXT_ENHANCEMENT_CONFIG,
   normalizeContextEnhancementConfig,
@@ -37,9 +41,18 @@ import {
 } from './model-setting.mjs';
 import { WORKSPACE_SESSION_STALE } from './workspace-session.mjs';
 import { configValidationError, withConfigResource } from './config-read-error.mjs';
+import {
+  DEFAULT_CONVERSATION_DIRECTORY,
+  normalizeConversationDirectory,
+  validateConversationDirectory,
+  workspaceManualEditDisabled,
+} from './conversation-directory.mjs';
+import { conversationDirectoryName, prepareDirectoryPath } from './conversation-directory-ensure.mjs';
 
 const DELIVERY_DOCUMENT_VERSION = 2;
-export const CURRENT_DOCUMENT_VERSION = 3;
+const SESSION_SYNC_DOCUMENT_VERSION = 3;
+const DS_BOT_DOCUMENT_VERSION = 4;
+export const CURRENT_DOCUMENT_VERSION = 5;
 const EMPTY_DOCUMENT = Object.freeze({ version: 1, workspaces: Object.freeze({}) });
 
 function invalidWorkspaceConfig(field, issue) {
@@ -131,6 +144,42 @@ function normalizeConversationWorkspaces(value) {
   return conversationWorkspaces;
 }
 
+function normalizeConversationDirectoryOverrides(value) {
+  const result = Object.create(null);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
+  for (const [botId, config] of Object.entries(value)) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(botId)) continue;
+    const normalized = normalizeConversationDirectory(config);
+    if (normalized) result[botId] = normalized;
+  }
+  return result;
+}
+
+function normalizeSessionDirectories(value) {
+  const result = Object.create(null);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
+  for (const [botId, entries] of Object.entries(value)) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(botId) || !entries || typeof entries !== 'object') continue;
+    const normalized = Object.create(null);
+    for (const [key, record] of Object.entries(entries)) {
+      if (!record || typeof record !== 'object' || typeof record.base !== 'string'
+        || typeof record.workspace !== 'string' || !isAbsolute(record.base) || !isAbsolute(record.workspace)) continue;
+      const config = normalizeConversationDirectory({ enabled: true, strategy: record.strategy, prefix: record.prefix });
+      if (config) normalized[key] = {
+        base: resolve(record.base), workspace: resolve(record.workspace), ...config,
+        timestamp: Number.isSafeInteger(record.timestamp) && record.timestamp > 0
+          ? record.timestamp : undefined,
+        pending: record.pending === true,
+        history: Array.isArray(record.history)
+          ? [...new Set(record.history.filter((path) => typeof path === 'string' && isAbsolute(path)).map((path) => resolve(path)))]
+          : [],
+      };
+    }
+    if (Object.keys(normalized).length) result[botId] = normalized;
+  }
+  return result;
+}
+
 function normalizeDeliveryTarget(value, { targetId, allowSessionSync = false } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw deliveryTargetError('invalid-target', 'Invalid delivery target');
@@ -211,7 +260,7 @@ function normalizeDeliveryTargets(value, { version } = {}) {
         }
         const normalized = normalizeDeliveryTarget(candidate, {
           targetId,
-          allowSessionSync: version >= CURRENT_DOCUMENT_VERSION,
+          allowSessionSync: version >= SESSION_SYNC_DOCUMENT_VERSION,
         });
         const { targetId: _targetId, ...stored } = normalized;
         normalizedTargets[targetId] = stored;
@@ -244,9 +293,29 @@ function normalizeAccessPolicies(value, workspaces) {
   return accessPolicies;
 }
 
+function normalizeDsBotBindings(value) {
+  const bindings = Object.create(null);
+  if (value === undefined) return bindings;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return invalidWorkspaceConfig('dsBotBindings', 'expected-object');
+  }
+  try {
+    for (const [botId, conversations] of Object.entries(value)) {
+      botIdOf(botId);
+      if (!conversations || typeof conversations !== 'object' || Array.isArray(conversations)) throw new TypeError();
+      bindings[botId] = Object.fromEntries(Object.entries(conversations).map(([key, dsBotId]) => (
+        [conversationKeyOf(key), dsBotId === null ? null : botIdOf(dsBotId)]
+      )));
+    }
+  } catch {
+    return invalidWorkspaceConfig('dsBotBindings', 'invalid-binding');
+  }
+  return bindings;
+}
+
 function normalizeDocument(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalidWorkspaceConfig('$', 'expected-object');
-  if (![1, DELIVERY_DOCUMENT_VERSION, CURRENT_DOCUMENT_VERSION].includes(value.version)) return invalidWorkspaceConfig('version', 'unsupported-version');
+  if (![1, DELIVERY_DOCUMENT_VERSION, SESSION_SYNC_DOCUMENT_VERSION, DS_BOT_DOCUMENT_VERSION, CURRENT_DOCUMENT_VERSION].includes(value.version)) return invalidWorkspaceConfig('version', 'unsupported-version');
   if (!value.workspaces || typeof value.workspaces !== 'object' || Array.isArray(value.workspaces)) return invalidWorkspaceConfig('workspaces', 'expected-object');
   const workspaces = {};
   for (const [index, [botId, workspace]] of Object.entries(value.workspaces).entries()) {
@@ -298,6 +367,7 @@ function normalizeDocument(value) {
   }
   if (value.version === 1 && value.deliveryTargets !== undefined) return invalidWorkspaceConfig('deliveryTargets', 'unexpected-field');
   const deliveryTargets = normalizeDeliveryTargets(value.deliveryTargets, { version: value.version });
+  const dsBotBindings = normalizeDsBotBindings(value.dsBotBindings);
   const aliases = Object.create(null);
   if (value.aliases && typeof value.aliases === 'object' && !Array.isArray(value.aliases)) {
     for (const [botId, alias] of Object.entries(value.aliases)) {
@@ -316,6 +386,9 @@ function normalizeDocument(value) {
     }
   }
   const accessPolicies = normalizeAccessPolicies(value.accessPolicies, workspaces);
+  const conversationDirectory = normalizeConversationDirectory(value.conversationDirectory);
+  const conversationDirectories = normalizeConversationDirectoryOverrides(value.conversationDirectories);
+  const sessionDirectories = normalizeSessionDirectories(value.sessionDirectories);
   const version = Math.max(
     value.version,
     value.accessPolicies === undefined ? 1 : DELIVERY_DOCUMENT_VERSION,
@@ -326,10 +399,14 @@ function normalizeDocument(value) {
     version,
     workspaces,
     conversationWorkspaces,
+    conversationDirectory,
+    conversationDirectories,
+    sessionDirectories,
     agentPresets,
     models,
     contextEnhancement,
     deliveryTargets,
+    dsBotBindings,
     accessPolicies,
     aliases,
     busyMessageModes,
@@ -340,15 +417,23 @@ function storedDocument({
   version,
   workspaces,
   conversationWorkspaces,
+  conversationDirectory,
+  conversationDirectories,
+  sessionDirectories,
   agentPresets,
   models,
   contextEnhancement,
   deliveryTargets,
+  dsBotBindings,
   accessPolicies,
   aliases,
   busyMessageModes,
 }) {
   const document = { version, workspaces };
+  if (conversationDirectory) document.conversationDirectory = conversationDirectory;
+  if (Object.keys(conversationDirectories).length) document.conversationDirectories = conversationDirectories;
+  if (Object.keys(sessionDirectories).length) document.sessionDirectories = sessionDirectories;
+  if (Object.keys(dsBotBindings).length > 0) document.dsBotBindings = dsBotBindings;
   if (Object.keys(busyMessageModes).length > 0) document.busyMessageModes = busyMessageModes;
   if (Object.keys(aliases).length > 0) document.aliases = aliases;
   if (Object.keys(conversationWorkspaces).length > 0) {
@@ -406,6 +491,7 @@ export class BotWorkspaceStore {
   #path;
   #defaultWorkspace;
   #ungroupedWorkspace;
+  #groupByAgentPreset;
   #version = 1;
   #workspaces = {};
   #agentPresets = {};
@@ -414,8 +500,12 @@ export class BotWorkspaceStore {
   #busyMessageModes = Object.create(null);
   #contextEnhancement = {};
   #deliveryTargets = Object.create(null);
+  #dsBotBindings = Object.create(null);
   #accessPolicies = Object.create(null);
   #conversationWorkspaces = Object.create(null);
+  #conversationDirectory = null;
+  #conversationDirectories = Object.create(null);
+  #sessionDirectories = Object.create(null);
   #generations = new Map();
   #nextGeneration = 1;
   #conversationGenerations = new Map();
@@ -428,11 +518,12 @@ export class BotWorkspaceStore {
   #writeQueue = Promise.resolve();
   #botQueues = new Map();
 
-  constructor(path, { defaultWorkspace = defaultImWorkspace(), ungroupedWorkspace } = {}) {
+  constructor(path, { defaultWorkspace = defaultImWorkspace(), ungroupedWorkspace, groupByAgentPreset = false } = {}) {
     if (typeof path !== 'string' || !path) throw new TypeError('workspace store path is required');
     this.#path = path;
     this.#defaultWorkspace = resolve(defaultWorkspace);
     this.#ungroupedWorkspace = ungroupedWorkspace;
+    this.#groupByAgentPreset = groupByAgentPreset === true;
   }
 
   async load() {
@@ -446,8 +537,12 @@ export class BotWorkspaceStore {
       this.#busyMessageModes = normalized.busyMessageModes;
       this.#contextEnhancement = normalized.contextEnhancement;
       this.#deliveryTargets = normalized.deliveryTargets;
+      this.#dsBotBindings = normalized.dsBotBindings;
       this.#accessPolicies = normalized.accessPolicies;
       this.#conversationWorkspaces = normalized.conversationWorkspaces;
+      this.#conversationDirectory = normalized.conversationDirectory;
+      this.#conversationDirectories = normalized.conversationDirectories;
+      this.#sessionDirectories = normalized.sessionDirectories;
     } catch (error) {
       if (error?.code !== 'ENOENT') throw withConfigResource(error, 'workspace-config');
       this.#version = 1;
@@ -458,8 +553,12 @@ export class BotWorkspaceStore {
       this.#busyMessageModes = Object.create(null);
       this.#contextEnhancement = {};
       this.#deliveryTargets = Object.create(null);
+      this.#dsBotBindings = Object.create(null);
       this.#accessPolicies = Object.create(null);
       this.#conversationWorkspaces = Object.create(null);
+      this.#conversationDirectory = null;
+      this.#conversationDirectories = Object.create(null);
+      this.#sessionDirectories = Object.create(null);
     }
     this.#generations.clear();
     this.#nextGeneration = 1;
@@ -495,6 +594,112 @@ export class BotWorkspaceStore {
     return this.#workspaces[botIdOf(botId)] ?? this.#defaultWorkspace;
   }
 
+  conversationDirectoryFor(botId) {
+    const id = botIdOf(botId);
+    return { ...(Object.hasOwn(this.#conversationDirectories, id)
+      ? this.#conversationDirectories[id]
+      : this.#conversationDirectory ?? DEFAULT_CONVERSATION_DIRECTORY) };
+  }
+
+  conversationDirectoryOverrideFor(botId) {
+    const id = botIdOf(botId);
+    return Object.hasOwn(this.#conversationDirectories, id)
+      ? { ...this.#conversationDirectories[id] } : null;
+  }
+
+  async setConversationDirectory(botId, config, { incarnation } = {}) {
+    const id = botId === null ? null : botIdOf(botId);
+    const normalized = config === null ? null : validateConversationDirectory(config);
+    return this.#enqueue(id ?? '__channel__', async () => {
+      if (id !== null && (!this.has(id)
+        || (incarnation !== undefined && incarnation !== this.incarnationFor(id)))) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const previousDefault = this.#conversationDirectory;
+      const previousOverrides = { ...this.#conversationDirectories };
+      if (id === null) this.#conversationDirectory = normalized;
+      else if (normalized === null) delete this.#conversationDirectories[id];
+      else this.#conversationDirectories[id] = normalized;
+      try { await this.#persist(); }
+      catch (error) {
+        this.#conversationDirectory = previousDefault;
+        this.#conversationDirectories = previousOverrides;
+        throw error;
+      }
+    });
+  }
+
+  conversationDirectoryPathsFor(botId) {
+    return [...new Set(Object.values(this.#sessionDirectories[botIdOf(botId)] ?? {})
+      .flatMap((entry) => [entry.workspace, ...(entry.history ?? [])]))];
+  }
+
+  async prepareConversationDirectory(botId, conversationKey, {
+    explicitNew = false, incarnation, clearSession, onConversationGeneration,
+  } = {}) {
+    const id = botIdOf(botId);
+    if (!this.has(id) || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
+      const error = new Error('找不到要修改的机器人。');
+      error.code = 'workspace-bot-not-found';
+      throw error;
+    }
+    const config = this.conversationDirectoryFor(id);
+    if (!config.enabled) return null;
+    return this.#enqueue(id, async () => {
+      const existing = this.#sessionDirectories[id]?.[conversationKey];
+      const current = this.conversationWorkspaceFor(id, conversationKey);
+      const records = Object.values(this.#sessionDirectories[id] ?? {});
+      let base = existing?.base ?? current;
+      const visited = new Set();
+      while (!visited.has(base)) {
+        visited.add(base);
+        const parent = records.find((record) => record.workspace === base
+          || record.history?.includes(base))?.base;
+        if (!parent || parent === base) break;
+        base = parent;
+      }
+      const sameConfig = existing?.workspace === current && existing?.base === base
+        && existing?.strategy === config.strategy && existing?.prefix === config.prefix;
+      const reuse = sameConfig && (config.strategy === 'per-conversation'
+        || (!explicitNew && existing?.pending));
+      const timestamp = reuse ? existing.timestamp : Date.now();
+      const workspace = reuse ? existing.workspace : resolve(base, conversationDirectoryName(conversationKey, config, timestamp, `${this.#path}:${id}`));
+      try { await prepareDirectoryPath(base, workspace); }
+      catch (error) {
+        console.warn('[dsh-im] conversation directory preparation failed:', error?.message ?? error);
+        return { warning: '会话目录未生效：无法创建目录（权限或磁盘空间不足）；本次仍在原工作区运行。' };
+      }
+      const entries = { ...(this.#sessionDirectories[id] ?? {}), [conversationKey]: {
+        base, workspace, ...config, timestamp, pending: explicitNew,
+        history: existing && existing.workspace !== workspace
+          ? [...new Set([...(existing.history ?? []), existing.workspace])]
+          : existing?.history ?? [],
+      } };
+      const previousRecords = this.#sessionDirectories[id];
+      const previousOverrides = this.#conversationWorkspaces[id];
+      if (workspace !== current) {
+        const generation = this.publishConversationWorkspaceSwitch(id, conversationKey);
+        onConversationGeneration?.(generation);
+        await clearSession?.(conversationKey);
+      }
+      this.#sessionDirectories[id] = entries;
+      const overrides = { ...(this.#conversationWorkspaces[id] ?? {}), [conversationKey]: workspace };
+      this.#conversationWorkspaces[id] = overrides;
+      try { await this.#persist(); }
+      catch (error) {
+        if (previousRecords) this.#sessionDirectories[id] = previousRecords;
+        else delete this.#sessionDirectories[id];
+        if (previousOverrides) this.#conversationWorkspaces[id] = previousOverrides;
+        else delete this.#conversationWorkspaces[id];
+        console.warn('[dsh-im] conversation directory switch failed:', error?.message ?? error);
+        return { warning: '会话目录未生效：无法切换目录；本次仍在原工作区运行。' };
+      }
+      return { workspace };
+    });
+  }
+
   /**
    * An explicit override is stored even when it equals the current bot default,
    * so a later default change must never move a conversation that pinned its
@@ -517,6 +722,10 @@ export class BotWorkspaceStore {
     return this.#conversationGenerations.get(
       conversationWorkspaceGenerationKey(botId, conversationKey),
     ) ?? null;
+  }
+
+  groupsByAgentPreset(botId) {
+    return this.#groupByAgentPreset && !this.conversationDirectoryFor(botId).enabled;
   }
 
   agentPresetFor(botId) {
@@ -688,6 +897,49 @@ export class BotWorkspaceStore {
     return this.#generations.get(botIdOf(botId)) ?? null;
   }
 
+  dsBotBindingFor(botId, conversationKey) {
+    const dsBotId = this.#dsBotBindings[botId]?.[conversationKey];
+    return this.has(botId) && dsBotId ? { botId, conversationKey, dsBotId } : null;
+  }
+
+  listDsBotBindings(botId) {
+    return Object.entries(this.#dsBotBindings).flatMap(([id, conversations]) => (
+      this.has(id) && (botId === undefined || botId === id)
+        ? Object.entries(conversations).filter(([, dsBotId]) => dsBotId !== null)
+          .map(([conversationKey, dsBotId]) => ({ botId: id, conversationKey, dsBotId }))
+        : []
+    ));
+  }
+
+  dsBotConversationKeys(botId) {
+    return this.has(botId) ? Object.keys(this.#dsBotBindings[botId] ?? {}) : [];
+  }
+
+  async setDsBotBinding(botId, conversationKey, dsBotId) {
+    const id = botIdOf(botId);
+    const key = conversationKeyOf(conversationKey);
+    const selected = dsBotId === null ? null : botIdOf(dsBotId);
+    return this.#enqueue(id, async () => {
+      if (!this.has(id)) throw deliveryTargetError('unknown-bot', 'Unknown bot');
+      const conversations = { ...this.#dsBotBindings[id] };
+      if (selected !== null && (conversations[key] || Object.values(conversations).includes(selected))) {
+        throw deliveryTargetError('ds-bot-binding-conflict', 'DS Bot or private chat is already bound');
+      }
+      // Keep a confirmed private-chat key after unbinding so it can be selected
+      // again without keeping its old DS Bot session mapping alive.
+      conversations[key] = selected;
+      const next = { ...this.#dsBotBindings, [id]: conversations };
+      if (!Object.keys(conversations).length) delete next[id];
+      await this.#persist(
+        this.#contextEnhancement, this.#deliveryTargets, CURRENT_DOCUMENT_VERSION,
+        this.#accessPolicies, this.#aliases, this.#conversationWorkspaces, this.#busyMessageModes, next,
+      );
+      this.#dsBotBindings = next;
+      this.#version = CURRENT_DOCUMENT_VERSION;
+      return this.dsBotBindingFor(id, key);
+    });
+  }
+
   async whenIdle() {
     await this.#writeQueue;
   }
@@ -769,6 +1021,7 @@ export class BotWorkspaceStore {
 
   async setWorkspace(botId, value, { clearSessions, incarnation } = {}) {
     const id = botIdOf(botId);
+    if (this.conversationDirectoryFor(id).enabled) throw workspaceManualEditDisabled();
     if (!this.has(id)
       || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
       const error = new Error('找不到要修改的机器人。');
@@ -808,6 +1061,7 @@ export class BotWorkspaceStore {
     incarnation,
   } = {}) {
     const id = botIdOf(botId);
+    if (this.conversationDirectoryFor(id).enabled) throw workspaceManualEditDisabled();
     if (typeof conversationKey !== 'string' || !conversationKey
       || conversationKey.length > 1_024 || conversationKey.trim() !== conversationKey
       || /[\u0000-\u001f\u007f]/u.test(conversationKey)) {
@@ -1096,6 +1350,7 @@ export class BotWorkspaceStore {
     incarnation,
     expectedGeneration,
     expectedConversationGeneration,
+    preserveBotWorkspace = false,
   } = {}) {
     const id = botIdOf(botId);
     if (typeof conversationKey !== 'string' || !conversationKey
@@ -1126,6 +1381,10 @@ export class BotWorkspaceStore {
     const workspace = await canonicalWorkspacePath(await validateWorkspacePath(value, {
       ungroupedWorkspace: this.#ungroupedWorkspace,
     }));
+    if (this.conversationDirectoryFor(id).enabled
+      && !(await sameWorkspacePath(workspace, this.conversationWorkspaceFor(id, conversationKey)))) {
+      throw workspaceManualEditDisabled();
+    }
     return this.#enqueue(id, async () => {
       if (!this.has(id)
         || (incarnation !== undefined && incarnation !== this.incarnationFor(id))) {
@@ -1143,6 +1402,20 @@ export class BotWorkspaceStore {
       // workspace switch queued while the session was being adopted must not be
       // silently overwritten by the binding that started before it.
       assertConversationCurrent();
+      if (this.conversationDirectoryFor(id).enabled || preserveBotWorkspace) {
+        if (!preserveBotWorkspace
+          && !(await sameWorkspacePath(workspace, this.conversationWorkspaceFor(id, conversationKey)))) {
+          throw workspaceManualEditDisabled();
+        }
+        assertConversationCurrent();
+        await setSession(conversationKey, sessionId);
+        assertConversationCurrent();
+        return {
+          workspace, sessionId,
+          generation: this.#generations.get(id),
+          conversationGeneration,
+        };
+      }
       const sameWorkspace = await sameWorkspacePath(workspace, this.workspaceFor(id));
       const previousOverrides = this.#conversationWorkspaces[id];
       const override = previousOverrides?.[conversationKey];
@@ -1298,6 +1571,8 @@ export class BotWorkspaceStore {
       ...Object.keys(this.#deliveryTargets),
       ...Object.keys(this.#accessPolicies),
       ...Object.keys(this.#conversationWorkspaces),
+      ...Object.keys(this.#conversationDirectories),
+      ...Object.keys(this.#sessionDirectories),
       ...this.#dirtyRemovals,
     ]);
     for (const botId of candidates) {
@@ -1309,11 +1584,14 @@ export class BotWorkspaceStore {
     if (!status || typeof status !== 'object' || !Array.isArray(status.bots)) return status;
     return {
       ...status,
+      conversationDirectory: this.#conversationDirectory ? { ...this.#conversationDirectory } : null,
       bots: status.bots.map((bot) => bot?.botId
         ? {
           ...bot,
           ...(this.aliasFor(bot.botId) ? { bot: withBotAlias(bot.bot, this.aliasFor(bot.botId)) } : {}),
           workspace: this.workspaceFor(bot.botId),
+          conversationDirectory: this.conversationDirectoryFor(bot.botId),
+          conversationDirectoryOverride: this.conversationDirectoryOverrideFor(bot.botId),
           agentPreset: this.agentPresetFor(bot.botId),
           model: this.modelFor(bot.botId),
           contextEnhancement: this.contextEnhancementFor(bot.botId),
@@ -1359,10 +1637,13 @@ export class BotWorkspaceStore {
     const hadMessageMode = Object.hasOwn(this.#busyMessageModes, id);
     const hadContextEnhancement = Object.hasOwn(this.#contextEnhancement, id);
     const hadDeliveryTargets = Object.hasOwn(this.#deliveryTargets, id);
+    const hadDsBotBindings = Object.hasOwn(this.#dsBotBindings, id);
     const hadAccessPolicy = Object.hasOwn(this.#accessPolicies, id);
     const hadConversationWorkspaces = Object.hasOwn(this.#conversationWorkspaces, id);
+    const hadDirectoryRecords = Object.hasOwn(this.#conversationDirectories, id) || Object.hasOwn(this.#sessionDirectories, id);
     const needsCleanup = hadWorkspace || hadPreset || hadModel || hadAlias || hadContextEnhancement
-      || hadDeliveryTargets || hadAccessPolicy || hadConversationWorkspaces || hadMessageMode
+      || hadDeliveryTargets || hadDsBotBindings || hadAccessPolicy || hadConversationWorkspaces || hadMessageMode
+      || hadDirectoryRecords
       || this.#dirtyRemovals.has(id);
     delete this.#workspaces[id];
     delete this.#agentPresets[id];
@@ -1371,8 +1652,11 @@ export class BotWorkspaceStore {
     delete this.#busyMessageModes[id];
     delete this.#contextEnhancement[id];
     delete this.#deliveryTargets[id];
+    delete this.#dsBotBindings[id];
     delete this.#accessPolicies[id];
     delete this.#conversationWorkspaces[id];
+    delete this.#conversationDirectories[id];
+    delete this.#sessionDirectories[id];
     this.#generations.delete(id);
     this.#incarnations.delete(id);
     if (!needsCleanup) return {
@@ -1410,6 +1694,10 @@ export class BotWorkspaceStore {
     aliases = this.#aliases,
     conversationWorkspaces = this.#conversationWorkspaces,
     busyMessageModes = this.#busyMessageModes,
+    dsBotBindings = this.#dsBotBindings,
+    conversationDirectory = this.#conversationDirectory,
+    conversationDirectories = this.#conversationDirectories,
+    sessionDirectories = this.#sessionDirectories,
   ) {
     await writeStoredDocument(this.#path, storedDocument({
       version,
@@ -1419,9 +1707,13 @@ export class BotWorkspaceStore {
       models: this.#models,
       contextEnhancement,
       deliveryTargets,
+      dsBotBindings,
       accessPolicies,
       aliases,
       busyMessageModes,
+      conversationDirectory,
+      conversationDirectories,
+      sessionDirectories,
     }));
     this.#dirtyRemovals.clear();
   }
@@ -1434,6 +1726,7 @@ export class BotWorkspaceStore {
       || Object.keys(this.#busyMessageModes).length > 0
       || Object.keys(this.#contextEnhancement).length > 0
       || Object.keys(this.#deliveryTargets).length > 0
+      || Object.keys(this.#dsBotBindings).length > 0
       || Object.keys(this.#accessPolicies).length > 0
       || Object.keys(this.#conversationWorkspaces).length > 0) {
       await this.#persist();
@@ -1487,6 +1780,12 @@ function unavailableModel() {
   const error = new Error('模型不存在或不可用。');
   error.code = 'model-selection-unavailable';
   return error;
+}
+
+function unavailableModelCatalog(cause) {
+  const error = new Error(t('无法读取所选模型的列表，模型设置未保存，请重试。'), { cause });
+  error.code = 'model-catalog-unavailable';
+  return connectionStageError(error, 'status.read', undefined, { method: 'llm.models' });
 }
 
 function assertCurrentBotScope(isCurrentScope) {
@@ -1564,12 +1863,18 @@ export function observeBotWorkspaceRemovals(
 
 export function createBotWorkspaceScope(
   harness,
-  { botId, workspaces, state, agentPresetCatalog } = {},
+  { botId, workspaces, state, agentPresetCatalog, dsBot } = {},
 ) {
   if (!harness || !workspaces || !state) throw new TypeError('harness, workspaces, and state are required');
   const incarnation = workspaces.incarnationFor(botId);
   const isCurrentScope = () => workspaces.has(botId)
     && workspaces.incarnationFor(botId) === incarnation;
+  const dsBinding = (key) => workspaces.dsBotBindingFor?.(botId, key);
+  const assertNoDsBinding = (key) => {
+    if (dsBinding(key)) {
+      throw deliveryTargetError('ds-bot-bound', t('请先在“绑定 DS Bot”中解除绑定，再切换会话或工作目录。'));
+    }
+  };
   const presetSettings = async (catalog = agentPresetCatalog) => {
     let normalizedCatalog;
     try {
@@ -1694,6 +1999,43 @@ export function createBotWorkspaceScope(
 
   const scopedHarness = new Proxy(harness, {
     get(target, property) {
+      if (property === 'sessionFor') {
+        // Read-only state lookup used by /sessionlist to mark the binding. The
+        // state proxy owns the generation checks, so delegate instead of
+        // exposing the raw mapping.
+        return (key, ...args) => scopedState.sessionFor(key, ...args);
+      }
+      if (property === 'resolveDsBotSession') {
+        return async (key) => {
+          assertCurrentBotScope(isCurrentScope);
+          const binding = dsBinding(key);
+          if (!binding) return null;
+          if (!dsBot) throw deliveryTargetError('ds-bot-unavailable', 'DS Bot 当前不可用，请检查插件状态。');
+          let bot = await dsBot.resolve(binding.dsBotId);
+          if (typeof target.isSessionArchived === 'function' && (await target.isSessionArchived(bot.sessionId))) {
+            for (let i = 0; i < 5; i += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              const updated = await dsBot.resolve(binding.dsBotId).catch(() => null);
+              if (updated && updated.sessionId !== bot.sessionId && !(await target.isSessionArchived(updated.sessionId))) {
+                bot = updated;
+                break;
+              }
+            }
+          }
+          if (!(await target.sessionExists(bot.sessionId)) || (typeof target.isSessionArchived === 'function' && (await target.isSessionArchived(bot.sessionId)))) {
+            throw deliveryTargetError('ds-bot-not-found', 'DS Bot 的当前会话不可用。');
+          }
+          assertCurrentBotScope(isCurrentScope);
+          if (dsBinding(key)?.dsBotId !== binding.dsBotId) throw workspaceSessionStale('DS Bot binding changed');
+          if (state.sessionFor(key) !== bot.sessionId) await state.setSession(key, bot.sessionId);
+          sessionGenerations.set(bot.sessionId, {
+            generation: workspaces.generationFor(botId),
+            conversationKey: key,
+            conversationGeneration: currentConversationGeneration(key),
+          });
+          return bot.sessionId;
+        };
+      }
       if (property === 'agentPresetSettings') {
         return async (options = {}) => {
           options?.signal?.throwIfAborted();
@@ -1715,6 +2057,10 @@ export function createBotWorkspaceScope(
             if (!catalog.items.some((item) => item.id === agentPreset)) {
               throw unavailableAgentPreset();
             }
+          }
+          if (workspaces.groupsByAgentPreset?.(botId)) {
+            await ensurePresetWorkspace(target, workspaces.workspaceFor(botId), agentPreset, catalog, options);
+            assertCurrentBotScope(isCurrentScope);
           }
           await workspaces.setAgentPreset(botId, agentPreset, { incarnation });
           assertCurrentBotScope(isCurrentScope);
@@ -1758,6 +2104,24 @@ export function createBotWorkspaceScope(
           }
         };
       }
+      if (property === 'archiveWorkspaceSession' && typeof target[property] === 'function') {
+        // Archiving mutates Harness state, so it checks the bot scope on both
+        // sides of the call like every other write this scope exposes.
+        return async (...args) => {
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          const result = await target.archiveWorkspaceSession(...args);
+          if (!isCurrentScope()) {
+            const error = new Error('找不到要修改的机器人。');
+            error.code = 'workspace-bot-not-found';
+            throw error;
+          }
+          return result;
+        };
+      }
       if ((property === 'listWorkspaces'
         || property === 'listWorkspaceEntries'
         || property === 'listWorkspaceSessions'
@@ -1780,6 +2144,12 @@ export function createBotWorkspaceScope(
       }
       if (property === 'switchWorkspace') {
         return (workspace) => {
+          if (workspaces.conversationDirectoryFor(botId).enabled) {
+            return Promise.reject(workspaceManualEditDisabled());
+          }
+          if (workspaces.listDsBotBindings(botId).length > 0) {
+            throw deliveryTargetError('ds-bot-bound', '请先解除 DS Bot 绑定，再切换机器人工作目录。');
+          }
           if (!isCurrentScope()) {
             const error = new Error('找不到要修改的机器人。');
             error.code = 'workspace-bot-not-found';
@@ -1801,6 +2171,71 @@ export function createBotWorkspaceScope(
           return workspaces.conversationWorkspaceFor(botId, conversationKey);
         };
       }
+      if (property === 'resolveConversationWorkspace') {
+        return async (conversationKey, options = {}) => {
+          options.signal?.throwIfAborted();
+          assertCurrentBotScope(isCurrentScope);
+          const pending = pendingConversationSwitches.get(conversationKey);
+          if (pending) await pending;
+          await workspaces.whenBotIdle(botId);
+          assertCurrentBotScope(isCurrentScope);
+          const generation = workspaces.generationFor(botId);
+          const conversationGeneration = currentConversationGeneration(conversationKey);
+          const sessionId = scopedState.sessionFor(conversationKey);
+          const configured = workspaces.conversationWorkspaceFor(botId, conversationKey);
+          const preset = workspaces.agentPresetFor(botId);
+          const assertUnchanged = () => {
+            options.signal?.throwIfAborted();
+            assertCurrentBotScope(isCurrentScope);
+            if (generation !== workspaces.generationFor(botId)
+              || conversationGenerationIsStale(conversationKey, conversationGeneration)
+              || sessionId !== scopedState.sessionFor(conversationKey)
+              || (!sessionId && preset !== workspaces.agentPresetFor(botId))) {
+              throw workspaceSessionStale('The conversation changed while its workspace was being resolved.');
+            }
+          };
+          if (sessionId) {
+            const known = sessionGenerations.get(sessionId)?.workspace;
+            if (known) {
+              assertUnchanged();
+              return known;
+            }
+            // The configured bot directory stays unchanged when a preset groups
+            // a new session. Recover its actual owner after a restart, without
+            // adopting the session or moving an older chat to the new preset.
+            if (typeof target.rpc === 'function') {
+              const listed = await target.rpc('workspace.list', {}, 30_000, options);
+              assertUnchanged();
+              if (!Array.isArray(listed?.items)) throw new TypeError('Harness returned an invalid workspace list');
+              const owners = listed.items.filter((item) => Array.isArray(item?.sessionIds)
+                && item.sessionIds.includes(sessionId));
+              if (owners.length > 1) throw new TypeError('Harness returned multiple session workspaces');
+              const workspace = owners[0]?.path ?? configured;
+              if (typeof workspace !== 'string' || !isAbsolute(workspace)) {
+                throw new TypeError('Harness returned an invalid session workspace');
+              }
+              sessionGenerations.set(sessionId, { ...sessionGenerations.get(sessionId), workspace });
+              return workspace;
+            }
+            return configured;
+          }
+          // With no binding (including after /new), list the next preset's
+          // existing group. A read never creates a directory or registers it.
+          if (preset && workspaces.groupsByAgentPreset?.(botId)
+            && !workspaces.hasConversationWorkspaceOverride(botId, conversationKey)
+            && await target.isUngroupedWorkspace?.(configured)) {
+            const directory = join(configured, 'presets', preset);
+            const exists = await stat(directory).then((entry) => entry.isDirectory(), (error) => {
+              if (error?.code === 'ENOENT') return false;
+              throw error;
+            });
+            assertUnchanged();
+            if (exists) return directory;
+          }
+          assertUnchanged();
+          return configured;
+        };
+      }
       if (property === 'hasConversationWorkspaceOverride') {
         return (conversationKey) => {
           assertCurrentBotScope(isCurrentScope);
@@ -1818,8 +2253,33 @@ export function createBotWorkspaceScope(
         // bind and the send so a late switch cannot be outrun.
         return (conversationKey) => currentConversationGeneration(conversationKey);
       }
+      if (property === 'conversationDirectoryConfig') {
+        return () => workspaces.conversationDirectoryFor(botId);
+      }
+      if (property === 'conversationDirectoryPaths') {
+        return () => workspaces.conversationDirectoryPathsFor(botId);
+      }
+      if (property === 'prepareConversationDirectory') {
+        return async (conversationKey, options = {}) => {
+          assertCurrentBotScope(isCurrentScope);
+          assertNoDsBinding(conversationKey);
+          const pending = pendingConversationSwitches.get(conversationKey);
+          if (pending) await pending;
+          assertCurrentBotScope(isCurrentScope);
+          return trackConversationSwitch(conversationKey, workspaces.prepareConversationDirectory(botId, conversationKey, {
+            ...options,
+            incarnation,
+            clearSession: (key) => state.clearSession(key),
+            onConversationGeneration: (generation) => maskConversationSwitch(conversationKey, generation),
+          }));
+        };
+      }
       if (property === 'switchConversationWorkspace') {
         return (conversationKey, workspace) => {
+          if (workspaces.conversationDirectoryFor(botId).enabled) {
+            return Promise.reject(workspaceManualEditDisabled());
+          }
+          assertNoDsBinding(conversationKey);
           if (!isCurrentScope()) {
             const error = new Error('找不到要修改的机器人。');
             error.code = 'workspace-bot-not-found';
@@ -1841,6 +2301,10 @@ export function createBotWorkspaceScope(
       }
       if (property === 'clearConversationWorkspace') {
         return (conversationKey) => {
+          if (workspaces.conversationDirectoryFor(botId).enabled) {
+            return Promise.reject(workspaceManualEditDisabled());
+          }
+          assertNoDsBinding(conversationKey);
           if (!isCurrentScope()) {
             const error = new Error('找不到要修改的机器人。');
             error.code = 'workspace-bot-not-found';
@@ -1859,7 +2323,9 @@ export function createBotWorkspaceScope(
         };
       }
       if (property === 'bindWorkspaceSession') {
-        return async (conversationKey, sessionId) => {
+        return async (conversationKey, sessionId, options = {}) => {
+          const { expectedWorkspace } = options;
+          assertNoDsBinding(conversationKey);
           if (typeof conversationKey !== 'string' || !conversationKey
             || typeof sessionId !== 'string' || !sessionId) {
             throw new TypeError('conversationKey and sessionId are required');
@@ -1895,6 +2361,27 @@ export function createBotWorkspaceScope(
             || adopted.sessionId !== sessionId || typeof adopted.workspace !== 'string') {
             throw new TypeError('Harness returned an invalid adopted workspace session');
           }
+          // Title selection is local to the Workspace observed by the search.
+          // Recheck it here before committing; explicit IDs retain their
+          // existing bot-wide switching behavior.
+          const localBinding = expectedWorkspace !== undefined;
+          if (localBinding
+            && (!(await sameWorkspacePath(adopted.workspace, expectedWorkspace))
+              || !(await sameWorkspacePath(adopted.workspace,
+                await scopedHarness.resolveConversationWorkspace(conversationKey))))) {
+            throw workspaceSessionStale('The conversation workspace changed during session selection.');
+          }
+          // Selecting another session in the current automatic group must not
+          // turn that group into the bot's manual directory and clear every
+          // other conversation. Explicit cross-workspace selection keeps its
+          // existing bot-wide semantics.
+          const baseWorkspace = workspaces.workspaceFor(botId);
+          const preserveBotWorkspace = localBinding || (!workspaces.hasConversationWorkspaceOverride(botId, conversationKey)
+            && normalizeAgentPresetId(basename(adopted.workspace)) !== null
+            && await target.isUngroupedWorkspace?.(baseWorkspace)
+            && await sameWorkspacePath(dirname(adopted.workspace), join(baseWorkspace, 'presets'))
+            && await sameWorkspacePath(adopted.workspace,
+              await scopedHarness.resolveConversationWorkspace(conversationKey)));
           const bound = await workspaces.bindWorkspaceSession(botId, adopted.workspace, {
             conversationKey,
             sessionId,
@@ -1905,6 +2392,7 @@ export function createBotWorkspaceScope(
             incarnation,
             expectedGeneration,
             expectedConversationGeneration,
+            preserveBotWorkspace,
           });
           if (!isCurrentScope()) {
             const error = new Error('找不到要修改的机器人。');
@@ -1924,6 +2412,22 @@ export function createBotWorkspaceScope(
             conversationKey,
             conversationGeneration: bound.conversationGeneration ?? 0,
           });
+          // /session, /go, /prev and /next all bind through this one path, so the
+          // navigation ring records the bind here and stays in sync with the
+          // Session binding itself. Best-effort: a ring write must not fail a bind.
+          // A non-navigation bind (/session adopt) appends the Session as the
+          // ring's current position; /go, /prev and /next manage the visit stack
+          // themselves and pass { navigation: true } to skip this.
+          try {
+            const registered = await state.ensureSessionRing?.(conversationKey, sessionId, {
+              title: typeof adopted.title === 'string' && adopted.title ? adopted.title : undefined,
+            });
+            if (options.navigation !== true && registered?.entry) {
+              await state.appendRing?.(conversationKey, registered.entry.n);
+            }
+          } catch (error) {
+            console.warn('[dsh-im] unable to record the session in the navigation ring:', error?.message ?? error);
+          }
           return {
             ...adopted,
             workspace: bound.workspace,
@@ -1934,6 +2438,11 @@ export function createBotWorkspaceScope(
       if (property === 'createSession') {
         return async (options = {}) => {
           const { inheritBotModel = true, conversationKey, ...createOptions } = options;
+          assertNoDsBinding(conversationKey);
+          if (conversationKey) {
+            const prepared = await scopedHarness.prepareConversationDirectory(conversationKey);
+            if (prepared?.workspace) createOptions.workspace = prepared.workspace;
+          }
           // /conv publishes its generation before path validation enters the
           // bot queue. Wait for both phases before pairing a workspace with its
           // generation; otherwise a new session can carry a new fence but old cwd.
@@ -1954,7 +2463,13 @@ export function createBotWorkspaceScope(
             : null;
           const agentPreset = workspaces.agentPresetFor(botId);
           const model = inheritBotModel === false ? null : workspaces.modelFor(botId);
-          const workspace = workspaces.conversationWorkspaceFor(botId, conversationKey);
+          let workspace = workspaces.conversationWorkspaceFor(botId, conversationKey);
+          if (agentPreset && workspaces.groupsByAgentPreset?.(botId)
+            && !workspaces.hasConversationWorkspaceOverride(botId, conversationKey)) {
+            const settings = await presetSettings();
+            workspace = await ensurePresetWorkspace(target, workspace, agentPreset, settings.agentPresetCatalog, options);
+            assertCurrentBotScope(isCurrentScope);
+          }
           const sessionId = await target.createSession({
             ...createOptions,
             workspace,
@@ -2016,7 +2531,9 @@ export function createBotWorkspaceScope(
             : null;
           // Copy provenance into the immutable handle, but retain it for a later
           // setSession (notably /model, which binds after asynchronous selection).
+          const dsBotId = dsBinding(conversationKey)?.dsBotId;
           const isCurrentSession = () => isCurrentScope()
+            && dsBinding(conversationKey)?.dsBotId === dsBotId
             && generation === workspaces.generationFor(botId)
             && !conversationGenerationIsStale(conversationKey, conversationGeneration);
           const invokeCurrentSession = async (method, args, action) => {
@@ -2043,8 +2560,10 @@ export function createBotWorkspaceScope(
             // actual outcome even if a workspace switch commits concurrently.
             return target[method](sessionId, ...args);
           };
+          let replySessionId = sessionId;
           return Object.freeze({
             sessionId,
+            get replySessionId() { return replySessionId; },
             async sessionExists(...args) {
               if (!isCurrentSession()) return false;
               const exists = await target.sessionExists(sessionId, ...args);
@@ -2066,8 +2585,31 @@ export function createBotWorkspaceScope(
                 return invokeStartedSessionMutation('renameSession', args, 'title rename');
               },
             } : {}),
-            selectModel(...args) {
-              return invokeCurrentSession('selectSessionModel', args, 'model selection');
+            async selectModel(selection, options = {}) {
+              if (!dsBotId) {
+                return invokeCurrentSession('selectSessionModel', [selection, options], 'model selection');
+              }
+              options.signal?.throwIfAborted();
+              if (!isCurrentSession()) throw workspaceSessionStale('DS Bot binding changed before model selection.');
+              const bot = await dsBot?.resolve(dsBotId);
+              options.signal?.throwIfAborted();
+              if (!bot || bot.sessionId !== sessionId || !isCurrentSession()) {
+                throw workspaceSessionStale('DS Bot changed before model selection.');
+              }
+              if (typeof dsBot.updateBotModel !== 'function') {
+                throw deliveryTargetError('ds-bot-unavailable', 'DS Bot model selection is unavailable.');
+              }
+              // This is a Bot-wide setting. Never mutate only the IM session: DS
+              // Bot applies the choice to its own and group sessions as well.
+              const result = await dsBot.updateBotModel(dsBotId, selection, options);
+              const selected = result?.selected;
+              if (!selected || selected.reasoningEffort !== undefined) return result;
+              // Without a level DS Bot sends none, and DSH runs the model's
+              // default one: report the level the Session actually runs.
+              const current = (await target.getSessionModels(sessionId, options))?.current;
+              return current?.provider === selected.provider && current?.model === selected.model
+                ? { selected: { ...current } }
+                : result;
             },
             isRunning(...args) {
               return invokeCurrentSession('isSessionRunning', args, 'run-state check');
@@ -2089,13 +2631,76 @@ export function createBotWorkspaceScope(
                 return invokeStartedSessionMutation('executeCommand', args, 'command execution');
               },
             } : {}),
-            ask(...args) {
+            async ask(...args) {
               if (!isCurrentSession()) {
                 throw workspaceSessionStale(
                   'The bot workspace changed before this prompt started.',
                 );
               }
-              return target.ask(sessionId, ...args);
+              if (dsBotId) {
+                const bot = await dsBot?.resolve(dsBotId);
+                if (!bot) throw deliveryTargetError('ds-bot-unavailable', 'DS Bot 当前不可用。');
+                if (bot.sessionId !== sessionId || !isCurrentSession()) {
+                  throw workspaceSessionStale('DS Bot changed before this prompt started.');
+                }
+              }
+              if (!dsBotId) return target.ask(sessionId, ...args);
+              const options = typeof args[1] === 'number' ? { timeoutMs: args[1] } : args[1] ?? {};
+              const handoffResources = { stagedBatches: [] };
+              let currentSessionId = sessionId;
+              let promptRpcId;
+              const assertStillBound = () => {
+                options.signal?.throwIfAborted();
+                if (!isCurrentSession()) {
+                  // This input was already accepted. A stale-session error here
+                  // would cause the outer loop to submit it again after unbind.
+                  throw new DOMException('DS Bot binding changed while awaiting a reply.', 'AbortError');
+                }
+              };
+              for (;;) {
+                try {
+                  const answer = promptRpcId
+                    ? await target.waitForTransferredReply(currentSessionId, {
+                        ...options, handoffResources, promptRpcId, assertCurrent: assertStillBound,
+                      })
+                    : await target.ask(sessionId, args[0], { ...options, handoffResources });
+                  if (promptRpcId) assertStillBound();
+                  replySessionId = currentSessionId;
+                  return answer;
+                } catch (askError) {
+                  if (!dsBotId || !['session-archived', 'turn-blocked'].includes(askError?.code)) throw askError;
+                  assertStillBound();
+                  const evidence = extractConnectionEvidence(askError);
+                  const notSubmitted = evidence.details.submissionState === 'not-submitted';
+                  const accepted = askError.promptAccepted === true || evidence.details.submissionState === 'accepted';
+                  const originalRpcId = promptRpcId ?? askError.details?.promptRpcId ?? evidence.correlation.promptRpcId;
+                  // A failed submit can have an unknown outcome. Only explicit
+                  // pre-submit evidence permits replay; everything else needs
+                  // the durable identity of an accepted message to follow.
+                  if (!notSubmitted && (!accepted || !originalRpcId
+                    || typeof target.waitForTransferredReply !== 'function')) throw askError;
+                  let fresh;
+                  for (let attempt = 0; attempt < 6; attempt += 1) {
+                    assertStillBound();
+                    fresh = await dsBot.resolve(dsBotId).catch(() => null);
+                    assertStillBound();
+                    if (fresh && fresh.sessionId !== currentSessionId) break;
+                    await delay(200, undefined, { signal: options.signal });
+                  }
+                  if (!fresh || fresh.sessionId === currentSessionId) throw askError;
+                  if (notSubmitted) throw workspaceSessionStale('DS Bot rolled over before this prompt was submitted.');
+                  currentSessionId = fresh.sessionId;
+                  promptRpcId = originalRpcId;
+                  await withSessionBindingLock(state, conversationKey, async () => {
+                    assertStillBound();
+                    await state.setSession(conversationKey, currentSessionId);
+                    assertStillBound();
+                    sessionGenerations.set(currentSessionId, {
+                      generation, conversationKey, conversationGeneration,
+                    });
+                  });
+                }
+              }
             },
           });
         };
@@ -2108,6 +2713,26 @@ export function createBotWorkspaceScope(
             return false;
           }
           return target.sessionExists(sessionId, ...args);
+        };
+      }
+      if (property === 'forkSession') {
+        return async (sessionId, options = {}) => {
+          if (!isCurrentScope()) {
+            throw workspaceSessionStale('The bot workspace changed before the fork.');
+          }
+          if (generationIsStale(sessionGenerations.get(sessionId))) {
+            throw workspaceSessionStale('The session is no longer in the current workspace.');
+          }
+          if (typeof target.forkSession !== 'function') {
+            const error = new Error('The Host does not support forking sessions');
+            error.code = 'harness-api-not-found';
+            throw error;
+          }
+          const result = await target.forkSession(sessionId, options);
+          if (!isCurrentScope()) {
+            throw workspaceSessionStale('The bot workspace changed while the fork was running.');
+          }
+          return result;
         };
       }
       if (property === 'ask') {
@@ -2138,7 +2763,7 @@ export function createBotWorkspaceScope(
   });
   const scopedState = new Proxy(state, {
     get(target, property) {
-      if (property === CONNECTION_TEST_STATE_IDENTITY) return target;
+      if (property === CONNECTION_TEST_STATE_IDENTITY || property === SESSION_BINDING_STATE_IDENTITY) return target;
       if (property === 'sessionFor') {
         return (key, ...args) => {
           if (!isCurrentScope()) return null;
@@ -2164,11 +2789,18 @@ export function createBotWorkspaceScope(
       }
       if (property === 'setSession') {
         return (key, sessionId, ...args) => {
+          if (dsBinding(key) && target.sessionFor(key) !== sessionId) assertNoDsBinding(key);
           const entry = sessionGenerations.get(sessionId);
           if (!isCurrentScope() || generationIsStale(entry, key)) {
             return false;
           }
           return target.setSession(key, sessionId, ...args);
+        };
+      }
+      if (property === 'clearSession') {
+        return (key, ...args) => {
+          assertNoDsBinding(key);
+          return target.clearSession(key, ...args);
         };
       }
       const value = Reflect.get(target, property, target);
@@ -2184,6 +2816,7 @@ export function createBotScopedHarness(harness, options) {
 
 export function createWorkspaceAwareController(controller, {
   workspaces,
+  harness,
   stateFor,
   agentPresetCatalog,
   modelCatalog,
@@ -2244,6 +2877,9 @@ export function createWorkspaceAwareController(controller, {
         && !catalog?.items.some((item) => item.id === normalizedAgentPreset)) {
         throw unavailableAgentPreset();
       }
+      if (workspaces.groupsByAgentPreset?.(botId)) {
+        await ensurePresetWorkspace(harness, workspaces.workspaceFor(botId), normalizedAgentPreset, catalog);
+      }
       await workspaces.setAgentPreset(botId, normalizedAgentPreset, { incarnation });
       return decorateResult(
         workspaces,
@@ -2263,9 +2899,18 @@ export function createWorkspaceAwareController(controller, {
         error.code = 'workspace-bot-not-found';
         throw error;
       }
-      const catalog = model && modelCatalog
-        ? await resolveModelCatalog(modelCatalog, { fresh: true })
-        : null;
+      let catalog = null;
+      if (model && modelCatalog) {
+        try {
+          catalog = await resolveModelCatalog(modelCatalog, { fresh: true, throwOnError: true });
+        } catch (error) {
+          if (error?.name === 'AbortError') throw error;
+          throw unavailableModelCatalog(error);
+        }
+        if (catalog?.failures.some((failure) => failure.id === model.provider)) {
+          throw unavailableModelCatalog();
+        }
+      }
       const entry = modelCatalogEntry(catalog, model);
       if (model && (!modelCatalog || !entry)) {
         throw unavailableModel();
@@ -2432,6 +3077,16 @@ export function createWorkspaceAwareController(controller, {
 
   return new Proxy(controller, {
     get(target, property) {
+      if (property === 'updateConversationDirectory') {
+        return async (botId, config) => {
+          await workspaces.setConversationDirectory(
+            botId,
+            config,
+            botId === null ? {} : { incarnation: workspaces.incarnationFor(botId) },
+          );
+          return decorate(await controller.status());
+        };
+      }
       if (property === 'updateWorkspace') return updateWorkspace;
       if (property === 'updateAgentPreset') return updateAgentPreset;
       if (property === 'updateModel') return updateModel;

@@ -103,3 +103,49 @@ test('oversized final-only Markdown answers are delivered completely in bounded 
   assert.ok(sent.every((request) => Buffer.byteLength(request.data.content) <= 30_000));
   assert.equal(sent.map(markdown).join('').replace(/\n/g, ''), result.replace(/\n/g, ''));
 });
+
+for (const fence of ['```python', '~~~~python', '````python']) {
+  test(`long final-only code keeps indentation and independent fences (${fence})`, async () => {
+    const lines = Array.from({ length: 1800 }, (_, index) => `    values.append(${index})`);
+    // A shorter fence inside a longer one is code, not the end of the block.
+    if (fence === '````python') lines.splice(900, 0, '```');
+    const delimiter = fence.replace('python', '');
+    const result = `${fence}\n${lines.join('\n')}\n${delimiter}`;
+    const { sent, asks } = await runAnswer({ result });
+    assert.equal(asks, 1);
+    assert.ok(sent.length > 1);
+    const recovered = [];
+    for (const request of sent) {
+      assert.equal(request.data.msg_type, 'post');
+      assert.ok(Buffer.byteLength(request.data.content) <= 24_000);
+      const part = markdown(request);
+      const match = /^(`{3,}|~{3,})python\n([\s\S]*)\n\1$/.exec(part);
+      assert.ok(match, 'every message must contain a complete Python code block');
+      recovered.push(match[2]);
+    }
+    assert.equal(recovered.join('\n'), lines.join('\n'), 'all code lines and their indentation survive');
+  });
+}
+
+test('long code budgets include CJK, emoji, JSON escapes and added fences', async () => {
+  const lines = Array.from({ length: 1500 }, (_, index) => `\tprint("中文😀\\\\${index}")`);
+  const { sent } = await runAnswer({ result: `\`\`\`python\n${lines.join('\n')}\n\`\`\`` });
+  assert.ok(sent.length > 1);
+  const recovered = sent.map((request) => {
+    assert.equal(request.data.msg_type, 'post');
+    assert.ok(Buffer.byteLength(request.data.content) <= 24_000);
+    const match = /^```python\n([\s\S]*)\n```$/.exec(markdown(request));
+    assert.ok(match);
+    assert.ok(!match[1].includes('\ufffd'));
+    return match[1];
+  });
+  assert.equal(recovered.join('\n'), lines.join('\n'));
+});
+
+test('splitting near a complete code block keeps surrounding prose outside code', async () => {
+  const result = `${'说明。'.repeat(2700)}\n\n\`\`\`python\n    pass\n\`\`\`\n\n结尾。`;
+  const { sent } = await runAnswer({ result });
+  assert.ok(sent.length > 1);
+  assert.ok(sent.some((request) => markdown(request).includes('```python\n    pass\n```')));
+  assert.ok(markdown(sent.at(-1)).endsWith('结尾。'));
+});

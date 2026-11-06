@@ -4,10 +4,50 @@ import { DatabaseSync } from 'node:sqlite';
 
 import {
   MacOSMessagesApi,
+  decodeAttributedBodyText,
   normalizeIMessage,
   normalizeIMessageTarget,
   IMESSAGE_BOT_REPLY_PREFIX,
 } from '../../../src/channels/imessage/imessage-api.mjs';
+
+// Shaped like an NSArchiver typedstream: class name, then the '+' inline-string
+// tag, then the NXTypedStream length prefix and UTF-8 payload.
+const TYPEDSTREAM_STRING_PREFIX = Buffer.from('streamtyped\0NSString\0', 'utf8');
+const attributedBody = (lengthPrefix, payload) => Buffer.concat([
+  TYPEDSTREAM_STRING_PREFIX, Buffer.from([0x2b]), Buffer.from(lengthPrefix), Buffer.from(payload),
+]);
+// Exact blob from a macOS 26 chat.db where message.text is NULL and the body is "你好🤝".
+const MACOS_26_HEX_BODY = '040B73747265616D747970656481E803840140848484124E5341747472696275746564537472696E67008484084E534F626A656374008592848484084E53537472696E67019484012B0AE4BDA0E5A5BDF09FA49D86840269490104928484840C4E5344696374696F6E617279009484016901928496961D5F5F6B494D4D657373616765506172744174747269627574654E616D658692848484084E534E756D626572008484074E5356616C7565009484012A84999900868686';
+
+test('decodes the typedstream body macOS 26 stores instead of message.text', () => {
+  assert.equal(decodeAttributedBodyText(MACOS_26_HEX_BODY), '你好🤝');
+  assert.equal(decodeAttributedBodyText(Buffer.from(MACOS_26_HEX_BODY, 'hex')), '你好🤝');
+  assert.equal(decodeAttributedBodyText(attributedBody([0x03], 'abc')), 'abc');
+  // Producer regression case from other typedstream readers: 292-byte run as 0x81 0x24 0x01.
+  assert.equal(decodeAttributedBodyText(attributedBody([0x81, 0x24, 0x01], 'a'.repeat(292))), 'a'.repeat(292));
+  assert.equal(decodeAttributedBodyText(null), null);
+  assert.equal(decodeAttributedBodyText(''), null);
+  assert.equal(decodeAttributedBodyText(attributedBody([0x02], [0xff, 0xfe])), null);
+  assert.equal(decodeAttributedBodyText(attributedBody([0x81, 0xff, 0x00], 'short')), null);
+  assert.equal(decodeAttributedBodyText(Buffer.from('no typedstream marker', 'utf8')), null);
+  // Attachment-only bodies are U+FFFC; the text-only channel must keep ignoring them.
+  assert.equal(decodeAttributedBodyText(attributedBody([0x03], Buffer.from('\ufffc', 'utf8'))), null);
+  assert.equal(decodeAttributedBodyText(attributedBody([0x05], Buffer.from('hi\ufffc', 'utf8'))), 'hi');
+});
+
+test('normalizes a macOS 26 row that only carries attributedBody', () => {
+  const message = normalizeIMessage({
+    rowid: 5, guid: 'p:5', chatGuid: 'any;-;+8613800000000', serviceName: 'iMessage',
+    text: null, attributedBodyHex: MACOS_26_HEX_BODY, sender: '+8613800000000',
+  });
+  assert.equal(message.content, '你好🤝');
+  assert.equal(message.replyTarget.address, '+8613800000000');
+  assert.equal(normalizeIMessage({
+    rowid: 6, guid: 'p:6', chatGuid: 'any;-;+8613800000000', serviceName: 'iMessage',
+    text: null, attributedBodyHex: attributedBody([0x03], Buffer.from('\ufffc', 'utf8')).toString('hex'),
+    sender: '+8613800000000',
+  }), null);
+});
 
 test('normalizes private native Messages rows and ignores bot identities', () => {
   const message = normalizeIMessage({
@@ -38,6 +78,8 @@ test('reads Messages database rows after a durable cursor', async () => {
   assert.match(calls[0].args.at(-1), /ROWID > 3/);
   assert.match(calls[0].args.at(-1), /c\.service_name = 'iMessage'/);
   assert.match(calls[0].args.at(-1), /m\.is_from_me = 0/);
+  assert.match(calls[0].args.at(-1), /hex\(m\.attributedBody\) AS attributedBodyHex/);
+  assert.match(calls[0].args.at(-1), /OR m\.attributedBody IS NOT NULL/);
 });
 
 test('reads the latest iMessage row id for safe first-start cursor initialization', async (t) => {
@@ -72,7 +114,7 @@ test('self-chat accepts the owner once, ignores bot echoes and outgoing messages
   t.after(() => db.close());
   db.exec(`
     CREATE TABLE message (guid TEXT, text TEXT, handle_id INTEGER, date INTEGER,
-      is_from_me INTEGER, destination_caller_id TEXT);
+      is_from_me INTEGER, destination_caller_id TEXT, attributedBody BLOB);
     CREATE TABLE chat (guid TEXT, service_name TEXT, style INTEGER,
       chat_identifier TEXT, account_login TEXT, last_addressed_handle TEXT);
     CREATE TABLE chat_message_join (message_id INTEGER, chat_id INTEGER);
@@ -88,7 +130,8 @@ test('self-chat accepts the owner once, ignores bot echoes and outgoing messages
     db.prepare('INSERT INTO handle VALUES (?)').run(address);
   }
   const insert = (guid, text, chatId, fromMe, destination = 'owner@example.com') => {
-    const { lastInsertRowid } = db.prepare('INSERT INTO message VALUES (?, ?, ?, 0, ?, ?)')
+    const { lastInsertRowid } = db.prepare(`INSERT INTO message
+      (guid, text, handle_id, date, is_from_me, destination_caller_id) VALUES (?, ?, ?, 0, ?, ?)`)
       .run(guid, text, chatId, fromMe, destination);
     db.prepare('INSERT INTO chat_message_join VALUES (?, ?)').run(lastInsertRowid, chatId);
   };
@@ -116,6 +159,34 @@ test('self-chat accepts the owner once, ignores bot echoes and outgoing messages
   assert.equal(normalize(rows)[1].replyTarget.address, 'friend@example.com');
   // No process-local send history is needed to reject an echo after restart.
   assert.deepEqual(normalize(await makeApi().listMessages({ after: 2, chatGuid: 'self-email' })), []);
+});
+
+test('reads macOS 26 rows whose body only lives in attributedBody', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec(`
+    CREATE TABLE message (guid TEXT, text TEXT, attributedBody BLOB, handle_id INTEGER,
+      date INTEGER, is_from_me INTEGER);
+    CREATE TABLE chat (guid TEXT, service_name TEXT);
+    CREATE TABLE chat_message_join (message_id INTEGER, chat_id INTEGER);
+    CREATE TABLE handle (id TEXT);
+  `);
+  db.prepare('INSERT INTO chat VALUES (?, ?)').run('any;-;+15550001', 'iMessage');
+  db.prepare('INSERT INTO handle VALUES (?)').run('+15550001');
+  const { lastInsertRowid } = db.prepare(`INSERT INTO message
+    (guid, text, attributedBody, handle_id, date, is_from_me) VALUES (?, ?, ?, 1, 0, 0)`)
+    .run('tahoe-incoming', null, attributedBody([0x03], 'abc'));
+  db.prepare('INSERT INTO chat_message_join VALUES (?, 1)').run(lastInsertRowid);
+
+  const api = new MacOSMessagesApi({
+    execFileImpl: async (_file, args) => ({ stdout: JSON.stringify(db.prepare(args.at(-1)).all()) }),
+  });
+  const [row] = await api.listMessages();
+  assert.equal(row.text, null);
+  assert.match(row.attributedBodyHex, /^[0-9A-F]+$/);
+  const message = normalizeIMessage(row);
+  assert.equal(message.messageId, 'tahoe-incoming');
+  assert.equal(message.content, 'abc');
 });
 
 test('normalization never accepts an unmarked outgoing contact message', () => {

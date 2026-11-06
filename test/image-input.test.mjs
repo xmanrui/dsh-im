@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, readFile, rm, readdir, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -13,6 +13,8 @@ import { HarnessClient, HarnessRpcError } from '../src/channels/shared/harness-c
 import { TextHarnessBridge } from '../src/channels/shared/text-harness-bridge.mjs';
 import { WecomAppBridge } from '../src/channels/wecom-app/wecom-app-bridge.mjs';
 import { createImageInputRpcHandler, IMAGE_INPUT_ENDPOINTS } from '../plugin-src/host/image-input-rpc.mjs';
+
+import { assertRestrictiveMode } from './support/filesystem.mjs';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const MB = 1024 * 1024;
@@ -85,7 +87,7 @@ test('settings validate all fields and serialize atomically without changing TTL
   await Promise.all(values.map((value) => store.set(value)));
   assert.deepEqual(await new ImageInputSettingsStore(path).get(), values[2]);
   assert.deepEqual(await readdir(root), ['image-input-settings.json']);
-  assert.equal((await stat(path)).mode & 0o777, 0o600);
+  await assertRestrictiveMode(path, 0o600);
   const handler = createImageInputRpcHandler(store);
   assert.equal((await handler(IMAGE_INPUT_ENDPOINTS.set, { ...values[2], secret: 'no' })).ok, false);
   assert.equal((await handler(IMAGE_INPUT_ENDPOINTS.get, {})).value.maxImageMb, 8);

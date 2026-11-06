@@ -59,6 +59,7 @@ function harness({ ready = true, provide = true, onProvide } = {}) {
     },
     slots: {
       inject(name, install) {
+        if (name === 'sidebar.session.row.leading') return () => {};
         assert.equal(name, 'settings.section');
         const item = { cleanup: null, install };
         subscriptions.add(item);

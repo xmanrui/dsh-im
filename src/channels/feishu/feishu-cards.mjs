@@ -14,14 +14,18 @@
  * without button callbacks.
  */
 
-import { posix, win32 } from 'node:path';
 import { t } from '../shared/i18n.mjs';
+import { SESSION_NAV_HELP_LINES } from '../shared/command-catalog.mjs';
+import { workspaceLabels } from '../shared/workspace-labels.mjs';
 import { normalizeFeishuStepCardPanels } from './step-push-mode.mjs';
 
 export const MENU_PAGE_SIZE = 10;
+export const MODEL_PAGE_SIZE = 20;
+const MODEL_CARD_TEXT_LIMIT = 200;
 
 /** 预设下拉中「跟随默认」(null) 的哨兵值，供 initial_index 命中与回调识别。 */
 export const PRESET_FOLLOW_DEFAULT_SENTINEL = '__preset_follow_default__';
+export const REASONING_DEFAULT_SENTINEL = '__reasoning_default__';
 
 function plainText(content) {
   return { tag: 'plain_text', content: String(content) };
@@ -95,50 +99,6 @@ function cleanTitle(value) {
 
 function safeTitle(value) {
   return cleanTitle(value) || t('暂无标题');
-}
-
-const WORKSPACE_LABEL_LENGTH = 22;
-
-/** Display labels only: paths and their snapshot order remain the callback identity. */
-function workspaceLabels(paths, titles = {}) {
-  const entries = paths.map((path) => {
-    const api = /^[a-z]:[\\/]|^\\\\/iu.test(path) ? win32 : posix;
-    const normalized = api.normalize(path);
-    const name = cleanTitle(api.basename(normalized) || api.parse(normalized).root);
-    const base = (typeof titles[path] === 'string' && cleanTitle(titles[path])) || name;
-    return {
-      api, base, label: base, parent: api.dirname(normalized),
-      context: base === name ? '' : api.basename(normalized),
-    };
-  });
-  const counts = () => {
-    const result = new Map();
-    for (const { label } of entries) result.set(label, (result.get(label) ?? 0) + 1);
-    return result;
-  };
-  // Grow only ambiguous path suffixes; stop at the root even if display text collides.
-  for (;;) {
-    const repeated = counts();
-    let changed = false;
-    for (const entry of entries) {
-      if (repeated.get(entry.label) < 2 || entry.parent === null) continue;
-      const { api, parent } = entry;
-      entry.context = api.join(api.basename(parent) || parent, entry.context);
-      entry.label = `${entry.base} · ${cleanTitle(entry.context)}`;
-      const next = api.dirname(parent);
-      entry.parent = next === parent ? null : next;
-      changed = true;
-    }
-    if (!changed) break;
-  }
-  for (const entry of entries) {
-    const chars = Array.from(entry.label);
-    if (chars.length > WORKSPACE_LABEL_LENGTH) {
-      entry.label = `${chars.slice(0, 11).join('')}…${chars.slice(-10).join('')}`;
-    }
-  }
-  const repeated = counts();
-  return entries.map(({ label }) => ({ label, numbered: repeated.get(label) > 1 }));
 }
 
 function cardWith(headerText, elements) {
@@ -284,10 +244,19 @@ export function menuCard(ctx) {
   const curModelId = curModel ? `${curModel.provider}/${curModel.model}` : null;
   const flat = [];
   for (const group of groups) {
-    for (const model of (group.models || [])) flat.push({ id: `${group.id}/${model.id}`, name: `${group.name} - ${model.name}` });
+    for (const model of (group.models || [])) {
+      flat.push({
+        id: `${group.id}/${model.id}`,
+        name: `${group.name} - ${model.name}`,
+        reasoning: model.reasoning,
+      });
+    }
   }
   let modelDropdown = null;
+  let reasoningDropdown = null;
   if (flat.length > 1) {
+    // Keep the compact menu within Feishu select limits; the dedicated model
+    // card exposes the complete catalog.
     const setModelOptions = flat.slice(0, 30).map((opt) => ({
       text: { tag: 'plain_text', content: `${opt.id === curModelId ? '✓ ' : ''}${opt.name}` },
       value: opt.id,
@@ -299,6 +268,28 @@ export function menuCard(ctx) {
       initial_index: initialIndex(setModelOptions, curModelId),
       options: setModelOptions,
       behaviors: [{ type: 'callback', value: { action: 'model_pick' } }],
+    };
+  }
+  const selectedModel = flat.find((opt) => opt.id === curModelId);
+  const efforts = Array.isArray(selectedModel?.reasoning?.efforts)
+    ? selectedModel.reasoning.efforts.filter((effort) => typeof effort?.id === 'string' && effort.id)
+    : [];
+  if (efforts.length > 0) {
+    const currentEffort = curModel?.reasoningEffort ?? selectedModel.reasoning.defaultEffort;
+    const effortOptions = [
+      { id: REASONING_DEFAULT_SENTINEL, name: t('默认等级') },
+      ...efforts.map((effort) => ({ id: effort.id, name: effort.name || effort.id })),
+    ].map((effort) => ({
+      text: { tag: 'plain_text', content: `${effort.id === (currentEffort ?? REASONING_DEFAULT_SENTINEL) ? '✓ ' : ''}${effort.name}` },
+      value: effort.id,
+    }));
+    reasoningDropdown = {
+      tag: 'select_static',
+      name: 'reasoning_pick',
+      placeholder: { tag: 'plain_text', content: t('切换推理等级') },
+      initial_index: initialIndex(effortOptions, currentEffort ?? REASONING_DEFAULT_SENTINEL),
+      options: effortOptions,
+      behaviors: [{ type: 'callback', value: { action: 'reasoning_pick' } }],
     };
   }
 
@@ -335,6 +326,12 @@ export function menuCard(ctx) {
     tag: 'column_set', flex_mode: 'none',
     columns: [iconCol('🤖'), dropdownCol(row2[0]), iconCol('🧠'), dropdownCol(row2[1])],
   });
+  if (reasoningDropdown) {
+    elements.push({
+      tag: 'column_set', flex_mode: 'none',
+      columns: [iconCol('🧠'), dropdownCol(reasoningDropdown)],
+    });
+  }
 
   // 新会话 + 全部会话按钮
   const sessionButtons = buttonPair(newSessionLabel, 'new', t('📋 会话/关注'), 'sessions');
@@ -463,46 +460,52 @@ export function presetCard(catalog) {
  * The catalog comes from `harness.listModels()` or `session.models()`.
  * Groups are shown as text, then a flat dropdown for selection.
  */
-export function modelCard(catalog) {
+export function modelCard(catalog, { page = 0 } = {}) {
   const { groups, current } = catalog;
   const currentId = current ? `${current.provider}/${current.model}` : null;
+  const allModels = groups.flatMap((group) => group.models.map((model) => ({
+    group, model, id: `${group.id}/${model.id}`,
+  })));
+  const pages = Math.max(1, Math.ceil(allModels.length / MODEL_PAGE_SIZE));
+  const selectedPage = Number.isSafeInteger(page) && page >= 0 ? Math.min(page, pages - 1) : 0;
+  const currentOrdinal = currentId ? allModels.findIndex((entry) => entry.id === currentId) : -1;
+  const visibleModels = allModels.slice(selectedPage * MODEL_PAGE_SIZE, (selectedPage + 1) * MODEL_PAGE_SIZE);
 
   const elements = [
     { tag: 'div', text: markdown(t('**当前模型**：{model}', { model: currentId || t('未设置') })) },
     { tag: 'hr' },
   ];
 
-  // Count total models
-  let total = 0;
-  for (const group of groups) total += group.models.length;
-
-  if (total === 0) {
+  if (allModels.length === 0) {
     elements.push(
       { tag: 'div', text: markdown(t('当前没有可用模型。')) },
       backButton(),
     );
   } else {
-    // Show groups as text
+    const currentUnavailable = currentId && currentOrdinal < 0;
+    elements.push({ tag: 'div', text: markdown(t('第 {page}/{pages} 页 · 共 {total} 个模型', {
+      page: selectedPage + 1, pages, total: allModels.length,
+    })) });
+    if (currentUnavailable) elements.push({ tag: 'div', text: markdown(t('当前模型不可用：{model}', { model: currentId })) });
+    // Bound the Markdown and the picker together, so a large catalog does not
+    // produce an oversized card or silently hide selectable entries.
     for (const group of groups) {
-      const modelLines = group.models.map((m) => {
-        const id = `${group.id}/${m.id}`;
-        return `${id}${id === currentId ? ' ✓' : ''}`;
-      });
-      elements.push(
+      const modelLines = visibleModels.filter((entry) => entry.group === group).map(({ id }) => (
+        `${id}${id === currentId ? ' ✓' : ''}`
+      ));
+      if (modelLines.length) elements.push(
         { tag: 'div', text: markdown(`**${group.name}**\n${modelLines.join('\n')}`) },
       );
     }
 
-    // Flatten all models into a dropdown
-    const allOptions = [];
-    for (const group of groups) {
-      for (const model of group.models) {
-        allOptions.push({
-          value: `${group.id}/${model.id}`,
-          text: { tag: 'plain_text', content: `${group.name} - ${model.name}` },
-        });
-      }
-    }
+    const allOptions = visibleModels.map(({ group, model, id }) => ({
+      value: id,
+      text: { tag: 'plain_text', content: `${group.name} - ${model.name}`.slice(0, MODEL_CARD_TEXT_LIMIT) },
+    }));
+    const currentOption = allModels.find((entry) => entry.id === currentId)?.model;
+    const efforts = Array.isArray(currentOption?.reasoning?.efforts)
+      ? currentOption.reasoning.efforts.filter((effort) => typeof effort?.id === 'string' && effort.id)
+      : [];
 
     elements.push(
       { tag: 'hr' },
@@ -517,9 +520,34 @@ export function modelCard(catalog) {
         })),
         behaviors: [{ type: 'callback', value: { action: 'model_pick' } }],
       },
-      { tag: 'hr' },
-      backButton(),
     );
+    if (efforts.length > 0) {
+      const currentEffort = current?.reasoningEffort ?? currentOption.reasoning.defaultEffort;
+      const effortOptions = [
+        { id: REASONING_DEFAULT_SENTINEL, name: t('默认等级') },
+        ...efforts.map((effort) => ({ id: effort.id, name: effort.name || effort.id })),
+      ].map((effort) => ({
+        text: { tag: 'plain_text', content: `${effort.id === (currentEffort ?? REASONING_DEFAULT_SENTINEL) ? '✓ ' : ''}${effort.name}` },
+        value: effort.id,
+      }));
+      elements.push({
+        tag: 'select_static',
+        name: 'reasoning_pick',
+        placeholder: { tag: 'plain_text', content: t('切换推理等级') },
+        initial_index: initialIndex(effortOptions, currentEffort ?? REASONING_DEFAULT_SENTINEL),
+        options: effortOptions,
+        behaviors: [{ type: 'callback', value: { action: 'reasoning_pick' } }],
+      });
+    }
+    if (pages > 1) {
+      elements.push(buttonPair(
+        selectedPage > 0 ? t('◀ 上一页') : t('第一页'),
+        selectedPage > 0 ? `models:${selectedPage - 1}` : 'models:0',
+        selectedPage + 1 < pages ? t('下一页 ▶') : t('最后一页'),
+        selectedPage + 1 < pages ? `models:${selectedPage + 1}` : `models:${pages - 1}`,
+      ));
+    }
+    elements.push({ tag: 'hr' }, backButton());
   }
   return cardWith(t('🧠 模型列表'), elements);
 }
@@ -564,12 +592,14 @@ export function menuHelpText() {
     '',
     '📋 会话 / 工作区',
     '/sessionlist 或 /sessions  列出工作区会话',
+    '/sessionlist --all  跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）',
     '/sessionlist --limit N  仅列出当前工作区前 N 个会话',
-    '/session ID  绑定已有会话',
+    '/session Session ID、当前工作区序号或标题关键词  将当前聊天绑定到指定会话',
     '/workspacelist  列出工作区',
     '/workspace 工作区序号或绝对路径  切换工作区',
     '/ws、/wsl、/workspaces  工作区命令别名',
     '/new  开启全新会话',
+    ...SESSION_NAV_HELP_LINES.map((line) => t(line)),
     '',
     '📊 状态 / 压缩',
     '/status  连接状态',
@@ -635,8 +665,9 @@ const HELP_TEXT_COMMANDS = [
   '',
   '`/m` — 打开菜单卡片',
   '`/new` — 开启全新会话',
-  '`/session ID` — 绑定已有会话',
+  '`/session Session ID、当前工作区序号或标题关键词` — 绑定已有会话',
   '`/sessionlist [工作区]` 或 `/sessions [工作区]` — 列出会话',
+  '`/sessionlist --all` 或 `/sessions --all` — 跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）',
   '`/sessionlist --limit N` 或 `/sessions --limit N` — 仅列出当前工作区前 N 个会话',
   '`/workspace 工作区序号或绝对路径` — 切换工作区',
   '`/workspacelist` — 列出工作区',
@@ -736,7 +767,7 @@ export function cardActionProbeCard(nonce) {
  * in the label. `watchedSessionIds` is a Set-like of ids this conversation
  * already watches.
  */
-export function sessionListCard(workspace, sessions, page, total, watchedSessionIds = new Set()) {
+export function sessionListCard(workspace, sessions, page, total, watchedSessionIds = new Set(), boundSessionId = '') {
   const start = page * MENU_PAGE_SIZE;
   const slice = sessions.slice(start, start + MENU_PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(total / MENU_PAGE_SIZE));
@@ -761,7 +792,9 @@ export function sessionListCard(workspace, sessions, page, total, watchedSession
     })) },
     ...slice.map((session, offset) => {
       // Page-local numbering: number replies resolve against this page.
-      const label = `${offset + 1}. ${safeTitle(session.title)}${session.archived === true ? t('（已归档）') : ''}`;
+      const label = `${offset + 1}. ${safeTitle(session.title)}`
+        + `${session.archived === true ? t('（已归档）') : ''}`
+        + `${session.sessionId === boundSessionId ? t('（当前绑定）') : ''}`;
       const watching = watched(session.sessionId);
       return row(
         buttonElement(watching ? t('⭐ 取消关注') : t('☆ 关注'), watching ? `unwatch:${session.sessionId}` : `watch:${session.sessionId}`),
@@ -1292,8 +1325,8 @@ export function splitStepStreamCardBlocks(
 }
 
 /**
- * Interactive question card. When the question carries options, each option is
- * rendered as its own button; the selected option label is submitted via a
+ * Interactive question card. Each option is shown in wrapping body text with
+ * a short numbered button; the selected option label is submitted via a
  * card callback. Multi-select questions fall back to the plain-text flow (the
  * caller decides), because a multi-select needs a confirm step.
  * A resolvedText replaces the buttons when an image ends the question flow.
@@ -1314,18 +1347,22 @@ export function questionCard({ interactionId, header, question, detail, options,
 
   if (Array.isArray(options) && options.length > 0) {
     elements.push({ tag: 'hr' });
-    for (const option of options) {
+    for (const [optionIndex, option] of options.entries()) {
       const label = typeof option?.label === 'string' ? option.label : '';
       if (!label) continue;
       const description = typeof option?.description === 'string' && option.description.trim()
         ? option.description.trim()
         : '';
-      // Include the option description in the button so the user sees the full
-      // meaning (mirrors the text form "1. label — description").
-      const buttonText = description ? `${label}\n${description}` : label;
+      // Long button labels are clipped by Feishu. Keep the complete option in
+      // non-interactive body text, numbered like the text-reply fallback.
+      const number = optionIndex + 1;
+      elements.push({
+        tag: 'div',
+        text: plainText(`${number}. ${label}${description ? `\n${description}` : ''}`),
+      });
       // Action carries the question index so a stale card from a previous
       // question cannot be applied to the current one: answer:<interactionId>:<index>:<label>
-      elements.push(button(buttonText, `answer:${interactionId}:${index}:${label}`));
+      elements.push(button(t('选择 {number}', { number }), `answer:${interactionId}:${index}:${label}`));
     }
     // issue #162：自定义答案入口与 menuCard/steerCard 的「✏️ 更多 / 自定义…」
     // 对齐——文字流本就支持 custom 答案，卡片补上引导入口。

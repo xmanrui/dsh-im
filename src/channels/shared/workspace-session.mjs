@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { withSessionBindingLock } from './session-binding-lock.mjs';
 import { initialSessionTitle } from './session-title.mjs';
-import { messageDiagnosticError } from './connection-error.mjs';
+import { extractConnectionEvidence, messageDiagnosticError } from './connection-error.mjs';
+import { t } from './i18n.mjs';
 
 export const WORKSPACE_SESSION_STALE = 'workspace-session-stale';
 
@@ -103,6 +105,7 @@ export async function askInWorkspaceSession({
   existsOptions,
   askOptions,
   deferredDelivery,
+  onNotice,
 }) {
   const initialTitle = contextEnhanced
     ? initialSessionTitle({
@@ -114,29 +117,67 @@ export async function askInWorkspaceSession({
   const renameSignal = createOptions?.signal
     ?? (typeof askOptions === 'object' ? askOptions?.signal : undefined);
   const renameOptions = renameSignal ? { signal: renameSignal } : undefined;
+  let unreadableSessionId;
   while (true) {
     const diagnostic = { stage: 'session.prepare', submissionState: 'not-submitted' };
+    let dsBotSession = false;
     try {
       const binding = await withSessionBindingLock(state, key, async () => {
         await awaitPendingConversationSwitch(harness, key);
-        let sessionId = state.sessionFor(key);
+        const dsBotSessionId = await harness.resolveDsBotSession?.(key);
+        dsBotSession = Boolean(dsBotSessionId);
+        let sessionId = dsBotSessionId || state.sessionFor(key);
         diagnostic.sessionId = sessionId;
         let session = sessionId ? workspaceSession(harness, sessionId, key) : null;
-        if (!session || !(await sessionExists(session, existsOptions))) {
-          sessionId = await createSession(harness, {
-            conversationKey: key,
-            ...(createOptions ?? {}),
-          });
+        const replacingUnreadable = sessionId && sessionId === unreadableSessionId;
+        if (!session || replacingUnreadable || !(await sessionExists(session, existsOptions))) {
+          if (dsBotSessionId) {
+            throw Object.assign(new Error('DS Bot 的当前会话不可用。'), { code: 'ds-bot-unavailable' });
+          }
+          // Name the Session here and bind it *before* creating it. Prompt
+          // assembly runs inside creation, and a subscriber that resolves the
+          // conversation by session id can only answer if the conversation owns
+          // the id by then.
+          // A Harness that accepts a caller-chosen id lets the binding exist
+          // before the Session does; anything else keeps the old order.
+          const plannedSessionId = harness?.canChooseSessionId === true ? `session-${randomUUID()}` : null;
+          const previousSessionId = plannedSessionId === null ? null : state.sessionFor(key) ?? null;
+          if (plannedSessionId !== null && await state.setSession(key, plannedSessionId) === false) return null;
+          try {
+            sessionId = await createSession(harness, {
+              conversationKey: key,
+              ...(plannedSessionId === null ? {} : { sessionId: plannedSessionId }),
+              ...(createOptions ?? {}),
+            });
+          } catch (error) {
+            // The binding must not outlive a Session that was never created, and a
+            // failed replacement must leave the previous binding in place.
+            if (plannedSessionId !== null) {
+              if (previousSessionId === null) await state.clearSession?.(key);
+              else await state.setSession(key, previousSessionId);
+            }
+            throw error;
+          }
           diagnostic.sessionId = sessionId;
-          if (await state.setSession(key, sessionId) === false) return null;
+          if (plannedSessionId === null) {
+            if (await state.setSession(key, sessionId) === false) return null;
+          } else if (sessionId !== plannedSessionId && await state.setSession(key, sessionId) === false) {
+            return null;
+          }
           // Binding committed: capture the conversation's effective-workspace
           // generation together with the session, so the prompt below is fenced
           // against a conversation switch that only commits after the bind.
           const conversationGeneration = readConversationGeneration(harness, key);
           session = workspaceSession(harness, sessionId, key);
-          if (initialTitle && typeof session.renameTitle === 'function') {
+          // A title the user set with /title before any Session existed wins over
+          // the one derived from the first message, and is consumed exactly once.
+          const pendingTitle = typeof state.takePendingTitle === 'function'
+            ? await state.takePendingTitle(key).catch(() => null)
+            : null;
+          const effectiveTitle = pendingTitle || initialTitle;
+          if (effectiveTitle && typeof session.renameTitle === 'function') {
             try {
-              await session.renameTitle(initialTitle, renameOptions);
+              await session.renameTitle(effectiveTitle, renameOptions);
             } catch (error) {
               if (error?.code === WORKSPACE_SESSION_STALE || renameOptions?.signal?.aborted) {
                 throw error;
@@ -149,12 +190,26 @@ export async function askInWorkspaceSession({
           if (conversationGenerationMoved(harness, key, conversationGeneration)) {
             throw workspaceSessionStaleError();
           }
-          return { sessionId, session };
+          // Record the newly bound Session in the conversation's navigation ring
+          // so /ls, /go, /prev and /next can find it later. Optional: a state
+          // store without ring support simply skips this.
+          try {
+            const registered = await state.ensureSessionRing?.(key, sessionId, {
+              title: typeof effectiveTitle === 'string' && effectiveTitle ? effectiveTitle : undefined,
+            });
+            if (registered?.entry) await state.appendRing?.(key, registered.entry.n);
+          } catch (error) {
+            console.warn('[dsh-im] unable to record the session in the navigation ring:', error?.message ?? error);
+          }
+          return { sessionId, session, recovered: replacingUnreadable };
         }
         return { sessionId, session };
       });
       if (!binding) continue;
       diagnostic.sessionId = binding.sessionId;
+      if (binding.recovered) {
+        await onNotice?.(t('绑定会话的日志已损坏，已切换到新会话并继续处理本条消息。原会话记录已保留，历史上下文不会自动带入。'));
+      }
       diagnostic.stage = 'prompt.prepare';
       const artifacts = [];
       const originalOnArtifact = typeof askOptions === 'object'
@@ -194,12 +249,35 @@ export async function askInWorkspaceSession({
         throw error;
       }
       return {
-        sessionId: binding.sessionId,
+        sessionId: binding.session.replySessionId ?? binding.sessionId,
         answer,
         ...(artifacts.length > 0 ? { artifacts } : {}),
       };
     } catch (error) {
-      if (error?.code !== WORKSPACE_SESSION_STALE) throw messageDiagnosticError(error, diagnostic);
+      const failure = messageDiagnosticError(error, diagnostic);
+      if (dsBotSession && error?.code === 'session-archived'
+        && extractConnectionEvidence(failure).details.submissionState === 'not-submitted') {
+        let freshSessionId = null;
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          freshSessionId = await harness.resolveDsBotSession?.(key).catch(() => null);
+          if (freshSessionId && freshSessionId !== diagnostic.sessionId) break;
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+        if (freshSessionId && freshSessionId !== diagnostic.sessionId) {
+          continue;
+        }
+      }
+      // Retry once, only with positive evidence that no prompt was submitted.
+      // The binding lock rechecks identity so a concurrent /new or workspace
+      // switch cannot be overwritten by recovery of the previous Session.
+      if (!unreadableSessionId && !dsBotSession && diagnostic.sessionId
+        && error?.code === 'session-unreadable'
+        && !renameSignal?.aborted && !existsOptions?.signal?.aborted
+        && extractConnectionEvidence(failure).details.submissionState === 'not-submitted') {
+        unreadableSessionId = diagnostic.sessionId;
+        continue;
+      }
+      if (error?.code !== WORKSPACE_SESSION_STALE) throw failure;
     }
   }
 }

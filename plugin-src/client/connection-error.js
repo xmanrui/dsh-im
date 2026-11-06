@@ -37,7 +37,7 @@ export function formatConnectionDiagnostic(value) {
   return [
     localizeText(error.message), details.hint ? localizeText(details.hint) : null,
     localizeText('错误码') + ': ' + error.code,
-    ...['channel', 'operation', 'stage', 'method', 'transport', 'submissionState', 'attempts', 'lastFailureReason', 'reason', 'reasons', 'host', 'durationMs', 'timeoutMs', 'nodeVersion', 'dshVersion', 'platform', 'dependencies', 'proxyConfigured', 'truncated', 'httpStatus', 'providerCode', 'resource', 'file', 'field', 'issue', 'referenceId', 'occurredAt', 'rollback', 'pluginVersion']
+    ...['channel', 'operation', 'stage', 'method', 'transport', 'submissionState', 'attempts', 'lastFailureReason', 'reason', 'reasons', 'errorTypes', 'causeMessage', 'qrEncoder', 'qrRenderer', 'host', 'durationMs', 'timeoutMs', 'nodeVersion', 'dshVersion', 'platform', 'dependencies', 'proxyConfigured', 'truncated', 'httpStatus', 'providerCode', 'resource', 'file', 'field', 'issue', 'referenceId', 'occurredAt', 'rollback', 'pluginVersion']
       .filter(field => details[field] !== undefined)
       .map(field => `${field}: ${typeof details[field] === 'object' ? JSON.stringify(details[field]) : details[field]}`),
   ].filter(Boolean).join('\n');
@@ -61,6 +61,7 @@ export function ConnectionError({ error: value, warning = false, showMessage = t
     ['RPC 方法', details.method], ['调用方式', details.transport === 'host-api' ? localizeText('宿主 API（进程内）') : details.transport === 'http' ? 'HTTP' : details.transport === 'websocket' ? 'WebSocket' : undefined],
     ['消息提交状态', localizeText(SUBMISSION_LABELS[details.submissionState] ?? '')],
     ['连接尝试次数', details.attempts],
+    ['异常类型', details.errorTypes?.join(', ')], ['二维码编码器', details.qrEncoder], ['二维码图片格式', details.qrRenderer],
     ['最近一次连接失败', localizeText(STREAM_REASON_LABELS[details.lastFailureReason] ?? details.lastFailureReason ?? '')],
     ['底层原因', details.reason === 'unknown' ? localizeText('暂未识别') : details.reason], ['多个原因', details.reasons?.join(', ')], ['服务域名', details.host], ['请求耗时（毫秒）', details.durationMs], ['超时阈值（毫秒）', details.timeoutMs], ['Node 版本', details.nodeVersion], ['DSH 版本', details.dshVersion], ['依赖版本', details.dependencies ? Object.entries(details.dependencies).map(([name, version]) => `${name}: ${version}`).join(', ') : undefined], ['代理已配置', details.proxyConfigured], ['原因链已截断', details.truncated], ['运行平台', details.platform], ['HTTP 状态', details.httpStatus], ['服务返回码', details.providerCode],
     ['配置文件', details.file], ['配置字段', details.field],

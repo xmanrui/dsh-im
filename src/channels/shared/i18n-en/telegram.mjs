@@ -8,6 +8,12 @@ export default {
   '开启一个全新会话': 'Start a brand-new Session',
   '压缩当前会话的较早上下文': 'Compact the earlier context of the current Session',
   '切换工作区': 'Switch Workspace',
+  // /ws workspace picker card: one tap switches, the pressed card is re-marked in place.
+  '选择要切换的工作区（共 {count} 个）：': 'Choose a Workspace to switch to ({count} total):',
+  '这个列表已过期，请重新发送 /ws。': 'This list has expired. Send /ws again.',
+  '正在切换工作区，请稍候。': 'Switching Workspaces, one moment.',
+  '已经在工作区：{workspace}': 'Already in this Workspace: {workspace}',
+  '暂时无法切换工作区，请稍后重试。': 'Could not switch Workspaces right now. Try again later.',
   '列出工作区绝对路径': 'List Workspace absolute paths',
   '列出会话 ID 和标题': 'List Session IDs and titles',
   '将当前聊天绑定到指定会话': 'Bind the current chat to a specific Session',
@@ -24,4 +30,18 @@ export default {
     'This Telegram bot already has a Webhook configured. Remove the Webhook from the original service and try again.',
   'Telegram机器人': 'Telegram Bot',
   ' Bot API 长轮询': ' Bot API long polling',
+  // Approval button card (batch 1): buttons, terminal receipts and dead-card
+  // notices. Keys match the literals passed through t() in approval-card.mjs.
+  '✅ 批准一次': '✅ Approve once',
+  '✅ 已批准（仅本次）': '✅ Approved (this time only)',
+  '❌ 已拒绝': '❌ Rejected',
+  '⏰ 已过期': '⏰ Expired',
+  '⛔ 已失效': '⛔ No longer valid',
+  '正在提交审批决定，请稍候。': 'Submitting the approval decision, please wait.',
+  '该审批已处理，无需重复操作。': 'This approval was already handled. No need to act again.',
+  '该审批已过期，已自动拒绝。': 'This approval expired and was rejected automatically.',
+  '该审批已被新提示取代，请使用最新一条。':
+    'This approval was superseded by a newer prompt; use the latest one.',
+  '该审批已失效，请等待新的审批提示。':
+    'This approval is no longer valid; wait for a new approval prompt.',
 };

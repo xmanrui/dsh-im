@@ -4,7 +4,7 @@ import * as React from 'react';
 
 import { WecomLogoGlyph } from '../../channel-logos.js';
 import { AccountSettingsToggle, CollapsibleAccountSection } from '../shared/collapsible-account.js';
-import { h } from '../../i18n.js';
+import { h, localizeTemplate } from '../../i18n.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
 import {
@@ -68,7 +68,7 @@ function Heading({ totals, adding, busy, onAdd, addButtonRef }) {
         }, adding ? '收起表单' : '添加企业微信应用')),
       totals.configured > 0
         ? h('div', { className: 'ddt-badge dim-onlineBadge' },
-            h('span', null, `${totals.connected} / ${totals.configured} 在线`))
+            h('span', null, localizeTemplate('{connected} / {configured} 在线', { connected: totals.connected, configured: totals.configured })))
         : null));
 }
 
@@ -232,7 +232,7 @@ function AppSettingsEditor({ bot, busy, onSave }) {
 
 function RemoveConfirmation({ account, busy, onConfirm, onCancel }) {
   return h('div', { className: 'ddt-confirm dim-confirm', role: 'alertdialog' },
-    h('strong', null, `从 DeepSeek Harness 移除“${account.bot.name}”？`),
+    h('strong', null, localizeTemplate('从 DeepSeek Harness 移除“{name}”？', { name: account.bot.name })),
     h('p', null, '这会删除本机保存的应用凭据、回调配置及会话映射。企业微信后台的应用不会被删除。'),
     h('div', { className: 'ddt-actions dim-viewActions' },
       h(Button, { onClick: onCancel, disabled: busy }, '保留应用'),

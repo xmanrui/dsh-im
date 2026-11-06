@@ -108,6 +108,14 @@ ${MARKED}[${TITLE_ATTR}]::after {
   text-overflow: ellipsis;
   pointer-events: none;
 }
+/* The Host scrolls the original span and publishes these marquee fade hooks.
+   Let the replacement travel as complete text, not a pre-clipped viewport. */
+${MARKED}[${TITLE_ATTR}]:is([data-scrolled], [data-clipped])::after {
+  inset-inline-end: auto;
+  width: max-content;
+  overflow: visible;
+  text-overflow: clip;
+}
 ${Object.entries(uris).map(([channel, uri]) => `[${CHANNEL_ATTR}="${channel}"] { --dsh-im-session-logo: url("${uri}"); }`).join('\n')}
 `;
   document.head.appendChild(style);

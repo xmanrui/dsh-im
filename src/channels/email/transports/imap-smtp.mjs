@@ -34,7 +34,9 @@ export class ImapSmtpTransport {
 
   /** Open the IMAP connection and select the monitored mailbox. */
   async connect() {
-    if (this.#imap) return;
+    if (this.#imap?.usable) return;
+    this.#imap?.close();
+    this.#imap = null;
     const client = new ImapFlow({
       host: this.#config.imapHost,
       port: this.#config.imapPort,
@@ -43,10 +45,20 @@ export class ImapSmtpTransport {
       logger: false,
       ...(this.#config.rejectUnauthorized === false ? { tls: { rejectUnauthorized: false } } : {}),
     });
-    client.on('error', () => { /* surfaced by the caller's poll/connection state */ });
-    await client.connect();
-    await client.mailboxOpen(this.#config.mailbox ?? 'INBOX');
-    this.#imap = client;
+    // The next poll reconnects after a socket closes. A late event from an
+    // old client must never discard its healthy replacement.
+    client.on('close', () => {
+      if (this.#imap === client) this.#imap = null;
+    });
+    client.on('error', () => client.close());
+    try {
+      await client.connect();
+      await client.mailboxOpen(this.#config.mailbox ?? 'INBOX');
+      this.#imap = client;
+    } catch (error) {
+      client.close();
+      throw error;
+    }
   }
 
   async disconnect() {
@@ -117,12 +129,10 @@ export class ImapSmtpTransport {
 
   /** Read one message's RFC822 source by UID. */
   async #fetchSource(uid) {
-    try {
-      const message = await this.#imap.fetchOne(String(uid), { source: true }, { uid: true });
-      return message?.source ?? null;
-    } catch {
-      return null;
-    }
+    // A failed read must fail the poll, otherwise a later message could move
+    // the cursor past this unread mail. A vanished message still returns null.
+    const message = await this.#imap.fetchOne(String(uid), { source: true }, { uid: true });
+    return message?.source ?? null;
   }
 
   /** Send a reply inside the originating thread. */

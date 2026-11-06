@@ -1,4 +1,6 @@
+import { DeliverySyncSettings } from './delivery-sync-settings.js';
 import { GroupHistorySettings } from './group-history-settings.js';
+import { SidebarSettings } from './sidebar-settings.js';
 import * as React from 'react';
 
 import {
@@ -6,7 +8,7 @@ import {
   INBOUND_TTL_MAX_HOURS,
   normalizeInboundTtlHours,
 } from '../../src/channels/shared/inbound-ttl.mjs';
-import { h } from './i18n.js';
+import { h, localizeTemplate } from './i18n.js';
 import { DEFAULT_IMAGE_INPUT_SETTINGS, normalizeImageInputSettings } from '../../src/channels/shared/image-input-policy.mjs';
 
 export const GLOBAL_SETTINGS_RPC_CHANNEL = '/dsh-im-settings';
@@ -15,6 +17,14 @@ export const GLOBAL_SETTINGS_TAB_ID = 'global-settings';
 
 const ATTACHMENTS_TAB_ID = 'dim-general-settings-tab-attachments';
 const ATTACHMENTS_PANEL_ID = 'dim-general-settings-panel-attachments';
+const DELIVERY_PANEL_ID = 'dim-general-settings-panel-delivery';
+
+/** Tabs of the global settings page, in reading order. */
+export const GLOBAL_SETTINGS_TABS = Object.freeze([
+  { key: 'general', label: '通用' },
+  { key: 'attachments', label: '附件' },
+  { key: 'delivery', label: '投递' },
+]);
 
 export const GLOBAL_SETTINGS_ENDPOINTS = Object.freeze({
   getTtl: 'settings.inbound-ttl.get',
@@ -276,7 +286,10 @@ function AttachmentSettingsPanel({ rpcCall }) {
   const inlineStatus = phase === 'loading'
     ? { role: 'status', message: '正在读取通用设置…' }
     : ttlError
-      ? { role: 'alert', message: `请输入 -1、0 或 1~${INBOUND_TTL_MAX_HOURS} 之间的整数。` }
+      ? {
+        role: 'alert',
+        message: localizeTemplate('请输入 -1、0 或 1~{max} 之间的整数。', { max: INBOUND_TTL_MAX_HOURS }),
+      }
       : saveError
         ? { role: 'alert', message: saveError }
         : phase === 'error' && loadError
@@ -414,9 +427,41 @@ function AttachmentSettingsPanel({ rpcCall }) {
     h(ImageInputSettings, { rpcCall }));
 }
 
-export function GlobalSettingsPanel({ rpcCall }) {
+export function GlobalSettingsPanel({ rpcCall, deliverySyncRpcCall = null, languageRpcCall = null }) {
   const [tab, setTab] = React.useState('general');
-  const tabs = [{ key: 'general', label: '通用' }, { key: 'attachments', label: '附件' }];
+  const tabs = GLOBAL_SETTINGS_TABS;
+  const selectTab = (next) => {
+    setTab(next);
+    globalThis.document?.getElementById(`dim-general-settings-tab-${next}`)?.focus();
+  };
+  const step = (key) => {
+    const at = tabs.findIndex((item) => item.key === tab);
+    if (key === 'Home') return tabs[0].key;
+    if (key === 'End') return tabs[tabs.length - 1].key;
+    const delta = key === 'ArrowLeft' ? -1 : 1;
+    return tabs[(at + delta + tabs.length) % tabs.length].key;
+  };
+  const panel = tab === 'attachments'
+    ? h(AttachmentSettingsPanel, { rpcCall })
+    : tab === 'delivery'
+      ? h('div', {
+        id: DELIVERY_PANEL_ID,
+        className: 'dim-generalSettingsTabPanel',
+        role: 'tabpanel',
+        'aria-labelledby': `dim-general-settings-tab-delivery`,
+      }, h(DeliverySyncSettings, {
+        // This page has its own management channel: falling back to the
+        // loopback-only settings call would hide a missing channel behind a
+        // request the panel cannot actually use.
+        rpcCall: deliverySyncRpcCall,
+        languageRpcCall,
+      }))
+      : h('div', {
+        id: 'dim-general-settings-panel-general',
+        className: 'dim-generalSettingsTabPanel',
+        role: 'tabpanel',
+        'aria-labelledby': 'dim-general-settings-tab-general',
+      }, h(SidebarSettings, { rpcCall }), h(GroupHistorySettings, { rpcCall }));
   return h('section', { className: 'dim-generalSettingsPage', 'aria-label': '通用设置' },
     h('header', { className: 'dim-generalSettingsHeader' }, h('h2', null, '通用设置')),
     h('div', { className: 'dim-generalSettingsTabsBar' },
@@ -428,11 +473,8 @@ export function GlobalSettingsPanel({ rpcCall }) {
           onClick: () => setTab(item.key), onKeyDown: (event) => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
             event.preventDefault();
-            const next = event.key === 'Home' ? 'general' : event.key === 'End' ? 'attachments' : tab === 'general' ? 'attachments' : 'general';
-            setTab(next); globalThis.document?.getElementById(`dim-general-settings-tab-${next}`)?.focus();
+            selectTab(step(event.key));
           },
         }, item.label)))),
-    tab === 'general' ? h('div', { id: 'dim-general-settings-panel-general', className: 'dim-generalSettingsTabPanel', role: 'tabpanel',
-      'aria-labelledby': 'dim-general-settings-tab-general' }, h(GroupHistorySettings, { rpcCall }))
-      : h(AttachmentSettingsPanel, { rpcCall }));
+    panel);
 }

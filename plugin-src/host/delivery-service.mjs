@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { normalizeDeliveryTarget } from './delivery-adapter.mjs';
+import { deliverySuggestionFromConversationKey } from './delivery-suggestions.mjs';
 import { COMPETITIVE_APPROVAL_CHANNELS } from '../../src/channels/shared/harness-approval.mjs';
 import { t } from '../../src/channels/shared/i18n.mjs';
+import { parseConversationKey } from '../../src/channels/shared/conversation/describe.mjs';
 
 const BOT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const TARGET_ID_PATTERN = /^[A-Za-z0-9._:@-]{1,128}$/;
@@ -20,6 +22,11 @@ const ADAPTER_METHODS = Object.freeze([
 ]);
 
 const DELIVERY_ERROR_CODES = new Set([
+  'ds-bot-unavailable',
+  'ds-bot-not-found',
+  'ds-bot-bound',
+  'ds-bot-private-required',
+  'ds-bot-binding-conflict',
   'bad-request',
   'account-unverified',
   'account-changed',
@@ -70,6 +77,14 @@ function botIdOf(value) {
 function targetIdOf(value) {
   if (typeof value !== 'string' || !TARGET_ID_PATTERN.test(value)) {
     throw deliveryError('bad-request', 'Invalid target id');
+  }
+  return value;
+}
+
+function conversationKeyOf(value) {
+  if (typeof value !== 'string' || !value || value.length > 1_024
+    || value.trim() !== value || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw deliveryError('bad-request', 'Invalid private conversation');
   }
   return value;
 }
@@ -132,8 +147,10 @@ function sessionSyncState(value, available) {
 export class DeliveryService {
   #adapters = new Map();
   #unavailableSessionSyncChannels;
+  #logger;
+  dsBot;
 
-  constructor({ unavailableSessionSyncChannels = [] } = {}) {
+  constructor({ unavailableSessionSyncChannels = [], dsBot, logger = console } = {}) {
     if (!Array.isArray(unavailableSessionSyncChannels)
       || unavailableSessionSyncChannels.some((channel) => (
         typeof channel !== 'string' || !CHANNEL_PATTERN.test(channel)
@@ -141,6 +158,62 @@ export class DeliveryService {
       throw new TypeError('unavailableSessionSyncChannels must contain valid channel ids');
     }
     this.#unavailableSessionSyncChannels = new Set(unavailableSessionSyncChannels);
+    this.#logger = logger ?? console;
+    this.dsBot = dsBot;
+  }
+
+  async listDsBotSessions() {
+    const ids = new Set();
+    for (const { adapter } of this.#adapters.values()) {
+      if (!this.#supportsSessionSync(adapter)) continue;
+      for (const binding of await adapter.listDsBotBindings?.() ?? []) ids.add(binding.dsBotId);
+    }
+    if (!ids.size) return [];
+    const result = await this.dsBot?.status();
+    if (result?.state !== 'ready') return [];
+    // Only current, bound sessions and public appearance; no private routes,
+    // account configuration, conversation contents, or historical parts.
+    return result.bots.filter((bot) => ids.has(bot.id)).map(({ sessionId, id, name, color, avatar }) => ({
+      sessionId,
+      bot: { id, name, ...(color ? { color } : {}), ...(avatar ? { avatar } : {}) },
+    }));
+  }
+
+  async dsBotStatus(botId) {
+    const adapter = await this.#adapterFor(botIdOf(botId));
+    const result = this.#supportsSessionSync(adapter)
+      ? await this.dsBot?.status() ?? { state: 'unavailable', bots: [] }
+      : { state: 'remote', bots: [] };
+    return {
+      state: result.state,
+      bots: result.bots.map(({ id, name, color, avatar }) => ({
+        id, name, ...(color ? { color } : {}), ...(avatar ? { avatar } : {}),
+      })),
+      conversations: await adapter.listDsBotConversations?.(botId) ?? [],
+    };
+  }
+
+  async bindDsBot(botId, conversationKey, dsBotId) {
+    const id = botIdOf(botId);
+    const adapter = await this.#adapterFor(id);
+    if (!this.#supportsSessionSync(adapter) || !adapter.bindDsBot) {
+      throw deliveryError('ds-bot-unavailable');
+    }
+    try {
+      return await adapter.bindDsBot(id, conversationKeyOf(conversationKey), botIdOf(dsBotId));
+    } catch (error) {
+      throw publicOperationError(error);
+    }
+  }
+
+  async unbindDsBot(botId, conversationKey) {
+    const id = botIdOf(botId);
+    const adapter = await this.#adapterFor(id);
+    try {
+      return await adapter.unbindDsBot(id, conversationKeyOf(conversationKey));
+    } catch (error) {
+      throw publicOperationError(error);
+    }
   }
 
   registerAdapter(value) {
@@ -288,6 +361,48 @@ export class DeliveryService {
     return targets;
   }
 
+  /** Offer a question to one unambiguous bound private chat, like synced approvals. */
+  async presentSessionSyncQuestion(sessionId, interaction, options = {}) {
+    const { signal } = options;
+    const targets = await this.listSessionSyncTargets(sessionId);
+    if (signal?.aborted || targets.length === 0) return false;
+    const candidates = new Map();
+    let unresolvedTarget = false;
+    for (const target of targets) {
+      try {
+        const adapter = await this.#adapterFor(target.botId);
+        if (typeof adapter.describeSessionSyncQuestionTarget !== 'function') {
+          unresolvedTarget = true;
+          continue;
+        }
+        const info = await adapter.describeSessionSyncQuestionTarget(target.botId, target.targetId, sessionId);
+        candidates.set(JSON.stringify([target.channel, target.botId, info.conversationKey]), { adapter, target });
+      } catch {
+        unresolvedTarget = true;
+      }
+    }
+    if (signal?.aborted) return false;
+    if (!unresolvedTarget && candidates.size === 1) {
+      const { adapter, target } = candidates.values().next().value;
+      try {
+        if (await adapter.presentSessionSyncQuestion?.(target.botId, target.targetId, sessionId, interaction, options)) {
+          return true;
+        }
+      } catch (error) {
+        if (!signal?.aborted) console.warn('[dsh-im] synced question unavailable:', error?.code ?? error?.name);
+      }
+    }
+    if (!signal?.aborted) {
+      const results = await Promise.allSettled(targets.map((target) => this.sendSessionSyncText(
+        target.botId, target.targetId, sessionId, t('本会话有问题等待回答，请在桌面端回答。'), { signal },
+      )));
+      if (results.every((result) => result.status === 'rejected')) {
+        console.warn('[dsh-im] synced question notice could not be delivered');
+      }
+    }
+    return false;
+  }
+
   /** Offer one existing bound private chat the same approval the Host is awaiting. */
   async presentSessionSyncApproval(sessionId, interaction, { signal, completion } = {}) {
     const targets = (await this.listSessionSyncTargets(sessionId))
@@ -369,6 +484,141 @@ export class DeliveryService {
     if (this.#adapters.get(registration.adapter.channel) !== registration) {
       throw deliveryError('capability-unavailable');
     }
+  }
+
+  /**
+   * Describe the conversation a session belongs to, or null when no channel
+   * owns it. Pure lookup: no network, no session creation, no throwing.
+   * @param {string} sessionId harness session id
+   */
+  async describeConversation(sessionId) {
+    if (typeof sessionId !== 'string' || sessionId === '') return null;
+    for (const { adapter } of this.#adapters.values()) {
+      if (typeof adapter.describeConversationBySession !== 'function') continue;
+      try {
+        const described = await adapter.describeConversationBySession(sessionId);
+        if (described) return described;
+      } catch {
+        // A channel that cannot answer must not hide the others.
+        continue;
+      }
+    }
+    return null;
+  }
+
+  /**
+
+   * The same lookup, answered from memory only: no await, no network. A session
+   * whose channel has not loaded its state yet answers null — which is exactly the
+   * truth a synchronous prompt assembly can act on.
+   * @param {string} sessionId harness session id
+   */
+  describeConversationSync(sessionId) {
+    if (typeof sessionId !== 'string' || sessionId === '') return null;
+    for (const { adapter } of this.#adapters.values()) {
+      if (typeof adapter.describeConversationBySessionSync !== 'function') continue;
+      try {
+        const described = adapter.describeConversationBySessionSync(sessionId);
+        if (described) return described;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The Session no channel state owns may still be a DS Bot's current session:
+   * its chat was bound to the bot, the bot's `sessionId` rolled over without a
+   * new inbound message, and only the bot service knows the new session. Reverse
+   * the binding through `dsBot.status()` so delivery survives that rollover.
+   * An unavailable DS Bot, or a session no bot currently owns, answers `null`.
+   */
+  async describeViaDsBot(sessionId) {
+    try {
+      const status = await this.dsBot?.status();
+      if (status?.state !== 'ready') return null;
+      const bot = status.bots.find((entry) => entry.sessionId === sessionId);
+      if (!bot) return null;
+      for (const { adapter } of this.#adapters.values()) {
+        const bindings = await adapter.listDsBotBindings?.() ?? [];
+        const binding = bindings.find((entry) => entry.dsBotId === bot.id);
+        if (!binding) continue;
+        const parsed = parseConversationKey(binding.conversationKey, { channel: adapter.channel });
+        return {
+          channel: adapter.channel,
+          botId: binding.botId,
+          botName: bot.name ?? null,
+          conversationKey: binding.conversationKey,
+          chatType: parsed?.chatType ?? null,
+          chatId: parsed?.chatId ?? null,
+          threadId: parsed?.threadId ?? null,
+          chatTitle: null,
+          senderId: null,
+          senderName: null,
+          senderUsername: null,
+          senderIsBot: null,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Deliver one text to the chat this Session is currently bound to.
+   *
+   * The address is not configured anywhere beforehand: `describeConversation`
+   * reads the conversation the channel itself keeps for the Session, and its
+   * conversation key becomes the same draft route the manual delivery path
+   * accepts. A Session no channel owns simply has nowhere to go, which is a
+   * result rather than an error; a real send failure is thrown like `send()`.
+   *
+   * @param {string} sessionId harness session id
+   * @param {string} text message body
+   * @param {{format?: 'plain'|'markdown', signal?: AbortSignal}} [options]
+   * @returns {Promise<{sent: true} | {sent: false, reason: 'unbound'|'unroutable'}>}
+   */
+  async deliverSessionText(sessionId, text, { format = 'plain', signal } = {}) {
+    if (typeof sessionId !== 'string' || !sessionId
+      || typeof text !== 'string' || !text.trim()
+      || (format !== 'plain' && format !== 'markdown')) {
+      throw deliveryError('bad-request', 'Invalid Session delivery');
+    }
+    cancellation(signal);
+    const described = await this.describeConversation(sessionId) ?? await this.describeViaDsBot(sessionId);
+    cancellation(signal);
+    if (!described) {
+      this.#warnUndelivered(sessionId, 'unbound', null);
+      return { sent: false, reason: 'unbound' };
+    }
+    const draft = deliverySuggestionFromConversationKey(described.channel, described.conversationKey);
+    if (!draft) {
+      // A key the channel persisted but no route covers stays unroutable. An
+      // older shape such as `direct:<chatId>:<threadId>` is deliberately not
+      // reinterpreted as a chat: guessing a recipient would drop the thread and
+      // message the wrong place, so the key is only reported here.
+      this.#warnUndelivered(sessionId, 'unroutable', described);
+      return { sent: false, reason: 'unroutable' };
+    }
+    // The draft goes through the ordinary send path, so the adapter validates
+    // and normalizes it exactly as it does a saved target.
+    return this.send(described.botId, { kind: draft.kind, route: draft.route }, text, { signal, format });
+  }
+
+  /**
+   * Report one text that found nowhere to go. Only the identifiers that make the
+   * miss diagnosable are logged — Session, channel, conversation key — never the
+   * message body, and never a channel credential.
+   */
+  #warnUndelivered(sessionId, reason, described) {
+    const where = described
+      ? ` channel=${described.channel} conversationKey=${described.conversationKey}`
+      : '';
+    this.#logger?.warn?.(
+      `[dsh-im] Session text was not delivered [${reason}] session=${sessionId}${where}`,
+    );
   }
 
   async describeBot(botId) {

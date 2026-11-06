@@ -1392,3 +1392,141 @@ test('slack synced approval accepts the DM recipient, never the channel id as ac
     assert.equal(result.value.outcome, 'allowed-once');
   } finally { await runtime.stop(); }
 });
+
+test('Slack chat.update uses markdown_text and never parse:none', async () => {
+  const calls = [];
+  const api = new SlackApi({
+    botToken: BOT_TOKEN,
+    fetchImpl: async (url, options) => {
+      calls.push({ method: url.pathname.split('/').pop(), body: JSON.parse(options.body) });
+      return jsonResponse({ ok: true, ts: '1700000000.100' });
+    },
+  });
+  await api.updateMessage({
+    channelId: 'C12345678',
+    ts: '1700000000.100',
+    text: '**PR**：done',
+  });
+  assert.deepEqual(calls[0].body, {
+    channel: 'C12345678',
+    ts: '1700000000.100',
+    markdown_text: '**PR**：done',
+    link_names: false,
+  });
+  await assert.rejects(
+    async () => api.updateMessage({ channelId: 'C12345678', ts: '1700000000.100', text: 'x'.repeat(12_001) }),
+    /markdown_text exceeds/,
+  );
+});
+
+test('Slack stream finalize keeps rewritten Markdown instead of parse:none text', async () => {
+  const calls = [];
+  const warnings = [];
+  const client = new SlackBotClient({
+    logger: { warn: (message) => warnings.push(message) },
+    api: {
+      startStream: async () => ({ ts: '1700000000.100' }),
+      appendStream: async (request) => { calls.push({ method: 'append', request }); },
+      stopStream: async (request) => { calls.push({ method: 'stop', request }); },
+      updateMessage: async (request) => { calls.push({ method: 'update', request }); },
+      postMessage: async (request) => {
+        calls.push({ method: 'post', request });
+        return { ts: '1700000000.200' };
+      },
+    },
+  });
+  const stream = await client.openStream({
+    channelId: 'C12345678',
+    threadTs: '1700000000.001',
+    recipientUserId: 'U12345678',
+    recipientTeamId: 'T12345678',
+  });
+  stream.update('draft answer');
+  await eventually(() => calls.some((call) => call.method === 'append'));
+  await stream.finish('**PR**：done');
+  const update = calls.find((call) => call.method === 'update');
+  assert.equal(update.request.text, '**PR**：done');
+  assert.equal(calls.some((call) => call.method === 'post'), false);
+  assert.match(warnings[0], /prefix-mismatch/);
+  assert.doesNotMatch(warnings[0], /\*\*PR\*\*/);
+
+  const longCalls = [];
+  const longClient = new SlackBotClient({
+    logger: { warn() {} },
+    api: {
+      startStream: async () => ({ ts: '1700000000.101' }),
+      appendStream: async () => {},
+      stopStream: async () => {},
+      updateMessage: async (request) => { longCalls.push({ method: 'update', request }); },
+      postMessage: async (request) => {
+        longCalls.push({ method: 'post', request });
+        return { ts: '1700000000.201' };
+      },
+    },
+  });
+  const longStream = await longClient.openStream({
+    channelId: 'C12345678',
+    threadTs: '1700000000.001',
+  });
+  longStream.update('draft answer');
+  await eventually(() => longCalls.length === 0);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  await longStream.finish(`**PR**\n${'x'.repeat(11_100)}`);
+  assert.ok(longCalls.find((call) => call.method === 'update').request.text.length <= 11_000);
+  assert.equal(longCalls.filter((call) => call.method === 'post').every((call) => call.request.format === 'markdown_text'), true);
+});
+
+test('Slack delivery retries markdown_text after a block rejection', async () => {
+  const calls = [];
+  const warnings = [];
+  const client = new SlackBotClient({
+    logger: { warn: (message) => warnings.push(message) },
+    api: {
+      postMessage: async (request) => {
+        calls.push(request);
+        if (request.format === 'markdown') {
+          const error = new Error('rejected');
+          error.providerCode = 'invalid_blocks';
+          throw error;
+        }
+        return { ts: '1700000000.300' };
+      },
+    },
+  });
+  const text = '**PR**：done\n| 检查 | 结果 |\n| --- | --- |\n| a | b |';
+  const result = await client.sendDelivery(
+    { channelId: 'C12345678', threadTs: '1700000000.001' },
+    { kind: 'text', format: 'markdown', text },
+  );
+  assert.deepEqual(calls.map((call) => call.format), ['markdown', 'markdown_text']);
+  assert.equal(calls[1].text, text);
+  assert.deepEqual(result.providerMessageIds, ['1700000000.300']);
+  assert.match(warnings[0], /invalid_blocks/);
+  assert.doesNotMatch(warnings[0], /\*\*PR\*\*/);
+});
+
+test('Slack delivery sends literal text when Markdown itself is rejected', async () => {
+  const calls = [];
+  const client = new SlackBotClient({
+    logger: { warn() {} },
+    api: {
+      postMessage: async (request) => {
+        calls.push(request);
+        if (request.format !== 'literal') {
+          const error = new Error('bad markdown');
+          error.providerCode = 'invalid_markdown';
+          throw error;
+        }
+        return { ts: '1700000000.301' };
+      },
+    },
+  });
+  const text = '**not mrkdwn**';
+  const result = await client.sendDelivery(
+    { channelId: 'C12345678' },
+    { kind: 'text', format: 'markdown', text },
+  );
+  assert.deepEqual(calls.map((call) => call.format), ['markdown', 'literal']);
+  assert.equal(calls[1].text, text);
+  assert.deepEqual(result.providerMessageIds, ['1700000000.301']);
+});

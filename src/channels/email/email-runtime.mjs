@@ -229,9 +229,28 @@ export function normalizeEmail(parsed, { address, state } = {}) {
 class EmailBotClient {
   #api;
   #signal;
-  constructor(api, signal) {
+  #state;
+  constructor(api, signal, state = null) {
     this.#api = api;
     this.#signal = signal;
+    this.#state = state;
+  }
+
+  /**
+   * Record the RFC Message-ID of our own reply in the thread map.
+   *
+   * A client that quotes only the immediate parent (iOS Mail sends a
+   * one-entry References header) points its next reply at this id. Outgoing
+   * ids were never registered, so the resolver found nothing familiar and
+   * forked a brand-new session on every phone reply.
+   */
+  #rememberReply(target, sent) {
+    const parentId = parseMessageIds(target?.messageId)[0] ?? null;
+    const sentId = typeof sent?.messageId === 'string' ? sent.messageId : null;
+    if (!parentId || !sentId) return sent;
+    const conversation = this.#state?.conversationForThreadId?.(parentId) ?? null;
+    if (conversation) this.#state.rememberThreadId(sentId, conversation);
+    return sent;
   }
 
   async sendText(target, text) {
@@ -241,14 +260,14 @@ class EmailBotClient {
       error.code = 'invalid-target';
       throw error;
     }
-    return this.#api.sendReply({
+    return this.#rememberReply(target, await this.#api.sendReply({
       to,
       subject: target.subject,
       text,
       inReplyTo: target.messageId,
       transportMessageId: target.transportMessageId,
       references: target.references,
-    });
+    }));
   }
 
   sendTyping() {
@@ -271,7 +290,7 @@ class EmailBotClient {
   }
 
   async sendFile(target, file) {
-    return this.#api.sendReply({
+    return this.#rememberReply(target, await this.#api.sendReply({
       to: target?.to,
       subject: target?.subject,
       text: '',
@@ -279,11 +298,11 @@ class EmailBotClient {
       transportMessageId: target?.transportMessageId,
       references: target?.references,
       attachments: [this.#attachmentFrom(file, 'attachment')],
-    });
+    }));
   }
 
   async sendImage(target, image) {
-    return this.#api.sendReply({
+    return this.#rememberReply(target, await this.#api.sendReply({
       to: target?.to,
       subject: target?.subject,
       text: '',
@@ -291,7 +310,7 @@ class EmailBotClient {
       transportMessageId: target?.transportMessageId,
       references: target?.references,
       attachments: [this.#attachmentFrom(image, 'image')],
-    });
+    }));
   }
 }
 
@@ -460,7 +479,7 @@ export class EmailRuntime {
           await this.#state.setCursor(Math.max(0, tip - FIRST_CONNECT_WINDOW));
         }
       }
-      const client = new EmailBotClient(api, this.#abortController.signal);
+      const client = new EmailBotClient(api, this.#abortController.signal, this.#state);
       this.#bridge = new EmailHarnessBridge({
         bot: client,
         harness: this.#harness,

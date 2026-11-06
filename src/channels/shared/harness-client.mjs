@@ -25,6 +25,7 @@ import { t } from './i18n.mjs';
 import { watchHarnessMux } from './harness-mux.mjs';
 import { extractConnectionEvidence, messageDiagnosticError } from './connection-error.mjs';
 import { PromptFailureTracker } from './prompt-failure-tracker.mjs';
+import { isSessionLogCorrupt, isSessionNotFound } from './session-error.mjs';
 
 // Every channel plugin runs in the same Host process. Sharing ownership by
 // Host identity (or an explicitly configured HTTP origin) prevents clients
@@ -166,6 +167,23 @@ export function consumeDshImInputOrigin(scope, rpcId) {
   const origins = interactionRegistry(scope).imInputOrigins;
   pruneImInputOrigins(origins);
   return origins.delete(rpcId);
+}
+
+/**
+ * Whether a dsh-im prompt id is registered, without claiming it.
+ *
+ * An observer such as the Session sync coordinator must be able to ask "did a
+ * messenger start this turn?" without taking the id away from the channel that
+ * still owns it. The entry lives until its TTL or the size cap evicts it, so a
+ * repeated question keeps answering the same way, while the one-shot
+ * `consumeDshImInputOrigin` stays the only way to claim it.
+ */
+export function isDshImInputOrigin(scope, rpcId) {
+  if (!scope || !['object', 'function', 'string'].includes(typeof scope)
+    || typeof rpcId !== 'string' || !rpcId) return false;
+  const origins = interactionRegistry(scope).imInputOrigins;
+  pruneImInputOrigins(origins);
+  return origins.has(rpcId);
 }
 
 // A Host RPC may not accept cancellation itself. Bound the caller's wait
@@ -890,6 +908,16 @@ export class HarnessTransportError extends Error {
   }
 }
 
+/**
+ * session.prompt 提交超时（30 秒窗口到期）只说明应答迟到，不代表提交失败：
+ * 单进程 Host 忙碌时 prompt 往往已入队。这类错误需要先回查持久账本再定性。
+ */
+function isPromptSubmitTimeout(error) {
+  return error instanceof HarnessTransportError
+    && error.code === 'harness-timeout'
+    && error.method === 'session.prompt';
+}
+
 export class HarnessHealthError extends Error {
   constructor(cause) {
     super('Harness health RPC was rejected', { cause });
@@ -1173,6 +1201,33 @@ export class HarnessClient {
     return workspaceEntries(await this.rpc('workspace.list', {}, 30_000, options));
   }
 
+  /**
+   * Hide one known Session from the Workspace grouping surfaces. Archiving is a
+   * Harness capability: this only carries the request, so an older Host that
+   * does not expose it fails loudly instead of silently doing nothing.
+   *
+   * @param {string} sessionId - Session to archive.
+   * @param {object} [options] - `stopActivity` lets the Host stop running work.
+   */
+  async archiveWorkspaceSession(sessionId, options = {}) {
+    const { stopActivity = false, ...rpcOptions } = options;
+    await this.ensureRunning(rpcOptions);
+    const value = await this.rpc('workspace.archiveSession', {
+      sessionId,
+      ...(stopActivity === true ? { stopActivity: true } : {}),
+    }, 30_000, rpcOptions);
+    if (value === null || typeof value !== 'object') {
+      throw new Error('Harness returned an invalid response for workspace.archiveSession');
+    }
+    const archivedSessionIds = value.archivedSessionIds;
+    if (archivedSessionIds !== undefined
+      && (!Array.isArray(archivedSessionIds)
+        || archivedSessionIds.some((id) => typeof id !== 'string' || !id))) {
+      throw new Error('Harness returned invalid archived ids for workspace.archiveSession');
+    }
+    return { archivedSessionIds: archivedSessionIds ?? null };
+  }
+
   async listWorkspaceSessions(workspacePath, options = {}) {
     await this.ensureRunning(options);
     const workspaceList = await this.rpc('workspace.list', {}, 30_000, options);
@@ -1340,6 +1395,14 @@ export class HarnessClient {
     return created.workspace.workspaceId;
   }
 
+  /**
+   * This client can name a Session up front (`session.create` accepts `sessionId`),
+   * which lets a caller bind a conversation before prompt assembly runs.
+   */
+  get canChooseSessionId() {
+    return true;
+  }
+
   async createSession(options = {}) {
     const { agentPreset: requestedPreset, ...rpcOptions } = options;
     const workspace = rpcOptions.workspace ?? this.#workspace;
@@ -1351,6 +1414,11 @@ export class HarnessClient {
       : { workspaceId: await this.workspaceId(rpcOptions) };
     const agentPreset = requestedPreset !== undefined ? requestedPreset : this.#agentPreset;
     if (agentPreset != null) payload.agentPreset = agentPreset;
+    // The caller may name the Session: it then knows the identity before the
+    // Session exists, which is the only way prompt assembly can see it.
+    if (typeof options.sessionId === 'string' && options.sessionId !== '') {
+      payload.sessionId = options.sessionId;
+    }
     const created = await this.rpc('session.create', payload, 30_000, rpcOptions);
     if (typeof created?.sessionId !== 'string' || !created.sessionId) {
       throw new HarnessTransportError('harness-response-invalid', 'session.create');
@@ -1362,6 +1430,31 @@ export class HarnessClient {
     if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
     if (typeof title !== 'string' || !title.trim()) throw new TypeError('session title is required');
     return this.rpc('session.rename', { sessionId, title }, 30_000, options);
+  }
+
+  /**
+   * Branch a Session at the latest completed turn (or atSeq when given). The
+   * Host answers with the child session id; a Session with no completed turn is
+   * reported as fork-unavailable. Throws harness-api-not-found when the Host
+   * has no session.fork primitive.
+   */
+  async forkSession(sessionId, options = {}) {
+    if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
+    const { atSeq, timeoutMs = 30_000, ...rpcOptions } = options;
+    return this.rpc('session.fork', {
+      sessionId,
+      ...(atSeq === undefined ? {} : { atSeq }),
+    }, timeoutMs, rpcOptions);
+  }
+
+  /**
+   * Whether the connected Host can fork sessions. With the host-api transport
+   * this is the facade's sessions.fork member; the http transport reaches the
+   * Host endpoint directly, so a missing member here is not observable.
+   */
+  supportsSessionFork() {
+    if (this.#apiProxy) return typeof this.#apiProxy?.sessions?.fork === 'function';
+    return true;
   }
 
   async executeCommand(sessionId, line, options = {}) {
@@ -1405,9 +1498,15 @@ export class HarnessClient {
   }
 
   // A diagnostic recheck must not hide the original failure or cancellation.
-  async #confirmedArchiveError(sessionId, options, cause) {
+  async #confirmedSessionError(sessionId, options, cause) {
     try {
       if (await this.#isSessionArchived(sessionId, options)) return sessionArchivedError(sessionId, cause);
+      if (isSessionLogCorrupt(cause)) {
+        return Object.assign(new Error('Stored Session log is unreadable', { cause }), {
+          code: 'session-unreadable', method: cause.method,
+          details: { reason: 'session-log-corrupt' },
+        });
+      }
     } catch (error) {
       if (options?.signal?.aborted) throw options.signal.reason ?? error;
     }
@@ -1420,11 +1519,55 @@ export class HarnessClient {
     } catch (error) {
       if (options?.signal?.aborted) throw options.signal.reason ?? error;
       if (error instanceof HarnessRpcError
-        && ['internal', 'gateway/internal', 'session-not-found', 'session/not-found'].includes(error.code)) {
-        throw await this.#confirmedArchiveError(payload.sessionId, { signal: options?.signal }, error) ?? error;
+        && (['internal', 'gateway/internal'].includes(error.code) || isSessionNotFound(error.code))) {
+        throw await this.#confirmedSessionError(payload.sessionId, { signal: options?.signal }, error) ?? error;
       }
       throw error;
     }
+  }
+
+  /**
+   * 提交超时后的入库确认：session.history 是持久账本，按 promptRpcId 找回我们的
+   * 持久化痕迹（已执行的 user/message，或已入队待执行的 agent/inbox/spliced
+   * 回执）即视为提交已成功，让 ask() 继续等回复而不是误报失败。
+   * 确认探测自身的失败一律吞掉——它们不能掩盖或改变原始提交超时的定性；
+   * 唯独取消例外：取消原因必须优先于超时透出。
+   */
+  async #confirmPromptSubmit(sessionId, promptRpcId, { signal } = {}) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (signal?.aborted) return false;
+      try {
+        const history = await this.#sessionRpc('session.history', {
+          sessionId,
+          maxMessages: 50,
+        }, 30_000, { signal });
+        const confirmed = (history?.events ?? []).some((entry) => {
+          const event = entry?.event ?? entry;
+          if (event?.type === 'user/message') {
+            return event?.data?.source?.rpcId === promptRpcId;
+          }
+          // queue 模式下消息可能已持久入队但尚未产生 user/message：
+          // agent/inbox/spliced 的 inserted[].source.rpcId 就是入队回执。
+          if (event?.type === 'agent/inbox/spliced') {
+            return (event?.data?.inserted ?? [])
+              .some((message) => message?.source?.rpcId === promptRpcId);
+          }
+          return false;
+        });
+        if (confirmed) return true;
+      } catch (probeError) {
+        // 取消优先于超时定性：最后一次探测期间被取消时，循环后面没有
+        // sleep 再检查 abort，必须在这里把取消原因抛出，不能被超时覆盖。
+        if (signal?.aborted) throw signal.reason ?? probeError;
+        // 其余账本探测失败不改变定性：本轮未确认，继续轮询或最终按原超时上报。
+      }
+      if (attempt < 4) await sleep(2_000, signal);
+    }
+    return false;
+  }
+
+  async isSessionArchived(sessionId, options = {}) {
+    return this.#isSessionArchived(sessionId, options);
   }
 
   async sessionExists(sessionId, options = {}) {
@@ -1436,7 +1579,7 @@ export class HarnessClient {
       return true;
     } catch (error) {
       if (error.code === 'session-archived') return true;
-      if (error instanceof HarnessRpcError && error.code === 'session-not-found') return false;
+      if (error instanceof HarnessRpcError && isSessionNotFound(error.code)) return false;
       throw error;
     }
   }
@@ -1610,7 +1753,7 @@ export class HarnessClient {
       );
       this.#consumeInteractionOwnerships(sessionId, history.events ?? []);
     } catch (error) {
-      if (!(error instanceof HarnessRpcError) || error.code !== 'session-not-found') throw error;
+      if (!(error instanceof HarnessRpcError) || !isSessionNotFound(error.code)) throw error;
       for (const ownership of candidates) {
         ownership.active = false;
         ownership.completed = true;
@@ -1681,7 +1824,7 @@ export class HarnessClient {
       if (this.#activeControlOwnership(sessionId, control) === ownership) {
         ownership.stopRequested = false;
       }
-      if (error instanceof HarnessRpcError && error.code === 'session-not-found') return false;
+      if (error instanceof HarnessRpcError && isSessionNotFound(error.code)) return false;
       throw error;
     }
   }
@@ -1808,7 +1951,45 @@ export class HarnessClient {
     }
   }
 
-  async #ask(sessionId, prompt, options, diagnostic) {
+  /** Follow a prompt DS Bot carried to another Session, without submitting it again. */
+  async waitForTransferredReply(sessionId, { promptRpcId, ...options } = {}) {
+    if (typeof promptRpcId !== 'string' || !promptRpcId) {
+      throw new TypeError('Transferred prompt identity is required');
+    }
+    const diagnostic = { stage: 'reply.wait', submissionState: 'accepted', sessionId, promptRpcId };
+    try {
+      return await this.#ask(sessionId, null, options, diagnostic, promptRpcId);
+    } catch (error) {
+      if (options.signal?.aborted) throw options.signal.reason ?? error;
+      // Preflight failures must retain the accepted input's identity too. A
+      // fresh part may itself have rolled over before its watcher was opened.
+      error.promptAccepted = true;
+      error.details = { sessionId, promptRpcId, baselineSeq: -1, ...error.details };
+      throw messageDiagnosticError(error, diagnostic);
+    }
+  }
+
+  async #replyHistory(sessionId, afterSeq, transferred, signal) {
+    const events = [];
+    let beforeSeq;
+    for (let page = 0; page < 20; page += 1) {
+      signal?.throwIfAborted();
+      const history = await this.#sessionRpc('session.history', {
+        sessionId, maxMessages: 50,
+        ...(beforeSeq === undefined ? {} : { beforeSeq }),
+      }, 30_000, { signal });
+      signal?.throwIfAborted();
+      events.push(...(history.events ?? []));
+      const oldest = Math.min(...(history.events ?? []).map((entry) => (entry.event ?? entry).seq));
+      if (!transferred || !history.hasMore || oldest <= afterSeq + 1) return { events };
+      if (!Number.isSafeInteger(oldest) || oldest === beforeSeq) break;
+      beforeSeq = oldest;
+    }
+    // Do not attribute or complete a turn from an incomplete replay window.
+    return { events: [] };
+  }
+
+  async #ask(sessionId, prompt, options, diagnostic, transferredPromptRpcId = null) {
     const timeoutMs = options.timeoutMs ?? 600_000;
     const signal = options.signal;
     const onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : null;
@@ -1826,18 +2007,18 @@ export class HarnessClient {
       ? options.onInteractionResolved
       : undefined;
     const control = normalizeControl(options.control);
-    const inboundFiles = Array.isArray(options.files) ? options.files.filter(Boolean) : [];
-    const inboundImages = Array.isArray(options.images) ? options.images.filter(Boolean) : [];
+    const inboundFiles = !transferredPromptRpcId && Array.isArray(options.files) ? options.files.filter(Boolean) : [];
+    const inboundImages = !transferredPromptRpcId && Array.isArray(options.images) ? options.images.filter(Boolean) : [];
     await this.ensureRunning({ signal });
     if (await this.#isSessionArchived(sessionId, { signal })) throw sessionArchivedError(sessionId);
-    const before = await this.#sessionRpc(
+    const before = transferredPromptRpcId ? { events: [] } : await this.#sessionRpc(
       'session.history',
       { sessionId, maxMessages: 1 },
       30_000,
       { signal },
     );
     const baselineSeq = Math.max(-1, ...(before.events ?? []).map(({ event }) => event.seq ?? -1));
-    const promptRpcId = `${this.#rpcIdPrefix}-${randomUUID()}`;
+    const promptRpcId = transferredPromptRpcId ?? `${this.#rpcIdPrefix}-${randomUUID()}`;
     diagnostic.promptRpcId = promptRpcId;
     const releasePromptInputOrigin = registerImInputOrigin(this.#interactionRegistry, promptRpcId);
     const tracker = new HarnessReplyTracker({
@@ -1913,9 +2094,10 @@ export class HarnessClient {
     let artifactsDelivered = false;
     let deliveredArtifactCount = 0;
     let artifactHandoffError = null;
-    const stagedBatches = [];
-    let promptAccepted = false;
+    const stagedBatches = options.handoffResources?.stagedBatches ?? [];
+    let promptAccepted = Boolean(transferredPromptRpcId);
     let turnFinished = false;
+    let handedOff = false;
 
     const deliverArtifacts = async () => {
       if (!onArtifact || artifactsDelivered || tracker.turn === null) {
@@ -2006,67 +2188,86 @@ export class HarnessClient {
           }),
         ]);
       }
-      diagnostic.stage = 'prompt.prepare';
-      const content = typeof prompt === 'string'
-        ? [{ type: 'text', text: prompt }]
-        : prompt;
-      if (!Array.isArray(content) || content.length === 0) {
-        throw new TypeError('Harness prompt content is required');
-      }
-      // Publish the guidance the channel's own captured settings produced, so
-      // the Host materializes it once per Session as prompt context instead of
-      // per user message. It is passed in and never parsed back out of
-      // `content`: the prompt also carries whatever the user typed, and a
-      // message that merely looks like a guidance block is not configuration.
+      // Restore the channel's trusted guidance in a fresh part too; never
+      // derive it from the forwarded message's content.
       imSourceGuidance.publish(sessionId, options.sourceGuidance);
-      const timeZoneFields = clientTimeZoneFields();
-      const sendPrompt = (promptContent) => {
-        diagnostic.stage = 'prompt.submit';
-        diagnostic.submissionState = 'unknown';
-        return this.#sessionRpc('session.prompt', {
-          sessionId,
-          mode: 'queue',
-          content: promptContent,
-          ...timeZoneFields,
-        }, 30_000, { rpcId: promptRpcId, signal });
-      };
-      try {
-        await sendPrompt(content);
-      } catch (error) {
-        // The Host refuses image blocks for a non-vision model before any
-        // durable user message exists. Re-deliver the same bytes the way
-        // ordinary uploads (zip, documents) already travel — staged into the
-        // Session workspace and named in a text manifest — then retry once
-        // with a text-only prompt. The retry reuses promptRpcId so reply
-        // tracking, control and interaction ownership stay bound to this ask.
-        const originalsStaged = inboundImages.length > 0 && isImageAdmissionRejection(error)
-          && content.some((part) => part.type === 'image');
-        const imageSources = !originalsStaged && isModelImageRejection(error)
-          ? imageFileSourcesFromContent(content) : [];
-        if (!originalsStaged && imageSources.length === 0) throw error;
-        if (!originalsStaged) {
-          let stagedImages;
-          try {
-            stagedImages = await this.#stageWorkspaceFiles(sessionId, imageSources, signal);
-          } catch (stagingError) {
-            if (signal?.aborted) throw signal.reason ?? stagingError;
-            console.warn(
-              '[dsh-im] unable to restage rejected images as workspace files:',
-              this.#logPrefix,
-              stagingError?.message ?? String(stagingError),
-            );
-            throw error;
-          }
-          stagedBatches.push(stagedImages);
+      if (!transferredPromptRpcId) {
+        diagnostic.stage = 'prompt.prepare';
+        const content = typeof prompt === 'string'
+          ? [{ type: 'text', text: prompt }]
+          : prompt;
+        if (!Array.isArray(content) || content.length === 0) {
+          throw new TypeError('Harness prompt content is required');
         }
-        const baseContent = typeof basePrompt === 'string'
-          ? [{ type: 'text', text: basePrompt }]
-          : basePrompt;
-        const fallbackPrompt = appendInboundFilesToPrompt([
-          ...contentWithoutImages(baseContent),
-          { type: 'text', text: t(isModelImageRejection(error) ? IMAGE_FILE_FALLBACK_PROMPT : IMAGE_HOST_LIMIT_FALLBACK_PROMPT) },
-        ], { files: stagedBatches.flatMap((batch) => batch?.files ?? []) });
-        await sendPrompt(fallbackPrompt);
+        const timeZoneFields = clientTimeZoneFields();
+        const sendPrompt = (promptContent) => {
+          diagnostic.stage = 'prompt.submit';
+          diagnostic.submissionState = 'unknown';
+          return this.#sessionRpc('session.prompt', {
+            sessionId,
+            mode: 'queue',
+            content: promptContent,
+            ...timeZoneFields,
+          }, 30_000, { rpcId: promptRpcId, signal });
+        };
+        // 30 秒提交窗口到期只说明 Host 忙到没来得及应答，prompt 可能早已入队。
+        // 先按 promptRpcId 回查持久账本，确认入库就继续等回复；确认不到才把
+        // 原始超时错误向上抛，由文案层标注「提交请求超时、是否送达未知」。
+        const submitPrompt = async (promptContent) => {
+          try {
+            await sendPrompt(promptContent);
+          } catch (error) {
+            if (!isPromptSubmitTimeout(error) || signal?.aborted) throw error;
+            let confirmed = false;
+            try {
+              confirmed = await this.#confirmPromptSubmit(sessionId, promptRpcId, { signal });
+            } catch (confirmError) {
+              // 确认途中被取消时恢复调用方的取消语义（与图片暂存路径一致）。
+              if (signal?.aborted) throw signal.reason ?? confirmError;
+              throw error;
+            }
+            if (!confirmed) throw error;
+            diagnostic.submissionState = 'accepted';
+          }
+        };
+        try {
+          await submitPrompt(content);
+        } catch (error) {
+          // The Host refuses image blocks for a non-vision model before any
+          // durable user message exists. Re-deliver the same bytes the way
+          // ordinary uploads (zip, documents) already travel — staged into the
+          // Session workspace and named in a text manifest — then retry once
+          // with a text-only prompt. The retry reuses promptRpcId so reply
+          // tracking, control and interaction ownership stay bound to this ask.
+          const originalsStaged = inboundImages.length > 0 && isImageAdmissionRejection(error)
+            && content.some((part) => part.type === 'image');
+          const imageSources = !originalsStaged && isModelImageRejection(error)
+            ? imageFileSourcesFromContent(content) : [];
+          if (!originalsStaged && imageSources.length === 0) throw error;
+          if (!originalsStaged) {
+            let stagedImages;
+            try {
+              stagedImages = await this.#stageWorkspaceFiles(sessionId, imageSources, signal);
+            } catch (stagingError) {
+              if (signal?.aborted) throw signal.reason ?? stagingError;
+              console.warn(
+                '[dsh-im] unable to restage rejected images as workspace files:',
+                this.#logPrefix,
+                stagingError?.message ?? String(stagingError),
+              );
+              throw error;
+            }
+            stagedBatches.push(stagedImages);
+          }
+          const baseContent = typeof basePrompt === 'string'
+            ? [{ type: 'text', text: basePrompt }]
+            : basePrompt;
+          const fallbackPrompt = appendInboundFilesToPrompt([
+            ...contentWithoutImages(baseContent),
+            { type: 'text', text: t(isModelImageRejection(error) ? IMAGE_FILE_FALLBACK_PROMPT : IMAGE_HOST_LIMIT_FALLBACK_PROMPT) },
+          ], { files: stagedBatches.flatMap((batch) => batch?.files ?? []) });
+          await submitPrompt(fallbackPrompt);
+        }
       }
       promptAccepted = true;
       diagnostic.submissionState = 'accepted';
@@ -2080,12 +2281,9 @@ export class HarnessClient {
         // active until turn/end and can therefore outlive a stalled turn.
         while (true) {
           await sleep(300, signal);
-          const history = await this.#sessionRpc(
-            'session.history',
-            { sessionId, maxMessages: 50 },
-            30_000,
-            { signal },
-          );
+          options.assertCurrent?.();
+          const history = await this.#replyHistory(sessionId, tracker.lastSeq, Boolean(transferredPromptRpcId), signal);
+          options.assertCurrent?.();
           const wasActive = ownership?.active === true;
           if (ownership) {
             this.#consumeInteractionOwnerships(sessionId, history.events ?? []);
@@ -2097,7 +2295,7 @@ export class HarnessClient {
             if (!ownership?.stopRequested && !harnessTurnSucceeded(tracker.reason)) {
               const failure = harnessTurnError(tracker.reason);
               if (failure.code === 'turn-blocked') {
-                throw await this.#confirmedArchiveError(sessionId, { signal }, failure) ?? failure;
+                throw await this.#confirmedSessionError(sessionId, { signal }, failure) ?? failure;
               }
               throw failure;
             }
@@ -2131,7 +2329,7 @@ export class HarnessClient {
               .map((event) => event.seq));
             if (blockedSeq > checkedBlockedSeq) {
               checkedBlockedSeq = blockedSeq;
-              const archived = await this.#confirmedArchiveError(sessionId, { signal });
+              const archived = await this.#confirmedSessionError(sessionId, { signal });
               if (archived) throw archived;
             }
           }
@@ -2139,7 +2337,7 @@ export class HarnessClient {
           if (Date.now() - lastProgressAt < timeoutMs) continue;
 
           if (!ownership?.stopRequested) {
-            const archived = await this.#confirmedArchiveError(sessionId, { signal });
+            const archived = await this.#confirmedSessionError(sessionId, { signal });
             if (archived) throw archived;
           }
 
@@ -2162,6 +2360,8 @@ export class HarnessClient {
           throw timeoutError;
         }
       } catch (error) {
+        handedOff = Boolean(options.handoffResources)
+          && ['turn-blocked', 'session-archived'].includes(error.code);
         if (error.code === 'session-archived') {
           error.promptAccepted = promptAccepted;
           error.details = { ...error.details, promptRpcId, baselineSeq, turn: tracker.turn, lastSeq: tracker.lastSeq };
@@ -2182,7 +2382,7 @@ export class HarnessClient {
       }
     } finally {
       releasePromptInputOrigin();
-      if (!promptAccepted || turnFinished) {
+      if (!promptAccepted || (turnFinished && !handedOff)) {
         for (const staged of stagedBatches) {
           try {
             await staged?.cleanup?.();

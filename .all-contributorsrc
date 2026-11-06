@@ -723,6 +723,22 @@
       ]
     },
     {
+      "login": "unera",
+      "name": "Dmitry E. Oboukhov",
+      "avatar_url": "https://avatars.githubusercontent.com/u/538980",
+      "profile": "https://github.com/unera",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/414"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/414"
+        }
+      ]
+    },
+    {
       "login": "WE-Technology",
       "name": "WE-Technology",
       "avatar_url": "https://avatars.githubusercontent.com/u/109900108",

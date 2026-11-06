@@ -155,6 +155,8 @@ function requiredString(value, name) {
   return result;
 }
 
+const SLACK_MARKDOWN_TEXT_LIMIT = 12_000;
+
 function safeOutgoingText(value, { trim = true } = {}) {
   const raw = typeof value === 'string' ? value : '';
   const text = trim ? raw.trim() : raw;
@@ -162,6 +164,14 @@ function safeOutgoingText(value, { trim = true } = {}) {
   return text
     .replace(/<@([A-Z0-9]+)>/gi, '@$1')
     .replace(/<!(channel|here|everyone)(?:\^[^>]*)?>/gi, '@$1');
+}
+
+function markdownTextField(value) {
+  const text = safeOutgoingText(value);
+  if (text.length > SLACK_MARKDOWN_TEXT_LIMIT) {
+    throw new TypeError(`Slack markdown_text exceeds ${SLACK_MARKDOWN_TEXT_LIMIT} characters`);
+  }
+  return text;
 }
 
 function apiFailure(method, payload, tokenKind) {
@@ -272,15 +282,22 @@ export class SlackApi {
   }
 
   postMessage({ channelId, text, threadTs, signal, format = 'plain' }) {
+    const outgoing = format === 'markdown_text' ? markdownTextField(text) : safeOutgoingText(text);
+    const markdownText = format === 'markdown_text';
     return this.#request('chat.postMessage', {
       tokenKind: 'bot',
       signal,
       body: {
         channel: slackId(channelId, 'channel id'),
-        text: safeOutgoingText(text),
-        ...(format === 'markdown' ? { blocks: [{ type: 'markdown', text: safeOutgoingText(text) }] } : {}),
+        // markdown_text cannot be combined with text or blocks.
+        ...(markdownText
+          ? { markdown_text: outgoing }
+          : {
+              text: outgoing,
+              ...(format === 'markdown' ? { blocks: [{ type: 'markdown', text: outgoing }] } : {}),
+              mrkdwn: format !== 'literal',
+            }),
         ...(threadTs ? { thread_ts: cleanString(threadTs) } : {}),
-        mrkdwn: true,
         link_names: false,
         unfurl_links: false,
         unfurl_media: false,
@@ -295,8 +312,7 @@ export class SlackApi {
       body: {
         channel: slackId(channelId, 'channel id'),
         ts: requiredString(ts, 'message timestamp'),
-        text: safeOutgoingText(text),
-        parse: 'none',
+        markdown_text: markdownTextField(text),
         link_names: false,
       },
     });

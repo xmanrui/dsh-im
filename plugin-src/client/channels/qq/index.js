@@ -5,7 +5,7 @@ import * as React from 'react';
 import { QqLogoGlyph } from '../../channel-logos.js';
 import { CredentialActionIcon, CredentialBindingPanel, QrActionIcon } from '../../credential-binding.js';
 import { AccountSettingsToggle, CollapsibleAccountSection } from '../shared/collapsible-account.js';
-import { h } from '../../i18n.js';
+import { channelName, h, localizeTemplate } from '../../i18n.js';
 import { WorkspaceEditor } from '../../workspace-editor.js';
 import { ContextEnhancementEditor } from '../../context-enhancement.js';
 import {
@@ -83,14 +83,14 @@ function Heading({ totals, adding, busy, onAdd, onCredential, credentialOpen, ad
         }, h(CredentialActionIcon), credentialOpen ? '收起凭据' : '手动接入')),
       totals.configured > 0
         ? h('div', { className: 'ddt-badge dim-onlineBadge' },
-            h('span', null, `${totals.connected} / ${totals.configured} 在线`))
+            h('span', null, localizeTemplate('{connected} / {configured} 在线', { connected: totals.connected, configured: totals.configured })))
         : null));
 }
 
 function LoadingView() {
   return h('div', { className: 'ddt-card ddt-loading dim-surfaceCard dim-loadingView', 'aria-busy': 'true' },
     h('div', { className: 'ddt-spinner dim-spinner' }),
-    h('span', null, '正在读取 QQ 机器人状态…'));
+    h('span', null, localizeTemplate('正在读取 {channel} 机器人状态…', { channel: channelName('QQ') })));
 }
 
 function EmptyView({ busy, onStart }) {
@@ -161,7 +161,7 @@ function ProvisionView({ provision, busy, onRetry, onClose }) {
 
 function RemoveConfirmation({ account, busy, onConfirm, onCancel }) {
   return h('div', { className: 'ddt-confirm dim-confirm', role: 'alertdialog' },
-    h('strong', null, `从 DeepSeek Harness 移除“${account.bot.name}”？`),
+    h('strong', null, localizeTemplate('从 DeepSeek Harness 移除“{name}”？', { name: account.bot.name })),
     h('p', null, '这会停止消息连接，并删除本机保存的应用凭据、机器人配置及会话映射。腾讯平台中的机器人不会被自动删除。'),
     h('div', { className: 'ddt-actions dim-viewActions' },
       h(Button, { onClick: onCancel, disabled: busy }, '保留机器人'),
@@ -583,7 +583,7 @@ export function QqSettingsTab({ rpcCall }) {
     }),
     model.phase === 'loading' ? h(LoadingView)
       : model.phase === 'error'
-        ? h('div', { className: 'ddt-card dim-surfaceCard' }, h('div', { className: 'ddt-inlineError dim-inlineError' }, h('h3', null, '无法读取 QQ 机器人状态'), h(ConnectionError, { error: model.error }), h(Button, { onClick: () => void loadStatus() }, '重新读取')))
+        ? h('div', { className: 'ddt-card dim-surfaceCard' }, h('div', { className: 'ddt-inlineError dim-inlineError' }, h('h3', null, localizeTemplate('无法读取 {channel} 机器人状态', { channel: channelName('QQ') })), h(ConnectionError, { error: model.error }), h(Button, { onClick: () => void loadStatus() }, '重新读取')))
         : h(React.Fragment, null,
             credentialView,
             provisionView,

@@ -225,6 +225,9 @@ class ModernHarnessApi {
       describe: (request) => rpcResult(request, () => ({ ready: true, transport: 'typert' })),
     });
     this.workspace = Object.freeze({
+      rename: (request, signal) => rpcResult(request, () => this.#invoke(
+        'workspace', 'rename', { request: request.payload }, signal,
+      )),
       list: (request, signal) => rpcResult(request, () => this.#workspaceList(signal)),
       create: (request, signal) => rpcResult(request, () => this.#invoke(
         'workspace', 'create', { request: request.payload }, signal,
@@ -247,6 +250,9 @@ class ModernHarnessApi {
       )),
       rename: (request, signal) => rpcResult(request, () => this.#invoke(
         'session', 'rename', { request: request.payload }, signal,
+      )),
+      fork: (request, signal) => rpcResult(request, () => this.#invoke(
+        'session', 'fork', { request: request.payload }, signal,
       )),
       cancel: (request, signal) => rpcResult(request, () => this.#invoke(
         'session', 'cancel', { request: { sessionId: request.payload.sessionId } }, signal,
@@ -510,7 +516,9 @@ class ModernHarnessApi {
     let subscription;
     subscription = new MuxSubscription(signal, () => this.#mux.delete(subscription));
     this.#mux.add(subscription);
-    for (const pending of this.#pendingQuestions.values()) subscription.push(this.#questionFrame(pending));
+    for (const pending of this.#pendingQuestions.values()) {
+      if (pending.broadcast) subscription.push(this.#questionFrame(pending));
+    }
     for (const pending of this.#pendingApprovals.values()) {
       if (pending.broadcast !== false && pending.imAvailable !== false) subscription.push(this.#approvalFrame(pending));
     }
@@ -547,7 +555,9 @@ class ModernHarnessApi {
 
   #requestQuestion(request, next) {
     const owner = this.#claimableAgent(request?.agent);
-    if (!owner) return next();
+    const sessionId = owner?.sessionId ?? request?.agent?.session?.id ?? request?.agent?.id;
+    if (typeof sessionId !== 'string'
+      || (!owner && typeof this.#deliveryService?.presentSessionSyncQuestion !== 'function')) return next();
     const turnSignal = request.signal;
     if (turnSignal?.aborted) {
       return Promise.reject(questionError(
@@ -581,11 +591,21 @@ class ModernHarnessApi {
     // request exclusively used to keep the question out of Web entirely, leaving
     // whoever happened to be looking at that Session with a card they could not
     // answer. Racing keeps both surfaces usable: the first answer wins.
-    const im = this.#askThroughIm(request, owner);
+    const im = this.#askThroughIm(request, { sessionId }, { broadcast: Boolean(owner) });
+    let imAvailable = true;
+    let nativeError;
+    const withdraw = () => {
+      imAvailable = false;
+      im.withdraw();
+      // No binding/provider must preserve the native error, not leave the tool waiting forever.
+      if (nativeError) im.dismiss(nativeError);
+    };
     let answeredByIm = false;
     const native = Promise.resolve()
       .then(() => next())
       .catch((error) => {
+        nativeError = error;
+        if (!imAvailable) throw error;
         // A pure-IM session has no client connected, so the host rejects with
         // NO_PROVIDER — an expected state rather than a failure — and ASK_ABORTED
         // is this adapter's own retire signal below. Any other error is real, so
@@ -599,7 +619,7 @@ class ModernHarnessApi {
         }
         return new Promise(() => {});
       });
-    return Promise.race([
+    const result = Promise.race([
       native,
       im.promise.then((value) => {
         answeredByIm = true;
@@ -627,26 +647,45 @@ class ModernHarnessApi {
         // rejecting alongside us stays an expected retirement rather than a logged
         // failure.
         question.abort(questionError('the question was answered on IM', 'ASK_ABORTED'));
+      } else if (!owner) {
+        // Also stop a bound-chat lookup/delivery still in flight when the Host wins.
+        question.abort(questionError('the question ended', 'ASK_ABORTED'));
       }
     });
+    if (!owner) {
+      Promise.resolve().then(() => {
+        if (question.signal.aborted) return false;
+        return this.#deliveryService.presentSessionSyncQuestion(sessionId, {
+          ...im.interaction, withdraw,
+        }, { signal: question.signal, completion: result });
+      }).then((available) => {
+        if (!available) withdraw();
+      }, (error) => {
+        if (!question.signal.aborted) console.warn('[dsh-im] synced question delivery unavailable:', error?.code ?? error?.name);
+        withdraw();
+      });
+    }
+    return result;
   }
 
   /**
    * Present one question to IM clients. Returns the answer promise plus a
    * `dismiss` used to retire the pending when the host answers first.
    */
-  #askThroughIm(request, owner) {
+  #askThroughIm(request, owner, { broadcast = true } = {}) {
     let pending = null;
     const promise = new Promise((resolve, reject) => {
       pending = {
         rpcId: randomUUID(),
         sessionId: owner.sessionId,
         questions: request.questions,
+        broadcast,
+        imAvailable: true,
         signal: request.signal,
         settle: (outcome, value) => {
           if (!this.#pendingQuestions.delete(pending.rpcId)) return;
           request.signal?.removeEventListener('abort', onAbort);
-          this.#broadcast({
+          if (broadcast) this.#broadcast({
             type: 'question/resolved',
             sessionId: pending.sessionId,
             questionRpcId: pending.rpcId,
@@ -661,11 +700,23 @@ class ModernHarnessApi {
       ));
       this.#pendingQuestions.set(pending.rpcId, pending);
       request.signal?.addEventListener('abort', onAbort, { once: true });
-      this.#broadcast(this.#questionFrame(pending).payload, pending.rpcId);
+      if (broadcast) this.#broadcast(this.#questionFrame(pending).payload, pending.rpcId);
     });
     return {
       promise,
       dismiss: (reason) => pending?.settle('cancelled', reason),
+      withdraw: () => { pending.imAvailable = false; },
+      interaction: {
+        kind: 'question', interactionId: pending.rpcId, rpcId: pending.rpcId,
+        sessionId: pending.sessionId, payload: this.#questionFrame(pending).payload,
+        respond: async (response) => {
+          const receipt = this.#respond({ rpcId: pending.rpcId, result: response });
+          if (!receipt.accepted) throw new HarnessInteractionError(
+            `interaction-${receipt.reason}`, 'This question is no longer answerable',
+          );
+          return receipt;
+        },
+      },
     };
   }
 
@@ -869,7 +920,7 @@ class ModernHarnessApi {
       return { accepted: true };
     }
     const question = this.#pendingQuestions.get(message?.rpcId);
-    if (!question) return { accepted: false, reason: 'not-pending' };
+    if (!question || !question.imAvailable) return { accepted: false, reason: 'not-pending' };
     if (message?.result?.ok !== true) {
       if (message?.result?.error?.code !== 'cancelled') {
         return { accepted: false, reason: 'bad-response' };

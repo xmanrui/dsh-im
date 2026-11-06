@@ -53,6 +53,67 @@ function appleScriptString(value) {
   return JSON.stringify(String(value));
 }
 
+// macOS 26 (Tahoe) stopped populating message.text for received iMessages: the
+// body is only stored in message.attributedBody, an NSArchiver typedstream blob
+// (`streamtyped` + archived NSAttributedString). These constants describe the
+// inline-string run we need to read from that archive.
+const ATTRIBUTED_BODY_STRING_CLASS = Buffer.from('NSString', 'utf8');
+const ATTRIBUTED_BODY_STRING_TAG = 0x2b; // '+': inline NSString payload follows
+// Attachment-only messages carry U+FFFC (object replacement character) instead
+// of text. The channel is text-only, so such runs must keep normalizing to null.
+const OBJECT_REPLACEMENT_CHARACTER = '\ufffc';
+
+// Apple NXTypedStream integer encoding: a signed byte is a literal length,
+// 0x81/0x82/0x83 introduce a little-endian 2/4/8-byte length.
+function readTypedStreamLength(buffer, offset) {
+  if (offset >= buffer.length) return null;
+  const tag = buffer[offset];
+  let cursor = offset + 1;
+  let length;
+  if (tag === 0x81) {
+    if (cursor + 2 > buffer.length) return null;
+    length = buffer.readInt16LE(cursor);
+    cursor += 2;
+  } else if (tag === 0x82) {
+    if (cursor + 4 > buffer.length) return null;
+    length = buffer.readInt32LE(cursor);
+    cursor += 4;
+  } else if (tag === 0x83) {
+    if (cursor + 8 > buffer.length) return null;
+    const value = buffer.readBigInt64LE(cursor);
+    if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    length = Number(value);
+    cursor += 8;
+  } else {
+    length = tag > 0x7f ? tag - 0x100 : tag;
+  }
+  if (!Number.isInteger(length) || length < 0 || cursor + length > buffer.length) return null;
+  return { length, offset: cursor };
+}
+
+// Accepts either the hex string selected via hex(m.attributedBody) or the raw blob.
+export function decodeAttributedBodyText(value) {
+  const buffer = Buffer.isBuffer(value)
+    ? value
+    : typeof value === 'string' && value.trim() ? Buffer.from(value.trim(), 'hex') : null;
+  if (!buffer?.length) return null;
+  const marker = buffer.indexOf(ATTRIBUTED_BODY_STRING_CLASS);
+  if (marker < 0) return null;
+  let tagIndex = marker + ATTRIBUTED_BODY_STRING_CLASS.length;
+  while (tagIndex < buffer.length && buffer[tagIndex] !== ATTRIBUTED_BODY_STRING_TAG) tagIndex += 1;
+  if (tagIndex >= buffer.length) return null;
+  const run = readTypedStreamLength(buffer, tagIndex + 1);
+  if (!run || run.length === 0) return null;
+  let text;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(run.offset, run.offset + run.length));
+  } catch {
+    return null;
+  }
+  const stripped = text.replaceAll(OBJECT_REPLACEMENT_CHARACTER, '').trim();
+  return stripped || null;
+}
+
 export function normalizeIMessageTarget(value) {
   return normalizeChatGuid(value);
 }
@@ -62,7 +123,8 @@ export function normalizeIMessage(value, { botId } = {}) {
   if (value.serviceName !== undefined && value.serviceName !== 'iMessage') return null;
   const guid = cleanString(value.guid ?? value.id);
   const chatGuid = cleanString(value.chatGuid ?? value.chat_guid);
-  const text = cleanString(value.text);
+  const text = cleanString(value.text)
+    ?? decodeAttributedBodyText(value.attributedBodyHex ?? value.attributedBody);
   const sender = cleanString(value.sender ?? value.handle_id);
   if (!guid || !chatGuid || !text || !sender) return null;
   if (text.startsWith(IMESSAGE_BOT_REPLY_PREFIX)) return null;
@@ -127,7 +189,10 @@ export class MacOSMessagesApi {
     const chatFilter = chatGuid ? ` AND c.guid = ${sqlString(normalizeChatGuid(chatGuid))}` : '';
     // Messages delivers self-chat back as an incoming copy. Read that copy once,
     // keeping all outgoing rows excluded, and filter bot replies by their marker.
+    // macOS 26 (Tahoe) stores received iMessage bodies only in attributedBody, so
+    // accept either text column and decode the blob when text is empty.
     const query = `SELECT m.ROWID AS rowid, m.guid AS guid, m.text AS text,
+      hex(m.attributedBody) AS attributedBodyHex,
       h.id AS sender, c.guid AS chatGuid, c.service_name AS serviceName,
       m.is_from_me AS isFromMe,
       datetime((m.date / 1000000000) + 978307200, 'unixepoch') AS receivedAt
@@ -136,7 +201,7 @@ export class MacOSMessagesApi {
       JOIN chat c ON c.ROWID = cmj.chat_id
       LEFT JOIN handle h ON h.ROWID = m.handle_id
       WHERE m.ROWID > ${cursor} AND m.is_from_me = 0
-        AND m.text IS NOT NULL AND m.text != ''
+        AND ((m.text IS NOT NULL AND m.text != '') OR m.attributedBody IS NOT NULL)
         AND c.service_name = 'iMessage'${chatFilter}
       ORDER BY m.ROWID ASC LIMIT ${boundedLimit};`;
     try {

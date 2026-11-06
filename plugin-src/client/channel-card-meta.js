@@ -1,7 +1,7 @@
 import { ConnectionError } from './connection-error.js';
 import * as React from 'react';
 
-import { h, isEnglish } from './i18n.js';
+import { h, imLocale } from './i18n.js';
 
 export const BotSettingsContext = React.createContext(Object.freeze({
   openBotSettings() {},
@@ -50,9 +50,13 @@ export function BotSettingsButton({
     h('span', { className: 'dim-moreSettingsChevron', 'aria-hidden': 'true' })));
 }
 
+// Date formatting follows the interface language, not English-vs-not: a
+// Russian reader is served ru-RU numerals and month names, not Chinese ones.
+const INTL_LOCALES = Object.freeze({ zh: 'zh-CN', en: 'en-US', ru: 'ru-RU' });
+
 function messageErrorTime(value) {
   try {
-    return new Intl.DateTimeFormat(isEnglish() ? 'en-US' : 'zh-CN', {
+    return new Intl.DateTimeFormat(INTL_LOCALES[imLocale()] ?? 'en-US', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

@@ -7,10 +7,10 @@ import { DiscordHarnessBridge } from '../../../src/channels/discord/discord-brid
 import { SlackHarnessBridge } from '../../../src/channels/slack/slack-bridge.mjs';
 import { TelegramHarnessBridge } from '../../../src/channels/telegram/telegram-bridge.mjs';
 import { WhatsappHarnessBridge } from '../../../src/channels/whatsapp/whatsapp-bridge.mjs';
-import legacyHelp from './fixtures/command-help.json' with { type: 'json' };
+import expectedHelp from './fixtures/command-help.json' with { type: 'json' };
 
-// Captured from the pre-catalog bridge in zh/en: guard the complete usage,
-// ordering and examples independently of the metadata now used in production.
+// Expected zh/en /help: guard the complete usage, ordering and examples
+// independently of the metadata now used in production.
 for (const [channel, label, Bridge] of [
   ['telegram', 'Telegram', TelegramHarnessBridge],
   ['slack', 'Slack', SlackHarnessBridge],
@@ -36,9 +36,9 @@ for (const [channel, label, Bridge] of [
         translate('{label}机器人已连接 DeepSeek Harness。', { label }),
         '',
         translate('直接发送文字、图片或文件即可继续当前会话。'),
-        ...legacyHelp[language],
+        ...expectedHelp[language],
       ].join('\n'));
-      assert.deepEqual(commandHelpLines(channel), legacyHelp[language]);
+      assert.deepEqual(commandHelpLines(channel), expectedHelp[language]);
     });
   }
 }

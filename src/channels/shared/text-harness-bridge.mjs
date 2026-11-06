@@ -1,9 +1,9 @@
 import { BusyMessageDispatcher, canAutomaticallySteer } from './busy-message-dispatcher.mjs';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from './deferred-delivery-coordinator.mjs';
 import { t } from './i18n.mjs';
-import { commandHelpLines } from './command-catalog.mjs';
+import { availableCommandCatalog, commandHelpLines, SHARED_COMMAND_CATALOG } from './command-catalog.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
@@ -13,9 +13,11 @@ import {
   captureContextEnhancementSource,
   enhanceContextContent,
 } from './context-enhancement.mjs';
-import { runWorkspaceCommand } from './workspace-command.mjs';
+import { runWorkspaceCommand, workspaceSwitchFailureText } from './workspace-command.mjs';
+import { runStatusCommand } from './status-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
 import { isClearCommand, runClearCommand } from './clear-command.mjs';
+import { isResetCommand, runResetCommand } from './reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from './history-command.mjs';
 import {
   isControlCommand,
@@ -73,7 +75,23 @@ import {
   messageFailureText,
   setLastMessageFailure,
 } from './message-failure.mjs';
+import { logDeliveryFailure } from './delivery-failure-log.mjs';
 import { beginStatusReaction } from './status-reaction.mjs';
+import { startNewConversation, isNewCommand, newCommandTitle } from './new-command.mjs';
+import {
+  isSessionNavCommand,
+  runSessionNavCommand,
+} from './session-nav-command.mjs';
+import {
+  documentSendSupported,
+  buttonPreviewSupported,
+} from './channel-capabilities.mjs';
+import { createActionNonce } from './action-card.mjs';
+
+/** Cap and TTL for the in-memory workspace-picker snapshots behind button presses. */
+const MAX_WORKSPACE_CARDS = 50;
+const WORKSPACE_CARD_TTL_MS = 60 * 60 * 1000;
+const WORKSPACE_CARD_NONCE_BYTES = 9;
 
 const INTERACTION_RESOLVED_TEXT = '这个问题已在其他客户端处理，无需再次回答。';
 const FILE_ONLY_COMPLETION_TEXT = '任务已完成。';
@@ -175,6 +193,10 @@ function pendingMessageId(key, messageId) {
 
 const PENDING_RESTART_NOTICE = '排队中的消息在服务重启时被中断。为避免重复执行，未自动重放；如果该消息尚未处理，请重新发送。';
 
+// Callback namespace for the /tail preview "Hide" button: the payload is the
+// nonce of the preview message the bot must delete when pressed.
+const TAIL_HIDE_CALLBACK_PREFIX = 'tailhide|';
+
 export class TextHarnessBridge {
   #descriptor;
   #bot;
@@ -202,6 +224,17 @@ export class TextHarnessBridge {
   #approvals;
   #batches = new BatchInputManager();
   #interactionCard;
+  #workspaceCard;
+  // Workspace picker snapshots by nonce: the press carries an index, not a path.
+  #workspaceCards = new Map();
+  // Conversation key → the one picker card that is still authoritative there.
+  #workspaceCardKeys = new Map();
+  // /tail preview messages by nonce, so the "Hide" press can delete the bot's
+  // own preview message. Keyed by nonce → { target, providerMessageId }.
+  #tailPreviewMessages = new Map();
+  // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
+  // render hook). Null keeps every channel's existing plain-text approval flow.
+  #approvalCard;
   #contextHooks = null;
   // Delivery attempts per message id. A failed turn releases its `markSeen` so
   // the next poll can retry, and this counter is what keeps that from becoming
@@ -229,6 +262,9 @@ export class TextHarnessBridge {
     signal,
     keepaliveIntervalMs = 4_000,
     interactionCard = null,
+    workspaceCard = null,
+    approvalCard = null,
+    approvalTimeoutMs,
     contextHooks = null,
     autoSteerSameSender = false,
     autoSteerLimit = 0,
@@ -250,6 +286,8 @@ export class TextHarnessBridge {
     this.#signal = signal;
     this.#keepaliveIntervalMs = keepaliveIntervalMs;
     this.#interactionCard = interactionCard ?? null;
+    this.#workspaceCard = workspaceCard ?? null;
+    this.#approvalCard = approvalCard ?? null;
     // Opt-in follow-up lanes for channels whose groups run on rapid consecutive
     // posts: fold a same sender's burst into one dispatch, and steer that
     // sender's own mid-turn follow-ups into the in-flight turn instead of
@@ -273,6 +311,10 @@ export class TextHarnessBridge {
     this.#approvals = new HarnessApprovalQueue({
       label: descriptor.key,
       logger,
+      // Tests and hosts may shorten the approval deadline; the default stays.
+      ...(Number.isFinite(approvalTimeoutMs) && approvalTimeoutMs > 0
+        ? { approvalTimeoutMs }
+        : {}),
     });
     // A queued message lives only in #queues. If the process dies before its
     // turn runs the user has already been told it is queued, so the persisted
@@ -434,6 +476,7 @@ export class TextHarnessBridge {
     const collectingBatch = normalized.kind === 'direct'
       && this.#batches.status(key).phase === 'collecting';
     const commandRunner = collectingBatch ? null : isClearCommand(text) ? runClearCommand
+      : isResetCommand(text) ? runResetCommand
       : isHistoryCommand(text) ? runHistoryCommand
       : hasInboundFiles(normalized) ? null : isControlCommand(text)
       ? runControlCommand
@@ -1106,26 +1149,42 @@ export class TextHarnessBridge {
           t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
           '',
           t('直接发送文字、图片或文件即可继续当前会话。'),
-          ...commandHelpLines(this.#descriptor.key),
+          ...commandHelpLines(this.#descriptor.key, availableCommandCatalog(SHARED_COMMAND_CATALOG, {
+            supportsFork: this.#harness.supportsSessionFork?.() ?? true,
+          })),
         ].join('\n'));
         return;
       }
       if (!hasImages && !hasFiles && command === '/status') {
-        await this.#harness.ensureRunning({ signal: this.#signal });
-        await this.#bot.sendText(target, t('{label}机器人与 DeepSeek Harness 连接正常。', { label: this.#descriptor.label }));
+        const status = await runStatusCommand({
+          descriptor: this.#descriptor,
+          harness: this.#harness,
+          state: this.#state,
+          conversationKey,
+          signal: this.#signal,
+        });
+        await this.#bot.sendText(target, status.message);
         return;
       }
       const workspaceCommand = !hasImages && !hasFiles
         ? await runWorkspaceCommand(text, this.#harness, conversationKey)
         : null;
+      if (workspaceCommand && await this.#presentWorkspaceCommand(
+        target, workspaceCommand, conversationKey,
+      )) return;
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
           await this.#bot.sendText(target, reply);
         }
         return;
       }
-      if (!hasImages && !hasFiles && command === '/new') {
-        await this.#state.clearSession(conversationKey);
+      if (!hasImages && !hasFiles && isNewCommand(text)) {
+        const receipt = await startNewConversation({
+          state: this.#state,
+          harness: this.#harness,
+          key: conversationKey,
+          title: newCommandTitle(text),
+        });
         if (this.#contextHooks?.onSessionCleared) {
           try {
             await this.#contextHooks.onSessionCleared(conversationKey);
@@ -1134,7 +1193,47 @@ export class TextHarnessBridge {
             this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] failed to reset context anchors after /new:`, error?.message ?? error);
           }
         }
-        await this.#bot.sendText(target, t('已开启新会话。请发送你的问题。'));
+        await this.#bot.sendText(target, `${receipt}\n${t('请发送你的问题。')}`);
+        return;
+      }
+      if (!hasImages && !hasFiles && isSessionNavCommand(text)) {
+        const result = await runSessionNavCommand(
+          text,
+          this.#harness,
+          this.#state,
+          conversationKey,
+          { signal: this.#signal, isDirect: message.kind === 'direct' },
+        );
+        if (result) {
+          await this.#presentSessionNavResult(target, result);
+          if (result.askText) {
+            // /go N <text>, /prev <text>, /next <text>: switch, then submit the
+            // remainder through the ordinary prompt path. Never await the queued
+            // follow-up here — we are inside the queue's own job, so awaiting the
+            // next job deadlocks. The queue runs it right after this job returns.
+            const followUp = this.#enqueueMessage(
+              {
+                ...message,
+                controlText: result.askText,
+                content: result.askText,
+                images: undefined,
+                files: undefined,
+                replyTo: undefined,
+                batchSubmission: undefined,
+              },
+              `${messageId}-ask`,
+              senderId,
+              conversationKey,
+            );
+            followUp.catch((error) => {
+              this.#logger.warn?.(
+                `[dsh-im:${this.#descriptor.key}] follow-up ask after a nav command failed:`,
+                error?.message ?? error,
+              );
+              this.#bot.sendText(target, t('切换后的提问发送失败，请重试。')).catch(() => undefined);
+            });
+          }
+        }
         return;
       }
       const compactCommand = !hasImages && !hasFiles
@@ -1207,9 +1306,12 @@ export class TextHarnessBridge {
       if (message.kind === 'group') content = prependSpeakerLabel(content, message.speakerName);
       const snapshot = this.#acceptedMessageIds.get(messageId);
       let contextEnhanced = false;
+      // contextSource() is enhancement-only: it is read here, under an enabled
+      // snapshot, and nowhere else. The author record below reuses this read.
+      let contextSource = null;
       if (snapshot) {
         const originalContent = content ?? text;
-        const contextSource = message.contextSource?.();
+        contextSource = message.contextSource?.() ?? null;
         content = enhanceContextContent(originalContent, snapshot, () => ({
           channel: this.#descriptor.key,
           senderId,
@@ -1269,11 +1371,28 @@ export class TextHarnessBridge {
       // opened: the auto-steer lane keys its authorship decision off this
       // record, and the finally below retires it when the turn settles.
       this.#turnAuthors.set(conversationKey, { senderId, steered: 0, turnMessageId: messageId });
+      // Persist who spoke here last, so a later describeConversation() can name
+      // the sender of a group turn without replaying any message text. Channels
+      // that own a different state store simply skip it.
+      // The sender id and bot flag are always kept. A display name is kept only
+      // when the channel already exposes it (Matrix speakerName) or context
+      // enhancement read it above; a disabled enhancement never leaks names.
+      try {
+        await this.#state.rememberAuthor?.(conversationKey, {
+          senderId,
+          senderName: message.senderName ?? message.speakerName ?? contextSource?.senderName,
+          senderUsername: message.senderUsername ?? contextSource?.senderUsername,
+          isBot: message.senderIsBot === true,
+        });
+      } catch (error) {
+        this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] unable to remember the conversation author:`, error?.message ?? error);
+      }
       // The prompt is about to enter the Harness inbox, which is itself durable.
       // Marking the entry submitted first means a crash after this point reports
       // the message instead of replaying a turn the Harness may already own.
       await this.#markPendingSubmitted(conversationKey, messageId);
       const { sessionId, answer, artifacts = [] } = await askInWorkspaceSession({
+        onNotice: (notice) => this.#bot.sendText(target, notice),
         deferredDelivery: () => ({ coordinator: this.#deferred, target: this.#descriptor.key === 'whatsapp' ? { jid: target.jid, selfChat: target.selfChat } : target }),
         harness: this.#harness,
         state: this.#state,
@@ -1308,6 +1427,10 @@ export class TextHarnessBridge {
               return;
             }
             if (update.type === 'reasoning') return;
+            // A carrier that delivers the answer as its own message must not
+            // stream that answer into itself first: the reader would see the
+            // reply twice, and every preview costs an edit.
+            if (update.type === 'text' && stream.previewAnswer === false) return;
             const progress = update.type === 'text' ? update.text
               : update.type === 'tool' ? t('正在使用{name}…', { name: update.name }) : update.text;
             if (progress) {
@@ -1355,12 +1478,16 @@ export class TextHarnessBridge {
       const answerFormat = fileOnlyCompletion ? 'plain' : 'markdown';
       let textDeliveryError = null;
       let textReceipt = null;
+      // What the channel observed about the send itself; it is written to the
+      // log together with the reference id the user is shown.
+      let deliveryEvidence = null;
       if (stream) {
         try {
           const result = await stream.finish(semanticStream || thinkingStream
             ? createTextDeliveryBlock(visibleAnswer, answerFormat)
             : visibleAnswer);
           streamFinished = true;
+          deliveryEvidence = result?.deliveryEvidence ?? deliveryEvidence;
           textReceipt = createDeliveryReceipt({
             deliveryId: messageId,
             presentation: result?.presentation
@@ -1390,6 +1517,7 @@ export class TextHarnessBridge {
                 createTextDeliveryBlock(visibleAnswer, answerFormat),
               )
             : await this.#bot.sendText(answerTarget, visibleAnswer);
+          deliveryEvidence = result?.deliveryEvidence ?? deliveryEvidence;
           textReceipt = createDeliveryReceipt({
             deliveryId: messageId,
             presentation: result?.presentation ?? `${this.#descriptor.key}-text`,
@@ -1399,6 +1527,7 @@ export class TextHarnessBridge {
           });
         } catch (error) {
           textDeliveryError = channelDeliveryFailure(error);
+          deliveryEvidence = error?.deliveryEvidence ?? deliveryEvidence;
         }
       }
       const finalDeliveryUnknown = textReceipt?.deliveryOutcome === 'unknown';
@@ -1412,6 +1541,11 @@ export class TextHarnessBridge {
           Object.assign(new Error('Final text delivery outcome is unknown'), { code: textReceipt.reason }),
         );
       }
+      if (textDeliveryError && deliveryEvidence) {
+        // The catch further down reports this error, and the log line must
+        // carry the same evidence the channel recorded for the failed send.
+        textDeliveryError.deliveryEvidence = deliveryEvidence;
+      }
       // A failed final text must not discard an already registered result file.
       // Settle the independent attachment path before surfacing the text error.
       const delivery = await this.#deliverArtifacts(target, messageId, artifacts, textReceipt);
@@ -1420,7 +1554,8 @@ export class TextHarnessBridge {
         throw textDeliveryError;
       }
       if (textDeliveryError && delivery.artifactSendErrors === 0) {
-        setLastMessageFailure(this.#status, textDeliveryError);
+        const failure = setLastMessageFailure(this.#status, textDeliveryError);
+        logDeliveryFailure(this.#logger, this.#descriptor.key, failure, textDeliveryError.deliveryEvidence);
       }
       if (delivery.userVisible) {
         this.#status.messagesReplied += 1;
@@ -1507,6 +1642,9 @@ export class TextHarnessBridge {
         `[dsh-im:${this.#descriptor.key}] failed to process a message [${failure.referenceId}]:`,
         messageFailureDiagnostic(error, failure),
       );
+      // One line per failed or unconfirmed delivery, carrying the same id the
+      // user will quote back: a reference id nobody can grep is useless.
+      logDeliveryFailure(this.#logger, this.#descriptor.key, failure, error?.deliveryEvidence);
       if (await presentStreamFailure(failureText)) {
         return error.deliveryReceipt;
       }
@@ -1800,6 +1938,35 @@ export class TextHarnessBridge {
     if (!conversationId || !senderId || !messageId || callback?.senderIsBot === true) return;
     const kind = callback.kind === 'group' ? 'group' : 'direct';
     const key = `${kind}:${conversationId}`;
+    // The /tail preview "Hide" button is a stateless delete of the bot's own
+    // message; route its namespace before any interaction bookkeeping.
+    if (typeof callback?.data === 'string' && callback.data.startsWith(TAIL_HIDE_CALLBACK_PREFIX)) {
+      return this.#handleTailHidePress(callback, callback.data.slice(TAIL_HIDE_CALLBACK_PREFIX.length));
+    }
+    // Workspace pickers are stateless cards, not pending questions: route their
+    // namespace before the question bookkeeping so a press can never touch it.
+    const workspacePress = this.#workspaceCard?.parse?.(callback.data) ?? null;
+    if (workspacePress) return this.#handleWorkspaceCardPress(callback, key, workspacePress);
+    // Approval cards own their callback namespace; every other press keeps using
+    // the question-card path below. The card acknowledges the press itself (the
+    // ack must be the first round-trip), so this branch runs before any other
+    // work in acceptCallback.
+    if (this.#approvalCard && typeof this.#approvalCard.handlePress === 'function') {
+      const handled = await this.#approvalCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        submit: (approvalId, outcome, options) => (
+          this.#approvals.submitByApprovalId(approvalId, outcome, options)
+        ),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle an approval card press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
     const pending = this.#pendingInteractions.get(key);
     const notice = (text) => this.#answerInteractionCallback(callback, text);
     if (!pending) return notice(t('该问题已处理，无需再次选择。'));
@@ -1867,6 +2034,243 @@ export class TextHarnessBridge {
     });
   }
 
+  /**
+   * Render a session-navigation command result. Text replies are split and sent
+   * as-is; a /tail preview may carry a Hide button on button-capable channels;
+   * a /tail export is delivered as a document on file-capable channels.
+   */
+  async #presentSessionNavResult(target, result) {
+    if (result?.document) {
+      if (documentSendSupported(this.#descriptor.key, this.#bot)) {
+        try {
+          await this.#bot.sendFile(target, {
+            fileName: result.document.fileName,
+            mediaType: result.document.mediaType,
+            bytes: Buffer.from(result.document.content, 'utf8'),
+          });
+          return;
+        } catch (error) {
+          this.#logger.warn?.(
+            `[dsh-im:${this.#descriptor.key}] failed to send the /tail export:`,
+            error?.message ?? error,
+          );
+        }
+      }
+      await this.#bot.sendText(target, t('当前渠道不支持发送文件。'));
+      return;
+    }
+    if (result?.hide === true && buttonPreviewSupported(this.#descriptor.key, this.#bot)) {
+      await this.#sendTailPreviewWithHide(target, result);
+      return;
+    }
+    for (const reply of result?.messages ?? [result?.message]) {
+      if (reply) await this.#bot.sendText(target, reply);
+    }
+  }
+
+  /** Send a /tail preview with a single Hide button, falling back to plain text. */
+  async #sendTailPreviewWithHide(target, result) {
+    const nonce = createActionNonce(6);
+    const markup = {
+      inline_keyboard: [[{ text: t('隐藏消息'), callback_data: `${TAIL_HIDE_CALLBACK_PREFIX}${nonce}` }]],
+    };
+    let sent;
+    try {
+      sent = await this.#bot.sendInteractionCard(target, { text: result.message, markup });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] unable to send the /tail preview card; falling back to text:`,
+        error?.message ?? error,
+      );
+      for (const reply of result.messages ?? [result.message]) {
+        if (reply) await this.#bot.sendText(target, reply);
+      }
+      return;
+    }
+    const messageId = Array.isArray(sent?.providerMessageIds) && sent.providerMessageIds.length > 0
+      ? String(sent.providerMessageIds[0])
+      : undefined;
+    if (messageId) this.#tailPreviewMessages.set(nonce, { target, messageId });
+  }
+
+  /** Hide a /tail preview by deleting the bot's own message. Best-effort. */
+  async #handleTailHidePress(callback, nonce) {
+    const entry = this.#tailPreviewMessages.get(nonce);
+    if (entry) this.#tailPreviewMessages.delete(nonce);
+    await this.#answerInteractionCallback(callback, t('已隐藏。'));
+    if (!entry?.messageId || typeof this.#bot.deleteMessage !== 'function') return;
+    try {
+      await this.#bot.deleteMessage(entry.target, entry.messageId);
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] unable to delete a /tail preview:`,
+        error?.message ?? error,
+      );
+    }
+  }
+
+  /**
+   * Send the merged /ws listing as an interactive picker when the channel and
+   * the payload support one. Returns false so the caller can fall back to the
+   * text list: a failed or impossible card must never lose the listing.
+   */
+  async #presentWorkspaceCommand(target, command, conversationKey) {
+    const listing = command?.listing;
+    if (!listing
+      || typeof this.#workspaceCard?.render !== 'function'
+      || typeof this.#bot.sendInteractionCard !== 'function') return false;
+    const nonce = randomBytes(WORKSPACE_CARD_NONCE_BYTES).toString('base64url');
+    const card = this.#workspaceCard.render(listing, { nonce });
+    if (!card) return false;
+    const entry = { listing, key: conversationKey, target, createdAt: Date.now(), submitting: false };
+    this.#rememberWorkspaceCard(nonce, entry);
+    try {
+      const sent = await this.#bot.sendInteractionCard(target, card);
+      entry.messageId = Array.isArray(sent?.providerMessageIds) && sent.providerMessageIds.length > 0
+        ? String(sent.providerMessageIds[0])
+        : undefined;
+      await this.#activateWorkspaceCard(conversationKey, nonce);
+      return true;
+    } catch (error) {
+      this.#workspaceCards.delete(nonce);
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] unable to send the workspace picker; `
+        + 'falling back to the text list:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Only one picker stays authoritative per conversation. The previous card's
+   * keyboard is retired as soon as its replacement exists, so an old "current"
+   * marker can never be pressed after a newer list is on screen.
+   */
+  async #activateWorkspaceCard(conversationKey, nonce) {
+    const previousNonce = this.#workspaceCardKeys.get(conversationKey);
+    this.#workspaceCardKeys.set(conversationKey, nonce);
+    if (!previousNonce || previousNonce === nonce) return;
+    const previous = this.#workspaceCards.get(previousNonce);
+    this.#workspaceCards.delete(previousNonce);
+    if (!previous?.messageId) return;
+    await this.#retireCardKeyboard(previous.target, previous.messageId, previousNonce);
+  }
+
+  /** Drop a card's keyboard in place; failures are diagnostics, never user-facing. */
+  async #retireCardKeyboard(target, messageId, nonce) {
+    if (!target || !messageId || typeof this.#bot.updateInteractionCard !== 'function') return;
+    try {
+      await this.#bot.updateInteractionCard(target, String(messageId), {
+        markup: { inline_keyboard: [] },
+      });
+    } catch (error) {
+      // "message is not modified" and "message to edit not found" are both fine here.
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] unable to retire a workspace picker${nonce ? ` (${nonce})` : ''}:`,
+        error?.message ?? error,
+      );
+    }
+  }
+
+  #rememberWorkspaceCard(nonce, entry) {
+    const now = Date.now();
+    for (const [key, stored] of this.#workspaceCards) {
+      if (now - stored.createdAt > WORKSPACE_CARD_TTL_MS) this.#workspaceCards.delete(key);
+    }
+    // Keep the caller's object identity: it is the same entry whose messageId is
+    // filled in once the Bot API answers, and retirement reads it from here.
+    this.#workspaceCards.set(nonce, entry);
+    while (this.#workspaceCards.size > MAX_WORKSPACE_CARDS) {
+      const oldest = this.#workspaceCards.keys().next().value;
+      if (oldest === undefined) break;
+      this.#workspaceCards.delete(oldest);
+    }
+  }
+
+  /** Answer a workspace press through the current card snapshot. */
+  async #handleWorkspaceCardPress(callback, key, press) {
+    if (this.#signal?.aborted) return;
+    const notice = (text) => this.#answerInteractionCallback(callback, text);
+    const expired = t('这个列表已过期，请重新发送 /ws。');
+    const entry = this.#workspaceCards.get(press.nonce);
+    if (!entry || entry.key !== key || Date.now() - entry.createdAt > WORKSPACE_CARD_TTL_MS) {
+      // A card this bridge can still identify gets its dead keyboard removed so
+      // the same press is not offered again; an unrecognized card is only toasted
+      // because editing an id we never issued is not a safe assumption.
+      if (entry && entry.key === key) {
+        this.#workspaceCards.delete(press.nonce);
+        if (this.#workspaceCardKeys.get(key) === press.nonce) this.#workspaceCardKeys.delete(key);
+        await this.#retireCardKeyboard(
+          callback.replyTarget ?? entry.target,
+          String(callback.providerMessageId),
+          press.nonce,
+        );
+      }
+      return notice(expired);
+    }
+    const kind = callback.kind === 'group' ? 'group' : 'direct';
+    // The card is a command surface: the same command-permission gate as typing
+    // the command applies to a press, otherwise a keyboard could bypass it.
+    const decision = evaluateInboundAccess(this.#accessPolicy, {
+      conversationType: kind,
+      senderIds: [cleanText(callback.senderId)].filter(Boolean),
+      isCommand: true,
+    });
+    if (!decision.allowed) return notice(t(COMMAND_PERMISSION_DENIED_MESSAGE));
+    const path = entry.listing?.paths?.[press.index];
+    if (typeof path !== 'string') return notice(expired);
+    // Claim synchronously, before the first await: a second press arriving
+    // while the switch is in flight must not switch a second time.
+    if (entry.submitting) return notice(t('正在切换工作区，请稍候。'));
+    // Idempotency follows the live authoritative current, not the snapshot: a
+    // typed /ws or another card may have switched since this one was sent.
+    let liveCurrent = null;
+    try {
+      if (typeof this.#harness.currentWorkspace === 'function') {
+        liveCurrent = this.#harness.currentWorkspace();
+      }
+    } catch {
+      // A failed read only loses the pre-check; the switch below still reports.
+    }
+    // The card's current marker is only a display snapshot; it cannot prove
+    // that another command or conversation has not changed the bot workspace.
+    if (path === liveCurrent) {
+      return notice(t('已经在工作区：{workspace}', { workspace: path }));
+    }
+    entry.submitting = true;
+    try {
+      const switched = await this.#harness.switchWorkspace(path);
+      const current = typeof switched === 'string' && switched ? switched : path;
+      // Keep the snapshot truthful: the next press compares against this value.
+      entry.listing = { ...entry.listing, current };
+      const card = this.#workspaceCard.render(entry.listing, { nonce: press.nonce });
+      if (card && typeof this.#bot.updateInteractionCard === 'function') {
+        try {
+          await this.#bot.updateInteractionCard(
+            callback.replyTarget ?? entry.target,
+            String(callback.providerMessageId),
+            { markup: card.markup },
+          );
+        } catch (error) {
+          this.#logger.warn?.(
+            `[dsh-im:${this.#descriptor.key}] unable to re-mark the workspace picker:`,
+            error?.message ?? error,
+          );
+        }
+      }
+      return await notice(t('工作区已切换为：{workspace}', { workspace: current }));
+    } catch (error) {
+      // Same classification as the typed command, so a card press and /ws N
+      // cannot word the same failure differently.
+      return notice(
+        workspaceSwitchFailureText(error) ?? t('暂时无法切换工作区，请稍后重试。'),
+      );
+    } finally {
+      entry.submitting = false;
+    }
+  }
+
   async presentSessionSyncApproval(interaction, context, options = {}) {
     return this.#approvals.handleSessionSyncRequested(interaction, context, {
       ...options, runtimeSignal: this.#signal ?? options.runtimeSignal, accessPolicy: this.#accessPolicy,
@@ -1880,11 +2284,37 @@ export class TextHarnessBridge {
     requiresMention,
   }) {
     if (interaction?.kind === 'approval') {
+      const send = (text) => this.#bot.sendText(target, text);
+      // Optional interactive-card presentation. The shared queue calls
+      // `render(pending, send)` instead of the plain text when present and
+      // `onResolved(text, outcome)` after any decision (button or typed reply).
+      let cardContext = null;
+      if (this.#approvalCard && typeof this.#approvalCard.createContext === 'function') {
+        try {
+          cardContext = this.#approvalCard.createContext({
+            key,
+            actor,
+            target,
+            send,
+            bot: this.#bot,
+            logger: this.#logger,
+          });
+        } catch (error) {
+          this.#logger.warn?.(
+            `[dsh-im:${this.#descriptor.key}] approval card unavailable; keeping the text approval:`,
+            error?.message ?? error,
+          );
+        }
+      }
       return this.#approvals.handleRequested(interaction, {
         key,
         actor,
         requiresMention,
-        send: (text) => this.#bot.sendText(target, text),
+        send: typeof cardContext?.send === 'function' ? cardContext.send : send,
+        ...(typeof cardContext?.render === 'function' ? { render: cardContext.render } : {}),
+        ...(typeof cardContext?.onResolved === 'function'
+          ? { onResolved: cardContext.onResolved }
+          : {}),
       });
     }
     if (interaction?.kind !== 'question') return;

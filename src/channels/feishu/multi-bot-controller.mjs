@@ -731,6 +731,18 @@ export class MultiBotDshFeishuController {
     });
   }
 
+  async presentSessionSyncQuestion(botId, target, interaction, options = {}) {
+    this.#assertOpen();
+    return this.#withBotTransition(botId, async () => {
+      this.#assertOpen();
+      this.#requireBot(botId);
+      const runtime = this.#runtimes.get(botId);
+      if (!isConnected(connectionStatus(runtime))
+        || typeof runtime.presentSessionSyncQuestion !== 'function') return false;
+      return runtime.presentSessionSyncQuestion(target, interaction, options);
+    });
+  }
+
   async disconnectBot(botId) {
     this.#assertOpen();
     // An operational pause only: credentials/config remain durable, so the

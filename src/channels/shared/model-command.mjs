@@ -1,3 +1,4 @@
+import { isSessionNotFound } from './session-error.mjs';
 import { splitWorkspaceCommandMessage } from './workspace-command.mjs';
 import { t } from './i18n.mjs';
 import { WORKSPACE_SESSION_STALE } from './workspace-session.mjs';
@@ -390,7 +391,7 @@ function modelErrorMessage(error, action) {
   if (code === 'agent-busy') {
     return t('当前任务正在运行，请等待完成或先发送 /stop。');
   }
-  if (code === 'session-not-found') {
+  if (isSessionNotFound(code)) {
     return t('当前聊天绑定的会话已不存在，请重试。');
   }
   if (code === 'model-unavailable' || code === 'session/model-unavailable') {
@@ -438,6 +439,11 @@ function modelErrorMessage(error, action) {
 
 async function boundSession(harness, state, key, options) {
   if (typeof state?.sessionFor !== 'function') return null;
+  // A DS Bot binding may exist before this IM chat has received a message.
+  // Resolve its current part rather than creating an unrelated IM session.
+  if (typeof harness?.resolveDsBotSession === 'function') {
+    await harness.resolveDsBotSession(key);
+  }
   const sessionId = state.sessionFor(key);
   if (typeof sessionId !== 'string' || !sessionId) return null;
   if (typeof harness?.workspaceSession !== 'function') {

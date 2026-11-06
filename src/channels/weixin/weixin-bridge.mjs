@@ -1,4 +1,5 @@
 import { BusyMessageDispatcher, canAutomaticallySteer } from '../shared/busy-message-dispatcher.mjs';
+import { SESSION_NAV_HELP_LINES } from '../shared/command-catalog.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import {
   DEFAULT_WEIXIN_MAX_MESSAGE_CHARS,
@@ -22,7 +23,9 @@ import {
   isBatchInputCommand,
 } from '../shared/batch-input.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
+import { runPlanCommand, runGoalCommand } from '../shared/plan-goal-command.mjs';
 import { isClearCommand, runClearCommand } from '../shared/clear-command.mjs';
+import { isResetCommand, runResetCommand } from '../shared/reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
 import {
   isControlCommand,
@@ -38,6 +41,11 @@ import {
 } from '../shared/preset-command.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import {
+  isSessionNavCommand,
+  runSessionNavTextCommand,
+} from '../shared/session-nav-command.mjs';
+import { createConversationSession, isNewCommand, newCommandTitle } from '../shared/new-command.mjs';
 import {
   captureContextEnhancement,
   captureContextEnhancementSource,
@@ -94,13 +102,17 @@ const HELP_TEXT = () => [
   t('/new  开启一个全新会话'),
   t('/compact  压缩当前会话的较早上下文'),
   t('/clear  清空当前会话上下文（保留 Session 绑定和历史记录）'),
+  t('/plan  进入计划模式（/plan off 退出，可附带说明文字）'),
+  t('/goal [目标]  设置目标（clear 清除、edit 修改、pause 暂停、resume 恢复；不带参数查看）'),
   t('/history [数量]  查看最近历史消息（默认 3 条，最多 5 条）'),
   t('/workspace 工作区序号或绝对路径  切换工作区'),
   t('/workspacelist  列出工作区绝对路径'),
   t('/ws、/wsl、/workspaces  工作区命令别名'),
   t('/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题'),
+  t('/sessionlist --all  跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）'),
   t('/sessionlist --limit N  仅列出当前工作区前 N 个会话'),
-  t('/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话'),
+  t('/session Session ID、当前工作区序号或标题关键词  将当前聊天绑定到指定会话'),
+  ...SESSION_NAV_HELP_LINES.map((line) => t(line)),
   t('/models  按序号列出所有可用模型'),
   t('/reasoninglist 或 /reasonings  按序号列出当前模型可用推理等级'),
   t('/reasoning [序号、等级ID或 --default]  查看或切换当前推理等级'),
@@ -462,6 +474,7 @@ export class WeixinHarnessBridge {
       }
     }
     const commandRunner = isClearCommand(commandText) ? runClearCommand
+      : isResetCommand(commandText) ? runResetCommand
       : isHistoryCommand(commandText) ? runHistoryCommand
       : hasWeixinFileItems(message) ? null : isControlCommand(commandText)
       ? runControlCommand
@@ -818,9 +831,32 @@ export class WeixinHarnessBridge {
         await this.#state.markSeen(messageId);
         return;
       }
-      if (!hasImages && !hasFiles && command === '/new') {
-        await this.#state.clearSession(key);
-        await this.#send(sender, t('已开启新会话。请发送你的问题。'), contextToken, runId);
+      if (!hasImages && !hasFiles && isNewCommand(text)) {
+        const created = await createConversationSession({ state: this.#state, harness: this.#harness, key, title: newCommandTitle(text) });
+        await this.#send(sender, created.failed ? t('暂时无法创建新会话，请稍后重试。') : t('已开启新会话。请发送你的问题。'), contextToken, runId);
+        await this.#state.markSeen(messageId);
+        return;
+      }
+      if (!hasImages && !hasFiles && isSessionNavCommand(text)) {
+        const nav = await runSessionNavTextCommand(text, this.#harness, this.#state, key, {
+          signal: this.#signal,
+        });
+        if (nav) {
+          for (const reply of nav.messages ?? [nav.message]) {
+            await this.#send(sender, reply, contextToken, runId);
+          }
+          if (nav.askText) {
+            const followUp = this.#enqueueMessage(
+              { ...message, item_list: [{ type: 1, text_item: { text: nav.askText } }] },
+              `${messageId}-ask`,
+              key,
+            );
+            followUp.catch((error) => {
+              this.#logger.warn?.(`[dsh-im:weixin] follow-up ask after a nav command failed:`, error?.message ?? error);
+              this.#send(sender, t('切换后的提问发送失败，请重试。'), contextToken, runId).catch(() => undefined);
+            });
+          }
+        }
         await this.#state.markSeen(messageId);
         return;
       }
@@ -849,6 +885,36 @@ export class WeixinHarnessBridge {
         return;
       }
 
+      const planCommand = hasImages || hasFiles
+        ? null
+        : await runPlanCommand(
+            text,
+            this.#harness,
+            this.#state,
+            key,
+            { signal: this.#signal },
+          );
+      if (planCommand) {
+        await this.#send(sender, planCommand.message, contextToken, runId);
+        await this.#state.markSeen(messageId);
+        return;
+      }
+
+      const goalCommand = hasImages || hasFiles
+        ? null
+        : await runGoalCommand(
+            text,
+            this.#harness,
+            this.#state,
+            key,
+            { signal: this.#signal },
+          );
+      if (goalCommand) {
+        await this.#send(sender, goalCommand.message, contextToken, runId);
+        await this.#state.markSeen(messageId);
+        return;
+      }
+
       let answer;
       let artifacts = [];
       await this.#startTyping(sender, contextToken);
@@ -869,6 +935,7 @@ export class WeixinHarnessBridge {
         await this.#state.markSeen(messageId);
         promptRecorded = true;
         ({ answer, artifacts = [] } = await askInWorkspaceSession({
+          onNotice: (notice) => this.#send(sender, notice, contextToken, runId, { stopTyping: false }),
           deferredDelivery: () => ({ coordinator: this.#deferred, target: { toUserId: sender } }),
           harness: this.#harness,
           state: this.#state,

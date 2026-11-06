@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { HarnessClient, HarnessInteractionError, HarnessTurnError } from '../../../src/channels/shared/harness-client.mjs';
+import { HarnessClient, HarnessInteractionError, HarnessTransportError, HarnessTurnError } from '../../../src/channels/shared/harness-client.mjs';
 import { extractConnectionEvidence, messageDiagnosticError, atConnectionStage } from '../../../src/channels/shared/connection-error.mjs';
 import { normalizeDiagnosticDetails } from '../../../src/channels/shared/diagnostic-details.mjs';
 import { classifyMessageFailure, messageFailureDiagnostic, publicMessageFailure, channelDeliveryFailure } from '../../../src/channels/shared/message-failure.mjs';
@@ -182,6 +182,55 @@ for (const phase of ['before', 'submit', 'after']) {
     assert.equal(error.cause.code, 'ECONNRESET');
   });
 }
+
+test('a prompt-submit timeout stays a failure only after the durable ledger misses it', async t => {
+  const tick = clock(t);
+  const f = fixture({ native: true, fail(method) {
+    if (method === 'session.prompt') throw new HarnessTransportError('harness-timeout', 'session.prompt');
+  } });
+  const pending = f.client.ask('session-unconfirmed', 'hello').catch(e => e);
+  await flush();
+  for (let attempt = 0; attempt < 4; attempt += 1) await tick(2_000);
+  const error = await pending;
+  assert.ok(error instanceof HarnessTransportError);
+  assert.equal(error.code, 'harness-timeout');
+  // fail 钩子在 fixture 计数前抛错（与上方 submit 阶段测试同语义）；
+  // 6 次 session.history = 1 次 baseline + 5 次入库确认轮询。
+  assert.equal(f.promptCount, 0);
+  assert.equal(f.requests.filter(request => request.method === 'session.history').length, 6);
+  const details = evidence(error);
+  assert.equal(details.stage, 'prompt.submit');
+  assert.equal(details.submissionState, 'unknown');
+  const failure = classifyMessageFailure(error, { referenceId: 'MF-TEST01' });
+  assert.equal(failure.code, 'HARNESS_RESULT_UNCERTAIN');
+  assert.match(failure.message, /提交请求超时/u);
+  assert.match(failure.message, /不要立即重复提交/u);
+  setImHostLanguage('en');
+  try {
+    assert.doesNotMatch(JSON.stringify(classifyMessageFailure(error, { referenceId: 'MF-TEST01' }).message), /[\u4e00-\u9fff]/u);
+  }
+  finally { setImHostLanguage('zh'); }
+});
+
+test('a cancellation during the final confirmation probe surfaces the cancel reason', async t => {
+  const tick = clock(t);
+  const controller = new AbortController();
+  const f = fixture({ native: true, fail(method) {
+    if (method === 'session.prompt') throw new HarnessTransportError('harness-timeout', 'session.prompt');
+    // requests.push 先于 fail：probe5 是第 6 次 session.history，进入前在这里取消。
+    if (method === 'session.history'
+      && f.requests.filter(request => request.method === 'session.history').length >= 6) {
+      controller.abort(new Error('cancelled during probe'));
+    }
+  } });
+  const pending = f.client.ask('session-cancelled-probe', 'hello', { signal: controller.signal }).catch(e => e);
+  await flush();
+  for (let attempt = 0; attempt < 5; attempt += 1) await tick(2_000);
+  const error = await pending;
+  // 取消原因优先于原始提交超时透出，不能被 harness-timeout 覆盖。
+  assert.equal(error.message, 'cancelled during probe');
+  assert.ok(!(error instanceof HarnessTransportError));
+});
 
 test('an accepted prompt with no progress retains reply timeout and deferred-delivery context', async t => {
   const tick = clock(t);

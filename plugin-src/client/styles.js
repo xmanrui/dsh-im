@@ -1,16 +1,19 @@
 export const IM_STYLE_ID = 'xmanrui-dsh-im-settings';
 
 const CSS = String.raw`
+.dim-conversationDirectorySettings { max-width: 720px; }
+.dim-conversationDirectoryForm { margin: 18px 0; padding: 16px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; }
+.dim-conversationDirectoryForm h3 { margin: 0 0 12px; font-size: 15px; }
+.dim-conversationDirectoryField { display: flex; align-items: center; gap: 12px; margin: 12px 0; font-size: 13px; }
+.dim-conversationDirectoryField > span { min-width: 72px; }
+.dim-conversationDirectoryField input, .dim-conversationDirectoryField select { max-width: 100%; min-width: 0; padding: 7px 9px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 6px; font: inherit; color: inherit; background: var(--dsw-alias-bg-layer-1, #fff); }
 .dim-sidebarIcon { display: block; flex: none; }
 .dim-pluginOpen { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 7px 14px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; }
 .dim-pluginOpen:hover { background: var(--dsw-alias-interactive-bg-hover, #f7f8fa); }
-.dim-pluginOpen:focus-visible, .dim-pluginBack:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: 3px; }
+.dim-pluginOpen:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: 3px; }
 .dim-pluginPage { height: 100%; min-height: 0; overflow: auto; box-sizing: border-box; padding: 24px clamp(16px, 4vw, 48px) 32px; color: var(--dsw-alias-label-primary, #1f2329); }
 .dim-pluginPageContent { max-width: 1080px; margin: 0 auto; }
-.dim-pluginBack { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; margin: 0 0 24px; padding: 6px 8px; border: 0; border-radius: 8px; color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; }
-.dim-pluginBack:hover { color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-interactive-bg-hover, #f7f8fa); }
-.dim-pluginBack > span { font-size: 22px; line-height: 20px; }
-@media (pointer: coarse) { .dim-pluginOpen, .dim-pluginBack { min-height: 44px; } }
+@media (pointer: coarse) { .dim-pluginOpen { min-height: 44px; } }
 .dim-connectionDiagnostic { min-width: 0; width: 100%; color: var(--dsw-alias-label-secondary, #646a73); overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
 .dim-connectionDiagnostic[data-warning="true"] { color: var(--dsw-alias-state-warn-primary, #d97706); }
 .dim-connectionDiagnostic p { margin: 4px 0; }
@@ -66,6 +69,7 @@ const CSS = String.raw`
 .dim-brandVersion { color: var(--dsw-alias-label-tertiary, #8f959e); font: 500 10px/16px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0; }
 .dim-title p { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap; }
 .dim-titleActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.dim-sessionHistoryButton { min-height: 30px; padding: 4px 10px; font-size: 12px; line-height: 20px; white-space: nowrap; }
 .dim-updateButton { min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 3px; padding: 5px 10px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 12px; line-height: 18px; font-weight: 560; cursor: pointer; }
 .dim-updateButton:hover:not(:disabled) { border-color: #aeb3bb; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-interactive-bg-hover, #f7f8fa); }
 .dim-updateButton:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: 2px; }
@@ -602,6 +606,25 @@ const CSS = String.raw`
 .dim-targetField input[readonly] { color: var(--dsw-alias-label-secondary, #646a73); background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
 .dim-targetFormError { margin: 10px 0 0; font-size: 12px; line-height: 18px; }
 .dim-targetFormActions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 12px; }
+.dim-dsBotForm { margin-top: 20px; }
+.dim-dsBotForm .dim-targetFormGrid { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); margin-top: 0; gap: 16px; }
+.dim-dsBotForm .dim-targetFormActions { margin-top: 16px; }
+.dim-targetRow.dim-dsBotBinding { grid-template-columns: minmax(0, 1fr) max-content; align-items: center; }
+.dim-dsBotDestination { margin: 3px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.dim-dsBotNotice { margin: 20px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 20px; }
+.dim-dsBotNotice p { margin: 0 0 10px; }
+.dim-dsBotSettings > .dim-targetFeedback { margin-top: 12px; }
+.dim-dsBotAvatar { display: block; flex: none; object-fit: cover; border-radius: 5px; }
+.dim-dsBotBoundIdentity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dim-dsBotPicker { position: relative; min-width: 0; }
+.dim-dsBotPickerTrigger { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 9px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 7px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.dim-dsBotPickerName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dim-dsBotPickerTrigger:focus-visible { outline: 2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #3370ff) 28%, transparent); border-color: var(--dsw-alias-state-business-primary, #3370ff); }
+.dim-dsBotPickerTrigger:disabled { opacity: .5; cursor: not-allowed; }
+.dim-dsBotOptions { position: absolute; z-index: 20; inset: calc(100% + 5px) 0 auto; max-height: 240px; overflow-y: auto; padding: 4px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 5px 18px rgb(0 0 0 / 10%); }
+.dim-dsBotOptions > button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-primary, #1f2329); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.dim-dsBotOptions > button[data-active="true"] { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.dim-dsBotOptions > button[aria-selected="true"] { color: var(--dsw-alias-state-business-primary, #3370ff); }
 .dim-accessPage { min-width: 0; display: grid; gap: 14px; }
 .dim-accessScene { position: relative; min-width: 0; margin: 0; padding: 16px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 12px; background: var(--dsw-alias-bg-layer-3, #fff); }
 .dim-accessScene > legend { padding: 0 6px; color: var(--dsw-alias-label-primary, #1f2329); font-size: 15px; line-height: 22px; font-weight: 650; }
@@ -612,6 +635,10 @@ const CSS = String.raw`
 .dim-accessControls[data-mode="allowlist"] { grid-template-columns: minmax(0, 1fr); }
 .dim-accessField { min-width: 0; display: grid; align-content: start; gap: 5px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 16px; }
 .dim-accessField input, .dim-accessField select { width: 100%; min-width: 0; height: 36px; padding: 0 9px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 7px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 12px; }
+.dim-accessField textarea { width: 100%; min-width: 0; padding: 7px 9px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 7px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 12px; line-height: 18px; resize: vertical; }
+.dim-accessField textarea:focus { outline: 2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #3370ff) 28%, transparent); border-color: var(--dsw-alias-state-business-primary, #3370ff); }
+.dim-accessField textarea:disabled { opacity: .6; }
+.dim-groupTriggerValue { color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
 .dim-accessField input:focus, .dim-accessField select:focus { outline: 2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #3370ff) 28%, transparent); border-color: var(--dsw-alias-state-business-primary, #3370ff); }
 .dim-accessUsers { min-width: 0; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
 .dim-accessUsersHeading { position: relative; min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -646,6 +673,14 @@ const CSS = String.raw`
 .dim-botGeneralControl { position: relative; min-width: 0; max-width: 100%; justify-self: end; color: var(--dsw-alias-label-primary, #1f2329); }
 .dim-botGeneralControl select, .dim-groupHistoryInput { display: block; min-width: 104px; max-width: 100%; height: 36px; padding: 0 36px 0 14px; border: 0; border-radius: 10px; color: inherit; background: var(--dsw-alias-bg-module-platform, #f5f6f7); font: inherit; font-size: 14px; line-height: 22px; appearance: none; }
 .dim-botGeneralControl select { cursor: pointer; }
+.dim-sidebarSettings { border-bottom: 1px solid var(--dsw-alias-border-l2, #dfe1e5); }
+.dim-sidebarSettings .dim-botGeneralRow { border-bottom: 0; }
+.dim-sidebarHeading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.dim-sidebarFeedback { display: flex; align-items: center; gap: 12px; padding-bottom: 16px; }
+.dim-sidebarFeedback .dim-accessFeedback { flex: 1; min-width: 0; }
+/* Native option popups do not inherit the select's painted background on
+   Windows. Set both colors so dark Host text never lands on a light popup. */
+.dim-sidebarSelect option { color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-3, #fff); }
 .dim-botGeneralControl select:hover:not(:disabled), .dim-groupHistoryInput:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
 .dim-botGeneralControl select:focus-visible, .dim-groupHistoryInput:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: 2px; }
 .dim-botGeneralControl select:disabled, .dim-groupHistoryInput:disabled { opacity: .5; cursor: not-allowed; }
@@ -788,6 +823,22 @@ const CSS = String.raw`
   .dim-directoryPickerSpinner { animation-duration: 1.8s; }
   .dim-collapsibleBody, .dim-collapsibleChevron { transition: none !important; }
 }
+/* Delivery-sync settings (General settings -> Delivery tab) */
+.dim-deliverySyncSettings { container-type: inline-size; }
+.dim-deliverySyncSettings .dim-globalHead { position: relative; }
+.dim-deliverySyncSettings .dim-globalTtlHelp { position: static; }
+.dim-globalTtlTooltip.dim-deliverySyncTooltip { width: min(360px, 100%); max-width: none; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 17px; white-space: normal; overflow-wrap: anywhere; }
+.dim-deliverySyncFields { min-width: 0; display: grid; gap: 16px; margin-top: 12px; }
+.dim-deliverySyncField { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 200px); align-items: start; gap: 8px 16px; }
+.dim-deliverySyncLabel { min-width: 0; display: grid; gap: 4px; }
+.dim-deliverySyncLabel > label { color: var(--dsw-alias-label-primary, #1f2329); font-size: 14px; line-height: 22px; }
+.dim-deliverySyncCheckLabel { display: flex; align-items: center; gap: 8px; }
+.dim-deliverySyncCheckLabel input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--dsw-alias-state-business-primary, #3370ff); }
+.dim-deliverySyncHelp { margin: 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.dim-deliverySyncIcon { min-width: 0; display: grid; gap: 4px; }
+.dim-deliverySyncFields .dim-globalTtlInput { width: 100%; min-width: 0; }
+.dim-deliverySyncFeedback { margin: 10px 0 0; }
+@container (max-width: 460px) { .dim-deliverySyncField { grid-template-columns: minmax(0, 1fr); } }
 `;
 
 export function installImStyles() {

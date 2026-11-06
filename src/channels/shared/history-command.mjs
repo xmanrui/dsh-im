@@ -1,3 +1,4 @@
+import { isSessionNotFound } from './session-error.mjs';
 import { isDeepStrictEqual } from 'node:util';
 
 import { t } from './i18n.mjs';
@@ -90,7 +91,7 @@ function formatHistory(sessionId, records, requested, hasMore) {
 
 function historyErrorMessage(error) {
   const code = error?.code ?? error?.failure?.code;
-  if (code === 'session-not-found') return t('当前聊天绑定的会话已不存在，请重新绑定会话。');
+  if (isSessionNotFound(code)) return t('当前聊天绑定的会话已不存在，请重新绑定会话。');
   if (code === WORKSPACE_SESSION_STALE || code === 'workspace-bot-not-found'
     || code === 'session-binding-changed') return t('会话、工作区或机器人状态已发生变化，请重新执行 /history。');
   if (code === 'harness-api-not-found') return t('当前 Harness 暂不支持读取会话历史。');

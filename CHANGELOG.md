@@ -6,6 +6,319 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- 新增 `/sessionarchive <Session ID>`（别名 `/sessarchive`）：通过 Discord 等渠道触发 DSH 的会话归档（`workspace.archiveSession`）。传序号只做预览（标题、工作区、ID），不会执行归档——会话列表随新会话出现而位移，按序号直接归档会归档到错误会话；破坏性操作必须点名完整 ID。机器人只负责解析目标并转达 Host 结果，拒绝归档本对话当前绑定的会话与已归档会话；`--stop` 让 Host 先停止该会话正在运行的任务。归档后的会话不再出现在默认的 `/sessionlist`。
+  Added `/sessionarchive <Session ID>` (alias `/sessarchive`) to trigger DSH Session archiving; a numerical argument only previews the Session behind that index (title, workspace, ID) and never archives, because the list shifts and archiving by index would hit the wrong Session — destructive actions must name the full ID (`workspace.archiveSession`) from the chat. The bot only resolves the target and relays the Host result; it refuses the Session this chat is bound to and one that is already archived, and `--stop` lets the Host stop that Session's running work. Archived Sessions leave the default `/sessionlist`.
+
+### Changed / 变更
+
+- `/sessionlist` 与 `/sessionlist --all` 默认不再列出已归档会话，只提示隐藏了几条；新增 `--archived` 把它们列在末尾且不编号。序号只对应可按下标绑定的未归档会话，归档会话仍可用完整 Session ID 绑定。
+  `/sessionlist` and `/sessionlist --all` no longer list archived Sessions by default; they report how many were hidden, and the new `--archived` flag appends them unnumbered. Indices only cover the non-archived Sessions that `/session N` can bind; archived Sessions remain bindable by full Session ID.
+
+- `/session` 新增短别名 `/sess`：部分客户端有同名原生斜杠命令会抢占输入框，被抢时改用 `/sess` 即可，参数与行为完全一致（Session ID、工作区序号、标题关键词）。`/sess` 列在 `/help` 里，原生命令菜单只注册主命令。
+  `/session` gains the short alias `/sess`: some clients own a native slash command of the same name and grab the input box, so `/sess` takes exactly the same arguments (Session ID, workspace index, title keyword) and behaves identically. It appears in `/help` while the native menu registers the primary name only.
+
+### Fixed / 修复
+
+- `/session <关键词>` 不再接管已归档会话：归档会话不参与标题搜索，只有归档标题命中时会列出这些会话并要求改用完整 Session ID；用完整 ID 绑定归档会话的行为保持不变。
+  `/session <keyword>` no longer takes over archived Sessions: they are excluded from title search, an answer that matches only archived titles names them and asks for the full Session ID, and binding an archived Session by its full ID keeps working.
+
+- 单工作区 `/sessionlist` 遇到 Harness 返回的无效会话记录（没有可用 Session ID）时不再整条失败，改为计数并跳过该行、保留其余会话的原始序号；`--all` 的无效记录计数改为覆盖整个工作区，不再只统计 `--limit` 窗口内的记录。
+  A single-workspace `/sessionlist` no longer fails on a Session record the Harness cannot describe (no usable Session ID): the row is counted and skipped, the remaining rows keep their original indices, and `--all` counts invalid records across the whole workspace instead of only inside the `--limit` window.
+
+- 修复会话选择的完整 ID 优先级与标题绑定隔离：无前缀 ID 的精确匹配不再受标题内容或候选数量限制；在对话专属工作区内按标题绑定时保留 bot 默认目录及其他聊天的绑定，搜索期间工作区变化则拒绝旧选择。飞书接入 `/sessionlist --all` 汇总及卡片当前绑定标记；汇总跳过无效记录时保留原始序号，确保与 `/session N` 一致。
+  Session selection now resolves exact non-prefixed IDs independently of titles and the candidate cap. Binding by title in a conversation workspace preserves the bot default and other chats' bindings, and rejects selections if the workspace changes during the search. Feishu now handles `/sessionlist --all` and marks the bound session in cards. Skipping invalid rows in summaries preserves the original indices used by `/session N`.
+
+### Added / 新增
+
+- `/sessionlist --all` 跨工作区汇总列出会话，每个工作区默认显示 10 个并可用 `--limit N` 调整；单个工作区读取失败时跳过该分组并提示未包含的工作区数量，无效会话记录只跳过该行，均不影响其余结果。`/sessionlist` 用「（当前绑定）」标出本对话已绑定的会话，生产作用域也能正确读取该标记。`/session <关键词>` 按标题不区分大小写模糊匹配：仅在当前对话有效工作区内唯一命中时直接绑定；唯一命中位于其他工作区、命中多个、或部分工作区读取失败时只列出候选并要求完整 Session ID，避免误切换 bot 工作区并清除其他聊天的旧绑定；零命中保留原有按 Session ID 绑定的行为。标题关键词限制为单个连续词，未知旗标返回用法；对话专属工作区目录已不存在时回退到 bot 默认工作区。全部新增文案已同步英文与俄文词典。
+  `/sessionlist --all` summarizes sessions across all workspaces, 10 per workspace unless `--limit N` says otherwise. A workspace whose list cannot be read is skipped and the number of omitted workspaces is reported; invalid session rows are skipped individually without hiding the rest. `/sessionlist` marks the session this chat is already bound to, and the production scope now exposes that binding correctly. `/session <keyword>` matches session titles case-insensitively and binds directly only when a single match is in the conversation's effective workspace. A unique match in another workspace, several matches, or a partial search list candidates and require the full Session ID, so an accidental keyword cannot move the bot workspace and clear other chats' bindings. When nothing matches, the previous Session-ID behaviour is preserved. Keywords are limited to a single token, unknown flags return usage, and a missing conversation workspace directory falls back to the bot default. Every new string ships with English and Russian translations.
+
+## [5.10.0] - 2026-11-04
+
+### Added / 新增
+
+- 新增「通用设置 → 投递」，可分别开启 Web 用户输入镜像与非本聊天发起回合的最终回答投递，并设置各自的前缀图标；两项默认关闭。无已保存投递目标时，可按 Session 当前绑定的聊天投递 Web、定时任务及子代理通知等来源的回答；已有目标继续遵循目标范围和同步开关。（[#480](https://github.com/xmanrui/dsh-im/pull/480)）
+  Added General Settings → Delivery with separate, default-off switches for mirroring Web user input and delivering final answers from turns initiated outside the chat, plus configurable prefixes. Bots without saved delivery targets can deliver Web, scheduled and subagent-triggered answers through current Session bindings; saved targets retain their scope and sync controls. ([#480](https://github.com/xmanrui/dsh-im/pull/480))
+- 消息语言可在跟随 DSH 界面语言与中文、英文、俄语之间选择，显式插件 `language` 配置仍优先。
+  Message language can follow the DSH interface or be explicitly set to Chinese, English or Russian; explicit plugin `language` configuration still takes precedence.
+- 为 Telegram 交互卡片新增有限 429 重试、按钮文字清理与截断的共享辅助函数，并支持校验不携带动作字段的禁用按钮，供卡片功能接入使用。（[#505](https://github.com/xmanrui/dsh-im/pull/505)）
+  Added shared helpers for bounded Telegram action-card 429 retries and button-label sanitization/truncation, plus validation for disabled buttons without action fields, for card implementations to adopt. ([#505](https://github.com/xmanrui/dsh-im/pull/505))
+
+### Fixed / 修复
+
+- 会话同步仅投递最后一次工具调用后的最终回答，不回显内部驱动提示，也不重复投递本聊天发起的回合。飞书与 DS Bot 同步优先确认原卡片已呈现回答，仅对未确认的目标补发文字；两个全局开关关闭时同步卡片和文字均停发。（[#480](https://github.com/xmanrui/dsh-im/pull/480)）
+  Session sync delivers only the final answer after the last tool call, without echoing internal prompts or duplicating chat-originated turns. Feishu and DS Bot sync confirm card delivery first and send text only to unconfirmed targets; disabling both global switches stops synchronized cards and text. ([#480](https://github.com/xmanrui/dsh-im/pull/480))
+- DS Bot 已接受的请求在阻塞、接管或会话归档后按原请求身份继续跟踪，避免重复提交或把其他回合的结果当作当前回复；保留取消、过程事件和暂存文件的正确生命周期。（[#499](https://github.com/xmanrui/dsh-im/pull/499)、[#498](https://github.com/xmanrui/dsh-im/issues/498)）
+  Accepted DS Bot requests continue to be tracked by their original request identity across blocked turns, handoffs and archived sessions, avoiding duplicate submissions and unrelated replies while preserving cancellation, progress and staged-file lifetime. ([#499](https://github.com/xmanrui/dsh-im/pull/499), [#498](https://github.com/xmanrui/dsh-im/issues/498))
+- DS Bot 绑定会话在切换模型但未指定推理级别，或使用 `/reasoning --default` 时，回读会话实际的默认级别，避免已切换成功却误报失败。（[#513](https://github.com/xmanrui/dsh-im/pull/513)）
+  DS Bot-bound model changes without an explicit reasoning level, including `/reasoning --default`, now report the Session's actual default effort instead of falsely reporting a failed switch. ([#513](https://github.com/xmanrui/dsh-im/pull/513))
+- 区分模型目录读取失败与模型不存在，保留诊断信息；模型保存失败时关闭菜单并显示错误，保留原设置并支持重试。（[#521](https://github.com/xmanrui/dsh-im/issues/521)）
+  Model catalog failures remain distinguishable from missing models and retain diagnostics. Failed model saves close the menu and show an inline error while preserving the previous settings and allowing retry. ([#521](https://github.com/xmanrui/dsh-im/issues/521))
+
+### Notes / 使用说明
+
+- 升级后请在「通用设置 → 投递」检查同步开关。依赖声明、Node.js 要求及 DSH 兼容声明保持不变；重启 Host 并刷新管理页面使更新生效。
+  After upgrading, review the sync switches under General Settings → Delivery. Dependency declarations, Node.js requirements and DSH compatibility declarations are unchanged; restart the Host and refresh management pages.
+
+## [5.9.1] - 2026-11-01
+
+### Fixed / 修复
+
+- 邮件线程在只引用上一封的客户端（如 iOS Mail 只带一条 `References`）里会分裂：回信的 Message-ID 由发信时生成、从未登记，解析线程时认不出它，于是把该封当成新线程另开一个 Harness 会话。现在每次回信都把发信侧 Message-ID 登记回它所回复的线程，同一封邮件的往返始终留在同一个会话里。
+  A mail thread split when the client quoted only the immediate parent (iOS Mail sends a single-entry `References` header): the Message-ID of our own reply is minted on the way out and was never registered, so the thread resolver did not recognise it and opened a new Harness session for that message. Every reply we send now records its own Message-ID against the thread it answers, keeping a mail thread in one session.
+
+- 会话开启 Goal 后，自动续跑的每一轮会在绑定的飞书对话里渲染过程卡：工具调用、流式答案和每轮结果都会推送，不再整轮静默。同一会话的群话题与同步私聊按投递位置分别去重；连接中断漏掉轮次结束、会话改绑等异常下旧轮会先收尾，不会阻塞后续轮次或串写；目标轮次的驱动提示原文（`<goal_round>`）不会外发；目标轮的 `user/message` 不带 `turn` 字段，按紧邻的 `turn/start` 归轮。方案见 `docs/方案/飞书目标自动续跑过程与结果可见方案.md`。
+  Turns opened automatically by an active Goal now render into the bound Feishu conversation with the same step card an IM turn uses — tool calls, the streamed answer and each round's result are delivered instead of leaving the chat silent for the whole round. Deduplication happens per delivery surface, so a group topic keeps rendering next to a synced DM; rounds orphaned by a dropped turn-end or a conversation rebind are closed before the next round instead of blocking or writing into the wrong card; the `<goal_round>` driver prompt is never echoed. See `docs/方案/飞书目标自动续跑过程与结果可见方案.md`.
+
+- 通用设置与插件更新统一沿用 `rpcAuthority`，修复已认证的 NAS／Docker 局域网访问被固定本机限制拒绝的问题；显式 `loopback` 仍限制本机访问。管理错误区分登录失效、访问拒绝、接口缺失与服务异常，保留现有更新确认和安装限制。（[#477](https://github.com/xmanrui/dsh-im/issues/477)）
+  General settings and plugin updates now honor `rpcAuthority`, allowing authenticated, trusted LAN access on NAS/Docker deployments while retaining explicit `loopback` restrictions. Management errors distinguish authentication, access denial, missing APIs, and service failures. Existing update confirmation and installation restrictions are preserved. ([#477](https://github.com/xmanrui/dsh-im/issues/477))
+
+### Notes / 使用说明
+
+- 依赖声明、Node.js 要求及 DSH 兼容声明保持不变。升级后重启 Host 并刷新管理页面。
+  Dependency declarations, Node.js requirements and DSH compatibility declarations are unchanged. Restart the Host and refresh management pages after upgrading.
+
+## [5.9.0] - 2026-10-31
+
+### Added / 新增
+
+- 新增默认关闭的 `groupByAgentPreset` 选项，按明确选择的 Agent Preset 为后续新会话创建工作区分组；已有聊天、手动工作区和飞书会话隔离目录保持原路径。
+  Added opt-in `groupByAgentPreset` workspace grouping for new sessions with an explicitly selected Agent Preset. Existing chats, manual workspaces and Feishu conversation directories keep their paths.
+
+- Telegram 新增“批准一次 / 拒绝”审批按钮，仅允许任务发起人操作，处理重复点击、提交重试和过期状态；卡片不可用时回退文字审批。（[#430](https://github.com/xmanrui/dsh-im/pull/430)）
+  Added Telegram approve-once/reject buttons restricted to the task initiator, with duplicate-click, retry and expiry handling and text approval fallback. ([#430](https://github.com/xmanrui/dsh-im/pull/430))
+- Telegram 原生命令菜单分别注册私聊与群聊作用域，隐藏别名；`/status` 补充当前工作区、绑定会话、模型、Agent Preset 和运行任务，并限制可选信息读取的等待时间。（[#431](https://github.com/xmanrui/dsh-im/pull/431)）
+  Telegram registers native command menus separately for private and group chats and hides aliases. `/status` now includes the workspace, bound session, model, Agent Preset and running-task state, with bounded waits for optional fields. ([#431](https://github.com/xmanrui/dsh-im/pull/431))
+- 飞书模型卡片支持分页与推理强度选择，选择后在当前页刷新原卡片，避免大型模型列表被截断。（[#491](https://github.com/xmanrui/dsh-im/pull/491)）
+  Feishu model cards support pagination and reasoning-effort selection, refreshing the current card and page without truncating large model catalogs. ([#491](https://github.com/xmanrui/dsh-im/pull/491))
+- Host 新增 IM 会话身份查询（含同步查询）和绑定生命周期事件，供首条提示词及集成读取所属渠道、聊天和话题信息。（[#470](https://github.com/xmanrui/dsh-im/pull/470)）
+  Added Host conversation-identity lookups, including synchronous lookup, and binding lifecycle events for first-prompt construction and channel/chat/thread-aware integrations. ([#470](https://github.com/xmanrui/dsh-im/pull/470))
+
+### Fixed / 修复
+
+- 邮箱 IMAP 断线后在后续轮询自动重连，旧连接事件不会清除新连接；邮件读取失败会使本次轮询失败，避免游标跳过尚未读取的邮件。（[#493](https://github.com/xmanrui/dsh-im/pull/493)）
+  Email IMAP reconnects on subsequent polls after a disconnect, without letting stale connection events discard a replacement. Failed message reads fail the poll so the cursor cannot skip unread mail. ([#493](https://github.com/xmanrui/dsh-im/pull/493))
+- 飞书已绑定 DS Bot 的会话通过 DS Bot API 切换模型，并补全缺失的本地会话映射与取消处理。（[#490](https://github.com/xmanrui/dsh-im/pull/490)）
+  Feishu conversations bound to a DS Bot switch models through the DS Bot API, with missing local session mappings and cancellation handled correctly. ([#490](https://github.com/xmanrui/dsh-im/pull/490))
+- Agent Preset 分组下的会话列表与会话切换按当前绑定会话的实际工作区解析，避免重启或更换预设后列错工作区。（[#492](https://github.com/xmanrui/dsh-im/pull/492)）
+  Session lists and switching in Agent Preset groups resolve the bound session's actual workspace, including after restarts or preset changes. ([#492](https://github.com/xmanrui/dsh-im/pull/492))
+- 飞书二维码生成失败时显示经过白名单筛选的本地库错误原因，便于区分编码问题，同时避免把凭据或任意异常文本写入诊断。（[#495](https://github.com/xmanrui/dsh-im/pull/495)）
+  Feishu QR-generation diagnostics include allowlisted local-library failure details while excluding credentials and arbitrary exception text. ([#495](https://github.com/xmanrui/dsh-im/pull/495))
+- 绑定不存在的会话 ID 时明确提示“会话不存在”，不再误导用户稍后重试。（[#482](https://github.com/xmanrui/dsh-im/issues/482)）
+  Binding an unknown session ID now reports that the session does not exist instead of suggesting a retry. ([#482](https://github.com/xmanrui/dsh-im/issues/482))
+
+### Security / 安全
+
+- 将构建锁中的 `follow-redirects` 从 1.16.1 更新至 1.16.2 并重新构建 Host，纳入跨 realm `sensitiveHeaders` 数组的凭据保护修复。（[GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p)）
+  Updated build-lock `follow-redirects` from 1.16.1 to 1.16.2 and rebuilt the Host to include the credential-protection fix for cross-realm `sensitiveHeaders` arrays. ([GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p))
+
+### Notes / 使用说明
+
+- Agent Preset 分组需显式开启，仅影响后续新会话；分组共享工作区文件，不构成用户数据隔离边界。依赖声明、Node.js 要求和 DSH 兼容声明保持不变。升级后重启 Host 并刷新管理页面。
+  Agent Preset grouping requires explicit opt-in and applies to subsequent new sessions. Grouped sessions share workspace files; grouping is not a user-data isolation boundary. Dependency declarations, Node.js requirements and DSH compatibility declarations are unchanged. Restart the Host and refresh management pages after upgrading.
+
+## [5.8.0] - 2026-10-30
+
+### Added / 新增
+
+- 飞书新增会话目录隔离，支持每个对话固定目录或每次新会话创建新目录，可设置渠道默认、单机器人覆盖及目录前缀。目录直接创建在基工作区下，默认关闭；开启后禁止手动切换工作区，工作区列表默认隐藏隔离目录，使用 `/wsl all` 可查看全部。（[#422](https://github.com/xmanrui/dsh-im/pull/422)、[#481](https://github.com/xmanrui/dsh-im/pull/481)）
+  Added opt-in Feishu conversation directories, with a fixed directory per conversation or a new directory per session, channel defaults, per-bot overrides, and configurable prefixes. Directories are created directly under the base workspace. Manual workspace switching is disabled while enabled; workspace lists hide these directories by default, with `/wsl all` showing all entries. ([#422](https://github.com/xmanrui/dsh-im/pull/422), [#481](https://github.com/xmanrui/dsh-im/pull/481))
+
+### Fixed / 修复
+
+- 飞书引用消息中的文件现在通过正常附件流程下载并交给会话处理；话题根消息与工作区重试保留附件引用，避免重复附加或重复下载文件。（[#353](https://github.com/xmanrui/dsh-im/issues/353)）
+  Files quoted in Feishu messages now pass through the normal inbound attachment pipeline. Topic-root handling and workspace retries preserve attachment references without adding or downloading the same quoted files repeatedly. ([#353](https://github.com/xmanrui/dsh-im/issues/353))
+
+- `session.prompt` 提交超时（30 秒窗口到期）不再直接判定消息失败：客户端会按本次请求的 RPC ID 回查 `session.history` 持久账本，确认消息已入库（含已入队、尚未开始执行的状态）则继续等待回复，取消请求也优先于超时定性；仅当确认不到时才上报失败，并把「提交请求超时、是否送达未知」与「已提交、结果未知」的提示文案区分开。修复 Host 繁忙时每条消息先收到「已尝试提交，但任务结果尚未确认」误报、正常回复随后照达的问题。
+  A `session.prompt` submission timeout no longer fails the message outright: the client re-checks the durable `session.history` ledger by this request's RPC ID and keeps waiting for the reply once the message is confirmed as recorded (including the queued-but-not-yet-executing state), with cancellation taking precedence over the timeout; a failure is reported only when the message cannot be confirmed, with distinct wording for "submission request timed out, delivery unknown" versus "submitted, outcome unconfirmed". This fixes the false "submission attempted but unconfirmed" notice that appeared before every normal reply while the Host was busy.
+
+### Notes / 使用说明
+
+- 会话目录设置对新会话生效；发送 `/new` 使用新设置，已有会话和旧目录中的文件保留。依赖声明、Node.js 要求及 DSH 兼容声明保持不变。升级后重启 Host 并刷新管理页面。
+  Conversation directory settings apply to new sessions. Send `/new` to use updated settings; existing sessions and files in old directories are retained. Dependency declarations, Node.js requirements, and DSH compatibility declarations are unchanged. Restart the Host and refresh management pages after upgrading.
+
+## [5.7.0] - 2026-10-28
+
+### Added / 新增
+
+- 投递目标设置支持邮箱渠道，可显式填写收件人地址；不会把邮箱会话的 Message-ID 或 Session ID 当作地址自动生成目标。（[#451](https://github.com/xmanrui/dsh-im/pull/451)）
+  Delivery target settings now support email with an explicit recipient address. Email Message-IDs and Session IDs are not treated as recipient addresses for automatic target suggestions. ([#451](https://github.com/xmanrui/dsh-im/pull/451))
+
+### Fixed / 修复
+
+- 飞书停止运行时，为桥接层空闲等待设置 2 秒上限，避免未结束任务无限阻塞后续清理。（[#465](https://github.com/xmanrui/dsh-im/pull/465)）
+  Feishu shutdown now limits the bridge idle wait to 2 seconds so unfinished tasks cannot block subsequent cleanup indefinitely. ([#465](https://github.com/xmanrui/dsh-im/pull/465))
+- 修复带渠道图标的会话标题在滚动展示时仍被预先截断的问题，使长标题能够完整展示。（[#455](https://github.com/xmanrui/dsh-im/pull/455)）
+  Fixed channel-marked session titles remaining pre-clipped during marquee scrolling, allowing the full title to become visible. ([#455](https://github.com/xmanrui/dsh-im/pull/455))
+- 串行处理同路径更新状态文件的读写，Windows 原子替换遇到临时 EPERM 时有限重试并保留旧文件，避免并发状态查询损坏更新记录；同步修正跨平台测试基线。（[#456](https://github.com/xmanrui/dsh-im/pull/456)）
+  Serialized update-state reads and writes per path, with bounded retries for transient Windows EPERM during atomic replacement while preserving the old file. Concurrent status reads no longer disrupt update journals; cross-platform test baselines were also corrected. ([#456](https://github.com/xmanrui/dsh-im/pull/456))
+
+- 企业微信机器人被服务端断开后，若「正在连接」连续超过 2 分钟无状态更新，则自动重启连接；存活不足 5 分钟即再次掉线的连接与启动失败按 bot 共享 1–10 分钟指数退避，连接持续稳定 5 分钟后清零。正常 SDK 重连不受影响，手动重连始终立即执行。（[#420](https://github.com/xmanrui/dsh-im/pull/420)）
+  WeCom bots recover automatically when a server-side disconnect leaves them in "connecting" without a state update for over 2 minutes. Connections that drop again within 5 minutes and failed starts share per-bot exponential backoff from 1 to 10 minutes, cleared after 5 minutes of stable connectivity. Active SDK retries are unchanged, and manual reconnects remain immediate. ([#420](https://github.com/xmanrui/dsh-im/pull/420))
+
+- QQ 回复超时后迟到的结果改为在 QQ 被动回复窗口内（私聊 60 分钟、群 5 分钟，各留 30 秒余量）带原消息 `msg_id` 被动回复，不再一律走常被平台拒绝的主动消息；超时提示已占用的一次被动额度会计入。窗口外或平台明确拒绝被动回复时，回退为一次主动发送。
+  A late QQ result after a reply timeout is now sent as a passive reply to the original `msg_id` while QQ's window is open (C2C 60 min, group 5 min, each minus a 30 s margin), instead of always going out as a proactive message that QQ often refuses. The passive slot used by the timeout notice is counted. Outside the window, or when QQ definitely refuses the passive reply, it falls back to one proactive send.
+
+- Slack 流式定稿在追加失败或最终文本被重写时，改用 `chat.update` 的 `markdown_text`，不再以 `parse: none` 发送原始 GFM。Markdown block 被拒绝时先重试 `markdown_text`；只有 Markdown 本身被拒绝时才按字面文本发送，避免把 `**` 和表格当成 mrkdwn。（[#466](https://github.com/xmanrui/dsh-im/issues/466)）
+  Slack stream finalization now updates with `markdown_text` when appending fails or the final text is rewritten, instead of sending raw GFM with `parse: none`. A rejected Markdown block retries `markdown_text`; literal text is used only when the Markdown itself is rejected, so `**` and tables are not parsed as mrkdwn. ([#466](https://github.com/xmanrui/dsh-im/issues/466))
+
+### Security / 安全
+
+- 更新构建锁中的 qs 从 6.16.0 至 6.17.0 并重新构建 Host，纳入逗号数组序列化触发未捕获异常的修复（[GHSA-6pq8-jhm2-2vcw](https://github.com/advisories/GHSA-6pq8-jhm2-2vcw)）。
+  Updated build-lock qs from 6.16.0 to 6.17.0 and rebuilt the Host to include the fix for uncaught exceptions during comma-array serialization ([GHSA-6pq8-jhm2-2vcw](https://github.com/advisories/GHSA-6pq8-jhm2-2vcw)).
+
+### Notes / 使用说明
+
+- 中英文 README 新增赞助展示。依赖声明、Node.js 要求及 DSH 兼容声明保持不变；升级后重启 Host 并刷新管理页面。
+  Added sponsor information to the Chinese and English READMEs. Dependency declarations, Node.js requirements, and DSH compatibility declarations remain unchanged. Restart the Host and refresh management pages after upgrading.
+
+## [5.6.0] - 2026-10-24
+
+### Added / 新增
+
+- Telegram 的 `/ws`（`/workspace`）无参数时显示工作区切换卡片，点击按钮即可切换并更新当前项；保留带序号或绝对路径的直接切换，以及 `/wsl`、`/workspaces`、`/workspacelist` 文本别名。过期卡片与重复点击安全处理，工作区列表变更时不会按旧序号误切，卡片不可用时回退文字列表。（[#432](https://github.com/xmanrui/dsh-im/pull/432)）
+  Telegram `/ws` (`/workspace`) without arguments now shows an inline workspace picker. Buttons switch workspaces and update the current selection; direct index/path switching and the `/wsl`, `/workspaces`, and `/workspacelist` aliases remain supported. Stale cards and duplicate clicks are handled safely, changed lists cannot redirect old indices, and unavailable cards fall back to text. ([#432](https://github.com/xmanrui/dsh-im/pull/432))
+- Telegram 投递失败或结果不确定时，将用户提示中的 `MF-…` 编号与发送尝试、分片回执、失败正文写入同一条本地日志，保留富文本回退及过程消息的投递证据，便于定位未送达内容。（[#442](https://github.com/xmanrui/dsh-im/pull/442)）
+  Telegram failed or unconfirmed deliveries now log the user-visible `MF-…` reference alongside send attempts, part acknowledgments, and undelivered text, retaining rich-text fallback and thinking-stream evidence for diagnosis. ([#442](https://github.com/xmanrui/dsh-im/pull/442))
+
+### Fixed / 修复
+
+- 确认普通绑定会话的日志损坏且消息尚未提交时，自动切换到新会话并提示后继续本条消息，最多恢复一次；保留原会话，不自动迁移历史上下文，不将归档、权限、临时故障或提交状态不确定的情况误判为损坏，也不替换 DS Bot 会话。（[#445](https://github.com/xmanrui/dsh-im/pull/445)）
+  Confirmed corrupt logs in ordinary bound sessions can recover once into a new session before prompt submission, with a notice before continuing. Original sessions remain intact and history is not migrated. Archived, inaccessible, transient, uncertain-submission, and DS Bot session failures do not trigger this replacement. ([#445](https://github.com/xmanrui/dsh-im/pull/445))
+- 修复运行时拼接文案仅显示英文或翻译不完整的问题，完善渠道状态、凭据绑定及管理设置中的动态英文、俄语翻译，并补充回归覆盖。（[#443](https://github.com/xmanrui/dsh-im/pull/443)）
+  Fixed incomplete or English-only runtime-composed messages, improving dynamic English and Russian localization across channel status, credential binding, and management settings with regression coverage. ([#443](https://github.com/xmanrui/dsh-im/pull/443))
+- 管理界面统一使用“绑定 DS Bot”等明确标签，避免与 IM 渠道机器人混淆。
+  Clarified DS Bot binding labels in management settings to distinguish DS Bot from IM channel bots.
+- 修复飞书私聊发起 DS Bot 提问后，回合收尾误取消新问题卡、点击提示“已在其他客户端处理”的问题；同步问题按自身生命周期结束，撤回时同步释放投递状态，保留普通 Harness 问答及发送失败时的取消清理。（[#447](https://github.com/xmanrui/dsh-im/issues/447)）
+  Fixed Feishu-initiated DS Bot questions being cancelled by turn cleanup immediately after delivery. Synced questions now retain their own lifetime and release upstream delivery state on withdrawal, while ordinary Harness questions and failed-delivery cancellation retain their existing cleanup. ([#447](https://github.com/xmanrui/dsh-im/issues/447))
+
+### Security / 安全
+
+- Undici 更新到 7.30.1，Nodemailer 最低版本提高至 10.1.4，Mailparser 最低版本提高至 3.9.43，纳入上游 HTTP 响应处理及邮件地址解析安全修复。（[Undici 公告](https://github.com/advisories/GHSA-xjj6-f33q-929c)、[Nodemailer 公告](https://github.com/advisories/GHSA-8c8m-p3m8-cjg8)）
+  Updated Undici to 7.30.1 and raised minimum versions to Nodemailer 10.1.4 and Mailparser 3.9.43, incorporating upstream HTTP response handling and email address parsing security fixes. ([Undici advisory](https://github.com/advisories/GHSA-xjj6-f33q-929c), [Nodemailer advisory](https://github.com/advisories/GHSA-8c8m-p3m8-cjg8))
+
+### Notes / 使用说明
+
+- Telegram 失败投递日志可能包含未送达的消息正文、聊天和话题标识；分享日志前请检查并脱敏。日志中的平台错误说明会过滤匹配的 Bot Token URL，但消息正文按原样记录。
+  Telegram delivery-failure logs can contain undelivered message text and chat/topic identifiers. Review and redact logs before sharing. Matching bot-token URLs are scrubbed from provider error descriptions, while message text is retained verbatim.
+- Node.js 要求及 DSH 兼容声明保持不变。升级后重启 Host 并刷新管理页面。感谢 [@wings1848](https://github.com/wings1848) 的工作区卡片贡献和 [@unera](https://github.com/unera) 的翻译及投递诊断改进。
+  Node.js requirements and DSH compatibility declarations are unchanged. Restart the Host and refresh management pages after upgrading. Thanks to [@wings1848](https://github.com/wings1848) for workspace cards and [@unera](https://github.com/unera) for localization and delivery diagnostics.
+
+## [5.5.0] - 2026-10-24
+
+### Added / 新增
+
+- Telegram 支持通过 Host 的 `speechToText` 服务转写语音及音频附件，再将转写文本交给会话处理；规范 WAV 可直接使用，其他格式通过本机 ffmpeg 转换。未配置服务、未选择提供方或转写失败时保留无文本语音提示，不虚构转写内容。（[#405](https://github.com/xmanrui/dsh-im/pull/405)）
+  Telegram can transcribe voice and audio attachments through the Host's `speechToText` service and pass the transcript to the conversation. Canonical WAV is used directly; other formats are converted with local ffmpeg. Missing services, unselected providers, and transcription failures retain a textless-voice notice without inventing a transcript. ([#405](https://github.com/xmanrui/dsh-im/pull/405))
+
+- Telegram 新增逐聊天发送预算，默认每分钟 15 条，可配置为 1–30 条；新消息等待可用额度，编辑、草稿、输入状态及表情不占用该队列。发送遇到 429 时按 `retry_after` 有限重试，最终无法投递时明确报告失败。（[#423](https://github.com/xmanrui/dsh-im/pull/423)）
+  Added a per-chat Telegram send budget, defaulting to 15 new messages per minute and configurable from 1 to 30. New sends wait for capacity; edits, drafts, typing actions, and reactions bypass that queue. Sends receiving 429 use bounded `retry_after` retries and report failure if delivery cannot complete. ([#423](https://github.com/xmanrui/dsh-im/pull/423))
+
+- Telegram 过程消息支持 0–60 秒发送间隔和可选编号，窗口内合并为最新进度，结束时先处理待发进度再发送答案；进度占位消息也显示编号，取消后清理待发帧与定时器。默认不节流、不编号。（[#425](https://github.com/xmanrui/dsh-im/pull/425)、[#426](https://github.com/xmanrui/dsh-im/pull/426)）
+  Telegram thinking traces support a 0–60-second cadence and optional numbering. Bursts coalesce to the latest progress, pending progress settles before the final answer, and placeholder progress is numbered too. Cancellation clears pending frames and timers. Pacing and numbering are off by default. ([#425](https://github.com/xmanrui/dsh-im/pull/425), [#426](https://github.com/xmanrui/dsh-im/pull/426))
+
+- 新增 Host 消息与设置界面的俄语翻译、客户端俄语语言包及翻译覆盖检查；中文语言标签继续使用中文，俄语使用俄语，其余语言回退到英文，俄语缺失条目先回退英文。（[#438](https://github.com/xmanrui/dsh-im/pull/438)、[#439](https://github.com/xmanrui/dsh-im/pull/439)、[#440](https://github.com/xmanrui/dsh-im/pull/440)）
+  Added Russian Host messages, settings translations, a client language pack, and dictionary coverage checks. Chinese locale tags retain Chinese, Russian selects Russian, and other locales fall back to English; missing Russian entries fall back to English first. ([#438](https://github.com/xmanrui/dsh-im/pull/438), [#439](https://github.com/xmanrui/dsh-im/pull/439), [#440](https://github.com/xmanrui/dsh-im/pull/440))
+
+- 同 Host 插件服务 `dshIm` 新增 `createTarget(botId, target)`，消费插件可把已知的会话路由注册成投递目标，注册后即可用 `targetId` 投递并出现在设置页目标列表；已存在的 `targetId` 以 `target-conflict` 拒绝。
+  The same-Host `dshIm` service now exposes `createTarget(botId, target)`, so a consumer plugin can register a known conversation route as a delivery target; the target is then addressable by `targetId` and listed in the settings panel. An existing `targetId` is rejected with `target-conflict`.
+
+### Fixed / 修复
+
+- 修复绑定 DS Bot 的飞书私聊提问与回答续跑同步，支持 Host 提问及 DS Bot 的待回答卡片，重启后恢复未答问题；桌面端和 IM 端先答者生效，绑定不明确时提示回到桌面回答。（[#428](https://github.com/xmanrui/dsh-im/pull/428)）
+  Fixed question delivery and answer continuation for Feishu private chats bound to DS Bot, including Host questions and pending DS Bot cards recovered after restart. The first desktop or IM answer wins; ambiguous bindings ask the user to answer on the desktop. ([#428](https://github.com/xmanrui/dsh-im/pull/428))
+- Telegram 最终答案独立发送，不再只编辑进度占位消息，并在回合结束后清理状态表情；避免最终答案缺少新消息通知及遗留处理中标记。（[#412](https://github.com/xmanrui/dsh-im/pull/412)、[#414](https://github.com/xmanrui/dsh-im/pull/414)）
+  Telegram sends final answers as separate messages instead of only editing progress placeholders, and clears status reactions after a turn finishes, avoiding missing new-message notifications and stale processing indicators. ([#412](https://github.com/xmanrui/dsh-im/pull/412), [#414](https://github.com/xmanrui/dsh-im/pull/414))
+- 统一识别不同 Host 的缺失会话错误码，恢复失效会话绑定并改进相关命令的错误提示；不将权限错误误判为会话缺失。（[#444](https://github.com/xmanrui/dsh-im/pull/444)）
+  Recognize missing-session errors across Host error codes, recover stale session bindings, and improve related command guidance without treating permission failures as missing sessions. ([#444](https://github.com/xmanrui/dsh-im/pull/444))
+
+### Security / 安全
+
+- 将构建锁中的 ip-address 从 10.7.2 更新到 10.7.4，并重新生成 Host 产物，纳入 IPv6 地址解析可能阻塞进程的修复（[GHSA-rxp7-6hxx-x8q5](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5)）。保留旧间接依赖锁的已有安装仍需刷新依赖解析。
+  Updated build-lock ip-address from 10.7.2 to 10.7.4 and rebuilt the Host artifact with the IPv6 parsing denial-of-service fix ([GHSA-rxp7-6hxx-x8q5](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5)). Existing installations retaining old transitive dependency locks must refresh their resolution.
+
+### Notes / 使用说明
+
+- Telegram 语音转写需安装并配置 Host 的语音识别服务，非规范 WAV 转换需本机可用的 ffmpeg；本包不会自动安装 ffmpeg。发送预算是本地节流，不保证完全避免 Telegram 服务端限流。
+  Telegram transcription requires a configured Host speech-to-text service; noncanonical WAV conversion requires locally available ffmpeg, which this package does not install. The send budget is local pacing, not a guarantee against Telegram server-side limits.
+- 完善完整包名与 Desktop/Web 安装说明。依赖声明、Node.js 要求和 DSH 兼容声明保持不变；升级后重启 Host 并刷新管理页面。
+  Clarified the full package name and Desktop/Web installation instructions. Dependency declarations, Node.js requirements, and DSH compatibility declarations are unchanged. Restart the Host and refresh the management page after upgrading.
+- 感谢 [@unera](https://github.com/unera) 的 Telegram、俄语及测试贡献，以及 [@wanchun](https://github.com/wanchun) 的 `createTarget` 服务扩展。
+  Thanks to [@unera](https://github.com/unera) for Telegram, Russian localization, and test contributions, and [@wanchun](https://github.com/wanchun) for the `createTarget` service extension.
+
+## [5.4.0] - 2026-10-21
+
+### Added / 新增
+
+- 新增独立于投递目标设置的 DS Bot 私聊绑定：已有 IM 私聊可绑定到当前 Host 的 DS Bot，会话随 Bot 切换并同步到桌面；解绑后释放双方占用，保留原有普通会话同步设置。绑定选择器过滤已占用的 Bot 和私聊，并处理并发冲突、会话切换及旧数据迁移。（[#410](https://github.com/xmanrui/dsh-im/pull/410)、[#411](https://github.com/xmanrui/dsh-im/pull/411)）
+  Added DS Bot private-chat bindings independent of delivery targets. Existing IM private chats can follow a DS Bot session on the current Host and sync to the desktop. Unbinding releases both sides while preserving ordinary session-sync preferences. Selectors exclude occupied bots and chats, with conflict handling, session rollover, and migration support. ([#410](https://github.com/xmanrui/dsh-im/pull/410), [#411](https://github.com/xmanrui/dsh-im/pull/411))
+
+- Telegram 新增默认及逐群回复规则：关闭、提及或回复、名单内成员提及或回复、所有消息、名单内成员所有消息。可管理已发现的群，或通过群 ID、用户名及支持的公开链接添加群；未配置群维持原有提及或回复行为，私聊不受影响。（[#404](https://github.com/xmanrui/dsh-im/pull/404)）
+  Added default and per-group Telegram reply triggers: Off, Mention/reply, Mention/reply from listed senders, All messages, and All messages from listed senders. Manage discovered groups or add groups by ID, username, or supported public links. Unconfigured groups retain mention/reply behavior; private chats are unaffected. ([#404](https://github.com/xmanrui/dsh-im/pull/404))
+
+- 企业微信长任务在流式卡片接近十分钟窗口前自动续接新卡片，静默期间发送进度探测，连续回执拒绝时尝试更换卡片；最终结果发送到最新卡片，续接失败时回退到主动消息。（[#388](https://github.com/xmanrui/dsh-im/pull/388)）
+  WeCom long-running tasks rotate streaming cards before their ten-minute window expires, probe progress during quiet periods, and attempt replacement after consecutive rejected acknowledgments. Final results target the newest card, falling back to an active message if rotation fails. ([#388](https://github.com/xmanrui/dsh-im/pull/388))
+
+### Fixed / 修复
+
+- 绑定 DS Bot 的会话优先显示 Bot 头像而非渠道图标，支持形状、颜色及安全的图片头像；设置面板在打开或手动刷新时更新名称和头像，侧边栏在返回窗口时刷新，避免逐行请求及定时轮询，并丢弃过期请求结果。（[#415](https://github.com/xmanrui/dsh-im/pull/415)、[#416](https://github.com/xmanrui/dsh-im/pull/416)、[#417](https://github.com/xmanrui/dsh-im/pull/417)、[#418](https://github.com/xmanrui/dsh-im/pull/418)）
+  Bound sessions prioritize DS Bot avatars over channel logos, including shape, color, and safe image avatars. Settings refresh names and avatars on open or manual refresh; the sidebar refreshes on window return without per-row requests or periodic polling. Stale responses are discarded. ([#415](https://github.com/xmanrui/dsh-im/pull/415), [#416](https://github.com/xmanrui/dsh-im/pull/416), [#417](https://github.com/xmanrui/dsh-im/pull/417), [#418](https://github.com/xmanrui/dsh-im/pull/418))
+
+- 飞书提问卡片将选项说明放在选择按钮外并允许换行，改善长选项的显示。（[#407](https://github.com/xmanrui/dsh-im/pull/407)）
+  Feishu question cards place option text outside selection buttons and allow wrapping, improving readability for long options. ([#407](https://github.com/xmanrui/dsh-im/pull/407))
+
+- 移除 IM 管理面板的「返回插件详情」按钮及相关导航依赖、样式和翻译，从侧边栏或插件详情进入时统一通过宿主侧边栏切换面板。（[#395](https://github.com/xmanrui/dsh-im/issues/395)）
+  Removed the IM management panel's **Back to plugin details** button and its navigation dependency, styles, and translation. Both sidebar and plugin-detail entry points now use the host sidebar to switch panels. ([#395](https://github.com/xmanrui/dsh-im/issues/395))
+
+### Security / 安全
+
+- 将构建锁中的 follow-redirects 从 1.16.0 更新到 1.16.1，并重新生成 Host 产物，纳入跨源重定向凭据头过滤修复（[GHSA-q3jh-wrc6-jgq8](https://github.com/advisories/GHSA-q3jh-wrc6-jgq8)、[GHSA-8r9p-f939-6h3c](https://github.com/advisories/GHSA-8r9p-f939-6h3c)）。已有安装若保留旧的间接依赖锁，仍需刷新依赖解析。
+  Updated build-lock follow-redirects from 1.16.0 to 1.16.1 and rebuilt the Host artifact with cross-origin redirect credential-header filtering fixes ([GHSA-q3jh-wrc6-jgq8](https://github.com/advisories/GHSA-q3jh-wrc6-jgq8), [GHSA-8r9p-f939-6h3c](https://github.com/advisories/GHSA-8r9p-f939-6h3c)). Existing installations retaining older transitive dependency locks must refresh their resolution.
+
+### Notes / 使用说明
+
+- DS Bot 绑定要求当前 Host 已安装并启用 DS Bot，且 IM 已存在私聊；不支持群聊或远程 Harness 绑定。Bot 缺失时不会将消息误送到其他会话。Telegram 群规则只能处理机器人实际收到的消息，不支持通过邀请链接解析群；从管理列表移除群不会删除聊天历史。
+  DS Bot bindings require DS Bot installed and enabled on the current Host and an existing IM private chat; group chats and remote Harness bindings are unsupported. Missing bots do not redirect messages to unrelated sessions. Telegram rules apply only to messages delivered to the bot; invite links cannot resolve groups, and removing a group from the management list does not delete chat history.
+- 依赖声明、Node.js 要求与 DSH 兼容声明保持不变。新增头像素材的第三方许可说明；升级后重启 Host 并刷新管理页面。
+  Dependency declarations, Node.js requirements, and DSH compatibility declarations are unchanged. Added third-party notices for avatar assets. Restart the Host and refresh the management page after upgrading.
+
+## [5.3.0] - 2026-10-20
+
+### Added / 新增
+
+- 通用设置新增侧边栏入口「自动／始终显示／始终隐藏」模式。默认未配置渠道时显示，保存至少一个渠道后自动隐藏，删除最后一个渠道后恢复；设置保存后即时生效并在 Host 重启后保留。隐藏入口不会停止机器人，仍可从设置或插件详情打开管理面板。
+  Added Automatic / Always show / Always hide sidebar entry modes in General settings. Automatic shows the entry before setup, hides it after at least one channel is saved, and restores it after the last channel is removed. Preferences apply immediately and persist across Host restarts. Bots keep running, and Settings and plugin details still open the management panel.
+
+### Fixed / 修复
+
+- 微信、飞书、钉钉、企业微信、QQ、WhatsApp 的二维码生成失败现在保留脱敏的错误类型、错误码、生成阶段及依赖版本，区分本机图片生成故障与网络故障；失败后可在当前登录流程重试，迟到的失败不会清除新缓存。诊断不包含二维码内容、原始异常文本或堆栈。（[#393](https://github.com/xmanrui/dsh-im/pull/393)）
+  QR generation failures for Weixin, Feishu, DingTalk, WeCom, QQ, and WhatsApp now retain sanitized error types, codes, encoding stage, and dependency versions, distinguishing local image generation failures from network errors. Failed renders can retry within the current login attempt, and late failures cannot evict newer cached results. Diagnostics exclude QR contents, raw exception messages, and stack traces. ([#393](https://github.com/xmanrui/dsh-im/pull/393))
+
+- 侧边栏入口改为选择后自动保存并立即生效，移除独立保存按钮；保存失败恢复原选项并提供重试。
+  Sidebar entry preferences now save and apply on selection without a separate Save button. Failed saves restore the previous selection and offer Retry.
+
+- 侧边栏入口设置使用独立管理接口并遵循 `rpcAuthority`，修复通过已认证的局域网或域名访问时入口一直隐藏、无法强制显示的问题；TTL 等通用设置接口继续仅限本机。读取设置或渠道配置失败时，仍可选择并保存「始终显示／始终隐藏」，保存失败后保留重试入口。
+  Sidebar visibility uses a dedicated management route that follows `rpcAuthority`, restoring the entry and forced visibility settings for authenticated LAN and domain access. General settings such as TTL remain loopback-only. Failed settings or channel configuration reads still allow saving Always show / Always hide, and failed recovery saves retain Retry.
+
+- 启动时默认隐藏侧边栏入口，收到渠道配置及显示设置后才按需显示，避免已配置用户重启时入口先显示再隐藏造成侧栏闪动。读取失败时保持当前状态，设置与插件详情入口仍可访问。
+  Keep the sidebar entry hidden during startup until channel configuration and visibility preferences arrive, preventing a temporary entry from shifting the sidebar for configured users. Failed reads retain the current state; Settings and plugin details remain accessible.
+- iMessage 渠道在 macOS 26（Tahoe）上会静默跳过收到的消息：系统不再写入 `message.text`，正文只存在于 `message.attributedBody`。消息查询改为同时接受两列，并在 `text` 为空时解码 typedstream 正文；纯附件占位（U+FFFC）仍视为无文本。
+  iMessage messages were silently skipped on macOS 26 (Tahoe), where Messages no longer writes `message.text` and stores the body only in `message.attributedBody`. The query now accepts either column and decodes the typedstream body when `text` is empty; attachment-only runs (U+FFFC) still count as no text.
+
+### Security / 安全
+
+- 将构建锁中的 Axios 从 1.19.0 更新到 1.20.0、music-metadata 从 11.14.0 更新到 11.16.0，并重新生成 Host 发布产物，以纳入上游安全修复。更新均在现有依赖声明范围内；已有安装若保留旧的间接依赖锁，仍需更新依赖解析。
+  Updated build-lock Axios from 1.19.0 to 1.20.0 and music-metadata from 11.14.0 to 11.16.0, and rebuilt the Host artifact with upstream security fixes. Both updates satisfy existing dependency ranges; existing installations retaining older transitive dependency locks must refresh their resolution.
+
+### Notes / 使用说明
+
+- 感谢 [@zhiqiangme](https://github.com/zhiqiangme) 的侧边栏显示模式贡献（[#398](https://github.com/xmanrui/dsh-im/pull/398)）与 [@hxu129](https://github.com/hxu129) 的 iMessage 修复（[#401](https://github.com/xmanrui/dsh-im/pull/401)）。
+  Thanks to [@zhiqiangme](https://github.com/zhiqiangme) for sidebar visibility modes ([#398](https://github.com/xmanrui/dsh-im/pull/398)) and [@hxu129](https://github.com/hxu129) for the iMessage fix ([#401](https://github.com/xmanrui/dsh-im/pull/401)).
+- 直接依赖声明、Node.js 要求与 DSH 兼容声明保持不变。升级后重启 Host 并刷新管理页面，以加载同版 Host 和客户端代码。
+  Direct dependency declarations, Node.js requirements, and DSH compatibility declarations are unchanged. Restart the Host and refresh the management page after upgrading to load matching Host and client code.
+
 ## [5.2.0] - 2026-10-20
 
 ### Added / 新增
@@ -1805,8 +2118,8 @@ Thanks to [@Dong09](https://github.com/Dong09) for the Matrix conversation-conte
 
 - 飞书新增持久化 Session 关注、完成推送和菜单入口。
   Added persistent Session watches, completion notifications, and a watch menu entry for Feishu.
-- 飞书 Session 列表支持关注按钮、归档标记和 `/archived on|off` 切换。
-  Feishu Session lists now include watch buttons, archived badges, and the `/archived on|off` toggle.
+- 飞书 Session 列表支持关注按钮、归档标记和 `/sessarchived on|off` 切换。
+  Feishu Session lists now include watch buttons, archived badges, and the `/sessarchived on|off` toggle.
 
 ### Fixed / 修复
 
@@ -1895,7 +2208,18 @@ Thanks to [@Dong09](https://github.com/Dong09) for the Matrix conversation-conte
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v5.0.3...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v5.10.0...HEAD
+[5.10.0]: https://github.com/xmanrui/dsh-im/compare/v5.9.1...v5.10.0
+[5.9.1]: https://github.com/xmanrui/dsh-im/compare/v5.9.0...v5.9.1
+[5.9.0]: https://github.com/xmanrui/dsh-im/compare/v5.8.0...v5.9.0
+[5.8.0]: https://github.com/xmanrui/dsh-im/compare/v5.7.0...v5.8.0
+[5.7.0]: https://github.com/xmanrui/dsh-im/compare/v5.6.0...v5.7.0
+[5.6.0]: https://github.com/xmanrui/dsh-im/compare/v5.5.0...v5.6.0
+[5.5.0]: https://github.com/xmanrui/dsh-im/compare/v5.4.0...v5.5.0
+[5.4.0]: https://github.com/xmanrui/dsh-im/compare/v5.3.0...v5.4.0
+[5.3.0]: https://github.com/xmanrui/dsh-im/compare/v5.2.0...v5.3.0
+[5.2.0]: https://github.com/xmanrui/dsh-im/compare/v5.1.0...v5.2.0
+[5.1.0]: https://github.com/xmanrui/dsh-im/compare/v5.0.3...v5.1.0
 [5.0.3]: https://github.com/xmanrui/dsh-im/compare/v5.0.2...v5.0.3
 [5.0.2]: https://github.com/xmanrui/dsh-im/compare/v5.0.1...v5.0.2
 [5.0.1]: https://github.com/xmanrui/dsh-im/compare/v5.0.0...v5.0.1

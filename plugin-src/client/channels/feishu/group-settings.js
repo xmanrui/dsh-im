@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { h } from '../../i18n.js';
+import { h, localizeTemplate } from '../../i18n.js';
 import {
   FEISHU_ENDPOINTS,
   FEISHU_REGISTRATION_OPERATIONS,
@@ -250,14 +250,14 @@ function PermissionFlow({ provision, now, busy, botName, onRetry, onCancel, onCl
 
   return h('section', {
     className: 'dim-feishuGroupAuthorization',
-    'aria-label': `${botName}的飞书授权流程`,
+    'aria-label': localizeTemplate('{bot}的飞书授权流程', { bot: botName }),
   },
   h('div', { className: 'dim-feishuGroupQrColumn' },
     h('div', { className: 'dim-feishuGroupQrFrame' },
       qrSource
         ? h('img', {
             src: qrSource,
-            alt: `用于为${botName}开通群消息权限的一次性授权二维码`,
+            alt: localizeTemplate('用于为{bot}开通群消息权限的一次性授权二维码', { bot: botName }),
           })
         : h('div', { className: 'dim-feishuGroupQrFallback' },
             h(QrPlaceholder), h('span', null, '二维码未就绪，请打开授权链接')),
@@ -267,7 +267,7 @@ function PermissionFlow({ provision, now, busy, botName, onRetry, onCancel, onCl
         : null),
     h('div', {
       className: 'dim-feishuGroupCountdown',
-      'aria-label': expired ? '二维码已失效' : `二维码剩余 ${formatRemaining(remaining)}`,
+      'aria-label': expired ? '二维码已失效' : localizeTemplate('二维码剩余 {remaining}', { remaining: formatRemaining(remaining) }),
     },
     h('span', null, expired ? '等待刷新' : '二维码有效时间'),
     h('strong', null, formatRemaining(remaining)),
@@ -275,7 +275,7 @@ function PermissionFlow({ provision, now, busy, botName, onRetry, onCancel, onCl
       h('span', { style: { width: `${Math.round(progress * 100)}%` } })))),
   h('div', { className: 'dim-feishuGroupAuthorizationCopy' },
     h('span', { className: 'dim-feishuGroupAuthorizationEyebrow' },
-      `正在为「${botName}」开通群消息权限`),
+      localizeTemplate('正在为「{bot}」开通群消息权限', { bot: botName })),
     h('h3', null, expired ? '刷新二维码后继续' : '使用飞书确认群消息权限'),
     h('p', null,
       '扫码会更新现有飞书应用，只增量开通“获取群组中所有消息”权限，不会创建新应用。单独授权采集时保留原来的回复方式；选择响应所有消息时才切换。'),

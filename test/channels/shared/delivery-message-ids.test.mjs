@@ -164,11 +164,14 @@ test('Slack, Telegram, and Discord stream receipts retain the initial and remain
   ]);
 
   let telegramId = 300;
+  const deleted = [];
   const telegram = new TelegramBotClient({
     api: {
       sendChatAction: async () => true,
       sendMessage: async () => ({ message_id: ++telegramId }),
       editMessageText: async () => true,
+      deleteMessage: async (payload) => { deleted.push(payload.messageId); return true; },
+      sendRichMessage: async () => ({ message_id: ++telegramId }),
     },
   });
   const telegramReceipt = await textReceipt({
@@ -182,7 +185,9 @@ test('Slack, Telegram, and Discord stream receipts retain the initial and remain
       messageThreadId: 8,
     },
   });
-  assert.deepEqual(telegramReceipt.providerMessageIds, ['301']);
+  // The placeholder is progress only: the receipt points at the answer message.
+  assert.deepEqual(deleted, [301]);
+  assert.deepEqual(telegramReceipt.providerMessageIds, ['302']);
   assert.equal(telegramReceipt.presentation, 'telegram-rich-final');
 
   let discordId = 0;

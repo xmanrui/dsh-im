@@ -685,6 +685,73 @@ test('QQ applies the unified access policy before attachments or Harness work', 
   assert.equal(sent.length, ownerReplies, 'an unverified group identity does not inherit the private owner');
 });
 
+for (const recovery of ['unarchive', 'grant-command-permission']) {
+  test(`QQ archived chats guide command-denied users to administrator recovery: ${recovery}`, async () => {
+    const key = 'c2c:member-openid';
+    const fixture = stateFixture([[key, 'archived-session']]);
+    const sent = [];
+    const prompts = [];
+    let archived = true;
+    let creates = 0;
+    const accessPolicy = configuredAccessPolicy({
+      channel: 'qq', config: { ownerUserOpenid: 'owner-openid' },
+      users: [{ id: 'member-openid', canExecuteCommands: false }],
+    });
+    const bridge = new QqHarnessBridge({
+      ownerUserOpenid: 'owner-openid', accessPolicy, state: fixture.state,
+      bot: { sendText: async (_target, text) => {
+        sent.push(text);
+        return { id: `archive-recovery-${sent.length}` };
+      } },
+      harness: {
+        sessionExists: async () => true,
+        createSession: async () => { creates++; return 'new-session'; },
+        ask: async (sessionId, prompt) => {
+          prompts.push([sessionId, prompt]);
+          if (sessionId === 'archived-session' && archived) {
+            throw Object.assign(new Error('archived'), { code: 'session-archived' });
+          }
+          return '已恢复回复';
+        },
+      },
+      logger: { error() {}, warn() {} },
+    });
+    const send = (messageId, content) => bridge.accept(message({
+      messageId, content, senderId: 'member-openid',
+      replyTarget: { scope: 'c2c', targetId: 'member-openid', msgId: messageId },
+    }));
+
+    await send('archived-question', 'hello');
+    assert.match(sent.at(-1), /SESSION_ARCHIVED/);
+    assert.match(sent.at(-1), /有命令权限.*\/new/);
+    assert.match(sent.at(-1), /联系管理员.*取消归档.*开启命令权限/);
+    assert.equal(fixture.state.sessionFor(key), 'archived-session');
+
+    await send('denied-new', '/new');
+    assert.match(sent.at(-1), /没有执行命令的权限.*访问设置.*私聊或群聊.*命令权限/);
+    assert.equal(fixture.state.sessionFor(key), 'archived-session');
+    assert.equal(creates, 0);
+    assert.deepEqual(prompts, [['archived-session', 'hello']]);
+
+    if (recovery === 'unarchive') {
+      archived = false;
+    } else {
+      accessPolicy.getSettings().direct.allowlist.users[0].canExecuteCommands = true;
+      await send('authorized-new', '/new');
+      assert.match(sent.at(-1), /已开启新会话/);
+      assert.equal(fixture.state.sessionFor(key), 'new-session', '/new eagerly creates and binds the session');
+      assert.equal(creates, 1, '/new creates the Session eagerly');
+    }
+    await send('recovered-question', 'hello again');
+    const expectedSession = recovery === 'unarchive' ? 'archived-session' : 'new-session';
+    assert.equal(sent.at(-1), '已恢复回复');
+    assert.equal(fixture.state.sessionFor(key), expectedSession);
+    assert.deepEqual(prompts.at(-1), [expectedSession, 'hello again']);
+    assert.equal(creates, recovery === 'unarchive' ? 0 : 1);
+    assert.equal(bridge.status.lastMessageError, null);
+  });
+}
+
 test('QQ rejects non-platform image URLs without fetching and returns a retryable image error', async () => {
   const fixture = stateFixture([['c2c:owner-openid', 'session-image']]);
   const sent = [];

@@ -105,6 +105,7 @@ export function weixinStageError(code, cause, stage) {
 }
 
 function hintFor(code, details) {
+  if (code === 'qr-encode-failed') return connectionHint(details);
   if (details.rollback === 'failed' || details.rollback === 'unknown') return t('原账号状态尚未确认，请重新读取状态，并反馈诊断信息。');
   if (details.rollback === 'succeeded') return t('操作未完成，已恢复之前的本机状态。请处理上述问题后重试。');
   if (code.startsWith('harness-')) return t('请确认当前 DSH 宿主已就绪，并检查 Harness 与插件实际运行版本及宿主日志。');

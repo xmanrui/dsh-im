@@ -390,7 +390,7 @@ test('the thread root rides along until one successful turn consumes it and /new
     context.fake.pushEvents([inThread('/new', { command: true })]);
     await eventually(
       () => sentRoomMessages(context.fake)
-        .some((call) => typeof call.content?.body === 'string' && call.content.body.includes('已开启新会话')),
+        .some((call) => typeof call.content?.body === 'string' && call.content.body.includes('已开启全新 Harness 会话')),
       'the /new confirmation',
     );
     context.fake.pushEvents([inThread('第三条讨论')]);
@@ -770,7 +770,7 @@ test('a fresh session reads back the answers of the session it replaced, once', 
       'the running session does not re-read its own answer');
     context.fake.pushEvents([groupMessage({ sender: '@alice:example.org', body: '/new' })]);
     await eventually(() => sentRoomMessages(context.fake).some((call) =>
-      typeof call.content?.body === 'string' && call.content.body.includes('已开启新会话')), 'the /new confirmation');
+      typeof call.content?.body === 'string' && call.content.body.includes('已开启全新 Harness 会话')), 'the /new confirmation');
     context.fake.pushEvents([groupMessage({ sender: '@alice:example.org', body: addressedBody('新会话首问'), content: mentionContent() })]);
     await context.waitForPromptCount(3);
     ok(contextBlockBodies(context.harness.prompts[2]).some((body) => body.content === answer),
@@ -820,7 +820,7 @@ test('the self-answer retirement holds on the reply-chain lane as well, while a 
     // bumped generation the same quote resolves into the fresh session's context.
     context.fake.pushEvents([groupMessage({ sender: '@alice:example.org', body: '/new' })]);
     await eventually(() => sentRoomMessages(context.fake).some((call) =>
-      typeof call.content?.body === 'string' && call.content.body.includes('已开启新会话')), 'the /new confirmation');
+      typeof call.content?.body === 'string' && call.content.body.includes('已开启全新 Harness 会话')), 'the /new confirmation');
     context.fake.pushEvents([groupMessage({
       sender: '@alice:example.org',
       body: addressedBody('继续说天气'),
@@ -859,7 +859,7 @@ test('the room window read-once retirement survives a restarted runtime, and a c
       'the restarted runtime re-offers nothing its conversation has already been shown: the ledger is durable, not process-local');
     revived.fake.pushEvents([groupMessage({ sender: '@bob:example.org', body: '/new' })]);
     await eventually(() => sentRoomMessages(revived.fake).some((call) =>
-      typeof call.content?.body === 'string' && call.content.body.includes('已开启新会话')), 'the /new confirmation');
+      typeof call.content?.body === 'string' && call.content.body.includes('已开启全新 Harness 会话')), 'the /new confirmation');
     revived.fake.pushEvents([groupMessage({ sender: '@bob:example.org', body: addressedBody('新会话首问'), content: mentionContent() })]);
     await revived.waitForPromptCount(2);
     ok(contextBlockBodies(revived.harness.prompts[1]).some((entry) => entry.content === '旁人的留言'),

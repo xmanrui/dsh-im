@@ -23,6 +23,7 @@ export function createTelegramHostPlugin(config) {
 
 export { createProductionController } from './production.mjs';
 export {
+  GROUP_TRIGGERS_ENDPOINTS,
   TELEGRAM_ENDPOINTS,
   TELEGRAM_RPC_CHANNEL,
   TELEGRAM_RPC_ENDPOINTS,

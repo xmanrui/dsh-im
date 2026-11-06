@@ -319,12 +319,13 @@ test('the general settings gear sits to the right of GitHub and outside the chan
   assert.doesNotMatch(markup, /id="dim-panel-global-settings"/);
 });
 
-test('general settings defaults to group history and keeps a separate Attachments tab', () => {
+test('general settings defaults to group history and keeps Attachments and Delivery tabs', () => {
   const markup = renderToStaticMarkup(React.createElement(GlobalSettingsPanel, { rpcCall: async () => ({}) }));
   assert.match(markup, /<h2>通用设置<\/h2>/);
   assert.match(markup, /id="dim-general-settings-tab-general"[^>]*aria-selected="true"/);
   assert.match(markup, /id="dim-general-settings-tab-attachments"[^>]*aria-selected="false"/);
-  assert.equal((markup.match(/role="tab"/g) ?? []).length, 2);
+  assert.match(markup, /id="dim-general-settings-tab-delivery"[^>]*aria-selected="false"/);
+  assert.equal((markup.match(/role="tab"/g) ?? []).length, 3);
   assert.match(markup, /群聊天记录保留天数/);
   assert.match(markup, /value="14"/);
   assert.match(markup, /正在读取群记录设置/);
@@ -1214,15 +1215,27 @@ test('the bundled DingTalk channel has no local sender approval workflow', async
   );
 });
 
-test('the bilingual dictionary has no duplicate object keys', async () => {
-  const source = await readFile(new URL('../plugin-src/client/i18n.js', import.meta.url), 'utf8');
-  const { warnings } = await transform(source, { loader: 'js', logLevel: 'silent' });
-  assert.deepEqual(warnings.filter((warning) => warning.id === 'duplicate-object-key'), []);
+test('the client dictionaries have no duplicate object keys', async () => {
+  // A duplicate Chinese key silently drops one of the two translations, which no
+  // parity check can catch: the object only ever holds the later value.
+  for (const name of ['i18n.js', 'i18n-ru.js']) {
+    const source = await readFile(new URL(`../plugin-src/client/${name}`, import.meta.url), 'utf8');
+    const { warnings } = await transform(source, { loader: 'js', logLevel: 'silent' });
+    assert.deepEqual(
+      warnings.filter((warning) => warning.id === 'duplicate-object-key'),
+      [],
+      name,
+    );
+  }
 });
 
 test('every shipped Chinese client string has an English projection', async () => {
+  // Dictionary modules are the projection rather than a source of UI strings:
+  // their Chinese keys are the very literals the other modules render, so
+  // scanning them would ask the dictionaries to translate themselves.
+  const dictionaries = new Set(['i18n.js', 'i18n-ru.js']);
   const paths = (await readdir(CLIENT_SOURCE_DIRECTORY_URL, { recursive: true }))
-    .filter((path) => path.endsWith('.js') && path !== 'i18n.js');
+    .filter((path) => path.endsWith('.js') && !dictionaries.has(path));
   const sources = await Promise.all(paths.map((path) =>
     readFile(new URL(path, CLIENT_SOURCE_DIRECTORY_URL), 'utf8')));
   const strings = new Set();

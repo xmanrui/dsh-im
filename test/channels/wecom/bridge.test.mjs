@@ -455,7 +455,12 @@ test('Enterprise WeChat does not download quoted images for local commands or de
   assert.equal(asks, 0);
   assert.equal(cleared, 1);
   assert.deepEqual(commands, ['/compact']);
-  assert.equal(transport.streamed.some(({ content }) => content.includes('用法：/workspace')), true);
+  // Bare /workspace is the merged listing command now; this fixture's harness does
+  // not expose listWorkspaces, so the explicit degradation text is what surfaces.
+  assert.equal(
+    transport.streamed.some(({ content }) => content.includes('当前机器人暂不支持列出工作区。')),
+    true,
+  );
   assert.equal(transport.streamed.some(({ content }) => content.includes('用法：/session')), true);
 });
 

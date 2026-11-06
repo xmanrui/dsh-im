@@ -27,6 +27,25 @@ const EXPIRY_RETRY_MAX_MS = 5 * 60_000;
 const RESOLVED_ROUTE_TTL_MS = 5 * 60_000;
 const MAX_RESOLVED_ROUTES = 2_048;
 
+/**
+ * How a card-driven decision ended, so a channel card can tell "the decision is
+ * in" from "still submitting", "try again" and "this card can never work again".
+ *
+ * A transient Host/RPC failure keeps the approval pending, which makes the
+ * press retryable: the card must hand its keyboard back instead of staying
+ * `claimed` forever behind a "still submitting" toast.
+ */
+export const APPROVAL_SUBMIT_RESULT = Object.freeze({
+  /** The Host accepted the decision; the approval is gone from the queue. */
+  SUBMITTED: 'submitted',
+  /** Another decision is in flight; keep the card until its outcome is known. */
+  BUSY: 'busy',
+  /** Nothing was decided and the approval is still pending: press again. */
+  RETRYABLE: 'retryable',
+  /** The approval is no longer decidable here (resolved, expired, closed). */
+  GONE: 'gone',
+});
+
 function cleanText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -72,6 +91,7 @@ export function harnessApprovalText(payload, {
   toolCall,
   requiresMention = false,
   maxArgumentsLength = 6_000,
+  hasButtons = false,
 } = {}) {
   if (!validHarnessApproval(payload)) return null;
   const callId = cleanText(payload.callId);
@@ -90,8 +110,13 @@ export function harnessApprovalText(payload, {
   ];
   const reason = printableText(payload.reason);
   if (reason) lines.push(t('原因：{reason}', { reason }));
-  lines.push('', t(APPROVAL_PROMPT));
-  if (requiresMention) lines.push('', t('群聊中请 @机器人 后发送审批决定。'));
+  // A button card carries the intent itself: asking the user to type a decision
+  // (or to @ the bot in a group) would be misleading next to the buttons. The
+  // plain-text path below stays byte-identical to what it has always sent.
+  if (!hasButtons) {
+    lines.push('', t(APPROVAL_PROMPT));
+    if (requiresMention) lines.push('', t('群聊中请 @机器人 后发送审批决定。'));
+  }
   return lines.join('\n');
 }
 
@@ -236,7 +261,9 @@ export class HarnessApprovalQueue {
               return;
             }
             if (!decision) {
-              await send(t(APPROVAL_PROMPT));
+              // A button card already tells the user how to decide; repeating
+              // the type-the-decision prompt would contradict its buttons.
+              if (!pending.interactiveCard) await send(t(APPROVAL_PROMPT));
               return;
             }
             await this.#submit(pending, decision);
@@ -366,6 +393,10 @@ export class HarnessApprovalQueue {
       deliveryCompleted: false,
       replyTail: null,
       submitting: false,
+      // Set by a channel renderer once an interactive card really reached the
+      // user. It means the card owns the decision guidance and the receipt, so
+      // the plain-text prompts/receipts below must stay quiet.
+      interactiveCard: false,
       inactive: false,
       resolving: false,
       closedOutcome: null,
@@ -396,13 +427,20 @@ export class HarnessApprovalQueue {
    * (e.g. Feishu approve/reject). Returns false when no matching pending
    * approval is found. Callers may pass the acting user to enforce that only
    * the originating actor can decide.
+   *
+   * Pass `{ detailed: true }` to get an {@link APPROVAL_SUBMIT_RESULT} instead of
+   * a boolean: an interactive card has to tell a retryable submission failure
+   * apart from an in-flight decision, one that landed, or an invalid card.
    */
-  async submitByApprovalId(approvalId, outcome, { actor } = {}) {
+  async submitByApprovalId(approvalId, outcome, { actor, detailed = false } = {}) {
     const pending = this.#byId.get(cleanText(approvalId));
-    if (!pending || pending.inactive || pending.resolving || pending.submitting) return false;
-    if (actor !== undefined && pending.actor !== actor) return false;
-    await this.#submit(pending, outcome);
-    return true;
+    const gone = detailed ? APPROVAL_SUBMIT_RESULT.GONE : false;
+    if (!pending || pending.inactive || pending.resolving) return gone;
+    if (actor !== undefined && pending.actor !== actor) return gone;
+    if (pending.submitting) return detailed ? APPROVAL_SUBMIT_RESULT.BUSY : false;
+    const result = await this.#submit(pending, outcome);
+    if (!detailed) return true;
+    return result ?? APPROVAL_SUBMIT_RESULT.RETRYABLE;
   }
 
   async handleResolved(resolution) {
@@ -583,18 +621,19 @@ export class HarnessApprovalQueue {
         await this.#transition(next, async () => {
           await this.#notifyResolved(pending, 'resolved', send);
         });
-        return;
+        return APPROVAL_SUBMIT_RESULT.GONE;
       }
-      if (pending.inactive) return;
+      if (pending.inactive) return APPROVAL_SUBMIT_RESULT.GONE;
       pending.submitting = false;
       this.#logger.error?.(`[dsh-im:${this.#label}] failed to submit an approval:`, error);
       // The deadline passed while this decision was in flight.
       if (pending.expired) {
         await this.#expire(pending);
-        return;
+        return APPROVAL_SUBMIT_RESULT.GONE;
       }
       await pending.send(t('审批提交失败，请重新回复「批准」或「拒绝」。')).catch(() => undefined);
-      return;
+      // The approval is still pending: the caller may offer the press again.
+      return APPROVAL_SUBMIT_RESULT.RETRYABLE;
     }
 
     const send = pending.send;
@@ -602,6 +641,7 @@ export class HarnessApprovalQueue {
     await this.#transition(next, async () => {
       await this.#notifyResolved(pending, outcome, send);
     });
+    return APPROVAL_SUBMIT_RESULT.SUBMITTED;
   }
 
   async #notifyResolved(pending, outcome, send = pending.send) {
@@ -610,11 +650,16 @@ export class HarnessApprovalQueue {
     // resolved event cannot replace the confirmed result or notify twice.
     pending.resolutionNotified = true;
     const text = approvalOutcomeText(outcome);
+    let deliveredByPresentation = false;
     try {
-      await pending.onResolved?.(text);
+      // A card renderer returns true when it already edited the original message
+      // into the receipt; the separate terminal text would then be a duplicate
+      // (and the pending.send may have been swapped by an interim text reply).
+      deliveredByPresentation = (await pending.onResolved?.(text, outcome)) === true;
     } catch (error) {
       this.#logger.warn?.(`[dsh-im:${this.#label}] failed to update a resolved approval:`, error);
     }
+    if (deliveredByPresentation) return;
     await send(text).catch(() => undefined);
   }
 

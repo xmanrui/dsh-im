@@ -28,7 +28,7 @@ jobs:
         run: npm run check
 
   windows-workspaces:
-    name: Workspace regression tests (Windows)
+    name: Workspace and QR regression tests (Windows)
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -43,7 +43,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check workspace creation, switching, and session recovery
+      - name: Check workspace recovery and QR encoding diagnostics
         run: >-
           node --test test/default-workspace.test.mjs
           test/channels/shared/default-workspace-production.test.mjs
@@ -52,3 +52,5 @@ jobs:
           test/conversation-workspace-races.test.mjs
           test/conversation-workspace-switch-order.test.mjs
           test/conversation-workspace-bind-recovery.test.mjs
+          test/preset-workspaces.test.mjs
+          test/channels/shared/qr-encoding.test.mjs

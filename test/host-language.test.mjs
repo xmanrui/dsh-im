@@ -49,7 +49,7 @@ test('normalizeInterfaceLanguageTag keeps BCP 47-style tags and rejects everythi
 });
 
 test('resolveHostLanguageTag prefers the plugin config, then DSH settings, then the mirror', () => {
-  assert.deepEqual(HOST_LANGUAGE_SOURCES, ['config', 'settings', 'mirror']);
+  assert.deepEqual(HOST_LANGUAGE_SOURCES, ['config', 'explicit', 'settings', 'mirror']);
   assert.deepEqual(
     resolveHostLanguageTag({ config: 'zh-CN', settings: 'en', mirror: 'en' }),
     { tag: 'zh-CN', source: 'config' },
@@ -57,6 +57,11 @@ test('resolveHostLanguageTag prefers the plugin config, then DSH settings, then 
   assert.deepEqual(
     resolveHostLanguageTag({ settings: 'en', mirror: 'zh' }),
     { tag: 'en', source: 'settings' },
+  );
+  // A language picked in the settings page outranks what DSH is set to.
+  assert.deepEqual(
+    resolveHostLanguageTag({ explicit: 'ru', settings: 'en', mirror: 'zh' }),
+    { tag: 'ru', source: 'explicit' },
   );
   assert.deepEqual(
     resolveHostLanguageTag({ mirror: 'en-GB' }),
@@ -123,7 +128,9 @@ test('the controller applies the winning layer and never lets the mirror beat an
   });
 
   setImHostLanguage('zh');
-  assert.deepEqual(controller.apply(), { language: 'zh', tag: null, source: 'default', pinned: false });
+  // No layer names a locale at all, so the resolver lands on English: an
+  // unknown or absent tag must never surface Chinese.
+  assert.deepEqual(controller.apply(), { language: 'en', tag: null, source: 'default', pinned: false });
 
   // A browser-derived interface locale reaches the Host only through the mirror.
   await controller.mirror('en');
@@ -187,9 +194,12 @@ test('installHostLanguage follows the DSH locale preference live and tolerates a
   const bare = new Context();
   const withoutSettings = installHostLanguage(bare, { dshHome: home });
   await withoutSettings.ready;
-  assert.equal(getImHostLanguage(), 'zh');
+  // Nothing is configured, so the resolver lands on English rather than on the
+  // untranslated identity language.
+  assert.equal(getImHostLanguage(), 'en');
+  await withoutSettings.mirror('zh');
+  assert.equal(getImHostLanguage(), 'zh', 'the mirror still works without a settings provider');
   await withoutSettings.mirror('en');
-  assert.equal(getImHostLanguage(), 'en', 'the mirror still works without a settings provider');
 
   const ctx = new Context();
   let section = { [DSH_LOCALE_PREFERENCE_FIELD]: 'zh' };
@@ -250,12 +260,13 @@ test('the language RPC reports the resolved snapshot and mirrors the interface l
   assert.equal(HOST_LANGUAGE_RPC_CHANNEL, '/dsh-im-language');
   assert.deepEqual(HOST_LANGUAGE_ENDPOINTS, {
     get: 'settings.language.get',
+    set: 'settings.language.set',
     mirror: 'settings.language.mirror',
   });
 
   assert.deepEqual(await handler(HOST_LANGUAGE_ENDPOINTS.get, {}), {
     ok: true,
-    value: { language: 'zh', tag: null, source: 'default', pinned: false },
+    value: { language: 'en', tag: null, source: 'default', pinned: false },
   });
   assert.deepEqual(await handler(HOST_LANGUAGE_ENDPOINTS.mirror, { locale: 'en-US' }), {
     ok: true,
@@ -265,7 +276,7 @@ test('the language RPC reports the resolved snapshot and mirrors the interface l
   assert.equal(store.getLanguageTag(), 'en-US');
   assert.deepEqual(await handler(HOST_LANGUAGE_ENDPOINTS.mirror, { locale: null }), {
     ok: true,
-    value: { language: 'zh', tag: null, source: 'default', pinned: false },
+    value: { language: 'en', tag: null, source: 'default', pinned: false },
   });
 
   for (const [endpoint, payload] of [
@@ -286,6 +297,7 @@ test('the language RPC reports the resolved snapshot and mirrors the interface l
     controller: {
       apply: () => controller.apply(),
       snapshot: () => controller.snapshot(),
+      select: async () => controller.apply(),
       mirror: async () => { throw new Error('private-disk-failure'); },
     },
   });

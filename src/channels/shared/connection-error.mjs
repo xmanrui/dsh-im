@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import packageInfo from '../../../package.json' with { type: 'json' };
-import { normalizeDiagnosticDetails } from './diagnostic-details.mjs';
+import { DIAGNOSTIC_ERROR_TYPES, normalizeDiagnosticDetails } from './diagnostic-details.mjs';
 import { t } from './i18n.mjs';
 
 const reported = new WeakMap();
 const lastReport = new WeakMap();
 const stages = new WeakMap();
 const OWNED_REASONS = { 'harness-interaction-timeout': 'timeout', 'harness-response-invalid': 'invalid-response', 'connect-timeout': 'timeout', 'telegram-timeout': 'timeout', 'cli-timeout': 'timeout', 'provider-timeout': 'timeout', 'telegram-response-invalid': 'invalid-response', 'office-protocol-mismatch': 'invalid-response' };
-const STANDARD_NAMES = new Set(['Error', 'TypeError', 'SyntaxError', 'AggregateError', 'DOMException', 'AxiosError', 'TimeoutError', 'AbortError']);
 const KNOWN_MESSAGES = {
   'discord-401': 'Discord Bot Token 无效，请重新填写。',
   'discord-intents': 'Discord Gateway Intents 配置不正确，请检查 Developer Portal 的 Bot 设置。',
@@ -36,7 +35,7 @@ export function connectionErrorChain(error) {
 export function extractConnectionEvidence(error) {
   const { chain, truncated } = connectionErrorChain(error);
   const errors = chain.map(e => ({
-    type: STANDARD_NAMES.has(e.name) ? e.name : 'Error',
+    type: DIAGNOSTIC_ERROR_TYPES.has(e.name) ? e.name : 'Error',
     // Host RPC adapters carry safe diagnostic facts without the original Error graph.
     ...normalizeDiagnosticDetails({
       reason: e.details?.reason, reasons: e.details?.reasons,
@@ -98,9 +97,9 @@ export async function atConnectionStage(stage, operation, resource) {
   catch (error) { throw connectionStageError(error, stage, resource); }
 }
 
-export function connectionStageError(cause, stage, resource) {
+export function connectionStageError(cause, stage, resource, details = {}) {
   if (!cause || typeof cause !== 'object') cause = new Error('Operation failed');
-  if (!stages.has(cause)) stages.set(cause, normalizeDiagnosticDetails({ stage, resource }));
+  if (!stages.has(cause)) stages.set(cause, normalizeDiagnosticDetails({ ...details, stage, resource }));
   return cause;
 }
 
@@ -117,6 +116,7 @@ export function diagnosticRpcResult(diagnostics, cause, result, context) {
 }
 
 export function connectionHint(details) {
+  if (details.stage === 'qr.encode') return t('本机二维码图片生成失败，请重试；若持续失败，请复制诊断信息并检查 DSH 运行环境。');
   const r = details.reason;
   if (r === 'multiple-causes') return t('检测到多个底层原因，请展开诊断详情逐项检查。');
   if (['ENOTFOUND', 'EAI_AGAIN'].includes(r)) return t('服务域名解析失败，请检查运行 DSH 的机器的 DNS 和网络设置。');

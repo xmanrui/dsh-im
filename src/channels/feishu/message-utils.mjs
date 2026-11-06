@@ -549,6 +549,7 @@ function feishuReplyReference(event, client) {
           : {}),
         ...(content ? { content } : {}),
         attachments,
+        ...(quoted.files?.length ? { files: quoted.files } : {}),
         ...(messageType === 'interactive' && !content && attachments.length === 0
           ? { unavailableReason: 'unsupported' }
           : {}),

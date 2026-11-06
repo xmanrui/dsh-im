@@ -17,6 +17,7 @@ import { normalizeContextEnhancementConfig } from "../../../../src/channels/shar
 import { normalizeFeishuStepPushMode, normalizeFeishuStepCardPanels } from "../../../../src/channels/feishu/step-push-mode.mjs";
 import { normalizeFeishuVoiceConfig } from "../../../../src/channels/feishu/voice-config.mjs";
 import { normalizeSlashPanelConfig } from "../../../../src/channels/feishu/slash-command-panel.mjs";
+import { normalizeConversationDirectory } from "../../../../src/channels/shared/conversation-directory.mjs";
 
 export const FEISHU_RPC_CHANNEL = "/feishu";
 
@@ -32,6 +33,8 @@ export const FEISHU_ENDPOINTS = Object.freeze({
   disconnectBot: "bot.disconnect",
   deleteBot: "bot.delete",
   setWorkspace: "bot.workspace.set",
+  setConversationDirectory: "bot.conversation-directory.set",
+  setConversationDirectoryDefault: "bot.conversation-directory.default.set",
   setModel: SET_MODEL_ENDPOINT,
   setAgentPreset: "bot.preset.set",
   setContextEnhancement: "bot.context-enhancement.set",
@@ -224,6 +227,8 @@ export function normalizeBotConnection(value, fallbackBotId) {
     connected,
     configured: value.configured !== false,
     workspace: optionalString(value.workspace)?.slice(0, 4_096) ?? "",
+    conversationDirectory: normalizeConversationDirectory(value.conversationDirectory),
+    conversationDirectoryOverride: normalizeConversationDirectory(value.conversationDirectoryOverride),
     model: normalizeModelSelection(value.model),
     agentPreset: normalizeAgentPresetId(value.agentPreset),
     busyMessageMode: normalizeBusyMessageMode(value.busyMessageMode),    contextEnhancement: normalizeContextEnhancementConfig(value.contextEnhancement),

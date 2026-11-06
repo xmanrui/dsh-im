@@ -10,6 +10,8 @@ import { createSlackBridgeStatus, SlackHarnessBridge } from './slack-bridge.mjs'
 const RECONNECT_DELAYS_MS = Object.freeze([1_000, 3_000, 5_000, 10_000, 30_000]);
 const SLACK_MESSAGE_LIMIT = 38_000;
 const SLACK_STREAM_CHUNK_LIMIT = 11_000;
+const SLACK_MARKDOWN_BLOCK_REJECTION = Object.freeze(['invalid_blocks', 'invalid_blocks_format']);
+const SLACK_MARKDOWN_REJECTION = Object.freeze([...SLACK_MARKDOWN_BLOCK_REJECTION, 'invalid_markdown']);
 const IMAGE_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 function addSocketListener(socket, event, listener) {
@@ -304,18 +306,40 @@ async function createSlackMessageStream({ api, target, signal, logger }) {
       if (!broken && first.startsWith(appended)) {
         await appendInChunks(api, target, ts, first.slice(appended.length), signal);
         await api.stopStream({ channelId: target.channelId, ts, signal });
+        for (const chunk of chunks.slice(1)) {
+          const result = await api.postMessage({
+            channelId: target.channelId,
+            threadTs: target.threadTs,
+            text: chunk,
+            signal,
+          });
+          if (typeof result?.ts === 'string' && result.ts) providerMessageIds.push(result.ts);
+        }
       } else {
+        const reason = broken ? 'broken' : 'prefix-mismatch';
         await api.stopStream({ channelId: target.channelId, ts, signal }).catch(() => undefined);
-        await api.updateMessage({ channelId: target.channelId, ts, text: first, signal });
-      }
-      for (const chunk of chunks.slice(1)) {
-        const result = await api.postMessage({
+        const source = typeof text === 'string' && text.trim() ? text.trim() : t('处理完成。');
+        const parts = chunkMarkdownParts(source, SLACK_STREAM_CHUNK_LIMIT);
+        const markdownParts = parts.length > 0 ? parts : [{ markdown: source }];
+        logger?.warn?.(
+          `[dsh-im:slack] stream finalize fell back to chat.update (${reason}, length ${markdownParts[0].markdown.length})`,
+        );
+        await api.updateMessage({
           channelId: target.channelId,
-          threadTs: target.threadTs,
-          text: chunk,
+          ts,
+          text: markdownParts[0].markdown,
           signal,
         });
-        if (typeof result?.ts === 'string' && result.ts) providerMessageIds.push(result.ts);
+        for (const chunk of markdownParts.slice(1)) {
+          const result = await api.postMessage({
+            channelId: target.channelId,
+            threadTs: target.threadTs,
+            text: chunk.markdown,
+            format: 'markdown_text',
+            signal,
+          });
+          if (typeof result?.ts === 'string' && result.ts) providerMessageIds.push(result.ts);
+        }
       }
     },
     cancel() {
@@ -337,6 +361,41 @@ export class SlackBotClient {
     this.#api = api;
     this.#signal = signal;
     this.#logger = logger;
+  }
+
+  #postMarkdown(target, text, format) {
+    return this.#api.postMessage({
+      channelId: target.channelId,
+      threadTs: target.threadTs,
+      text,
+      format,
+      signal: this.#signal,
+    });
+  }
+
+  async #recoverRejectedMarkdown(target, chunk, error) {
+    // Retry only a definite formatting rejection, never an ambiguous send.
+    if (this.#signal?.aborted || Number(error?.status) >= 500
+      || !SLACK_MARKDOWN_REJECTION.includes(error?.providerCode)) throw error;
+    if (SLACK_MARKDOWN_BLOCK_REJECTION.includes(error.providerCode)) {
+      this.#logger?.warn?.(
+        `[dsh-im:slack] Markdown block rejected (${error.providerCode}); retrying markdown_text, length ${chunk.markdown.length}`,
+      );
+      try {
+        const result = await this.#postMarkdown(target, chunk.markdown, 'markdown_text');
+        return typeof result?.ts === 'string' && result.ts ? [result.ts] : [];
+      } catch (retryError) {
+        if (this.#signal?.aborted || Number(retryError?.status) >= 500
+          || retryError?.providerCode !== 'invalid_markdown') throw retryError;
+        error = retryError;
+      }
+    }
+    this.#logger?.warn?.(
+      `[dsh-im:slack] Markdown rejected (${error.providerCode}); sending this chunk as literal text, length ${chunk.plain?.length ?? 0}`,
+    );
+    if (!chunk.plain) return [];
+    const result = await this.#postMarkdown(target, chunk.plain, 'literal');
+    return typeof result?.ts === 'string' && result.ts ? [result.ts] : [];
   }
 
   async sendText(target, text) {
@@ -362,21 +421,11 @@ export class SlackBotClient {
     for (const chunk of chunkMarkdownParts(block.text, SLACK_STREAM_CHUNK_LIMIT)) {
       this.#signal?.throwIfAborted();
       try {
-        const result = await this.#api.postMessage({
-          channelId: target.channelId, threadTs: target.threadTs,
-          text: chunk.markdown, format: 'markdown', signal: this.#signal,
-        });
+        const result = await this.#postMarkdown(target, chunk.markdown, 'markdown');
         if (typeof result?.ts === 'string' && result.ts) providerMessageIds.push(result.ts);
       } catch (error) {
-        // Retry only a definite formatting rejection, never an ambiguous send.
-        if (this.#signal?.aborted || Number(error?.status) >= 500
-          || !['invalid_blocks', 'invalid_blocks_format', 'invalid_markdown']
-            .includes(error?.providerCode)) throw error;
-        this.#logger?.warn?.('[dsh-im:slack] Markdown rejected; sending this chunk as text');
-        if (chunk.plain) {
-          const result = await this.sendText(target, chunk.plain);
-          providerMessageIds.push(...result.providerMessageIds);
-        }
+        const delivered = await this.#recoverRejectedMarkdown(target, chunk, error);
+        providerMessageIds.push(...delivered);
       }
     }
     return { providerMessageIds };

@@ -44,7 +44,7 @@ export function installUpdateRpc(ctx, options = {}) {
   const runtime = options.runtime ?? createUpdateRuntime({ ctx, moduleUrl: import.meta.url });
   const service = options.service ?? createUpdateService({ runtime });
   const dispose = registerManagementRpc(ctx, UPDATE_RPC_CHANNEL, createUpdateRpcHandler(service), {
-    authority: 'loopback',
+    authority: options.authority,
   });
   ctx.effect(() => () => service.close(), 'dsh-im: close update installer');
   return dispose;

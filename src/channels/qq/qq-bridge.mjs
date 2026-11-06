@@ -1,10 +1,12 @@
 import { captureGroupHistory } from '../shared/group-history.mjs';
+import { SESSION_NAV_HELP_LINES } from '../shared/command-catalog.mjs';
 import { BusyMessageDispatcher, canAutomaticallySteer } from '../shared/busy-message-dispatcher.mjs';
 import { isPermissionCommand, runPermissionCommand } from '../shared/permission-command.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
 import { isClearCommand, runClearCommand } from '../shared/clear-command.mjs';
+import { isResetCommand, runResetCommand } from '../shared/reset-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from '../shared/history-command.mjs';
 import {
   isControlCommand,
@@ -26,6 +28,11 @@ import {
   runPresetCommand,
 } from '../shared/preset-command.mjs';
 import { askInWorkspaceSession } from '../shared/workspace-session.mjs';
+import {
+  isSessionNavCommand,
+  runSessionNavTextCommand,
+} from '../shared/session-nav-command.mjs';
+import { createConversationSession, isNewCommand, newCommandTitle } from '../shared/new-command.mjs';
 import {
   captureContextEnhancement,
   captureContextEnhancementSource,
@@ -71,6 +78,7 @@ import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
 } from '../shared/inbound-access.mjs';
+import { ApiError } from '@tencent-connect/qqbot-nodejs';
 import { sendMarkdownReply } from './markdown-reply.mjs';
 import {
   isQqMenuCommand, parseQqMenuCommand, QqMenuStore,
@@ -117,8 +125,10 @@ function helpText() {
     t('/workspacelist  列出工作区绝对路径'),
     t('/ws、/wsl、/workspaces  工作区命令别名'),
     t('/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题'),
+    t('/sessionlist --all  跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）'),
     t('/sessionlist --limit N  仅列出当前工作区前 N 个会话'),
-    t('/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话'),
+    t('/session Session ID、当前工作区序号或标题关键词  将当前聊天绑定到指定会话'),
+    ...SESSION_NAV_HELP_LINES.map((line) => t(line)),
     t('/models  按序号列出所有可用模型'),
     t('/reasoninglist 或 /reasonings  按序号列出当前模型可用推理等级'),
     t('/reasoning [序号、等级ID或 --default]  查看或切换当前推理等级'),
@@ -267,6 +277,28 @@ export function qqInboundMessage(message, { fetchImpl = fetch } = {}) {
     files,
     ...(replyTo ? { replyTo } : {}),
   };
+}
+
+// QQ accepts passive replies to an inbound msg_id for a bounded window
+// (C2C 60 min, group 5 min). Proactive C2C/group sends are quota-limited and
+// are often refused, so a late result keeps the passive route while the
+// window is still open and only falls back to proactive delivery after it.
+const PASSIVE_REPLY_WINDOW_MS = Object.freeze({ c2c: 60 * 60_000, group: 5 * 60_000 });
+const PASSIVE_REPLY_MARGIN_MS = 30_000;
+
+function deferredQqTarget(message, target, acceptedAt) {
+  const route = { scope: target.scope, targetId: target.targetId };
+  const msgId = nonEmptyString(target.msgId);
+  if (!msgId || !PASSIVE_REPLY_WINDOW_MS[target.scope]) return route;
+  const sentAt = Date.parse(message?.timestamp ?? '');
+  return { ...route, msgId, receivedAt: Number.isFinite(sentAt) ? Math.min(sentAt, acceptedAt) : acceptedAt };
+}
+
+export function deferredDeliveryTarget(target, now = Date.now()) {
+  const route = { scope: target?.scope, targetId: target?.targetId };
+  const window = PASSIVE_REPLY_WINDOW_MS[target?.scope];
+  if (!nonEmptyString(target?.msgId) || !window || !Number.isFinite(target?.receivedAt)) return route;
+  return now - target.receivedAt < window - PASSIVE_REPLY_MARGIN_MS ? { ...route, msgId: target.msgId } : route;
 }
 
 function nonEmptyString(value) {
@@ -635,6 +667,7 @@ export class QqHarnessBridge {
     const commandRunner = explicitMenu || numericMenu
       ? () => this.#runMenuCommand(message, menuInput, key)
       : isClearCommand(commandText) ? runClearCommand
+      : isResetCommand(commandText) ? runResetCommand
       : isHistoryCommand(commandText) ? runHistoryCommand
       : isPermissionCommand(commandText) ? runPermissionCommand
       : hasQqFileAttachments(message) ? null : isControlCommand(commandText)
@@ -896,7 +929,22 @@ export class QqHarnessBridge {
   }
 
   async #deliverDeferredOutcome(entry, outcome) {
-    await sendMarkdownReply(this.#bot, entry.target, deferredOutcomeText(outcome), { logger: this.#logger });
+    const text = deferredOutcomeText(outcome);
+    const target = deferredDeliveryTarget(entry.target);
+    if (!target.msgId) {
+      await sendMarkdownReply(this.#bot, target, text, { logger: this.#logger });
+      return true;
+    }
+    try {
+      // The timeout notice already answered this msg_id once.
+      await sendMarkdownReply(this.#bot, target, text, { logger: this.#logger, passiveRepliesUsed: 1 });
+    } catch (error) {
+      // Nothing was sent and QQ definitely refused the passive reply (window
+      // closed early or budget spent), so the proactive route cannot duplicate it.
+      if (!(error instanceof ApiError) || !(error.httpStatus >= 400 && error.httpStatus < 500)) throw error;
+      this.#logger.warn?.('[dsh-im:qq] passive deferred reply was refused; retrying proactively:', error);
+      await sendMarkdownReply(this.#bot, { scope: target.scope, targetId: target.targetId }, text, { logger: this.#logger });
+    }
     return true;
   }
 
@@ -984,10 +1032,11 @@ export class QqHarnessBridge {
           || locked.sessionId !== choice.context.sessionId) {
           return { message: t('会话或工作区已变化，请重新发送 /m。') };
         }
-        await this.#state.clearSession(key);
-        return { message: t('已开启新会话。请发送你的问题。') };
+        const created = await createConversationSession({ state: this.#state, harness: this.#harness, key });
+        return { message: created.failed ? t('暂时无法创建新会话，请稍后重试。') : t('已开启新会话。请发送你的问题。') };
       });
       if (isClearCommand(command)) return runClearCommand(command, this.#harness, this.#state, key, options);
+      if (isResetCommand(command)) return runResetCommand(command, this.#harness, this.#state, key, options);
       if (command === '/compact') return runCompactCommand(command, this.#harness, this.#state, key, options);
       return runWorkspaceCommand(command, this.#harness, key);
     };
@@ -1155,6 +1204,7 @@ export class QqHarnessBridge {
     batchSubmission = null,
   } = {}) {
     if (this.#signal?.aborted) return;
+    const acceptedAt = Date.now();
     const messageId = nonEmptyString(message?.messageId);
     const sender = nonEmptyString(message?.senderId);
     if (!messageId || !sender || message.senderIsBot === true) return;
@@ -1199,9 +1249,32 @@ export class QqHarnessBridge {
         await markMessageSeen();
         return;
       }
-      if (!hasImages && !hasFiles && command === '/new') {
-        await this.#state.clearSession(key);
-        await this.#bot.sendText(target, t('已开启新会话。请发送你的问题。'));
+      if (!hasImages && !hasFiles && isNewCommand(text)) {
+        const created = await createConversationSession({ state: this.#state, harness: this.#harness, key, title: newCommandTitle(text) });
+        await this.#bot.sendText(target, created.failed ? t('暂时无法创建新会话，请稍后重试。') : t('已开启新会话。请发送你的问题。'));
+        await markMessageSeen();
+        return;
+      }
+      if (!hasImages && !hasFiles && isSessionNavCommand(text)) {
+        const nav = await runSessionNavTextCommand(text, this.#harness, this.#state, key, {
+          signal: this.#signal,
+        });
+        if (nav) {
+          for (const reply of nav.messages ?? [nav.message]) {
+            await this.#bot.sendText(target, reply);
+          }
+          if (nav.askText) {
+            const followUp = this.#enqueueMessage(
+              { ...message, content: nav.askText, attachments: [] },
+              `${messageId}-ask`,
+              key,
+            );
+            followUp.catch((error) => {
+              this.#logger.warn?.(`[dsh-im:qq] follow-up ask after a nav command failed:`, error?.message ?? error);
+              this.#bot.sendText(target, t('切换后的提问发送失败，请重试。')).catch(() => undefined);
+            });
+          }
+        }
         await markMessageSeen();
         return;
       }
@@ -1214,6 +1287,18 @@ export class QqHarnessBridge {
       });
       if (clearCommand) {
         await this.#bot.sendText(target, clearCommand.message);
+        await markMessageSeen();
+        return;
+      }
+      const resetCommand = await runResetCommand(text, this.#harness, this.#state, key, {
+        signal: this.#signal,
+        hasImages,
+        hasFiles,
+        pendingInteraction: this.#pendingInteractions.has(key) || this.#approvals.hasPending(key),
+        busy: this.#queues.has(key),
+      });
+      if (resetCommand) {
+        await this.#bot.sendText(target, resetCommand.message);
         await markMessageSeen();
         return;
       }
@@ -1263,6 +1348,15 @@ export class QqHarnessBridge {
       let answer;
       let artifacts = [];
       try {
+        try {
+          await this.#state.rememberAuthor?.(key, {
+            senderId: sender,
+            senderName: message.kind === 'group' ? message.senderName : undefined,
+            isBot: message.senderIsBot === true,
+          });
+        } catch (error) {
+          this.#logger.warn?.('[dsh-im:qq] unable to remember the conversation author:', error?.message ?? error);
+        }
         // Persist consumption before handing the prompt to Harness. Provider
         // redelivery after a failed error notice must never execute it twice.
         await markMessageSeen();
@@ -1272,7 +1366,8 @@ export class QqHarnessBridge {
         // already own.
         await this.#markPendingSubmitted(key, messageId);
         ({ answer, artifacts = [] } = await askInWorkspaceSession({
-          deferredDelivery: () => ({ coordinator: this.#deferred, target: { scope: target.scope, targetId: target.targetId } }),
+          onNotice: (notice) => this.#bot.sendText(target, notice),
+          deferredDelivery: () => ({ coordinator: this.#deferred, target: deferredQqTarget(message, target, acceptedAt) }),
           harness: this.#harness,
           state: this.#state,
           key,

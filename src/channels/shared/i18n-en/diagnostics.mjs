@@ -1,4 +1,10 @@
 export default Object.freeze({
+  '无法读取所选模型的列表，模型设置未保存，请重试。': 'Could not load the selected model’s catalog. The model setting was not saved. Try again.',
+  '异常类型': 'Exception types',
+  '二维码编码器': 'QR encoder',
+  '二维码图片格式': 'QR image format',
+  '本机二维码图片生成失败，请重试；若持续失败，请复制诊断信息并检查 DSH 运行环境。':
+    'The QR-code image could not be generated locally. Retry; if it keeps failing, copy the diagnostics and check the DSH runtime environment.',
   '准备会话': 'Prepare session',
   '准备消息': 'Prepare message',
   '建立交互通道': 'Open interaction channel',
@@ -23,6 +29,8 @@ export default Object.freeze({
     'Message preparation failed before submission. It has not been submitted for execution. Try again; if this persists, share the reference with your administrator.',
   '消息已尝试提交，但任务结果尚未确认。请先到 DSH 查看状态，不要立即重复提交；若持续发生，请将参考号提供给管理员。':
     'Message submission was attempted, but the task outcome is unconfirmed. Check its status in DSH before resubmitting; if this persists, share the reference with your administrator.',
+  '消息提交请求超时，未能确认消息是否已送达 DSH。请稍后到 DSH 查看该会话状态，不要立即重复提交；若持续发生，请将参考号提供给管理员。':
+    'The message submission request timed out and delivery to DSH could not be confirmed. Check the session status in DSH before resubmitting; if this persists, share the reference with your administrator.',
   "DSH 版本": "DSH version",
   "依赖版本": "Dependency versions",
   "代理已配置": "Proxy configured",
@@ -78,5 +86,10 @@ export default Object.freeze({
   "超时阈值（毫秒）": "Timeout (ms)",
   "Node 版本": "Node version",
   "运行平台": "Platform",
-  "无法访问 DSH 管理接口，请检查 DSH 连接或重新登录后重试。": "Cannot access the DSH management API. Check the DSH connection or sign in again."
+  "无法访问 DSH 管理接口，请检查 DSH 连接或重新登录后重试。": "Cannot access the DSH management API. Check the DSH connection or sign in again.",
+  "DSH 登录状态无效或已过期，请通过有效启动链接重新登录。": "Your DSH session is invalid or expired. Sign in again using a valid launch link.",
+  "DSH 拒绝了当前管理请求（HTTP 403）。请检查访问权限、可信地址配置及代理设置；若启用了仅本机访问，请按该限制访问。": "DSH denied this management request (HTTP 403). Check access permissions, trusted hosts and proxy settings. If local-only access is enabled, use an allowed local connection.",
+  "DSH 管理接口不存在（HTTP 404），请检查 Host 与插件版本及代理路径，重启后重试。": "The DSH management API was not found (HTTP 404). Check the Host and plugin versions and proxy path, then restart and retry.",
+  "DSH 管理服务暂时异常，请检查服务状态或稍后重试。": "The DSH management service encountered an error. Check its status or try again later.",
+  "DSH 管理请求失败，请检查服务状态和网络连接后重试。": "The DSH management request failed. Check the service status and network connection, then retry."
 });

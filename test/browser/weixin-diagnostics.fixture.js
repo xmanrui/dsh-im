@@ -7,6 +7,7 @@ import { en, localizeText, setImTranslator } from '../../plugin-src/client/i18n.
 
 const params = new URLSearchParams(location.search);
 const scenario = params.get('scenario') ?? 'qr';
+const qrScenario = scenario === 'qr' || scenario === 'encode';
 const english = params.has('en');
 const layoutWidth = params.has('mobile') ? 390 : innerWidth;
 if (params.has('mobile')) document.body.style.width = `${layoutWidth}px`;
@@ -19,6 +20,12 @@ const error = scenario === 'startup' ? {
   details: { operation: 'startup', stage: 'startup.load', reason: 'invalid-config', resource: 'workspace-config',
     file: 'workspaces.json', field: 'workspaces[0].value', issue: 'invalid-workspace-path',
     hint: '工作区路径必须是当前操作系统的绝对路径。 请检查微信渠道数据目录中的 workspaces.json，修复后重启 DSH；“重新读取”不会重新加载配置。 字段位置中的序号从 0 开始，按文件中的条目顺序计数，不包含真实账号标识。' },
+} : scenario === 'encode' ? {
+  code: 'qr-encode-failed', message: '已取得扫码地址，但本机二维码图片生成失败。',
+  details: { operation: 'provision.begin', stage: 'qr.encode', reason: 'ERR_ZLIB_INITIALIZATION_FAILED',
+    errorTypes: ['Error', 'TypeError'], qrEncoder: 'qrcode', qrRenderer: 'png',
+    dependencies: { qrcode: '1.5.4', pngjs: '5.0.0', zlib: '1.3.1' },
+    hint: '本机二维码图片生成失败，请重试；若持续失败，请复制诊断信息并检查 DSH 运行环境。' },
 } : scenario === 'qr' ? {
   code: 'network-error', message: '暂时无法访问微信服务。',
   details: { operation: 'provision.begin', stage: 'qr.begin', reason: 'ENOTFOUND',
@@ -33,7 +40,7 @@ const error = scenario === 'startup' ? {
     hint: '请移除失效接入并重新扫码绑定。' },
 };
 Object.assign(error.details, { referenceId: 'WX-CONN-1234ABCD', occurredAt: '2026-09-12T04:10:00.000Z', pluginVersion: '4.19.2', token: 'private-fixture-secret' });
-const snapshot = { schemaVersion: 1, revision: 1, bots: scenario === 'qr' ? [] : [{
+const snapshot = { schemaVersion: 1, revision: 1, bots: qrScenario ? [] : [{
   botId, state: 'error', connected: false, configured: true, workspace: '/workspace/demo',
   bot: { name: english ? 'Demo assistant' : '演示助手', accountIdMasked: 'demo•••' },
   error: scenario === 'offline' ? error : null,
@@ -67,7 +74,7 @@ async function run() {
   await until(() => button('扫码接入机器人'), 'Page did not mount');
   const collapse = document.querySelector('[aria-expanded="false"]');
   if (collapse) collapse.click();
-  if (scenario === 'qr') button('扫码接入机器人').click();
+  if (qrScenario) button('扫码接入机器人').click();
   if (scenario === 'delete') {
     await until(() => button('移除接入'), 'Remove action did not mount');
     button('移除接入').click();
@@ -84,6 +91,14 @@ async function run() {
   assert(text.includes(error.code) && text.includes(error.details.referenceId), 'Copy lost the diagnostic identity');
   assert(!text.includes('private-fixture-secret'), 'Copy leaked an unknown detail');
   assert(text.includes('pluginVersion: 4.19.2'), 'Copy lost the plugin version');
+  if (scenario === 'encode') {
+    for (const field of ['errorTypes', 'qrEncoder', 'qrRenderer', 'dependencies']) {
+      assert(text.includes(`${field}:`), `Copy lost ${field}`);
+    }
+    for (const value of ['ERR_ZLIB_INITIALIZATION_FAILED', 'TypeError', 'qrcode', 'pngjs']) {
+      assert(diagnostic.textContent.includes(value), `Diagnostic lost ${value}`);
+    }
+  }
   if (scenario === 'startup') {
     for (const field of ['file', 'field', 'issue']) assert(text.includes(`${field}: ${error.details[field]}`), `Copy lost ${field}`);
     assert(diagnostic.textContent.includes('workspaces[0].value'), 'Field position is not visible');

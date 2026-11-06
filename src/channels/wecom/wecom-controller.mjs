@@ -12,6 +12,27 @@ import { publicMessageFailure } from '../shared/message-failure.mjs';
 const ACTIVE_ATTEMPT_STATES = new Set(['pending', 'connecting']);
 const TERMINAL_ATTEMPT_STATES = new Set(['connected', 'failed', 'cancelled', 'expired']);
 
+// A runtime may legitimately sit in 'connecting' while the SDK retries with
+// backoff: every retry emits 'reconnecting', which refreshes lastCheckedAt at
+// least once per reconnect cycle. After a server-side disconnect, however, the
+// SDK marks the close manual and stops for good without emitting anything
+// else, so 'connecting' goes stale forever and initialize() below would keep
+// skipping the bot on every supervisor pass. A 'connecting' status whose last
+// transition is older than this grace is treated as stalled and restarted.
+const STALLED_CONNECTING_GRACE_MS = 120_000;
+// Two deployments holding the same credential keep kicking each other, and
+// every restart authenticates successfully (so failure-based backoff never
+// triggers) while only surviving one reconnect cycle. A connection that
+// dropped again within this window of being established counts as short-lived
+// and its restarts are paced; a connection that stays healthy this long
+// proves the bot is not in a kick loop and clears the pacing.
+const STABLE_CONNECTION_MS = 300_000;
+// Automatic restarts are paced per bot: when the same credential is held by
+// another connection, each side kicks the other, and restarting at supervisor
+// cadence would storm the provider and fight the legitimate holder.
+const RESTART_BACKOFF_INITIAL_MS = 60_000;
+const RESTART_BACKOFF_MAX_MS = 600_000;
+
 function cleanString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -49,6 +70,8 @@ export class WecomController {
   #transitions = new Map();
   #revision = 0;
   #closed = false;
+  #now;
+  #restartBackoff = new Map();
 
   constructor({
     qrAuth,
@@ -57,6 +80,7 @@ export class WecomController {
     createRuntime,
     deleteState = async () => {},
     logger = console,
+    nowImpl = Date.now,
   }) {
     if (!qrAuth || typeof qrAuth.start !== 'function' || typeof qrAuth.poll !== 'function') {
       throw new TypeError('Enterprise WeChat QR auth is required');
@@ -70,12 +94,14 @@ export class WecomController {
       throw new TypeError('WecomController requires a config store');
     }
     if (typeof createRuntime !== 'function') throw new TypeError('createRuntime is required');
+    if (typeof nowImpl !== 'function') throw new TypeError('nowImpl must be a function');
     this.#qrAuth = qrAuth;
     this.#credentials = credentials;
     this.#configStore = configStore;
     this.#createRuntime = createRuntime;
     this.#deleteState = deleteState;
     this.#logger = logger;
+    this.#now = nowImpl;
     this.#diagnostics = createConnectionDiagnostics({ channel: 'wecom', logger });
   }
 
@@ -91,17 +117,47 @@ export class WecomController {
     for (const config of this.#configStore.list()) {
       await this.#withBotTransition(config.botId, async () => {
         const existing = this.#runtimes.get(config.botId)?.status;
-        if (this.#closed || existing?.ready || existing?.wecomConnectionState === 'connecting') return;
+        if (this.#closed || existing?.ready) {
+          // A single successful authenticate does not prove the bot is back
+          // for good: in a kick loop every restart authenticates and is
+          // dropped again one cycle later. Only a connection that has now
+          // held healthy past the stability window clears the pacing.
+          if (existing?.ready && this.#connectionStable(existing)) this.#restartBackoff.delete(config.botId);
+          return;
+        }
+        if (existing?.wecomConnectionState === 'connecting' && !this.#stalledConnecting(existing)) return;
+        const stalled = this.#stalledConnecting(existing);
+        const shortLived = stalled && this.#shortLivedConnecting(existing);
+        const backoff = this.#restartBackoff.get(config.botId);
+        if (backoff && backoff.nextAttemptAt > this.#now()) return;
+        if (shortLived && !backoff) {
+          // First short-lived drop: schedule one pacing window before
+          // contending for the credential again, instead of grabbing it back
+          // at supervisor cadence and immediately kicking the other side.
+          this.#scheduleRestartBackoff(config.botId);
+          this.#logger.warn?.(`[dsh-im:wecom] bot ${config.botId} connection was short-lived; deferring reconnect`);
+          return;
+        }
         try {
           const secret = await this.#resolveSecret(config.secretRef);
           if (!secret) {
             this.#errors.set(config.botId, safeError('missing-secret', t('企业微信机器人凭据缺失，请移除后重新扫码。')));
             return;
           }
+          if (stalled) {
+            if (shortLived) {
+              // The pacing window has elapsed; contend again. The schedule
+              // above doubles the next window first, so a renewed kick loop
+              // slows down instead of cycling at supervisor cadence.
+              this.#scheduleRestartBackoff(config.botId);
+            }
+            this.#logger.warn?.(`[dsh-im:wecom] bot ${config.botId} connection stalled in 'connecting'; restarting`);
+          }
           await this.#startRuntime(config, secret);
           this.#errors.delete(config.botId);
         } catch (error) {
           this.#errors.set(config.botId, this.#failure(error, 'connection-failed', t('企业微信连接未就绪，插件会自动重试。')));
+          this.#scheduleRestartBackoff(config.botId);
           this.#logger.warn?.(`[dsh-im:wecom] bot ${config.botId} failed to initialize`);
         } finally {
           this.#touch();
@@ -109,6 +165,38 @@ export class WecomController {
       });
     }
     return this.status();
+  }
+
+  #stalledConnecting(status) {
+    if (status?.wecomConnectionState !== 'connecting') return false;
+    const { lastCheckedAt } = status;
+    return typeof lastCheckedAt === 'number' && this.#now() - lastCheckedAt > STALLED_CONNECTING_GRACE_MS;
+  }
+
+  // Whether the connection that just went silent had been established for
+  // less than the stability window: the signature of a credential contested
+  // by another deployment, as opposed to an ordinary healthy connection that
+  // dropped. Based on the timestamps of the drop (lastCheckedAt) and of the
+  // last successful authenticate (lastConnectedAt), so it does not change as
+  // time passes without a new connection.
+  #shortLivedConnecting(status) {
+    const { lastCheckedAt, lastConnectedAt } = status ?? {};
+    return typeof lastCheckedAt === 'number' && typeof lastConnectedAt === 'number'
+      && lastCheckedAt > lastConnectedAt
+      && lastCheckedAt - lastConnectedAt < STABLE_CONNECTION_MS;
+  }
+
+  #connectionStable(status) {
+    const { lastConnectedAt } = status ?? {};
+    return typeof lastConnectedAt === 'number' && this.#now() - lastConnectedAt >= STABLE_CONNECTION_MS;
+  }
+
+  #scheduleRestartBackoff(botId) {
+    const entry = this.#restartBackoff.get(botId) ?? { consecutive: 0, nextAttemptAt: 0 };
+    entry.consecutive += 1;
+    entry.nextAttemptAt = this.#now()
+      + Math.min(RESTART_BACKOFF_INITIAL_MS * 2 ** (entry.consecutive - 1), RESTART_BACKOFF_MAX_MS);
+    this.#restartBackoff.set(botId, entry);
   }
 
   async startProvisioning() {

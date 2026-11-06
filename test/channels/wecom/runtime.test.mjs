@@ -225,3 +225,31 @@ test('Enterprise WeChat runtime enables result-file delivery without per-bot con
   assert.equal(typeof onArtifact, 'function');
   await runtime.stop();
 });
+
+test('Enterprise WeChat runtime forwards stream supervision options to the bridge', async () => {
+  const client = new FakeClient();
+  const bridgeOptionsSeen = [];
+  const runtime = new WecomRuntime({
+    config: { botId: 'wecom_bot', remoteBotId: 'remote-bot' },
+    secret: 'private-secret',
+    harness: { ensureRunning: async () => true },
+    state: {},
+    createClient: () => client,
+    streamRotateAfterMs: 1234,
+    streamSilentProbeMs: 567,
+    createBridge: (options) => {
+      bridgeOptionsSeen.push(options);
+      return { accept() {}, stop() {}, waitForIdle: async () => {} };
+    },
+  });
+  await runtime.start();
+  try {
+    assert.equal(bridgeOptionsSeen.length, 1);
+    const options = bridgeOptionsSeen[0];
+    assert.equal(options.streamRotateAfterMs, 1234);
+    assert.equal(options.streamSilentProbeMs, 567);
+    assert.equal(typeof options.replyTimeoutMs, 'number');
+  } finally {
+    await runtime.stop();
+  }
+});

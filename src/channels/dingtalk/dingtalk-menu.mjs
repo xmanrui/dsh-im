@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { workspacePathSnapshot } from '../shared/workspace-command.mjs';
+import { conversationSessionWorkspace, workspacePathSnapshot } from '../shared/workspace-command.mjs';
 import { t } from '../shared/i18n.mjs';
 
 export const DINGTALK_MENU_TEMPLATE_ID = '9ca31362-e5b3-409c-a694-6993706a6004.schema';
@@ -19,9 +19,8 @@ const presetCommand = (id) => `/preset ${/^\d+$/u.test(id) ? 'id:' : ''}${id}`;
 // as a command supplied by the client or as a prompt for the model.
 export async function dingtalkMenuSnapshot(harness, state, key, signal) {
   const workspace = harness.currentWorkspace?.();
-  const currentSessionWorkspace = () => typeof harness.currentConversationWorkspace === 'function'
-    ? harness.currentConversationWorkspace(key) : harness.currentWorkspace?.();
-  const sessionWorkspace = currentSessionWorkspace();
+  const currentSessionWorkspace = () => conversationSessionWorkspace(harness, key, { signal });
+  const sessionWorkspace = await currentSessionWorkspace();
   const sessionId = state.sessionFor(key);
   const options = { signal };
   const results = await Promise.allSettled([
@@ -36,7 +35,7 @@ export async function dingtalkMenuSnapshot(harness, state, key, signal) {
   ]);
   signal?.throwIfAborted();
   if (harness.currentWorkspace?.() !== workspace
-    || currentSessionWorkspace() !== sessionWorkspace || state.sessionFor(key) !== sessionId) {
+    || await currentSessionWorkspace() !== sessionWorkspace || state.sessionFor(key) !== sessionId) {
     throw new Error(t('会话或工作区已变化，请重新发送 /m。'));
   }
   const [paths, listed, catalog, settings] = results.map((r) => r.status === 'fulfilled' ? r.value : null);

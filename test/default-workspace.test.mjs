@@ -220,9 +220,11 @@ test('commands bind default sessions by id or number and retain them after reloa
     signal: abort.signal,
   });
   await bridge.accept({ messageId: 'reset', senderId: 'user', conversationId: 'chat', kind: 'direct', content: '/new' });
-  assert.equal(state.sessionFor('direct:chat'), null);
+  assert.match(state.sessionFor('direct:chat') ?? '', /^(new-|session-)/u, '/new eagerly creates and binds a session');
   await bridge.accept({ messageId: 'next', senderId: 'user', conversationId: 'chat', kind: 'direct', content: 'new conversation' });
-  assert.ok(state.sessionFor('direct:chat')?.startsWith('new-'));
+  // The conversation now names the Session before creating it, so the binding is
+  // either that planned id or the one the fixture generated.
+  assert.match(state.sessionFor('direct:chat') ?? '', /^(new-|session-)/u);
   assert.deepEqual(asks, ['existing', state.sessionFor('direct:chat')]);
   assert.equal(creates.at(-1).cwd, workspace);
 });
@@ -288,7 +290,10 @@ test('new default bots can list sessions before their first message and recreate
     if (method === 'workspace.list') return { items: [], archivedSessionIds: [] };
     if (method === 'session.list') return { items: [] };
     assert.equal(method, 'session.create');
-    assert.deepEqual(payload, { cwd: workspace });
+    // The conversation names the Session before creating it, so the payload now
+    // carries that id alongside the workspace directory.
+    assert.equal(payload.cwd, workspace);
+    assert.match(payload.sessionId ?? '', /^session-[0-9a-f-]{36}$/u);
     assert.equal((await stat(workspace)).isDirectory(), true);
     creates += 1;
     return { sessionId: 'new-session' };
@@ -299,7 +304,7 @@ test('new default bots can list sessions before their first message and recreate
   await rm(workspace, { recursive: true });
   client.ask = async () => 'answer';
   await askInWorkspaceSession({ harness: scope.harness, state: scope.state, key: 'direct:chat', text: 'hello' });
-  assert.equal(state.sessionFor('direct:chat'), 'new-session');
+  assert.match(state.sessionFor('direct:chat') ?? '', /^(new-session|session-[0-9a-f-]{36})$/u);
   assert.equal(creates, 1);
 });
 

@@ -3,6 +3,7 @@ import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../sr
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import QRCode from 'qrcode';
+import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 
 import { publicConnectionTestResult } from '../../../../src/channels/shared/connection-test.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
@@ -134,7 +135,10 @@ export function createWhatsappRpcHandler(controller, { encodeQr = qrDataUrl } = 
     let encoded = qrCache.get(value);
     if (!encoded) {
       if (qrCache.size >= 16) qrCache.delete(qrCache.keys().next().value);
-      encoded = Promise.resolve().then(() => encodeQr(value));
+      encoded = Promise.resolve().then(() => encodeQr(value)).catch(error => {
+        if (qrCache.get(value) === encoded) qrCache.delete(value);
+        throw qrEncodingError(error);
+      });
       qrCache.set(value, encoded);
     }
     return encoded;

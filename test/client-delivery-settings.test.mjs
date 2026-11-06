@@ -112,16 +112,19 @@ const connectedAccount = Object.freeze({
   }),
 });
 
-test('delivery settings define only the ten supported IM channel routes', () => {
+test('delivery settings define the supported IM and email channel routes', () => {
   assert.deepEqual(BOT_SETTINGS_TABS, [
     { id: 'general', label: '通用' },
     { id: 'delivery', label: '投递设置' },
+    { id: 'ds-bot', label: '绑定 DS Bot' },
     { id: 'access', label: '访问设置' },
   ]);
   assert.deepEqual(FEISHU_BOT_SETTINGS_TABS, [
     { id: 'general', label: '通用' },
     { id: 'delivery', label: '投递设置' },
+    { id: 'ds-bot', label: '绑定 DS Bot' },
     { id: 'access', label: '访问设置' },
+    { id: 'conversation-directory', label: '会话目录' },
     { id: 'group', label: '群聊' },
     { id: 'slash', label: '指令面板' },
     { id: 'voice', label: '语音交互' },
@@ -132,7 +135,7 @@ test('delivery settings define only the ten supported IM channel routes', () => 
   assert.equal(DELIVERY_RPC_CHANNEL, '/dsh-im-delivery');
   assert.deepEqual(Object.keys(DELIVERY_CHANNEL_DEFINITIONS), [
     'weixin', 'feishu', 'dingtalk', 'wecom', 'wecomApp', 'qq',
-    'slack', 'telegram', 'discord', 'whatsapp', 'imessage',
+    'slack', 'telegram', 'discord', 'whatsapp', 'imessage', 'email',
   ]);
   assert.deepEqual(
     DELIVERY_CHANNEL_DEFINITIONS.feishu.fields.user.map((field) => field.key),
@@ -147,7 +150,11 @@ test('delivery settings define only the ten supported IM channel routes', () => 
     ['chatId', 'messageThreadId'],
   );
   assert.equal('office' in DELIVERY_CHANNEL_DEFINITIONS, false);
-  assert.deepEqual(Object.keys(ACCESS_CHANNEL_DEFINITIONS), Object.keys(DELIVERY_CHANNEL_DEFINITIONS));
+  // 邮箱使用独立的发件人设置，不在共享访问策略表单中。
+  assert.deepEqual(
+    Object.keys(ACCESS_CHANNEL_DEFINITIONS),
+    Object.keys(DELIVERY_CHANNEL_DEFINITIONS).filter((channel) => channel !== 'email'),
+  );
   assert.equal(ACCESS_CHANNEL_DEFINITIONS.weixin.groupSupported, false);
 });
 
@@ -284,7 +291,7 @@ test('expanded card more settings opens a bot-scoped page and returns in place',
     0,
   );
   const settingsTabs = page.findAllByProps({ role: 'tab' });
-  assert.deepEqual(settingsTabs.map(textOf), ['通用', '投递设置', '访问设置']);
+  assert.deepEqual(settingsTabs.map(textOf), ['通用', '投递设置', '绑定 DS Bot', '访问设置']);
   const settingsTab = settingsTabs[0];
   const settingsPanel = page.findByProps({ role: 'tabpanel' });
   assert.equal(textOf(settingsTab), '通用');
@@ -395,7 +402,7 @@ test('Feishu more settings has separate group and voice tabs, with only group co
 
   const page = renderer.root.findByProps({ className: 'dim-deliveryPage' });
   assert.deepEqual(page.findAllByProps({ role: 'tab' }).map(textOf), [
-    '通用', '投递设置', '访问设置', '群聊', '指令面板', '语音交互',
+    '通用', '投递设置', '绑定 DS Bot', '访问设置', '会话目录', '群聊', '指令面板', '语音交互',
   ]);
   await act(async () => {
     button(page, '群聊').props.onClick();
@@ -542,7 +549,7 @@ test('access settings preserve independent mode drafts and save direct and group
   });
 
   // Common settings plus Feishu-specific tabs.
-  assert.equal(renderer.root.findAllByProps({ role: 'tab' }).length, 6);
+  assert.equal(renderer.root.findAllByProps({ role: 'tab' }).length, 8);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessScene' }).length, 2);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessOwnerNotice' }).length, 0);
   assert.equal(accessHelpButtons(renderer.root).length, 2);
@@ -1051,6 +1058,65 @@ test('recent conversation picker explains the empty state and refreshes on deman
   assert.equal(calls.filter((call) => call.endpoint === DELIVERY_ENDPOINTS.listSuggestions).length, 2);
 });
 
+test('email recipients can be entered, tested, and saved when conversation suggestions are empty', async (t) => {
+  const calls = [];
+  let targets = [];
+  const botId = 'bot-email';
+  const renderer = await mount(t, {
+    channel: 'email',
+    account: { ...connectedAccount, botId },
+    rpcCall: async (endpoint, payload) => {
+      calls.push({ endpoint, payload });
+      if (endpoint === DELIVERY_ENDPOINTS.list) return { ok: true, value: { targets } };
+      if (endpoint === DELIVERY_ENDPOINTS.listSuggestions) {
+        return { ok: true, value: { suggestions: [] } };
+      }
+      if (endpoint === DELIVERY_ENDPOINTS.test) return { ok: true, value: { sent: true } };
+      if (endpoint === DELIVERY_ENDPOINTS.create) {
+        targets = [payload.target];
+        return { ok: true, value: payload.target };
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    },
+    onBack() {},
+  });
+  await act(async () => {
+    button(renderer.root, '新建目标').props.onClick();
+    await flush();
+  });
+  await act(async () => {
+    button(renderer.root, '手动填写（高级）').props.onClick();
+    await flush();
+  });
+  const addressInput = renderer.root.findByProps({ name: 'address' });
+  assert.equal(addressInput.props.inputMode, 'email');
+  assert.equal(renderer.root.findByProps({ name: 'kind' }).props.value, 'user');
+  await act(async () => {
+    renderer.root.findByProps({ name: 'targetId' }).props.onChange({ target: { value: 'recipient' } });
+    addressInput.props.onChange({ target: { value: ' user@example.com ' } });
+    await flush();
+  });
+  await act(async () => {
+    button(renderer.root, '测试').props.onClick();
+    await flush();
+  });
+  assert.deepEqual(calls.find((call) => call.endpoint === DELIVERY_ENDPOINTS.test), {
+    endpoint: DELIVERY_ENDPOINTS.test,
+    payload: { botId, target: { kind: 'user', route: { address: 'user@example.com' } } },
+  });
+  await act(async () => {
+    renderer.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    await flush();
+  });
+  assert.deepEqual(calls.find((call) => call.endpoint === DELIVERY_ENDPOINTS.create), {
+    endpoint: DELIVERY_ENDPOINTS.create,
+    payload: { botId, target: {
+      targetId: 'recipient', kind: 'user', route: { address: 'user@example.com' },
+    } },
+  });
+  assert.ok(renderer.root.findByProps({ 'data-target-id': 'recipient' }));
+});
+
 test('recent conversation names remain platform data in the English UI', async (t) => {
   setImTranslator((key) => en[key] ?? key);
   t.after(() => setImTranslator(null));
@@ -1091,7 +1157,7 @@ test('recent conversation names remain platform data in the English UI', async (
   );
   assert.deepEqual(
     renderer.root.findAllByProps({ role: 'tab' }).map(textOf),
-    ['General', 'Delivery settings', 'Access settings', 'Group', 'Command panel', 'Voice'],
+    ['General', 'Delivery settings', 'Bind DS Bot', 'Access settings', 'Conversation directories', 'Group', 'Command panel', 'Voice'],
   );
 });
 

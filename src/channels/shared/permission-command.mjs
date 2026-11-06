@@ -1,3 +1,4 @@
+import { isSessionNotFound } from './session-error.mjs';
 import { createCommandListSnapshots } from './command-list-snapshots.mjs';
 import { t } from './i18n.mjs';
 import { withSessionBindingLock } from './session-binding-lock.mjs';
@@ -50,7 +51,7 @@ function errorMessage(error, writing) {
   if (code === WORKSPACE_SESSION_STALE || code === 'workspace-bot-not-found') {
     return t('工作区或机器人状态已发生变化，请重试。');
   }
-  if (['session-not-found', 'session/not-found', 'agent-not-found'].includes(code)) {
+  if (isSessionNotFound(code) || code === 'agent-not-found') {
     return t('当前聊天绑定的会话已不存在，请先绑定或建立会话。');
   }
   if (['commands-unavailable', 'permissions-unavailable', 'harness-api-not-found',

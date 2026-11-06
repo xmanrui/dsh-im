@@ -1,15 +1,113 @@
 import imageInput from '../../src/channels/shared/i18n-en/image-input.mjs';
 import diagnostics from '../../src/channels/shared/i18n-en/diagnostics.mjs';
 import weixinDiagnostics from '../../src/channels/weixin/connection-error.en.mjs';
+import { RU } from './i18n-ru.js';
 import * as React from 'react';
 
 export const IM_LOCALE_NAMESPACE = 'dsh-im';
 
+// Sentences the settings UI composes itself: the dictionaries carry them as
+// templates with `{name}` placeholders, looked up like any other key and filled in
+// after translation (see localizeTemplate), so word order belongs to the target
+// language instead of the Chinese sentence it was assembled from.
+const COMPOSED = Object.freeze({
+  '使用 Bot Token 接入 {channel} 机器人': 'Connect a {channel} bot with a Bot Token',
+  '已接入的 {channel} 机器人': 'Connected {channel} bots',
+  '正在读取 {channel} 机器人状态…': 'Loading {channel} bot status…',
+  '无法读取 {channel} 机器人状态': 'Could not load {channel} bot status',
+  '尚未接入 {channel} 机器人': 'No {channel} bot connected yet',
+  '手动接入{channel}机器人': 'Connect {channel} bot manually',
+  '{channel} 设置': '{channel} settings',
+  '{name}机器人设置': '{name} bot settings',
+  '{channel}机器人': '{channel} bot',
+  '{channel} 服务返回了无法识别的响应': '{channel} service returned an unrecognized response',
+  '{channel} 操作失败': '{channel} operation failed',
+  '{channel}连接尚未就绪': '{channel} connection is not ready',
+  '{channel} 服务没有返回有效的机器人列表': '{channel} service did not return a valid bot list',
+  '{channel}操作失败，请稍后重试': '{channel} operation failed; try again later',
+  '{channel} 设置页缺少 RPC 连接': 'The {channel} settings are missing an RPC connection',
+  '{subject}运行正常': '{subject} is healthy',
+  '{connected} / {configured} 在线': '{connected}/{configured} online',
+  '已接入 {configured} 个机器人，其中 {connected} 个在线': '{connected} of {configured} bots online',
+  '从 DeepSeek Harness 移除“{name}”？': 'Remove “{name}” from DeepSeek Harness?',
+  '从 DeepSeek Harness 移除{name}': 'Remove {name} from DeepSeek Harness',
+  '移除{name}': 'Remove {name}',
+  '{bot}操作失败，请查看机器人状态。': '{bot} operation failed. Check the bot status.',
+  '这会停止消息连接，并删除本机保存的 {credentials}、机器人配置及会话映射。{platform}中的机器人不会被自动删除。': 'This stops the message connection and removes the locally stored {credentials}, bot configuration, and session mappings. The bot in {platform} is not deleted.',
+  '{bot}的飞书授权流程': 'Feishu authorization flow for {bot}',
+  '用于为{bot}补全权限与回调的一次性授权二维码': 'One-time QR code for completing permissions and the callback for {bot}',
+  '用于为{bot}开通群消息权限的一次性授权二维码': 'One-time QR code for granting group-message permission to {bot}',
+  '正在为「{bot}」补全权限与回调': 'Completing permissions and the callback for “{bot}”',
+  '正在为「{bot}」开通群消息权限': 'Granting group-message permission to “{bot}”',
+  '为{bot}补全权限与回调': 'Complete permissions and the callback for {bot}',
+  '{bot}的权限与回调已补全。': 'Permissions and the callback completed for {bot}.',
+  '{bot}的权限补全二维码已生成，请使用飞书扫码。': 'Permission-completion QR code generated for {bot}. Scan it with Feishu.',
+  '{bot}的群消息权限二维码已生成，请使用飞书确认。': 'Group-message permission QR code generated for {bot}. Confirm it with Feishu.',
+  '{bot}已开通群消息权限，并启用“响应所有群消息”。': '{bot} now has group-message permission and “Respond to all group messages” is enabled.',
+  '{bot}已连接，可以在飞书中开始聊天。': '{bot} is connected and ready to chat in Feishu.',
+  '{bot}连接检查完成。': '{bot} connection check completed.',
+  '{bot}已重新连接。': '{bot} reconnected.',
+  '{bot}已从此 DeepSeek Harness 移除；飞书开放平台中的应用未被删除。': '{bot} was removed from this DeepSeek Harness. The app in Feishu Open Platform was not deleted.',
+  '{bot}移除失败，请重试。': '{bot} could not be removed; try again.',
+  '检查连接{name}': 'Check connection {name}',
+  '重试连接{name}': 'Reconnect {name}',
+  '二维码剩余 {remaining}': 'QR code expires in {remaining}',
+  '连接检查失败：{error}（参考号：{reference}）': 'Connection check failed: {error} (reference: {reference})',
+  '连接检查失败：{error}': 'Connection check failed: {error}',
+  '操作失败：{error}': 'Operation failed: {error}',
+  '状态刷新失败：{error}': 'Status refresh failed: {error}',
+  '状态自动刷新失败：{error}': 'Automatic status refresh failed: {error}',
+  '请输入 -1、0 或 1~{max} 之间的整数。': 'Enter -1, 0, or an integer from 1 to {max}.',
+  '查看会话 {sessionId}': 'View session {sessionId}',
+  '复制会话 ID {sessionId}': 'Copy session ID {sessionId}',
+  '{count} 个会话': '{count} sessions',
+  '事件 {seq}': 'Event {seq}',
+  '读取失败：{error}': 'Could not read the session: {error}',
+  '已显示 {shown} / {total} 条正文': 'Showing {shown} / {total} messages',
+  '加载失败：{error}': 'Could not load channel sessions: {error}',
+});
+
 const EN = Object.freeze({
+  ...COMPOSED,
+  "私聊对象": "Private chat",
+  "选择私聊对象": "Select a private chat",
+  "仅支持已经建立会话的私聊，请先与机器人私聊后刷新。": "Only established private chats are supported. Message the bot privately, then refresh.",
+  "选择 DS Bot 和私聊对象，直接使用 Bot 的会话。": "Choose a DS Bot and a private chat to use the Bot’s session.",
+  "还没有可绑定的私聊。先给这个机器人发一条私聊消息，再点击刷新。": "No private chats yet. Send this bot a private message, then refresh.",
+
+  "绑定 DS Bot": "Bind DS Bot",
+  "正在检测 DS Bot…": "Checking DS Bot…",
+  "选择 DS Bot": "Select DS Bot",
+  "暂无可选 DS Bot": "No available DS Bots",
+  "暂无可选私聊对象": "No available private chats",
+  "已绑定的 DS Bot 和私聊对象不可重复选择，解除绑定后可重新选择。": "Bound DS Bots and private chats cannot be selected again. Unbind them to make them available.",
+  "所选 DS Bot 或私聊对象已绑定，请刷新后重新选择。": "The selected DS Bot or private chat is already bound. Refresh and choose again.",
+  "解除绑定": "Unbind",
+  "已绑定": "Bound",
+  "未安装 DS Bot，请先在 DSH 插件管理中安装 ds-bot，然后刷新。": "DS Bot is not installed. Install ds-bot in DSH plugin management, then refresh.",
+  "DS Bot 尚未启用，请在 DSH 插件管理中启用后刷新。": "DS Bot is disabled. Enable it in DSH plugin management, then refresh.",
+  "暂时无法读取 DS Bot，请检查插件是否正常运行后重试。": "Unable to read DS Bot. Check that the plugin is running, then retry.",
+  "DS Bot 当前由其他 Host 管理，请在运行它的 Host 中绑定。": "DS Bot is managed by another Host. Bind it on that Host.",
+  "绑定 DS Bot 仅支持当前 Host 的会话，请先检查机器人的 Harness 连接设置。": "DS Bot binding requires the current Host. Check the bot’s Harness connection settings.",
+  "所选 DS Bot 已不存在，请刷新后重新选择。": "The selected DS Bot no longer exists. Refresh and select another.",
+  "绑定设置保存失败，请刷新后重试。": "Could not save the binding. Refresh and retry.",
+  "绑定已保存。": "Binding saved.",
+  "已解除绑定，聊天记录保留。": "Binding removed. Chat history is preserved.",
+  "还没有 DS Bot，请先在 DS Bot 中创建机器人后刷新。": "No bots yet. Create a bot in DS Bot, then refresh.",
+  "DS Bot 暂不可用": "DS Bot unavailable",
+
   ...weixinDiagnostics,
   ...diagnostics,
   ...imageInput,
   '$locale': 'en',
+  '侧边栏入口': 'Sidebar entry',
+  '自动模式：未配置渠道时显示，配置至少一个渠道后隐藏。隐藏后仍可从插件详情或设置进入，不影响机器人后台运行。': 'Automatic: show before any channel is configured, then hide. Plugin details and Settings remain available; bots keep running in the background.',
+  '自动隐藏': 'Auto-hide',
+  '始终显示': 'Always show',
+  '始终隐藏': 'Always hide',
+  '正在读取侧边栏设置…': 'Loading sidebar settings…',
+  '无法读取或保存侧边栏设置，请稍后重试。': 'Unable to read or save sidebar settings. Try again.',
+  '侧边栏设置返回了无法识别的响应。': 'Unrecognized sidebar settings response.',
   '保持本页打开，等待权限生效': 'Keep this page open while the permission takes effect',
   "群聊天记录": "Group chat history",
   "群聊天记录保留天数": "Group chat retention (days)",
@@ -59,17 +157,65 @@ const EN = Object.freeze({
   'macOS Messages 权限': 'macOS Messages permissions',
   'IM机器人': 'IM bots',
   '打开 IM机器人': 'Open IM bots',
-  '返回插件详情': 'Back to plugin details',
   'IM机器人设置': 'IM bot settings',
   'IM 面板加载失败': 'Could not load the IM panel',
   '更多机器人设置': 'More bot settings',
   '更多设置': 'More settings',
+  '会话目录': 'Conversation directories',
+  '会话目录隔离': 'Conversation directory isolation',
+  '会话目录隔离已开启，工作区由对话自动分配。': 'Conversation directory isolation is enabled. Workspaces are assigned automatically.',
+  '无法读取会话目录设置。': 'Could not load conversation directory settings.',
+  '保存会话目录设置失败。': 'Could not save conversation directory settings.',
+  '让每个对话在自己的目录里工作，避免多人使用同一机器人时互相覆盖文件。默认关闭。': 'Give each conversation its own directory to prevent users sharing a bot from overwriting files. Off by default.',
+  '设置保存后对新会话生效。发送 /new 使用新设置；已有会话和旧目录中的文件保留。开启后无法手动修改工作区。': 'New settings apply to new sessions. Send /new to use them. Existing sessions and files remain. Workspaces cannot be changed manually while isolation is enabled.',
+  '当前类型全部机器人会话目录隔离': 'Channel default · Conversation directory isolation',
+  '继承渠道默认；保存后仅覆盖当前机器人。': 'Inherits the channel default. Saving overrides it for this bot only.',
+  '启用会话目录隔离': 'Enable conversation directory isolation',
+  '目录策略': 'Directory strategy',
+  '每个对话固定一个目录': 'One directory per conversation',
+  '每次新建会话使用新目录': 'A new directory for every session',
+  '目录前缀': 'Directory prefix',
+  '恢复继承渠道默认': 'Restore channel default',
+  '清除渠道默认': 'Clear channel default',
+  '1–32 位字母、数字、下划线或连字符，默认为 conv-。': '1–32 letters, digits, underscores or hyphens. Default: conv-.',
   '向左滚动设置页签': 'Scroll settings tabs left',
   '向右滚动设置页签': 'Scroll settings tabs right',
   '常用配置': 'Common settings',
   '机器人设置': 'Bot settings',
   '机器人设置页签': 'Bot settings tabs',
   '投递设置': 'Delivery settings',
+  '机器人群聊行为': 'Bot in groups',
+  '新群聊默认设置': 'Default for new groups',
+  '响应条件': 'React to',
+  '不响应': 'Do not react',
+  '被 @ 或回复时（任何人）': 'Mention or reply, anyone',
+  '被 @ 或回复时（仅名单成员）': 'Mention or reply, listed members only',
+  '所有消息（任何人）': 'All messages, anyone',
+  '所有消息（仅名单成员）': 'All messages, listed members only',
+  '成员名单': 'Members list',
+  '名单为空：该模式不会响应任何成员。': 'The list is empty, so nobody can trigger the bot in this mode.',
+  '当前模式不使用名单。': 'This mode does not use the list.',
+  '群 ID': 'Group',
+  '标题': 'Title',
+  '最近活动': 'Last activity',
+  '（默认）': ' (default)',
+  '× 移除': '× Remove',
+  '自定义': 'Customize',
+  '添加群聊': 'Add group',
+  '群 ID、@用户名或消息链接': 'Group ID, @username or message link',
+  '支持数字 ID、@用户名、t.me/<name> 或 t.me/c/<id>/<msg>；真实 ID 通过 getChat 解析。': 'Accepts a numeric ID, @username, t.me/<name> or t.me/c/<id>/<msg>; the real ID is resolved through getChat.',
+  '+ 添加': '+ Add',
+  '保存群聊设置': 'Save group settings',
+  '已从列表移除，保存后生效。': 'Removed from the list. Save to apply.',
+  '已添加，保存后生效。': 'Added. Save to apply.',
+  '已添加。Telegram 未确认该群（机器人可能还不在群里），保存后生效。': 'Added without Telegram confirmation (the bot may not be in that group yet). Save to apply.',
+  '群聊设置已保存。': 'Group settings saved.',
+  '正在读取群聊设置…': 'Loading group settings…',
+  '无法读取群聊设置，请稍后重试。': 'Unable to read group settings. Try again.',
+  '无法保存群聊设置，请稍后重试。': 'Unable to save group settings. Try again.',
+  '无法读取或保存群聊设置，请稍后重试。': 'Unable to read or save group settings. Try again.',
+  '无法解析该群聊，请重试或填写数字群 ID。': 'Could not resolve this group. Try again or enter the numeric group ID.',
+  '该群已在列表中，请编辑上方的卡片。': 'This group is already in the list. Edit its card above instead.',
   '访问设置': 'Access settings',
   '查看访问权限说明': 'View access permission details',
   '允许所有用户': 'Allow all users',
@@ -505,6 +651,7 @@ const EN = Object.freeze({
   '查看模型设置说明': 'View model setting help',
   '跟随默认模型': 'Follow the default model',
   '模型修改失败，请重试。': 'Could not update the model. Try again.',
+  '无法读取所选模型的列表，模型设置未保存，请重试。': 'Could not load the selected model’s catalog. The model setting was not saved. Try again.',
   '模型无效。': 'The model is invalid.',
   '模型不存在或不可用。': 'The model does not exist or is unavailable.',
   '当前模型已不可用，请选择其他模型或跟随默认模型。': 'The current model is unavailable. Choose another model or follow the default.',
@@ -621,13 +768,6 @@ const EN = Object.freeze({
   '飞书服务返回的应用更新信息缺少 botId': 'Feishu app-update status is missing the bot ID',
   '飞书服务返回了不匹配的注册进度': 'Feishu returned registration progress for a different operation',
   '此机器人': 'this bot',
-  '用于为${botName}开通群消息权限的一次性授权二维码': 'One-time QR code for granting group-message permission to ${botName}',
-  '正在为「${botName}」开通群消息权限': 'Granting group-message permission to “${botName}”',
-  '${botName ?? "机器人"}的权限补全二维码已生成，请使用飞书扫码。': 'Permission-completion QR code generated for ${botName ?? "bot"}. Scan it with Feishu.',
-  '${botName ?? "机器人"}的群消息权限二维码已生成，请使用飞书确认。': 'Group-message permission QR code generated for ${botName ?? "bot"}. Confirm it with Feishu.',
-  '${targetBotName}已开通群消息权限，并启用“响应所有群消息”。': '${targetBotName} now has group-message permission and “Respond to all group messages” is enabled.',
-  '${targetBot.bot.name}已开通群消息权限，并启用“响应所有群消息”。': '${targetBot.bot.name} now has group-message permission and “Respond to all group messages” is enabled.',
-  '${targetBot.bot.name}已连接，可以在飞书中开始聊天。': '${targetBot.bot.name} is connected and ready to chat in Feishu.',
   '已取消补全权限与回调。': 'Completing permissions and the callback was cancelled.',
   '已取消群消息权限授权。': 'Group-message permission authorization was cancelled.',
   '权限与回调已更新，但暂时无法确认机器人连接状态': 'Permissions and the callback were updated, but the bot connection could not be confirmed yet',
@@ -772,6 +912,15 @@ const EN = Object.freeze({
   '思考过程留痕': 'Thinking traces',
   '实时显示思考步骤与工具调用，最终答案单独成条': 'Show thinking steps and tool calls as they happen; the final answer arrives as its own message',
   '请提交有效的思考过程留痕设置。': 'Submit a valid thinking-traces setting.',
+  '编号思考帧': 'Number trace frames',
+  '在每帧前加上本轮序号；被节奏跳过的帧也计数，所以编号会跳号（需先打开思考过程留痕）': 'Prefix each frame with its number in the turn; paced-away frames still count, so numbers jump. Requires thinking traces.',
+  '最多每隔多久发送一帧（秒）': 'Send at most one frame every (seconds)',
+  '突发时只发送窗口里最新的一帧，过期的帧丢弃，不排队也不重发': 'A burst sends only its latest frame; stale frames are dropped, not queued or resent',
+  '不限制（0）': 'No limit (0)',
+  '请提交有效的思考帧节奏设置。': 'Submit a valid trace cadence setting.',
+  '消息发送上限': 'Message limit',
+  '每个聊天每分钟的消息数；机器人会等待而不是丢弃': 'Per chat, messages per minute; the bot waits instead of dropping',
+  '请提交有效的消息发送上限。': 'Submit a valid message limit.',
   '正在使用{name}…': 'Using {name}…',
   '访问模式': 'Access mode',
   'Telegram 访问模式': 'Telegram access mode',
@@ -867,7 +1016,6 @@ const EN = Object.freeze({
   '钉钉扫码服务没有返回有效的绑定任务': 'DingTalk did not return a valid setup attempt',
   '钉钉 Stream 长连接运行正常': 'DingTalk Stream connection is healthy',
   '钉钉服务没有返回有效的机器人列表': 'DingTalk did not return a valid bot list',
-  '${totals.connected} / ${totals.configured} 在线': '${totals.connected} / ${totals.configured} online',
   '用于把钉钉机器人接入 DeepSeek Harness 的一次性二维码': 'One-time QR code for connecting a DingTalk bot to DeepSeek Harness',
   '二维码已过期\\n请重新生成': 'QR code expired\\nGenerate a new one',
   '机器人已创建，正在建立消息连接': 'Bot created. Starting the message connection',
@@ -883,18 +1031,13 @@ const EN = Object.freeze({
   '飞书服务没有返回连接状态': 'Feishu did not return connection status',
   '飞书服务没有返回创建进度': 'Feishu did not return creation progress',
   '飞书服务返回了未知的创建状态': 'Feishu returned an unknown creation status',
-  '已接入 ${totals.configured} 个机器人，其中 ${totals.connected} 个在线': '${totals.connected} of ${totals.configured} bots online',
   '尚未接入机器人': 'No bot connected yet',
   '用于新增 DeepSeek Harness 飞书机器人的一次性授权二维码': 'One-time authorization QR code for adding a Feishu bot to DeepSeek Harness',
   '请刷新后重新扫码': 'Refresh and scan again',
-  '${connected ? "检查连接" : "重试连接"}${bot.name}': '${connected ? "Check connection" : "Reconnect"} ${bot.name}',
   '无法读取飞书机器人': 'Could not load Feishu bots',
   '授权二维码已生成，请使用飞书扫码。': 'Authorization QR code generated. Scan it with Feishu.',
   '飞书机器人凭据已绑定。': 'Feishu bot credentials connected.',
   '已取消添加机器人。': 'Adding the bot was cancelled.',
-  '${newBot.bot.name}已连接，可以在飞书中开始聊天。': '${newBot.bot.name} is connected and ready to chat in Feishu.',
-  '${bot.name}操作失败，请查看机器人状态。': '${bot.name} operation failed. Check the bot status.',
-  '${bot.name}已从此 DeepSeek Harness 移除；飞书开放平台中的应用未被删除。': '${bot.name} was removed from this DeepSeek Harness. The app in Feishu Open Platform was not deleted.',
   '无法读取连接状态': 'Could not load connection status',
   'QQ 服务没有返回扫码绑定进度': 'QQ did not return QR setup progress',
   'QQ 扫码服务没有返回有效的绑定任务': 'QQ did not return a valid setup attempt',
@@ -905,10 +1048,6 @@ const EN = Object.freeze({
   'QQ 服务没有返回有效的机器人列表': 'QQ did not return a valid bot list',
   '尚未绑定 QQ 机器人': 'No QQ bot connected yet',
   '用于绑定 QQ 机器人的一次性二维码': 'One-time QR code for connecting a QQ bot',
-  '${channel}${connectionSummary}运行正常': '${channel}${connectionSummary} is healthy',
-  '${channel} 服务没有返回有效的机器人列表': '${channel} did not return a valid bot list',
-  '使用 Bot Token 接入 ${channel} 机器人': 'Connect a ${channel} bot with a Bot Token',
-  '${model.totals.connected} / ${model.totals.configured} 在线': '${model.totals.connected}/${model.totals.configured} online',
   ' Bot API 长轮询': ' Bot API long polling',
   '企业微信服务没有返回扫码绑定进度': 'WeCom did not return QR setup progress',
   '企业微信扫码服务没有返回有效的绑定任务': 'WeCom did not return a valid setup attempt',
@@ -939,7 +1078,6 @@ const EN = Object.freeze({
   '用于把微信机器人绑定到 DeepSeek Harness 的一次性二维码': 'One-time QR code for connecting a WeChat bot to DeepSeek Harness',
   '保持本页打开，等待消息长轮询变为在线': 'Keep this page open until long polling is online',
   '微信二维码已生成，请使用手机微信扫描。': 'WeChat QR code generated. Scan it with WeChat on your phone.',
-  '移除失败：${presentError(error).message}': 'Removal failed: ${presentError(error).message}',
   '无法读取微信状态': 'Could not load WeChat status',
   'WhatsApp 服务没有返回扫码进度': 'WhatsApp did not return QR setup progress',
   'WhatsApp 服务没有返回有效的扫码任务': 'WhatsApp did not return a valid setup attempt',
@@ -1001,6 +1139,7 @@ const EN = Object.freeze({
   '先在对应平台与机器人聊一条消息，再刷新。': 'Send the bot a message on the platform, then refresh.',
   '已添加': 'Added',
   '手动填写（高级）': 'Enter manually (advanced)',
+  '目标是细粒度设置：某个机器人一旦配置了目标（哪怕关闭会话同步），该机器人的投递就按目标走。如需使用「通用设置 → 投递」里的简单开关，请先删除该机器人的全部目标。': 'Targets are a fine-grained setting: once a bot has any target (even with session sync off), delivery for that bot follows the targets. To use the simple switches under General settings → Delivery, delete all of that bot’s targets first.',
   '测试消息已发送，请到目标会话确认。': 'Test message sent. Confirm it in the target conversation.',
   '测试发送失败，请稍后重试。': 'Test delivery failed. Try again later.',
   '已复制调用参数': 'Call parameters copied',
@@ -1063,7 +1202,6 @@ const EN = Object.freeze({
   '永久保留，不会自动清理': 'Keep forever; nothing is removed automatically',
   '每 Turn 结束后立即清理': 'Cleaned up as soon as each turn ends',
   '小时后自动清理': 'hours until automatic cleanup',
-  '请输入 -1、0 或 1~${INBOUND_TTL_MAX_HOURS} 之间的整数。': 'Enter -1, 0, or an integer from 1 to ${INBOUND_TTL_MAX_HOURS}.',
   '设置保存失败，请稍后重试。': 'Could not save the setting. Try again later.',
   '已保存': 'Saved',
   '通用设置暂不可用。': 'General settings are unavailable.',
@@ -1142,6 +1280,7 @@ const EN = Object.freeze({
   'DeepSeek Harness 会读取该邮箱的新邮件作为指令，并在同一邮件线程内回复处理结果。': 'DeepSeek Harness reads new mail in this mailbox as instructions and replies with the result inside the same mail thread.',
   '邮箱服务商': 'Mail provider',
   '邮箱地址': 'Email address',
+  '收件人': 'Recipient',
   '应用密码 / 授权码': 'App password / authorization code',
   'IMAP/SMTP 授权码': 'IMAP/SMTP authorization code',
   '不是邮箱登录密码；请在邮箱设置中单独生成。': 'This is not your login password; generate it separately in your mailbox settings.',
@@ -1185,6 +1324,59 @@ const EN = Object.freeze({
   '由授权结果自动填入，无需手工填写。': 'Filled in from the authorization; no need to type it.',
   '刷新会话列表': 'Refresh the session list',
   '腾讯 Agent 邮箱需要微信扫码授权。点下面的按钮生成授权链接，在打开的页面里用微信扫码登录并确认。': 'The Tencent Agent mailbox authorizes with a WeChat QR code. Generate an authorization link, then scan it with WeChat on the page that opens and confirm.',
+  '投递': 'Delivery',
+  '会话同步': 'Session sync',
+  '只对已开启会话同步的目标生效：在 Web GUI 里输入的回合、定时提醒、子代理通知等“不是本聊天发起”的回合，其回答会转发到这些目标。消息语言同时影响机器人发送的命令菜单文本。': 'Applies to targets with Session sync turned on: answers of turns this chat did not start (Web GUI input, schedule reminders, subagent notices) are forwarded to those targets. The message language also changes the command menus the bot sends.',
+  '查看会话同步说明': 'Show Session sync help',
+  '插件消息语言': 'Plugin message language',
+  '跟随 DSH 界面语言': 'Same as the DSH interface',
+  '中文': '中文',
+  'English': 'English',
+  'Русский': 'Русский',
+  '镜像 Web 中输入的消息': 'Mirror messages typed in the Web UI',
+  '输入前缀图标': 'Input prefix icon',
+  '投递模型回答': 'Deliver model answers',
+  '回答前缀图标': 'Answer prefix icon',
+  '最多 32 个字符；留空则不添加前缀。': 'Up to 32 characters; leave it empty for no prefix.',
+  '保存投递设置': 'Save delivery settings',
+  '正在读取投递设置…': 'Loading delivery settings…',
+  '投递同步设置通道不可用。': 'The delivery sync settings channel is unavailable.',
+  '会话同步设置返回了无法识别的响应。': 'The delivery settings returned an unrecognized response.',
+  '无法读取或保存会话同步设置，请稍后重试。': 'Could not load or save the delivery settings. Try again later.',
+  '无效的会话同步设置：开关必须是布尔值，图标是不超过 32 个字符的文本。': 'Invalid delivery settings: a switch must be a boolean and an icon is text of at most 32 characters.',
+  '只对已开启会话同步的目标生效；消息语言同时影响机器人发送的命令菜单文本。': 'Applies to targets with Session sync turned on; the message language also changes the command menus the bot sends.',
+  '默认跟随 DSH 界面语言；可以单独固定机器人消息的语言。': 'Follows the DSH interface language by default; you can pin the language of the bot messages separately.',
+  '语言设置暂不可用。': 'The language setting is unavailable.',
+  '在 Web GUI 中发送的消息会作为一条带前缀的消息转发到本聊天的会话同步目标。': 'A message sent in the Web GUI is forwarded to the Session sync target of this chat, prefixed with the icon.',
+  '其他回合（Web 输入、定时提醒、子代理通知等）的模型回答会发送到会话同步目标。': 'Model answers of other turns (Web input, schedule reminders, subagent notices and so on) are sent to the Session sync target.',
+  '微信客服': 'WeCom Customer Service',
+  '浏览器未允许访问剪贴板': 'The browser did not allow clipboard access',
+  '宿主响应缺少 value.channels，请检查 dsh-im host 是否已重载': 'The Host response is missing value.channels. Reload the dsh-im Host and try again.',
+  '宿主响应缺少 value.messages，请检查 dsh-im host 是否已重载': 'The Host response is missing value.messages. Reload the dsh-im Host and try again.',
+  '宿主响应缺少 value.messages': 'The Host response is missing value.messages',
+  '查看该会话的用户与助手正文': 'View the user and assistant messages in this session',
+  '复制失败': 'Copy failed',
+  '复制 ID': 'Copy ID',
+  '通道 / 会话键': 'Channel / conversation key',
+  'DSH 会话 ID': 'DSH session ID',
+  '操作': 'Actions',
+  '助手': 'Assistant',
+  '本条消息过长，已截断。': 'This message was too long and has been truncated.',
+  '会话内容': 'Session content',
+  '只读显示用户与助手正文；系统提示、工具调用和内部推理不显示。': 'Read-only user and assistant messages. System prompts, tool calls, and internal reasoning are hidden.',
+  '返回列表': 'Back to list',
+  '加载更早消息': 'Load earlier messages',
+  '加载中…': 'Loading…',
+  '没有可显示的用户或助手正文。': 'No user or assistant messages to display.',
+  '会话记录': 'Session history',
+  '返回 IM机器人': 'Back to IM bots',
+  '只读列出各 IM 通道当前绑定的 DSH 会话；点击会话 ID 查看正文，不会修改绑定。': 'Read-only list of DSH sessions bound to each IM channel. Select a session ID to view its messages; bindings are not changed.',
+  '正在读取通道会话…': 'Loading channel sessions…',
+  '尚未发现已绑定 DSH 会话的通道。': 'No channels with bound DSH sessions were found.',
+  'limit 或 offset 参数无效': 'The limit or offset parameter is invalid',
+  '该会话不属于指定通道绑定，可能已解绑': 'The session is not bound to the specified channel, or the binding was removed',
+  '宿主 sessionQuery 服务尚未就绪': 'The Host sessionQuery service is not ready',
+  '该会话暂时无法读取，请稍后重试。': 'The session cannot be read right now. Try again later.',
   '请求失败': 'The request failed',
 });
 
@@ -1193,131 +1385,242 @@ export const zh = Object.freeze(Object.fromEntries(
   Object.keys(EN).map((key) => [key, key === '$locale' ? 'zh' : key]),
 ));
 
+// Russian, narrowed to the keys this UI asks for: the shared Host modules it is
+// built from also carry strings no settings surface renders, and a namespace
+// dictionary holding keys the English one does not know would let a mistyped
+// Chinese key hide behind a lookup that happens to miss. The English text is the
+// last resort for a key the narrowed dictionary somehow lost.
+export const ru = Object.freeze(Object.fromEntries(
+  Object.keys(EN).map((key) => [key, RU[key] ?? EN[key]]),
+));
+
 let translate = (key) => key;
 
 export function setImTranslator(next) {
   translate = typeof next === 'function' ? next : (key) => key;
 }
 
+// The language these dictionaries are rendering in. Read through the `$locale`
+// entry rather than a snapshot taken at load time, so a locale whose dictionary
+// registers later is still reported correctly. Anything unrecognized means
+// Chinese, the identity language.
+export function imLocale() {
+  const id = translate('$locale');
+  return id === 'en' || id === 'ru' ? id : 'zh';
+}
+
 export function isEnglish() {
   return translate('$locale') === 'en';
 }
 
-function channelName(value) {
+export const IM_RUSSIAN_LANGUAGE = Object.freeze({ id: 'ru', label: 'Русский', fallback: 'en' });
+
+/**
+ * Register Russian with the DSH locale registry: the definition makes it
+ * selectable and chains its lookups to English, and the dictionary goes in as
+ * one single-locale entry because `ru` is a language pack rather than one of the
+ * two built-in locales.
+ *
+ * The definition is skipped when the id is already occupied — another language
+ * pack may have registered `ru` first, and an occupied id is a hard error there.
+ * The dictionary is registered either way, so Russian strings still resolve.
+ *
+ * @param locale - the client `locale` service.
+ * @returns an idempotent disposer for both registrations.
+ */
+export function installImRussianLocale(locale) {
+  if (typeof locale?.register !== 'function') return () => {};
+  const disposers = [];
+  const defined = (locale.getLocale?.()?.locales ?? []).some(
+    (entry) => entry?.id === IM_RUSSIAN_LANGUAGE.id,
+  );
+  if (!defined && typeof locale.addLanguage === 'function') {
+    try {
+      disposers.push(locale.addLanguage(IM_RUSSIAN_LANGUAGE));
+    } catch (error) {
+      // The id may have been taken between the check and this call; that pack
+      // owns the definition now, and registering the dictionary is still safe.
+      if (!/already registered/iu.test(String(error?.message ?? ''))) throw error;
+    }
+  }
+  disposers.push(locale.register(IM_LOCALE_NAMESPACE, IM_RUSSIAN_LANGUAGE.id, ru));
+  return () => {
+    // Reverse order: the dictionary goes before the definition that chains to it.
+    for (const dispose of disposers.reverse()) {
+      try {
+        dispose?.();
+      } catch {
+        // A registry that already dropped the entry must not block teardown.
+      }
+    }
+  };
+}
+
+/**
+ * Localise a channel name the way the settings UI writes it: "微信" becomes
+ * "WeChat" in English and Russian alike, while a name that is already Latin
+ * ("Telegram") is handed back unchanged.
+ */
+export function channelName(value) {
   return localizeText(value);
 }
 
-function translateDynamic(text) {
-  const configMessage = /^微信配置格式错误：(config\.json|workspaces\.json)。请查看诊断详情，修复后重启 DSH。$/.exec(text);
-  if (configMessage) return EN['微信配置格式错误：{file}。请查看诊断详情，修复后重启 DSH。'].replace('{file}', configMessage[1]);
-  const configHint = /^(.*?)请检查微信渠道数据目录中的 (config\.json|workspaces\.json)，修复后重启 DSH；“重新读取”不会重新加载配置。\s*(字段位置中的序号从 0 开始，按文件中的条目顺序计数，不包含真实账号标识。)?$/.exec(text);
-  if (configHint) return [
-    localizeText(configHint[1].trim()),
-    EN['请检查微信渠道数据目录中的 {file}，修复后重启 DSH；“重新读取”不会重新加载配置。'].replace('{file}', configHint[2]),
-    configHint[3] ? localizeText(configHint[3]) : '',
+// A broken WeChat configuration: the prefix, a `{file}` template sentence and an
+// optional counter sentence, each resolved in the active language.
+function configHint(match) {
+  return [
+    localizeText(match[1].trim()),
+    translate('请检查微信渠道数据目录中的 {file}，修复后重启 DSH；“重新读取”不会重新加载配置。').replace('{file}', match[2]),
+    match[3] ? localizeText(match[3]) : '',
   ].filter(Boolean).join(' ');
-  const guidanceLimit = /^增强提示词不得超过 (\d+) 个字符。$/.exec(text);
-  if (guidanceLimit) return `Guidance must not exceed ${guidanceLimit[1]} characters.`;
-  let match = /^(\d+) \/ (\d+) 在线$/.exec(text);
-  if (match) return `${match[1]}/${match[2]} online`;
-  match = /^已接入 (\d+) 个机器人，其中 (\d+) 个在线$/.exec(text);
-  if (match) return `${match[2]} of ${match[1]} bots online`;
-  match = /^请输入 -1、0 或 1~(\d+) 之间的整数。$/.exec(text);
-  if (match) return `Enter -1, 0, or an integer from 1 to ${match[1]}.`;
-  match = /^正在读取\s*(.+?)\s*机器人状态…$/.exec(text);
-  if (match) return `Loading ${channelName(match[1])} bot status…`;
-  match = /^无法读取\s*(.+?)\s*机器人状态$/.exec(text);
-  if (match) return `Could not load ${channelName(match[1])} bot status`;
-  match = /^尚未接入\s*(.+?)\s*机器人$/.exec(text);
-  if (match) return `No ${channelName(match[1])} bot connected yet`;
-  match = /^已接入的\s*(.+?)\s*机器人$/.exec(text);
-  if (match) return `Connected ${channelName(match[1])} bots`;
-  match = /^手动接入(.+)机器人$/.exec(text);
-  if (match) return `Connect ${channelName(match[1])} bot manually`;
-  match = /^(.+) 设置$/.exec(text);
-  if (match) return `${channelName(match[1])} settings`;
-  match = /^从 DeepSeek Harness 移除“(.+)”？$/.exec(text);
-  if (match) return `Remove “${match[1]}” from DeepSeek Harness?`;
-  match = /^从 DeepSeek Harness 移除(.+)$/.exec(text);
-  if (match) return `Remove ${match[1]} from DeepSeek Harness`;
-  match = /^(.+)的飞书授权流程$/.exec(text);
-  if (match) return `Feishu authorization flow for ${match[1]}`;
-  match = /^用于为(.+)补全权限与回调的一次性授权二维码$/.exec(text);
-  if (match) return `One-time QR code for completing permissions and the callback for ${match[1]}`;
-  match = /^用于为(.+)开通群消息权限的一次性授权二维码$/.exec(text);
-  if (match) return `One-time QR code for granting group-message permission to ${match[1]}`;
-  match = /^正在为「(.+)」补全权限与回调$/.exec(text);
-  if (match) return `Completing permissions and the callback for “${match[1]}”`;
-  match = /^正在为「(.+)」开通群消息权限$/.exec(text);
-  if (match) return `Granting group-message permission to “${match[1]}”`;
-  match = /^为(.+)补全权限与回调$/.exec(text);
-  if (match) return `Complete permissions and the callback for ${match[1]}`;
-  match = /^(.+)的权限补全二维码已生成，请使用飞书扫码。$/.exec(text);
-  if (match) return `Permission-completion QR code generated for ${match[1]}. Scan it with Feishu.`;
-  match = /^(.+)的群消息权限二维码已生成，请使用飞书确认。$/.exec(text);
-  if (match) return `Group-message permission QR code generated for ${match[1]}. Confirm it with Feishu.`;
-  match = /^(.+)的权限与回调已补全。$/.exec(text);
-  if (match) return `Permissions and the callback completed for ${match[1]}.`;
-  match = /^(.+)已开通群消息权限，并启用“响应所有群消息”。$/.exec(text);
-  if (match) return `${match[1]} now has group-message permission and “Respond to all group messages” is enabled.`;
-  match = /^(检查连接|重试连接)(.+)$/.exec(text);
-  if (match) return `${localizeText(match[1])} ${match[2]}`;
-  match = /^移除(.+)$/.exec(text);
-  if (match) return `Remove ${match[1]}`;
-  match = /^这会停止消息连接，并删除本机保存的 (.+)、机器人配置及会话映射。(.+)中的机器人不会被自动删除。$/.exec(text);
-  if (match) {
-    return `This stops the message connection and removes the locally stored ${localizeText(match[1])}, bot configuration, and session mappings. The bot in ${localizeText(match[2])} is not deleted.`;
-  }
-  match = /^二维码剩余 (.+)$/.exec(text);
-  if (match) return `QR code expires in ${match[1]}`;
-  match = /^最近一条消息处理失败：(.+)$/.exec(text);
-  if (match) return `Latest message failed: ${localizeText(match[1])}`;
-  match = /^图片下载失败（HTTP (.+)），请重新发送后再试。$/.exec(text);
-  if (match) return `The image download failed (HTTP ${match[1]}). Send it again.`;
-  match = /^一次最多只能处理 (\d+) 张图片。$/.exec(text);
-  if (match) return `A message can contain at most ${match[1]} images.`;
-  match = /^状态刷新失败：(.+)$/.exec(text);
-  if (match) return `Status refresh failed: ${match[1]}`;
-  match = /^状态自动刷新失败：(.+)$/.exec(text);
-  if (match) return `Automatic status refresh failed: ${match[1]}`;
-  match = /^操作失败：(.+)$/.exec(text);
-  if (match) return `Operation failed: ${match[1]}`;
-  match = /^连接检查失败：(.+)（参考号：(.+)）$/.exec(text);
-  if (match) return `Connection check failed: ${localizeText(match[1])} (reference: ${match[2]})`;
-  match = /^连接检查失败：(.+)$/.exec(text);
-  if (match) return `Connection check failed: ${match[1]}`;
-  match = /^移除失败：(.+)$/.exec(text);
-  if (match) return `Removal failed: ${match[1]}`;
+}
 
-  const phrases = [
-    ['企业微信', 'WeCom'], ['DeepSeek Harness', 'DeepSeek Harness'],
-    ['WhatsApp', 'WhatsApp'], ['iMessage', 'iMessage'], ['macOS Messages', 'macOS Messages'],
-    ['Telegram', 'Telegram'], ['Discord', 'Discord'],
-    ['Slack', 'Slack'], ['飞书', 'Feishu'], ['钉钉', 'DingTalk'], ['微信', 'WeChat'],
-    ['机器人', 'bot'], ['账号', 'account'], ['应用', 'app'], ['凭据', 'credentials'],
-    ['服务返回了无法识别的响应', 'service returned an unrecognized response'],
-    ['服务没有返回有效的机器人列表', 'service did not return a valid bot list'],
-    ['操作失败，请稍后重试', 'operation failed; try again later'],
-    ['操作失败', 'operation failed'], ['连接尚未就绪', 'connection is not ready'],
-    ['没有接入完成', 'was not connected'], ['没有绑定完成', 'was not connected'],
-    ['设置页缺少 RPC 连接', 'settings are missing an RPC connection'],
-    ['设置', 'settings'], ['连接检查完成', 'connection check completed'],
-    ['仍未连接，插件会继续自动重试', 'is still offline; the plugin will keep retrying'],
-    ['已重新连接', 'reconnected'], ['移除失败，请重试', 'could not be removed; try again'],
-    ['已连接，可以开始聊天', 'is connected and ready to chat'],
-    ['已连接，可以开始发送消息', 'is connected and ready for messages'],
-    ['服务请求失败', 'service request failed'], ['连接遇到问题', 'connection encountered a problem'],
-    ['正在读取', 'Loading '], ['连接状态', 'connection status'], ['二维码', 'QR code'],
-  ];
+// Sentences composed outside the settings UI — a bot status or an RPC error that the
+// host, or an IM platform, has already assembled — arrive as one string with no key
+// to look up, so they are recognised by the Chinese shape they are built from. The
+// client's own sentences are not here: they are template keys in the dictionaries
+// (see COMPOSED and localizeTemplate), which keeps this table to the text that really
+// has no key. Every rule carries a rendering per locale; `en` and `ru` are both
+// mandatory, because a rule with an English column only is exactly what left a
+// Russian reader looking at Chinese. Chinese needs no column of its own.
+const DYNAMIC_RULES = Object.freeze([
+  {
+    pattern: /^微信配置格式错误：(config\.json|workspaces\.json)。请查看诊断详情，修复后重启 DSH。$/,
+    // Both dictionaries already hold this sentence as a `{file}` template, so the
+    // rendering goes through the lookup rather than restating the text here.
+    en: (match) => EN['微信配置格式错误：{file}。请查看诊断详情，修复后重启 DSH。'].replace('{file}', match[1]),
+    ru: (match) => translate('微信配置格式错误：{file}。请查看诊断详情，修复后重启 DSH。').replace('{file}', match[1]),
+  },
+  {
+    pattern: /^(.*?)请检查微信渠道数据目录中的 (config\.json|workspaces\.json)，修复后重启 DSH；“重新读取”不会重新加载配置。\s*(字段位置中的序号从 0 开始，按文件中的条目顺序计数，不包含真实账号标识。)?$/,
+    en: (match) => configHint(match),
+    ru: (match) => configHint(match),
+  },
+  {
+    pattern: /^增强提示词不得超过 (\d+) 个字符。$/,
+    en: (match) => `Guidance must not exceed ${match[1]} characters.`,
+    ru: (match) => `Подсказка для контекста не должна превышать ${match[1]} символов.`,
+  },
+  {
+    pattern: /^一次最多只能处理 (\d+) 张图片。$/,
+    en: (match) => `A message can contain at most ${match[1]} images.`,
+    ru: (match) => `В одном сообщении может быть не больше ${match[1]} изображений.`,
+  },
+  {
+    pattern: /^图片下载失败（HTTP (.+)），请重新发送后再试。$/,
+    en: (match) => `The image download failed (HTTP ${match[1]}). Send it again.`,
+    ru: (match) => `Не удалось скачать изображение (HTTP ${match[1]}). Отправьте его заново.`,
+  },
+]);
+
+// Chinese fragments that survive inside messages no rule above recognises. Each row
+// carries the source fragment and its rendering per locale, so the last-resort path
+// is a table too rather than an English-only swap list.
+const DYNAMIC_PHRASES = Object.freeze([
+  ['企业微信', 'WeCom', 'WeCom'],
+  ['DeepSeek Harness', 'DeepSeek Harness', 'DeepSeek Harness'],
+  ['WhatsApp', 'WhatsApp', 'WhatsApp'],
+  ['iMessage', 'iMessage', 'iMessage'],
+  ['macOS Messages', 'macOS Messages', 'macOS Messages'],
+  ['Telegram', 'Telegram', 'Telegram'],
+  ['Discord', 'Discord', 'Discord'],
+  ['Slack', 'Slack', 'Slack'],
+  ['飞书', 'Feishu', 'Feishu'],
+  ['钉钉', 'DingTalk', 'DingTalk'],
+  ['微信', 'WeChat', 'WeChat'],
+  ['机器人', 'bot', 'бот'],
+  ['账号', 'account', 'аккаунт'],
+  ['应用', 'app', 'приложение'],
+  ['凭据', 'credentials', 'учётные данные'],
+  ['服务返回了无法识别的响应', 'service returned an unrecognized response', 'сервис вернул нераспознанный ответ'],
+  ['服务没有返回有效的机器人列表', 'service did not return a valid bot list', 'сервис не вернул список ботов'],
+  ['操作失败，请稍后重试', 'operation failed; try again later', 'операция не удалась, попробуйте позже'],
+  ['操作失败', 'operation failed', 'операция не удалась'],
+  ['连接尚未就绪', 'connection is not ready', 'подключение ещё не готово'],
+  ['没有接入完成', 'was not connected', 'подключить не удалось'],
+  ['没有绑定完成', 'was not connected', 'подключить не удалось'],
+  ['设置页缺少 RPC 连接', 'settings are missing an RPC connection', 'в настройках нет подключения RPC'],
+  ['设置', 'settings', 'настройки'],
+  ['连接检查完成', 'connection check completed', 'проверка подключения завершена'],
+  ['仍未连接，插件会继续自动重试', 'is still offline; the plugin will keep retrying', 'всё ещё не подключён, плагин продолжит попытки'],
+  ['已重新连接', 'reconnected', 'переподключено'],
+  ['移除失败，请重试', 'could not be removed; try again', 'удалить не удалось, попробуйте снова'],
+  ['已连接，可以开始聊天', 'is connected and ready to chat', 'подключён, можно начинать переписку'],
+  ['已连接，可以开始发送消息', 'is connected and ready for messages', 'подключён и готов отправлять сообщения'],
+  ['服务请求失败', 'service request failed', 'запрос к сервису не удался'],
+  // Failure reasons the host embeds in a message: they arrive as a captured phrase
+  // inside an already localised sentence, so they need a translation of their own.
+  ['网络中断', 'network down', 'сеть недоступна'],
+  ['请求超时', 'request timed out', 'истекло время ожидания'],
+  ['超时', 'timed out', 'истекло время ожидания'],
+  ['服务不可用', 'service unavailable', 'сервис недоступен'],
+  ['连接被拒绝', 'connection refused', 'соединение отклонено'],
+  ['未授权', 'unauthorized', 'нет авторизации'],
+  ['响应格式错误', 'malformed response', 'неверный формат ответа'],
+  ['连接遇到问题', 'connection encountered a problem', 'проблема с подключением'],
+  ['正在读取', 'Loading ', 'Загружаем '],
+  ['连接状态', 'connection status', 'состояние подключения'],
+  ['二维码', 'QR code', 'QR-код'],
+]);
+
+// The rules and their renderings, exposed so a test can hold every pattern to the
+// same per-locale contract instead of trusting the order of the chain below.
+export const IM_DYNAMIC_RULES = DYNAMIC_RULES;
+export const IM_DYNAMIC_PHRASES = DYNAMIC_PHRASES;
+
+/**
+ * Localise a sentence the UI composed at runtime, e.g. `已接入的 Telegram 机器人`.
+ *
+ * @param text - the composed sentence, in the language the patterns are written in.
+ * @param locale - `'en'`, `'ru'` or `'zh'`; anything else is served English, and
+ *   Chinese is the identity language, so its text travels untouched.
+ * @returns the sentence in the requested locale, or `text` when nothing matches.
+ */
+export function translateDynamic(text, locale = imLocale()) {
+  if (locale === 'zh') return text;
+  const column = locale === 'ru' ? 'ru' : 'en';
+  for (const rule of DYNAMIC_RULES) {
+    const match = rule.pattern.exec(text);
+    if (!match) continue;
+    return (rule[column] ?? rule.en)(match);
+  }
+  const at = column === 'ru' ? 2 : 1;
   let output = text;
-  for (const [source, target] of phrases) output = output.replaceAll(source, target);
+  for (const row of DYNAMIC_PHRASES) output = output.replaceAll(row[0], row[at]);
   return output;
+}
+
+const TEMPLATE_PLACEHOLDER = /\{(\w+)\}/gu;
+
+/**
+ * Localise a sentence the settings UI composes itself, from a template key both
+ * dictionaries carry: `已接入的 {channel} 机器人`. The key is looked up like any other
+ * string — so a Russian reader gets the Russian sentence — and the values are filled
+ * in afterwards, which keeps the word order of the translation instead of the
+ * Chinese one the sentence was assembled from. A key neither dictionary knows comes
+ * back as the key with its placeholders still visible, the same identity the rest of
+ * the module falls back to.
+ *
+ * @param key - the Chinese template, e.g. `尚未接入 {channel} 机器人`.
+ * @param values - one value per placeholder; a missing one keeps its braces so the
+ *   gap is visible instead of silently empty.
+ */
+export function localizeTemplate(key, values) {
+  if (typeof key !== 'string') return key;
+  const template = translate(key);
+  if (values == null) return template;
+  return template.replace(TEMPLATE_PLACEHOLDER, (placeholder, name) => (
+    Object.hasOwn(values, name) ? String(values[name]) : placeholder
+  ));
 }
 
 export function localizeText(value) {
   if (typeof value !== 'string') return value;
   const exact = translate(value);
-  if (exact !== value || !isEnglish()) return exact;
+  if (exact !== value) return exact;
+  // A whole-string lookup missing means the UI composed the sentence at runtime.
+  // Chinese is the identity language, so `translateDynamic` hands the text back in
+  // its own language there and renders it in the active locale everywhere else.
   return translateDynamic(value);
 }
 

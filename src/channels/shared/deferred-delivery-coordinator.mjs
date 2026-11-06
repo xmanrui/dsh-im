@@ -1,3 +1,4 @@
+import { isSessionNotFound } from './session-error.mjs';
 import { createDeferredDeliveryRegistry, extractCompletedTurnAnswer } from './deferred-delivery.mjs';
 import { t } from './i18n.mjs';
 import { channelDeliveryFailure } from './message-failure.mjs';
@@ -159,7 +160,7 @@ export function createDeferredDeliveryCoordinator({
       return 'delivered';
     } catch (error) {
       if (activeSignal.aborted) return 'none';
-      if (error?.code === 'session-not-found') { await remove(entry); return 'none'; }
+      if (isSessionNotFound(error?.code)) { await remove(entry); return 'none'; }
       const current = await pending(id);
       if (!current) return 'none';
       if (!sending) {

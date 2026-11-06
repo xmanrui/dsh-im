@@ -125,6 +125,12 @@ for (const [channel, fixture] of Object.entries(channels)) {
     const first = blockingHarness();
     const firstSent = [];
     const state = await new fixture.Store(statePath).load();
+    const putPendingMessage = state.putPendingMessage.bind(state);
+    let queuedPersisted = false;
+    t.mock.method(state, 'putPendingMessage', async (entry) => {
+      await putPendingMessage(entry);
+      if (entry.messageId === 'two') queuedPersisted = true;
+    });
     const firstBridge = fixture.create({
       harness: first.harness, state,
       send: (target, text) => firstSent.push({ target, text }),
@@ -138,10 +144,9 @@ for (const [channel, fixture] of Object.entries(channels)) {
 
     // 1) The queued message is on disk before it is ever submitted, and the
     // in-flight message is already marked submitted.
-    await eventually(async () => {
-      const persisted = JSON.parse(await readFile(statePath, 'utf8'));
-      return (persisted.pendingMessages ?? []).length === 2;
-    }, 'both queue entries to be persisted');
+    // Wait for the real persistence promise before reading once. Polling the
+    // destination with readFile can itself deny atomic rename on Windows.
+    await eventually(() => queuedPersisted, 'the queued message write to finish');
     const persisted = JSON.parse(await readFile(statePath, 'utf8'));
     const queuedEntry = persisted.pendingMessages.find((entry) => entry.messageId === 'two');
     const inFlightEntry = persisted.pendingMessages.find((entry) => entry.messageId === 'one');

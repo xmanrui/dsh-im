@@ -4,13 +4,21 @@ dsh-im 发布可选客户端服务 `dshImClient`，供同一 DSH 客户端中的
 
 The optional `dshImClient` service exposes the existing IM management panel to a shell in the same DSH client. Settings → IM bots remains available by default. No migration or new configuration is required. The host-side `dshIm` delivery service is separate.
 
-支持插件详情操作按钮的 DSH 中，dsh-im 详情页提供「打开 IM机器人」按钮，在主区域打开同一管理面板；「返回插件详情」返回该插件。此入口依赖可选的 `layout`、`pluginNavigation` 服务及 `plugins.detail.actions` 槽位，旧版 DSH 仍可通过设置入口访问。
+支持插件详情操作按钮的 DSH 中，dsh-im 详情页提供「打开 IM机器人」按钮，在主区域打开同一管理面板。面板不显示返回按钮，通过宿主侧边栏切换面板。此入口依赖可选的 `layout` 服务及 `plugins.detail.actions` 槽位，旧版 DSH 仍可通过设置入口访问。
 
-On DSH versions with plugin detail actions, **Open IM bots** opens the same management panel in the main area, with **Back to plugin details** returning to this plugin. This entry uses the optional `layout` and `pluginNavigation` services and the `plugins.detail.actions` slot. Older DSH versions retain the Settings entry.
+On DSH versions with plugin detail actions, **Open IM bots** opens the same management panel in the main area. The panel has no back button; use the host sidebar to switch panels. This entry uses the optional `layout` service and the `plugins.detail.actions` slot. Older DSH versions retain the Settings entry.
+
+「IM机器人」页面右上角的「会话记录」按钮与「通用设置」并列，打开各 IM 通道已绑定会话的只读列表；点击 Session ID 可查看用户与助手正文、刷新或加载更早消息。列表和正文页均提供「返回 IM机器人」。会话记录不注册独立侧边栏入口；只有宿主提供导航服务与主面板槽位时才显示按钮。目录覆盖标准机器人状态路径、微信账号状态和已配置的飞书旧版状态，不推断自定义 `dataDir` / `botsDir`。
+
+**Session history**, next to **General settings** in the IM bots toolbar, opens a read-only list of bound IM sessions. Select a Session ID to read user and assistant text, refresh, or load earlier messages. Both the list and transcript provide **Back to IM bots**. History has no separate sidebar entry, and the toolbar action appears only when the host provides navigation and a main-panel slot. Discovery covers standard bot state, Weixin accounts, and configured Feishu legacy state; custom `dataDir` / `botsDir` overrides are not inferred.
 
 支持 `sidebar.panellist` 的宿主同时提供左侧「IM机器人」入口，与插件详情操作共用同一个 `main` 面板。侧栏沿用插件页的双对话框造型，在 16×16 矢量画布上使用与宿主普通图标一致的 1px 描边，通过 `currentColor` 跟随侧栏颜色和传入尺寸；插件页仍使用原彩色图标。此入口不调用 `setSettingsVisible()`，设置入口和插件详情操作均保留。侧栏槽位消失时只移除侧栏入口，主面板或依赖服务退出时清理全部对应注册。
 
 Hosts with `sidebar.panellist` also show **IM bots** in the left sidebar, targeting the same `main` panel as the detail action. The sidebar retains the catalog's linked speech bubbles as a 16×16 vector with the host's regular 1px stroke, using `currentColor` and the requested icon size; the catalog keeps its original color image. This entry does not call `setSettingsVisible()`: both existing entry points remain available. Sidebar withdrawal removes only its entry, while main-slot or navigation-service withdrawal cleans up all related registrations.
+
+「IM机器人 → 通用设置 → 通用 → 侧边栏入口」可选择「自动隐藏」「始终显示」或「始终隐藏」。默认自动隐藏：没有已保存的渠道时显示，至少一个渠道保存成功后隐藏，删除全部渠道后恢复。离线渠道仍算已配置，扫码过程不算；隐藏不会停止机器人或关闭已打开的面板。设置保存在 DSH home 下的 `integrations/dsh-im/sidebar-settings.json`，通过独立的 `/api/dsh-im/dsh-im-sidebar` 管理接口读写，遵循与渠道管理相同的 `rpcAuthority`（默认 `trusted-host`），支持 DSH 已认证并通过 Host/Origin 校验的局域网与域名访问；TTL 等通用设置仍仅限本机。选择后自动保存并立即更新当前客户端，无需点击保存按钮；其他客户端在下一次管理操作或最多约 30 秒后同步。启动时先隐藏，收到 Host 确认零渠道配置或「始终显示」后才注册侧边栏入口，避免先显示再隐藏造成布局闪动。读取失败时保留上次确认的状态，初始保持隐藏；设置和插件详情入口始终独立可用。读取失败时仍可选择并保存「始终显示／始终隐藏」，恢复入口；自动模式仍须成功读取渠道配置。
+
+**IM bots → General settings → General → Sidebar entry** offers Auto-hide, Always show, and Always hide. Auto-hide shows the entry with no saved channels, hides it after at least one channel is saved, and restores it when all channels are removed. Offline channels still count; pending QR logins do not. Hiding neither stops bots nor closes an open panel. The preference is stored in `integrations/dsh-im/sidebar-settings.json` under the DSH home and uses the dedicated `/api/dsh-im/dsh-im-sidebar` route. It follows channel management `rpcAuthority` (default `trusted-host`), allowing LAN and domain access already authenticated and admitted by DSH Host/Origin checks. General settings such as TTL remain loopback-only. Selecting a mode saves it automatically and updates this client immediately, without a Save button; other clients refresh after management operations or within about 30 seconds. Startup keeps the entry hidden until the Host confirms zero saved channels or Always show, avoiding a temporary row that shifts the sidebar. Failed reads retain the last confirmed visibility, initially hidden; Settings and plugin details remain independently available. Failed reads still allow saving Always show / Always hide to recover the entry; Auto-hide still requires a successful channel configuration read.
 
 ```ts
 interface DshImClient {
@@ -34,9 +42,9 @@ interface DshImClient {
 
 `preferredSectionId` selects the initial section using the IDs above. Missing or unknown IDs default to WeChat. Changing the prop after mounting does not override the reader's selection; remount deliberately to reset it.
 
-开关只影响当前客户端内存，不写服务器配置或浏览器存储。因此桌面端隐藏入口不影响另一个浏览器。刷新后恢复默认，由宿主再次按需接管。隐藏入口不会停止机器人或外部已挂载的面板。V1 按一个活跃管理面板接入，不提供多个面板间的状态同步。
+`setSettingsVisible()` 只影响当前客户端内存，不写服务器配置或浏览器存储。因此桌面端隐藏设置入口不影响另一个浏览器。刷新后恢复默认，由宿主再次按需接管。隐藏入口不会停止机器人或外部已挂载的面板。V1 按一个活跃管理面板接入，不提供多个面板间的状态同步。此 API 与上方持久化的侧边栏入口设置独立。
 
-Visibility is local to this client instance and is never persisted. A desktop shell cannot hide the entry in another browser. Reload restores the default until the shell opts in again. Hiding settings does not stop bots or unmount an embedded panel. V1 targets one active management panel and does not synchronize multiple copies.
+`setSettingsVisible()` is local to this client instance and is never persisted. A desktop shell cannot hide Settings in another browser. Reload restores the default until the shell opts in again. Hiding settings does not stop bots or unmount an embedded panel. V1 targets one active management panel and does not synchronize multiple copies. This API is independent of the persisted sidebar preference above.
 
 ## 宿主接入 / Shell lifecycle
 

@@ -11,6 +11,18 @@ import {
 
 const options = { referenceId: 'MF-TEST01', at: 123 };
 
+test('missing Sessions accept both RPC codes without changing the original error', () => {
+  for (const code of ['session-not-found', 'session/not-found']) {
+    const error = Object.freeze({ code, message: 'private session path' });
+    const failure = classifyMessageFailure(error, options);
+    assert.equal(failure.code, 'SESSION_NOT_FOUND');
+    assert.equal(failure.reason, 'SESSION_NOT_FOUND');
+    assert.match(failure.message, /\/new/u);
+    assert.doesNotMatch(JSON.stringify(failure), /private session path/u);
+    assert.equal(error.code, code);
+  }
+});
+
 test('unknown transport failures reuse normalized timeout and network evidence', () => {
   for (const [error, code, reason] of [
     [new DOMException('private timeout detail', 'TimeoutError'), 'REQUEST_TIMEOUT', 'timeout'],
@@ -50,6 +62,25 @@ test('known business failures and explicit input guidance keep priority over tra
   assert.equal(classifyMessageFailure({ code: 'ETIMEDOUT' }, {
     ...options, reason: 'image-invalid', userMessage: '当前图片无法处理。',
   }).code, 'INPUT_INVALID');
+});
+
+test('prompt-submit timeouts keep a distinct submission-timeout notice', () => {
+  const failure = classifyMessageFailure({
+    code: 'harness-timeout', method: 'session.prompt',
+    details: { stage: 'prompt.submit', submissionState: 'unknown' },
+  }, options);
+  assert.equal(failure.code, 'HARNESS_RESULT_UNCERTAIN');
+  assert.match(failure.message, /提交请求超时/u);
+  assert.match(failure.message, /不要立即重复提交/u);
+  assert.doesNotMatch(failure.message, /任务可能已经开始/u);
+
+  const replyStage = classifyMessageFailure({
+    code: 'harness-timeout', method: 'session.history',
+    details: { stage: 'reply.wait', submissionState: 'accepted' },
+  }, options);
+  assert.equal(replyStage.code, 'HARNESS_RESULT_UNCERTAIN');
+  assert.match(replyStage.message, /任务可能已经开始/u);
+  assert.doesNotMatch(replyStage.message, /提交请求超时/u);
 });
 
 test('uncertain Telegram delivery does not become a safe-to-retry timeout', () => {

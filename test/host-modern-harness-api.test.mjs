@@ -431,6 +431,28 @@ test('modern adapter maps the narrow legacy API without changing HarnessClient',
   });
 });
 
+test('sessions.fork forwards session.fork and passes atSeq through only when given', async () => {
+  const calls = [];
+  const { ctx } = fakeContext({
+    async invoke({ namespace, method, args }) {
+      calls.push({ namespace, method, args });
+      assert.equal(namespace, 'session');
+      assert.equal(method, 'fork');
+      return { sessionId: 'child', seq: 5 };
+    },
+    async stream() { throw new Error('unused'); },
+  });
+  const { apiProxy } = harnessConnection(ctx);
+
+  await apiProxy.sessions.fork({ rpcId: 'fork-with-seq', payload: { sessionId: 'parent', atSeq: 9 } });
+  await apiProxy.sessions.fork({ rpcId: 'fork-latest', payload: { sessionId: 'parent' } });
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].args, { request: { sessionId: 'parent', atSeq: 9 } });
+  assert.deepEqual(calls[1].args, { request: { sessionId: 'parent' } });
+  assert.equal(Object.hasOwn(calls[1].args.request, 'atSeq'), false, 'atSeq is omitted when absent');
+});
+
 test('queue and steer omit an unresolved time zone at the in-process gateway boundary', async (t) => {
   t.mock.method(Intl, 'DateTimeFormat', () => ({ resolvedOptions: () => ({ timeZone: undefined }) }));
   const events = [];
@@ -1524,4 +1546,22 @@ forEachSessionApi('a competitive approval', async (sessionApi) => {
     toolName: 'bash',
   }, () => Promise.resolve('browser-owned'));
   assert.equal(delegated, 'browser-owned');
+});
+
+test('modern workspace adapter forwards rename without activating a session', async () => {
+  const calls = [];
+  const { ctx } = fakeContext({
+    stream() { throw new Error('rename does not need a stream'); },
+    async invoke(request) {
+      calls.push(request);
+      assert.equal(request.namespace, 'workspace');
+      assert.equal(request.method, 'rename');
+      assert.deepEqual(request.args, { request: { workspaceId: 'preset-group', title: 'Research' } });
+      return { workspace: { workspaceId: 'preset-group', title: 'Research' } };
+    },
+  });
+  const harness = new HarnessClient({ ...harnessConnection(ctx), workspace: '/workspace', autostart: false });
+  const result = await harness.rpc('workspace.rename', { workspaceId: 'preset-group', title: 'Research' });
+  assert.equal(result.workspace.title, 'Research');
+  assert.equal(calls.length, 1);
 });

@@ -33,7 +33,10 @@
 
   <p>
     <a href="https://trendshift.io/repositories/169119#achievements">
-      <img src="https://trendshift.io/api/badge/trendshift/repositories/169119/daily?language=JavaScript" alt="DSH-IM — Trendshift JavaScript 日榜第 3 名" width="420">
+      <img src="https://trendshift.io/api/badge/repositories/169119" alt="DSH-IM — GitHub Trending JavaScript 日榜第 7 名" width="48%" align="middle">
+    </a>&nbsp;
+    <a href="https://trendshift.io/repositories/169119#achievements">
+      <img src="https://trendshift.io/api/badge/trendshift/repositories/169119/daily?language=JavaScript" alt="DSH-IM — Trendshift JavaScript 日榜第 3 名" width="48%" align="middle">
     </a>
   </p>
 
@@ -42,12 +45,51 @@
 
 ---
 
-<a id="recognition"></a>
+## ❤️ 赞助商
 
-> [!NOTE]
-> **DSH-IM 已获得 DeepSeek Harness 官方 Token 赞助，价值人民币 2,000 元**。感谢官方对本项目的支持！
+<table width="100%">
+  <tr>
+    <td width="180" align="center" valign="middle">
+      <a href="https://88api.ai/sign-up?aff=lJoL"><img src="assets/sponsors/88api.jpg" alt="88API Token聚合平台" width="150"></a>
+    </td>
+    <td valign="middle">
+      <a href="https://88api.ai/sign-up?aff=lJoL"><strong>88API Token聚合平台</strong></a>赞助了本项目！88API 是一家由香港企业运营并且主要面向开发者、创作者与 AI 应用用户的一站式多模型 API 平台，通过统一接口接入文本、图片、语音和视频模型，覆盖 AI 编程、智能翻译、内容创作、配音、图像生成、视频生成等常见工作流。可提供高质量的折扣Deepseek官转算力和自有B300集群自部署Deepseek算力；支持国际主流付款方式，可提供发票，提供企业级稳定服务。<a href="https://88api.ai/sign-up?aff=lJoL"><strong>通过此链接注册可以获取专属赠送额度！</strong></a>
+    </td>
+  </tr>
+  <tr>
+    <td width="180" align="center" valign="middle">
+      <a id="recognition"></a>
+      <a href="https://github.com/deepseek-ai/deepseek-harness"><strong>DeepSeek<br>Harness</strong></a>
+    </td>
+    <td valign="middle">
+      <strong>DSH-IM 已获得 <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> 官方 Token 赞助</strong>。感谢官方对本项目的支持！
+      <p>本项目由社区开发者独立开发与维护。</p>
+    </td>
+  </tr>
+</table>
+
+---
+
+> [!IMPORTANT]
+> **安装请认准完整包名：`@xmanrui/dsh-im`**
 >
-> 本项目由社区开发者独立开发与维护。
+> 为避免名称混淆，在插件市场搜索、插件安装框中填写或使用命令安装时，请复制下方完整包名。
+>
+> ```text
+> @xmanrui/dsh-im
+> ```
+>
+> 选择对应的一条命令：**Desktop** 在内置终端执行，**Web** 在启动当前 Harness 的终端执行。
+>
+> ```sh
+> dsh plugin --profile desktop add -w @xmanrui/dsh-im
+> ```
+>
+> ```sh
+> dsh plugin --profile web add -w @xmanrui/dsh-im
+> ```
+>
+> 安装后重启 Desktop 或 `dsh web`，Web 刷新浏览器，再打开「设置 → IM机器人」。
 
 ## 简介
 
@@ -131,13 +173,25 @@ WhatsApp、飞书、Telegram、Discord、Slack、QQ 支持自动保存实际收�
 
 ## 安装
 
-推荐从 npm 安装已发布的稳定版本：
+推荐从 npm 安装已发布的稳定版本 **`@xmanrui/dsh-im`**。请按实际使用的运行方式选择对应命令：
+
+**DSH Desktop**：在当前 Desktop 的内置终端中执行：
+
+```sh
+dsh plugin --profile desktop add -w @xmanrui/dsh-im
+```
+
+安装完成后重启 DSH Desktop。
+
+**DSH Web**：在启动当前 Harness 的终端环境中执行：
 
 ```sh
 dsh plugin --profile web add -w @xmanrui/dsh-im
 ```
 
-重启 `dsh web`、刷新浏览器，然后打开「设置 → IM机器人」。IM机器人使用 `order: 21`，尽量排在一级设置菜单的「Agent 预设」之后；插件页面不再保留旧入口。从旧版升级不会改变已有机器人、凭据、工作区、Agent Preset 或会话绑定。
+安装完成后重启 `dsh web`，并刷新浏览器。
+
+重启后打开「设置 → IM机器人」。IM机器人使用 `order: 21`，尽量排在一级设置菜单的「Agent 预设」之后；插件页面不再保留旧入口。从旧版升级不会改变已有机器人、凭据、工作区、Agent Preset 或会话绑定。
 
 本机 `dsh web` 和 DSH Desktop 默认直接复用当前 Host 的内部服务：通过 Typert Gateway 调用 Session Controller 和 Workspace Controller，不需要配置 Harness 地址，也不绕行本机 HTTP 端口。Desktop 的兼容模式、扩展窗口和增强模式均无需开启“允许在浏览器中打开”或局域网访问。渠道配置中显式设置的 `harnessBaseUrl` 仅保留给旧版远程 HTTP/WebSocket Harness；内部调用失败不会自动改连其他 Host。
 
@@ -208,6 +262,55 @@ Logo 由 dsh-im 的浏览器适配显示，无需修改 DSH。适配保留原始
 
 支持全局面板的 DSH 在左侧边栏提供「IM机器人」，沿用插件页的双对话框造型，以单色细线图标显示，点击打开完整 IM 管理面板。原「设置 → IM机器人」和插件详情页的「打开 IM机器人」入口保留。宿主也可通过可选客户端服务 `dshImClient` 嵌入面板；接口、兼容要求与接入示例见[客户端接入文档](docs/client-integration.md)。
 
+### 会话 → 对话反查（宿主服务）
+
+其他插件常常只拿得到会话 id，却需要知道这个会话属于哪个渠道、哪个机器人、哪个群和哪个话题。宿主服务 `dshIm` 为此提供一个只读方法：
+
+```js
+const info = await dshIm.describeConversation(sessionId);
+// null —— 该会话不属于任何 IM 对话
+// 否则：
+// { channel, botId, botName, conversationKey, chatType,
+//   chatId, threadId, chatTitle,
+//   senderId, senderName, senderUsername, senderIsBot }
+```
+
+- 只读：不访问网络、不创建会话、不阻塞回复，也不抛错；未知会话返回 `null`。
+- 数据全部来自插件自己的状态文件（`sessions` 映射）与机器人配置，不要求内核新增字段。
+- `chatType` 为 `group`、`thread` 或 `dm`。没有作者记录时，只有当键本身标识用户时才从键推出 `senderId`：Matrix `direct:dm:<userId>`、`p2p:<id>`（飞书、微信、企业微信自建应用、钉钉）、QQ `c2c:<openid>`，以及 Telegram 和企业微信的 `direct:<id>`。Slack、Discord、WhatsApp、iMessage 等渠道的 `direct:<id>` 标识的是私聊频道，因此放进 `chatId`，`senderId` 保持 `null`。
+- 每个会话首次反查写一行日志 `[dsh-im] describeConversation session=… chat=… sender=…`，之后不再重复。
+- 发言人会被记住：桥接在把消息交给会话之前，把 `senderId` 与「是否机器人」写进机器人状态文件（`authors`）；显示名和 `username` 只有在该聊天类型启用了上下文增强（或渠道本身提供发言人名称，如 Matrix）时才记录，否则为 `null`，每条新消息覆盖前一条，只保留身份、不保留文本；因此重启后仍然可读。
+- 上述渠道的私聊 `senderId` 即使作者记录缺失也能从键推出；群聊作者在第一条入站消息之前为 `null`。
+- 由对话键插入数字聊天／话题字段的链接是 **Telegram 专用**；QQ 和其他渠道必须使用各自的原生 route 字段，不能把它们当作 Telegram 链接。
+
+同一个反查还有一个同步版本，供在同步上下文里组装的场景使用（例如系统提示词的渲染）：
+
+```js
+const info = dshIm.describeConversationSync(sessionId);
+```
+
+- 没有 `await`：只读本进程已经加载的机器人状态，绝不发起加载、访问网络或启动账户查询。
+- 因此该机器人状态尚未加载时返回 `null` —— 调用方要自己决定「未知」意味着什么；异步版本会在需要时加载并给出 `botName`，同步版本 `botName` 恒为 `null`。
+- 已经处理过消息的机器人，其状态一定在内存里，所以活跃会话的第一次提示词组装就能拿到身份。
+
+### 对话绑定的两个事件
+
+写入绑定时，通道会同步发出事件，订阅方不必反查就能维持自己的「会话 → 身份」表：
+
+| 事件 | 何时发出 | 载荷 |
+| --- | --- | --- |
+| `dsh-im/session-pre-bind` | 对话绑定到某个会话，且在 `session.create` 之前 | `channel`、`botId`、`sessionId`、`conversationKey`、`chatType`、`chatId`、`threadId`、`senderId`、`senderName` |
+| `dsh-im/session-unbind` | 对话不再指向原会话：切换到另一个会话，或绑定被清除 | 同上，但没有作者字段；`sessionId` 是被解绑的旧会话 |
+
+- 两个事件同步发出，顺序是「先解绑旧的、再绑定新的」，订阅方能一条线读完。
+- 所有聊天通道都会发这两个事件：Telegram、Discord、Email、iMessage 走共用的生产控制器；DingTalk、飞书、Matrix、QQ、Slack、企业微信（`wecom` 与 `wecom-app`）、微信（`weixin`）和 WhatsApp 各自组装控制器，但状态同样经过同一层封装。`office` 是任务连接器，没有对话，因此不发这两个事件。
+- 自己组装生产控制器的通道不要直接 `new StateStore(path).load()`：用 `createAnnouncedStateStore({ announcer, StateStore, statePath })`，它按机器人只加载一次并返回已包装的 store，同时给出投递适配器需要的 `stateForSync`；启动时用 `prime()` 预热，第一次提示词组装才能同步拿到身份。
+- 只有真正提交的写入才会发事件：写入被拒绝（返回 `false`）或写成同一个会话时不发 `unbind`。
+- 订阅方必须按 `(conversationKey, sessionId)` 做到幂等：重复写入同一条绑定会再发一次绑定事件，协议上分不出这次重复和第一次。
+- 清除一个会话绑定（`clearSession`）和清除全部绑定（`clearSessions`）同样会按对话逐个发 `session-unbind`。
+- 订阅方抛错不影响消息处理。
+- 解绑不代表会话的身份消失：把它留在自己的表里（例如带 `superseded_at`）仍可让独占该会话的定时任务继续投递到原来的对话，只是「谁拥有这个对话」要按最新一次绑定算。
+
 ### 上下文增强
 
 [查看上下文增强说明](docs/上下文增强.md)
@@ -251,11 +354,12 @@ Logo 由 dsh-im 的浏览器适配显示，无需修改 DSH。适配保留原始
 | `/repair` | 在飞书私聊中增量修复卡片回调，并补全媒体、群聊机器人 @ 消息与原生 Slash Command 面板所需的权限。 |
 | `/compact` | 立即压缩当前聊天绑定会话的较早上下文。 |
 | `/clear` | 清空当前聊天绑定会话的模型上下文，同时保留 Session 绑定和历史记录；当前 Host 未注册该命令时会明确提示未支持。 |
-| `/workspace <工作区序号或绝对路径>`、`/ws <工作区序号或绝对路径>` | 按 `/workspacelist` 序号或绝对路径切换当前机器人的 Harness 工作区。 |
-| `/workspacelist`、`/workspaces`、`/wsl` | 列出当前 Harness Host 上仍然存在的工作区绝对路径。 |
-| `/sessionlist [工作区序号或绝对路径]`、`/sessions [...]` | 两个等价命令；列出指定工作区的会话 ID 和标题，默认 IM 目录也包含其中的未分组会话；省略参数时使用当前工作区。 |
+| `/workspace [工作区序号或绝对路径]`、`/ws [...]` | 查看并切换当前机器人的 Harness 工作区：不带参数时列出可切换的工作区（Telegram 上为可点击卡片，点一下即切换，原地标记当前项）；带序号或绝对路径时直接切换。 |
+| `/workspacelist`、`/workspaces`、`/wsl` | `/workspace` 的旧别名，等同无参数形式；原生命令菜单只保留一个工作区入口。 |
+| `/sessionlist [工作区序号或绝对路径]`、`/sessions [...]` | 两个等价命令；列出指定工作区的会话 ID 和标题，并标出本对话已绑定的会话（「（当前绑定）」）；默认 IM 目录也包含其中的未分组会话；省略参数时使用当前工作区。 |
+| `/sessionlist --all`、`/sessions --all` | 跨工作区汇总会话：当前对话有效工作区置顶并标注，每个工作区默认显示 10 条，可用 `--limit N` 调整；读取失败的工作区会跳过并提示数量。 |
 | `/sessionlist --limit N`、`/sessions --limit N` | 列出当前工作区现有顺序中的前 N 个会话；N 必须是正整数。 |
-| `/session <Session ID>` | 将当前聊天绑定到指定的已有 Harness 会话。 |
+| `/session <Session ID、序号或标题关键词>` | 将当前聊天绑定到指定的已有 Harness 会话；标题关键词只在当前对话工作区唯一命中时自动绑定，其他情况要求完整 Session ID；已归档的会话不会被关键词选中。 |
 | `/history [数量]` | 在私聊中查看当前绑定会话的最近历史消息，默认 3 条，最多 5 条。 |
 | 交互式提问 | 回复选项序号、选项文字或自定义文字；多选时用逗号分隔。飞书中，提问发起人发送图片或图文消息会结束本轮追问，并在同一会话继续处理图片，无需答完剩余问题或重新发图。 |
 | 远程审批 | 回复 `批准` / `拒绝` / `同意` / `不同意` / `yes` / `no`。 |
@@ -270,9 +374,14 @@ Web 与机器人可同时处理同一审批，先提交的「批准一次」或�
 
 ## 其它功能
 
+### 按 Agent Preset 自动分组
+
+在插件 Host 配置中设置 `groupByAgentPreset: true`（默认关闭），也可在某个渠道配置中单独启用或关闭。选择明确的 Agent Preset 后，在默认 IM 目录下创建或复用 `presets/<preset-id>` 工作区，标题使用 Preset 名称；后续新会话进入该分组。已有聊天保留原历史和位置，手动目录、会话级目录和飞书目录隔离优先。详见 [配置和行为](docs/preset-workspaces.md)。
+
+
 - **图片识别**：支持图片输入的内置渠道都可以把 JPEG、PNG、WebP，以及以图片文件方式发送的 GIF 交给 Harness；图片可以附带文字说明。默认每张原图最多接收 30 MB、每条消息最多 20 张；原图保存到会话工作区，模型副本自动缩放或压缩到单张 5 MB、总计 20 MB 以内，仍超限或模型不支持图片时按文件交给模型处理。这四项限制可在「通用设置 → 附件 → 图片输入」调整，对后续消息生效；原图沿用附件保留时长。调高模型输入上限会增加请求体积、处理耗时和模型成本，也仍受平台及宿主限制。iMessage 首版仅支持文本私聊。
 - **在机器人卡片切换工作区**：设置页中的每张机器人卡片都会显示当前 Harness 工作区。可以直接填写已有目录的绝对路径，也可以打开目录选择器。切换只清除该机器人的旧聊天映射，不会删除、清空或归档旧 Session；已经开始的回复可以继续完成，后续消息使用新工作区。
-- **默认目录与未分组会话**：所有使用默认值的机器人共用 `$DSH_HOME/im`，但各自保存聊天与会话的绑定。插件不会为该目录创建工作区分组；`/sessions` 可以列出该目录的未分组会话，`/session <Session ID>` 或 `/session N` 可以绑定普通会话。切换到其他目录后，新会话按现有机制加入对应工作区分组；切回默认目录后新会话归入「未分组」。已有机器人的目录不会自动迁移。
+- **默认目录与未分组会话**：所有使用默认值的机器人共用 `$DSH_HOME/im`，但各自保存聊天与会话的绑定。插件不会为该目录创建工作区分组；`/sessions` 可以列出该目录的未分组会话，`/session <Session ID>`、`/session N` 或 `/session <标题关键词>` 可以绑定普通会话。切换到其他目录后，新会话按现有机制加入对应工作区分组；切回默认目录后新会话归入「未分组」。已有机器人的目录不会自动迁移。
 - **在机器人卡片选择模型与思考强度**：每个 IM 渠道的每张机器人卡片都在工作区下方提供模型与思考强度入口，采用 DSH 风格的分组列表、档位说明和选中标记。先选择 Host 当前可用模型，再选择其支持的强度，或跟随模型默认；未选模型时整体跟随 Host 默认。设置按机器人独立保存，只用于之后新建的 Session；已有 Session 和正在生成的回复不受影响。
 - **在机器人卡片选择 Agent Preset**：设置页中的每张机器人卡片都可以选择 Host 已有的 Agent Preset，或跟随 Host 默认。切换只作用于该机器人，并且只影响之后新建的会话；已有会话和正在生成的回复不受影响。
 - **检查连接并发送测试消息**：机器人在线时，点击卡片上的「检查连接」会检查平台连接，并向该机器人最近记录的私聊发送一条“DeepSeek Harness 连接测试成功”消息；WhatsApp 会发送到账号自聊。测试消息不会创建 Harness Session，也不会调用模型。机器人必须至少收到过一条私聊才能记住测试目标，否则页面会提示尚无可用的测试会话。
@@ -332,7 +441,9 @@ dsh web --trusted-host dsh.example.com
     rpcAuthority: loopback
 ```
 
-`rpcAuthority` 默认为 `trusted-host`；显式设置 `loopback` 会额外要求回环 Host 和 Origin。更新与入站 TTL 管理始终仅允许回环访问。
+`rpcAuthority` 默认为 `trusted-host`，统一适用于渠道管理、通用设置（群记录保留、附件保留与清理、图片限制）和插件更新。通过 DSH 认证与 Host／Origin 校验的局域网或 NAS／Docker 访问可直接使用这些接口；显式设置 `loopback` 会额外要求回环 Host，以及存在时的回环 Origin。
+
+管理请求返回 401 时，请通过有效启动链接重新登录；403 表示访问被拒，应检查 DSH 可信地址、代理的 Host／Origin 和插件的 `rpcAuthority` 配置。远程访问 NAS 时，不要将浏览器地址改为自己电脑的 localhost。接口可访问不代表当前安装方式允许按钮更新：源码／链接安装、不支持的执行环境等仍沿用现有限制；确认安装、版本校验、并发锁和手动重启流程不变。
 
 局域网管理的 HTTP 集成测试可在构建插件后运行 `node scripts/verify-lan-management.mjs /path/to/built/deepseek-harness`。脚本启动原版 DSH CLI，使用独立临时 profile 和空机器人配置，检查默认访问、登录认证、Host／Origin 检查以及显式 `loopback` 策略，结束后停止服务并清理临时目录。测试通过回环 TCP 发送局域网 Host／Origin，不替代跨设备浏览器验收；原版 `0.1.5-alpha.1` CLI 本身拒绝 `--host 0.0.0.0`，跨设备测试需使用支持局域网访问的 Harness 环境。
 
@@ -366,13 +477,12 @@ dsh web --trusted-host dsh.example.com
 
 ## 联系方式
 
-欢迎加入企业微信群，或通过邮箱、微信、小红书或 WhatsApp 联系我。
+欢迎加入 QQ群，或通过邮箱、小红书或 WhatsApp 联系我。
 
 <table>
   <tr>
     <th align="center">邮箱</th>
-    <th align="center">企业微信群</th>
-    <th align="center">微信</th>
+    <th align="center">QQ群</th>
     <th align="center">小红书</th>
     <th align="center">WhatsApp</th>
   </tr>
@@ -381,10 +491,7 @@ dsh web --trusted-host dsh.example.com
       <a href="mailto:longmanr307@gmail.com">longmanr307@gmail.com</a>
     </td>
     <td align="center" valign="top">
-      <a href="docs/images/wecom.png"><img src="docs/images/wecom.png" alt="dsh-im 企业微信群二维码" width="240"></a>
-    </td>
-    <td align="center" valign="top">
-      <a href="docs/images/weixin.jpg"><img src="docs/images/weixin.jpg" alt="微信二维码" width="240"></a>
+      <a href="docs/images/QQ.png"><img src="docs/images/QQ.png" alt="dsh-im QQ群二维码" width="240"></a>
     </td>
     <td align="center" valign="top">
       <a href="docs/images/xhs.jpg"><img src="docs/images/xhs.jpg" alt="小红书二维码" width="240"></a>
@@ -465,12 +572,15 @@ dsh web --trusted-host dsh.example.com
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/trae-agent" title="trae-agent"><img src="https://avatars.githubusercontent.com/u/220387035?s=80" width="80" alt="Trae"/><br /><sub><b>Trae</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/commit/ed47ae7db87d08a12fc6412083ece05669372929" title="Documentation">📖</a></td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/unera" title="unera"><img src="https://avatars.githubusercontent.com/u/538980?s=80" width="80" alt="Dmitry E. Oboukhov"/><br /><sub><b>Dmitry E. Oboukhov</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/pull/414" title="Code">💻</a> <a href="https://github.com/xmanrui/dsh-im/pull/414" title="Tests">⚠️</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/WE-Technology" title="WE-Technology"><img src="https://avatars.githubusercontent.com/u/109900108?s=80" width="80" alt="WE-Technology"/><br /><sub><b>WE-Technology</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/commit/b0606159e01bbb0a171323e52578324b5faea97a" title="Code">💻</a> <a href="https://github.com/xmanrui/dsh-im/commit/b0606159e01bbb0a171323e52578324b5faea97a" title="Documentation">📖</a> <a href="https://github.com/xmanrui/dsh-im/commit/b0606159e01bbb0a171323e52578324b5faea97a" title="Tests">⚠️</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/wings1848" title="wings1848"><img src="https://avatars.githubusercontent.com/u/120104016?s=80" width="80" alt="Wings Butterfly"/><br /><sub><b>Wings Butterfly</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/pull/206" title="Code">💻</a> <a href="https://github.com/xmanrui/dsh-im/pull/206" title="Documentation">📖</a> <a href="https://github.com/xmanrui/dsh-im/pull/206" title="Tests">⚠️</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/xmanrui" title="xmanrui"><img src="https://avatars.githubusercontent.com/u/4094054?s=80" width="80" alt="xiemanR"/><br /><sub><b>xiemanR</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/commit/b8bd681a793a87ff2a7b8d282cb4944a0ce769c3" title="Code">💻</a> <a href="https://github.com/xmanrui/dsh-im/commit/b8bd681a793a87ff2a7b8d282cb4944a0ce769c3" title="Documentation">📖</a> <a href="https://github.com/xmanrui/dsh-im/commit/b8bd681a793a87ff2a7b8d282cb4944a0ce769c3" title="Tests">⚠️</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/yangzhe1991" title="yangzhe1991"><img src="https://avatars.githubusercontent.com/u/860739?s=80" width="80" alt="Zhe (Phil) Yang"/><br /><sub><b>Zhe (Phil) Yang</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/commits/main/?author=yangzhe1991" title="Code">💻</a> <a href="https://github.com/xmanrui/dsh-im/commits/main/?author=yangzhe1991" title="Documentation">📖</a> <a href="https://github.com/xmanrui/dsh-im/commits/main/?author=yangzhe1991" title="Tests">⚠️</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/yhay81" title="yhay81"><img src="https://avatars.githubusercontent.com/u/11132792?s=80" width="80" alt="Yusuke Hayashi"/><br /><sub><b>Yusuke Hayashi</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/commit/91f49a603b504762fc0c5daf50d4385bf604ce93" title="Code">💻</a> <a href="https://github.com/xmanrui/dsh-im/commit/91f49a603b504762fc0c5daf50d4385bf604ce93" title="Documentation">📖</a> <a href="https://github.com/xmanrui/dsh-im/commit/91f49a603b504762fc0c5daf50d4385bf604ce93" title="Tests">⚠️</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/yzxxy010" title="yzxxy010"><img src="https://avatars.githubusercontent.com/u/98270201?s=80" width="80" alt="星曜"/><br /><sub><b>星曜</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/commit/7a68e94f547a2412e602772dfef82af779750b5f" title="Code">💻</a> <a href="https://github.com/xmanrui/dsh-im/commit/f27c0c3018a4c26c6d29885ba0cf2b44be947a4f" title="Documentation">📖</a> <a href="https://github.com/xmanrui/dsh-im/commit/7a68e94f547a2412e602772dfef82af779750b5f" title="Tests">⚠️</a></td>
+    </tr>
+    <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/zaakirio" title="zaakirio"><img src="https://avatars.githubusercontent.com/u/90780598?s=80" width="80" alt="zaakir"/><br /><sub><b>zaakir</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05" title="Code">💻</a> <a href="https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05" title="Documentation">📖</a> <a href="https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05" title="Tests">⚠️</a> <a href="https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05" title="Translation">🌍</a></td>
     </tr>
   </tbody>

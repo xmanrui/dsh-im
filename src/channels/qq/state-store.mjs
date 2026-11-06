@@ -1,11 +1,34 @@
 import { deferredStateAccess, normalizeDeferredState } from '../shared/deferred-state.mjs';
+import { createSessionRingSupport, normalizePendingTitles, normalizeSessionRings } from '../shared/session-ring-support.mjs';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { qqStateError } from './state-error.mjs';
 
 const PENDING_MESSAGE_LIMIT = 200;
+const AUTHOR_LIMIT = 500;
 const EMPTY_STATE = Object.freeze({ version: 1, sessions: {}, seenMessageIds: [] });
+
+function normalizeAuthor(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const senderId = typeof value.senderId === 'string' ? value.senderId : '';
+  if (!senderId) return null;
+  const author = { senderId, isBot: value.isBot === true };
+  if (typeof value.senderName === 'string' && value.senderName) author.senderName = value.senderName;
+  if (typeof value.senderUsername === 'string' && value.senderUsername) author.senderUsername = value.senderUsername;
+  if (typeof value.at === 'string' && value.at) author.at = value.at;
+  return author;
+}
+
+function normalizeAuthors(value) {
+  const authors = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return authors;
+  for (const key of Object.keys(value).slice(-AUTHOR_LIMIT)) {
+    const author = normalizeAuthor(value[key]);
+    if (author) authors[key] = author;
+  }
+  return authors;
+}
 
 /**
  * A message persisted when it enters the QQ bridge's in-memory queue, so a
@@ -59,15 +82,22 @@ function normalizeState(value) {
   // An empty queue leaves no key behind, so an untouched state file keeps the
   // shape earlier versions wrote.
   const pendingMessages = normalizePendingMessages(value.pendingMessages);
+  // A file written before the navigation ring existed loads unchanged: the keys
+  // are only added when they hold something.
+  const rings = normalizeSessionRings(value.rings);
+  const pendingTitles = normalizePendingTitles(value.pendingTitles);
   return {
     version: 1,
     sessions,
+    ...(value.authors ? { authors: normalizeAuthors(value.authors) } : {}),
     includeArchivedSessions: value.includeArchivedSessions === true,
     ...(pendingMessages.length ? { pendingMessages } : {}),
     ...(value.deferred ? { deferred: normalizeDeferredState(value.deferred) } : {}),
     seenMessageIds: Array.isArray(value.seenMessageIds)
       ? value.seenMessageIds.filter((id) => typeof id === 'string').slice(-1_000)
       : [],
+    ...(Object.keys(rings).length ? { rings } : {}),
+    ...(Object.keys(pendingTitles).length ? { pendingTitles } : {}),
   };
 }
 
@@ -81,8 +111,13 @@ export class QqStateStore {
   constructor(path, { logger = console } = {}) {
     this.#path = path;
     this.#logger = logger;
+    // The navigation ring is a view over this store's state, shared with the
+    // channels that inherit `ConversationStateStore`.
+    Object.assign(this, createSessionRingSupport({
+      state: () => this.#state,
+      persist: () => this.#persist(),
+    }));
   }
-
   async load() {
     let bytes;
     try {
@@ -167,6 +202,25 @@ export class QqStateStore {
   }
 
   includesArchivedSessions() { return this.#state.includeArchivedSessions === true; }
+
+  authorFor(key) {
+    const author = this.#state.authors?.[key];
+    return author ? structuredClone(author) : null;
+  }
+
+  async rememberAuthor(key, value) {
+    const author = normalizeAuthor({ at: new Date().toISOString(), ...value });
+    if (typeof key !== 'string' || !key || !author) return null;
+    const authors = this.#state.authors ??= {};
+    delete authors[key];
+    authors[key] = author;
+    const keys = Object.keys(authors);
+    if (keys.length > AUTHOR_LIMIT) {
+      for (const stale of keys.slice(0, keys.length - AUTHOR_LIMIT)) delete authors[stale];
+    }
+    await this.#persist();
+    return structuredClone(author);
+  }
 
   async setIncludeArchivedSessions(include) {
     this.#state.includeArchivedSessions = include === true;

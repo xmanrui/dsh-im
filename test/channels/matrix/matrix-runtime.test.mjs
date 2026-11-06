@@ -621,7 +621,7 @@ test('bang commands resolve only through the known command catalog', async () =>
   });
   try {
     await context.runtime.start();
-    await eventually(() => sentMessages(context.fake).some((call) => call.content.body?.includes('新会话'))
+    await eventually(() => sentMessages(context.fake).some((call) => call.content.body?.includes('全新 Harness 会话'))
       && context.harness.prompts.length >= 1);
     deepStrictEqual(context.runtime.status.messagesReceived, 2);
     ok(!context.harness.prompts.some((prompt) => prompt.includes('/new')),
