@@ -88,6 +88,7 @@ import { IMPanelErrorBoundary } from './panel-error-boundary.js';
 import { installImPluginPage } from './plugin-page.js';
 import { installSidebarVisibilitySync, SIDEBAR_SETTINGS_ENDPOINTS, SIDEBAR_SETTINGS_RPC_CHANNEL } from './sidebar-settings.js';
 
+import { installChannelSessionsPage, CHANNEL_LIST_RPC_CHANNEL } from './im-channels.js';
 export const name = 'im-settings';
 export const inject = ['slots', 'connection', 'locale', 'workspaces'];
 export const IM_PLUGIN_VERSION = manifest.version;
@@ -240,6 +241,7 @@ export function IMSettingsTab({
   deliverySyncRpcCall,
   languageRpcCall,
   workspaceDirectoryPicker,
+  onOpenSessionHistory,
   preferredSectionId,
   browserLocation = globalThis.location,
   navigateToRecoveryUrl = replacePageLocation,
@@ -362,6 +364,11 @@ export function IMSettingsTab({
           className: 'dim-githubTooltip',
           role: 'tooltip',
         }, '帮助与反馈 · 前往 GitHub')),
+      onOpenSessionHistory ? h('button', {
+        type: 'button',
+        className: 'dim-pluginOpen dim-sessionHistoryButton',
+        onClick: onOpenSessionHistory,
+      }, '会话记录') : null,
       h('span', { className: 'dim-generalSettingsAction' },
         h('button', {
           type: 'button',
@@ -569,6 +576,8 @@ export function apply(ctx) {
     managementRpc(ctx.connection, DELIVERY_SYNC_SETTINGS_RPC_CHANNEL, endpoint, payload, signal);
   const languageRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, HOST_LANGUAGE_RPC_CHANNEL, endpoint, payload, signal);
+  const channelListRpcCall = (endpoint, payload, signal) =>
+    managementRpc(ctx.connection, CHANNEL_LIST_RPC_CHANNEL, endpoint, payload, signal);
   const workspaceDirectoryPicker = Object.freeze({
     listDirectory: (path, signal) =>
       callWorkspaceDirectoryApi(ctx, 'listDirectory', path, signal),
@@ -595,6 +604,7 @@ export function apply(ctx) {
     globalSettingsRpcCall,
     languageRpcCall,
     deliverySyncRpcCall,
+    channelListRpcCall,
     workspaceDirectoryPicker,
   };
   const subscribeLocale = (listener) => typeof ctx.on === 'function'
@@ -605,8 +615,14 @@ export function apply(ctx) {
   // new component type and reset the reader's selected tab or unsaved input.
   function IMPanel({ preferredSectionId }) {
     React.useSyncExternalStore(subscribeLocale, localeSnapshot, localeSnapshot);
+    const historyAvailable = React.useSyncExternalStore(
+      channelSessionsPage.subscribe, channelSessionsPage.available, channelSessionsPage.available,
+    );
     return h(IMPanelErrorBoundary, null,
-      h(IMSettingsTab, { ...panelDependencies, preferredSectionId }));
+      h(IMSettingsTab, {
+        ...panelDependencies, preferredSectionId,
+        onOpenSessionHistory: historyAvailable ? channelSessionsPage.open : undefined,
+      }));
   }
   const buildPanelElement = (props = {}) => h(IMPanel, {
     preferredSectionId: props.preferredSectionId,
@@ -616,6 +632,7 @@ export function apply(ctx) {
     packageName: manifest.name,
     renderPanel: buildPanelElement,
   });
+  const channelSessionsPage = installChannelSessionsPage(ctx, { channelListRpcCall });
 
   ctx.effect(() => {
     sidebarSync = installSidebarVisibilitySync({
