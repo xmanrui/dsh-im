@@ -14,7 +14,7 @@ import { qqMenuView } from '../src/channels/qq/qq-menu.mjs';
 import { QqHarnessBridge } from '../src/channels/qq/qq-bridge.mjs';
 import { directAccessPolicy } from './channels/access-policy-fixture.mjs';
 
-async function fixture(t) {
+async function fixture(t, { sessionCount = 1, beforeList } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-im-channel-workspace-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   const workspaceA = join(root, 'a');
@@ -28,14 +28,20 @@ async function fixture(t) {
   const state = await new StateStore(join(root, 'state.json')).load();
   const listedWorkspaces = [];
   const adoptedSessions = [];
+  const archivedSessionCalls = [];
   const target = {
     async ensureRunning() {},
     async listWorkspaces() { return [workspaceA, workspaceB]; },
     async listWorkspaceSessions(workspace) {
       listedWorkspaces.push(workspace);
+      await beforeList?.(workspace);
+      const name = workspace === workspaceB ? 'B' : 'A';
       return {
         workspace,
-        sessions: [{ sessionId: workspace === workspaceB ? 'session-B' : 'session-A', title: workspace === workspaceB ? 'Session B' : 'Session A' }],
+        sessions: Array.from({ length: sessionCount }, (_, index) => ({
+          sessionId: `session-${name}${index ? `-${index + 1}` : ''}`,
+          title: `Session ${name}${index ? ` ${index + 1}` : ''}`,
+        })),
       };
     },
     async listModels() { return { groups: [], failures: [] }; },
@@ -43,9 +49,22 @@ async function fixture(t) {
       adoptedSessions.push(sessionId);
       return { sessionId, workspace: sessionId === 'session-B' ? workspaceB : workspaceA };
     },
+    async archiveWorkspaceSession(sessionId, options = {}) {
+      archivedSessionCalls.push({ sessionId, stopActivity: options.stopActivity === true });
+      return { archivedSessionIds: [sessionId] };
+    },
   };
   const scope = createBotWorkspaceScope(target, { botId, workspaces, state });
-  return { ...scope, workspaces, botId, workspaceA, workspaceB, listedWorkspaces, adoptedSessions };
+  return {
+    ...scope,
+    workspaces,
+    botId,
+    workspaceA,
+    workspaceB,
+    listedWorkspaces,
+    adoptedSessions,
+    archivedSessionCalls,
+  };
 }
 
 function feishuMessage(messageId, text) {
@@ -78,6 +97,113 @@ function feishuBridge(f) {
     },
   };
 }
+
+test('the production scope exposes sessionFor so /sessionlist marks the bound Session', async (t) => {
+  const f = await fixture(t);
+  const key = 'p2p:ou_owner';
+  assert.equal(typeof f.harness.sessionFor, 'function');
+  await f.state.setSession(key, 'session-A');
+
+  const listed = await runWorkspaceCommand('/sessionlist', f.harness, key);
+  assert.match(listed.message, /1\. Session A（当前绑定）\n   ID: session-A/);
+});
+
+test('title binding in a pinned workspace preserves the bot default and other chats', async (t) => {
+  const f = await fixture(t);
+  const key = 'p2p:ou_owner';
+  const otherKey = 'p2p:ou_other';
+  await f.harness.switchConversationWorkspace(key, f.workspaceB);
+  await f.state.setSession(otherKey, 'session-A');
+
+  const bound = await runWorkspaceCommand('/session B', f.harness, key);
+
+  assert.match(bound.message, /ID：session-B/);
+  assert.equal(f.state.sessionFor(key), 'session-B');
+  assert.equal(f.state.sessionFor(otherKey), 'session-A');
+  assert.equal(f.harness.currentWorkspace(), f.workspaceA);
+  assert.equal(f.harness.currentConversationWorkspace(key), f.workspaceB);
+  assert.equal(f.workspaces.hasConversationWorkspaceOverride(f.botId, key), true);
+
+  // Explicit IDs retain the documented bot-wide switching behavior.
+  await runWorkspaceCommand('/session session-B', f.harness, key);
+  assert.equal(f.harness.currentWorkspace(), f.workspaceB);
+  assert.equal(f.state.sessionFor(otherKey), null);
+});
+
+test('a workspace change during title search rejects the stale selection', async (t) => {
+  let release;
+  let ready;
+  const paused = new Promise((resolve) => { ready = resolve; });
+  const resume = new Promise((resolve) => { release = resolve; });
+  let block = true;
+  const f = await fixture(t, {
+    async beforeList() {
+      if (!block) return;
+      block = false;
+      ready();
+      await resume;
+    },
+  });
+  const key = 'p2p:ou_owner';
+  const otherKey = 'p2p:ou_other';
+  await f.harness.switchConversationWorkspace(key, f.workspaceB);
+  await f.state.setSession(otherKey, 'session-A');
+  const selecting = runWorkspaceCommand('/session B', f.harness, key);
+  await paused;
+  try {
+    await f.harness.switchConversationWorkspace(key, f.workspaceA);
+  } finally {
+    release();
+  }
+
+  const result = await selecting;
+  assert.match(result.message, /工作区或会话状态已发生变化/);
+  assert.equal(f.harness.currentWorkspace(), f.workspaceA);
+  assert.equal(f.harness.currentConversationWorkspace(key), f.workspaceA);
+  assert.equal(f.state.sessionFor(key), null);
+  assert.equal(f.state.sessionFor(otherKey), 'session-A');
+});
+
+test('Feishu accept sends cross-workspace summaries with limits and binding markers', async (t) => {
+  const f = await fixture(t, { sessionCount: 12 });
+  const key = 'p2p:ou_owner';
+  await f.harness.switchConversationWorkspace(key, f.workspaceB);
+  await f.state.setSession(key, 'session-B');
+  const channel = feishuBridge(f);
+
+  await channel.send('sessions-all', '/sessionlist --all');
+  const all = JSON.stringify(channel.sent);
+  assert.deepEqual(f.listedWorkspaces, [f.workspaceB, f.workspaceA]);
+  assert.match(all, /跨工作区会话（2 个工作区，共 24 个会话）/);
+  assert.match(all, /Session B（当前绑定）/);
+  assert.match(all, /ID: session-A-10/);
+  assert.match(all, /ID: session-B-10/);
+  assert.doesNotMatch(all, /ID: session-[AB]-11/);
+
+  f.listedWorkspaces.length = 0;
+  channel.sent.length = 0;
+  await channel.send('sessions-all-limited', '/SESSIONS --LIMIT 2 --ALL');
+  const limited = JSON.stringify(channel.sent);
+  assert.deepEqual(f.listedWorkspaces, [f.workspaceB, f.workspaceA]);
+  assert.match(limited, /ID: session-A-2/);
+  assert.match(limited, /ID: session-B-2/);
+  assert.doesNotMatch(limited, /ID: session-[AB]-3/);
+});
+
+test('Feishu session cards mark the bound Session while retaining watch and use actions', async (t) => {
+  const f = await fixture(t);
+  const key = 'p2p:ou_owner';
+  await f.state.setSession(key, 'session-A');
+  const channel = feishuBridge(f);
+
+  await channel.send('sessions-bound', '/sessionlist');
+
+  assert.equal(channel.sent.at(-1).type, 'interactive');
+  const card = JSON.stringify(channel.sent.at(-1).content);
+  assert.match(card, /1\. Session A（当前绑定）/);
+  assert.match(card, /use:session-A/);
+  assert.match(card, /watch:session-A/);
+});
 
 test('Feishu accept uses /conv for /sessionlist while explicit selectors still win', async (t) => {
   const f = await fixture(t);
@@ -219,4 +345,23 @@ test('QQ rejects an actor\'s old session menu after another group actor changes 
   assert.equal(f.harness.currentConversationWorkspace(key), f.workspaceA);
   assert.equal(f.state.sessionFor(key), null);
   assert.match(JSON.stringify(sent.at(-1)), /会话或工作区已变化/u);
+});
+
+test('the production scope exposes archiveWorkspaceSession for /sessionarchive', async (t) => {
+  const f = await fixture(t, { sessionCount: 2 });
+  assert.equal(typeof f.harness.archiveWorkspaceSession, 'function');
+
+  const result = await runWorkspaceCommand('/sessionarchive session-A-2', f.harness, 'p2p:ou_owner');
+  assert.deepEqual(f.archivedSessionCalls, [{ sessionId: 'session-A-2', stopActivity: false }]);
+  assert.match(result.message, /^已归档会话：/);
+  assert.match(result.message, /ID：session-A-2/);
+
+  // An index only previews; the destructive call needs the explicit id.
+  const preview = await runWorkspaceCommand('/sessionarchive 1', f.harness, 'p2p:ou_owner');
+  assert.match(preview.message, /按序号归档只做预览/);
+  assert.equal(f.archivedSessionCalls.length, 1);
+
+  const withStop = await runWorkspaceCommand('/sessionarchive session-A --stop', f.harness, 'p2p:ou_owner');
+  assert.deepEqual(f.archivedSessionCalls.at(-1), { sessionId: 'session-A', stopActivity: true });
+  assert.match(withStop.message, /ID：session-A/);
 });

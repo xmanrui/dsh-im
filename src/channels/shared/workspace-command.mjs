@@ -9,22 +9,62 @@ const WORKSPACE_COMMAND = /^\/(?:workspace|ws)(?:\s+([\s\S]+))?$/i;
 const WORKSPACE_LIST_COMMAND = /^\/(?:workspacelist|workspaces|wsl)(?:\s+([\s\S]+))?$/i;
 const THREAD_WORKSPACE_COMMAND = /^\/(?:conv|conversation|thread)(?:\s+([\s\S]+))?$/i;
 const SESSION_LIST_COMMAND = /^\/(?:sessionlist|sessions)(?:\s+([\s\S]+))?$/i;
-const SESSION_BIND_PREFIX = /^\/session(?=$|\s)/i;
-const SESSION_BIND_COMMAND = /^\/session[ \t]+([^\s]+)$/i;
+// `/session` stays the advertised name. Some clients own a slash command of the
+// same name and grab the input box before the bot sees it, so `/sess` is
+// accepted as a short alias that survives those clients.
+const SESSION_BIND_PREFIX = /^\/(?:session|sess)(?=$|\s)/i;
+const SESSION_BIND_COMMAND = /^\/(?:session|sess)[ \t]+([^\s]+)$/i;
 const MAX_WORKSPACE_PATH_LENGTH = 4_096;
 const MAX_COMMAND_MESSAGE_LENGTH = 1_800;
 const MAX_SESSION_ID_LENGTH = 256;
 const UNSAFE_DISPLAY_TEXT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const UNSAFE_DISPLAY_TEXT_GLOBAL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
-const SESSION_BIND_USAGE = '用法：/session Session ID 或当前工作区序号（/session N）';
+const SESSION_BIND_USAGE = '用法：/session Session ID、当前工作区序号（/session N）或会话标题关键词';
 const SESSION_LIST_USAGE = [
   '用法：',
   '/sessionlist  列出当前工作区会话',
+  '/sessionlist --all  跨工作区汇总列出会话（每个工作区默认显示 10 个）',
+  '/sessionlist --all --limit N  跨工作区汇总列出会话，每个工作区显示前 N 个',
   '/sessionlist --limit N  列出当前工作区前 N 个会话（N 为正整数）',
+  '/sessionlist --archived  一并列出已归档会话（序号仍只对应未归档会话）',
   '/sessionlist 工作区序号  按 /workspacelist 序号列出会话',
   '/sessionlist 工作区绝对路径  列出指定工作区会话',
   '不带工作区参数时，默认列出当前对话的有效工作区（未设置对话专属工作区时即 bot 默认工作区）。',
 ].join('\n');
+// Archiving is a Harness capability (workspace.archiveSession); the command only
+// carries the request, so an older Host answers with a clear "not supported".
+const SESSION_ARCHIVE_PREFIX = /^\/(?:sessionarchive|sessarchive)(?=$|\s)/i;
+const SESSION_ARCHIVE_COMMAND = /^\/(?:sessionarchive|sessarchive)(?:[ \t]+([^\s]+))?(?:[ \t]+(--?stop))?$/i;
+const SESSION_ARCHIVE_USAGE = '用法：/sessionarchive Session ID 归档一个会话；/sessionarchive 序号 只预览该序号对应的会话（编号会随列表变化，归档请用完整 ID）。加 --stop 可让 DSH 先停止该会话正在运行的任务';
+// An index is resolved against a list that shifts as soon as a new Session
+// appears (the command's own turn can add one), so an index only previews the
+// target: archiving is destructive and has to name the Session explicitly.
+const SESSION_ARCHIVE_PREVIEW = '按序号归档只做预览：/sessionarchive {index} 现在对应这条会话。';
+const SESSION_ARCHIVE_PREVIEW_HINT = '（编号会随会话列表变化，所以不按序号直接归档；确认归档请发送：/sessionarchive {sessionId}）';
+const SESSION_LIST_ALL_FLAG = '--all';
+const SESSION_LIST_LIMIT_FLAG = '--limit';
+const SESSION_LIST_ARCHIVED_FLAG = '--archived';
+const ALL_WORKSPACES_DEFAULT_LIMIT = 10;
+const MAX_SESSION_TITLE_QUERY_LENGTH = 120;
+const MAX_SESSION_TITLE_MATCHES = 10;
+const SESSION_ID_PREFIX = /^session-/iu;
+const SESSION_LIST_ALL_HEADER = '跨工作区会话（{workspaces} 个工作区，共 {sessions} 个会话）：';
+const SESSION_LIST_ALL_CURRENT = '当前工作区：{workspace}';
+const SESSION_LIST_ALL_SKIPPED = '另有 {count} 个工作区暂时无法读取，未包含在汇总中。';
+const SESSION_LIST_GROUP_HEADER = '{workspace}（{count} 个会话）';
+const SESSION_LIST_GROUP_TRUNCATED = '（共 {total} 个，显示前 {shown} 个；用 --limit N 调整）';
+const SESSION_LIST_GROUP_EMPTY = '该工作区暂无会话。';
+const SESSION_LIST_GROUP_INVALID = '（{count} 条会话记录无效，已跳过）';
+const SESSION_LIST_ARCHIVED_HIDDEN = '（已隐藏 {count} 条归档会话，用 --archived 查看）';
+const SESSION_LIST_ARCHIVED_HEADER = '归档会话（只能用完整 Session ID 绑定）：';
+const SESSION_TITLE_AMBIGUOUS = '标题包含「{keyword}」的会话有多个，请改用完整 Session ID 绑定：';
+const SESSION_TITLE_REMOTE = '标题包含「{keyword}」的会话位于其他工作区，请使用完整 Session ID 绑定：';
+const SESSION_TITLE_SEARCH_INCOMPLETE = '部分工作区暂时无法读取，搜索结果可能不完整；请使用完整 Session ID 绑定：';
+const SESSION_TITLE_SEARCH_INCOMPLETE_MISS = '部分工作区暂时无法读取，未能确认标题包含「{keyword}」的会话。请稍后重试或使用完整 Session ID。';
+const SESSION_TITLE_AMBIGUOUS_TRUNCATED = '匹配较多，只显示前 {count} 个，请使用更精确的关键词。';
+const SESSION_TITLE_MISS = '没有标题包含「{keyword}」的会话，请先执行 /sessionlist --all 查看完整 Session ID。';
+const SESSION_TITLE_BIND_FAILED = '按标题匹配到「{title}」（ID: {sessionId}，工作区: {workspace}），但 Harness 当前无法接管这个会话，请稍后重试或用完整 Session ID 绑定。';
+const SESSION_TITLE_ARCHIVED = '标题包含「{keyword}」的会话已归档，按标题绑定不会接管归档会话，请用完整 Session ID 绑定：';
 
 function commandResult(message, messages = [message], extra = {}) {
   return { handled: true, message, messages, ...extra };
@@ -52,15 +92,47 @@ function validSessionId(value) {
 export function parseSessionListArgument(value) {
   const argument = typeof value === 'string' ? value.trim() : '';
   if (!argument) return { selector: '', limit: null };
-  if (!argument.toLowerCase().startsWith('--limit')) {
-    return { selector: argument, limit: null };
+  const tokens = argument.split(/[ \t]+/u);
+  const head = tokens[0].toLowerCase();
+  // Anything that does not start with a flag stays a workspace selector; only
+  // the flags below are parsed, so a path can never be mistaken for one. An
+  // unknown flag is a usage error instead of being echoed as a bad path.
+  const flags = new Set([SESSION_LIST_ALL_FLAG, SESSION_LIST_LIMIT_FLAG, SESSION_LIST_ARCHIVED_FLAG]);
+  if (!flags.has(head)) {
+    return head.startsWith('--')
+      ? { error: t(SESSION_LIST_USAGE) }
+      : { selector: argument, limit: null };
   }
-  const match = /^--limit[ \t]+(\d+)$/iu.exec(argument);
-  const limit = match ? Number(match[1]) : null;
-  if (!Number.isSafeInteger(limit) || limit < 1) {
-    return { error: t(SESSION_LIST_USAGE) };
+  let all = false;
+  let archived = false;
+  let limit = null;
+  for (let index = 0; index < tokens.length;) {
+    const token = tokens[index].toLowerCase();
+    if (token === SESSION_LIST_ALL_FLAG && !all) {
+      all = true;
+      index += 1;
+      continue;
+    }
+    if (token === SESSION_LIST_ARCHIVED_FLAG && !archived) {
+      archived = true;
+      index += 1;
+      continue;
+    }
+    const raw = token === SESSION_LIST_LIMIT_FLAG ? tokens[index + 1] : undefined;
+    const parsed = typeof raw === 'string' && /^\d+$/u.test(raw) ? Number(raw) : null;
+    if (limit !== null || parsed === null
+      || !Number.isSafeInteger(parsed) || parsed < 1) {
+      return { error: t(SESSION_LIST_USAGE) };
+    }
+    limit = parsed;
+    index += 2;
   }
-  return { selector: '', limit };
+  // Optional flags are only present when they were asked for, so the shape of a
+  // plain `--limit N` (or bare) result stays what earlier callers compare to.
+  const result = { selector: '', limit };
+  if (all) result.all = true;
+  if (archived) result.archived = true;
+  return result;
 }
 
 async function existingWorkspacePath(value) {
@@ -116,7 +188,13 @@ export async function workspacePathSnapshot(harness, { includeTitles = false, in
   const withEntries = includeTitles && typeof harness.listWorkspaceEntries === 'function';
   const listed = await (withEntries ? harness.listWorkspaceEntries(options) : harness.listWorkspaces(options));
   const currentValue = await conversationSessionWorkspace(harness, conversationKey, options);
-  const current = await existingWorkspacePath(currentValue);
+  let current = await existingWorkspacePath(currentValue);
+  if (!current && typeof conversationKey === 'string' && conversationKey
+    && typeof harness?.currentWorkspace === 'function') {
+    // A conversation override can outlive its directory. /sessionlist falls
+    // back to the bot workspace in that case; keep this snapshot consistent.
+    current = await existingWorkspacePath(harness.currentWorkspace());
+  }
   const entries = await Promise.all((Array.isArray(listed) ? listed : []).map(async (item) => ({
     path: await existingWorkspacePath(withEntries ? item?.path : item),
     title: withEntries ? safeDisplayText(item?.title) : '',
@@ -275,24 +353,92 @@ function formatSessionRelativeTime(value) {
   return t('{year}年{month}月{day}日', { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() });
 }
 
-function sessionListMessage(workspace, sessions, { currentWorkspace = false } = {}) {
-  const rows = sessions.map((session) => {
-    const sessionId = safeDisplayText(session?.sessionId);
-    if (!sessionId) throw new TypeError('Harness returned an invalid session id');
-    const title = session?.summaryAvailable === false
-      ? t('标题暂不可用')
-      : safeDisplayText(session?.title) || t('暂无标题');
-    const timeText = formatSessionRelativeTime(session?.time);
-    const annotation = `${timeText ? ` · ${timeText}` : ''}${session?.archived === true ? t('（已归档）') : ''}`;
-    return `${title}${annotation}\n   ID: ${sessionId}`;
-  });
-  if (rows.length === 0) return t(`工作区：{workspace}
+/**
+ * One numbered row. `boundSessionId` marks the Session this conversation is
+ * already bound to, so a reader can tell where they are instead of looking up
+ * the ID by hand.
+ */
+// Archived Sessions are listed only on request: the default answer should be
+// the set a user can bind by index, not the whole history of the Workspace.
+function splitArchived(sessions) {
+  const live = [];
+  const archived = [];
+  for (const session of sessions) {
+    (session?.archived === true ? archived : live).push(session);
+  }
+  return { live, archived };
+}
+
+function sessionRowText(session, boundSessionId) {
+  const sessionId = safeDisplayText(session?.sessionId);
+  if (!sessionId) throw new TypeError('Harness returned an invalid session id');
+  const title = session?.summaryAvailable === false
+    ? t('标题暂不可用')
+    : safeDisplayText(session?.title) || t('暂无标题');
+  const timeText = formatSessionRelativeTime(session?.time);
+  const annotation = `${timeText ? ` · ${timeText}` : ''}`
+    + `${session?.archived === true ? t('（已归档）') : ''}`
+    + `${boundSessionId && sessionId === boundSessionId ? t('（当前绑定）') : ''}`;
+  return `${title}${annotation}\n   ID: ${sessionId}`;
+}
+
+function sessionListRow(session, index, boundSessionId) {
+  return `${index}. ${sessionRowText(session, boundSessionId)}`;
+}
+
+/**
+ * Rows for one Workspace. Only the live (non-archived) Sessions get numbers,
+ * and those numbers are the same order `/session N` resolves against, so the
+ * list and the index always agree. Archived rows are unnumbered extras.
+ */
+function sessionRows(sessions, boundSessionId, { includeArchived = false } = {}) {
+  const { live, archived } = splitArchived(sessions);
+  const rows = [];
+  let invalid = 0;
+  for (const [index, session] of live.entries()) {
+    try {
+      rows.push(sessionListRow(session, index + 1, boundSessionId));
+    } catch {
+      invalid += 1;
+    }
+  }
+  const extra = [];
+  if (includeArchived) {
+    for (const session of archived) {
+      try {
+        extra.push(`• ${sessionRowText(session, boundSessionId)}`);
+      } catch {
+        invalid += 1;
+      }
+    }
+  }
+  return { rows, extra, archivedCount: archived.length, invalid };
+}
+
+function sessionListMessage(
+  workspace,
+  { rows, extra, archivedCount, invalid },
+  { currentWorkspace = false, includeArchived = false } = {},
+) {
+  const notes = [];
+  if (invalid > 0) notes.push(t(SESSION_LIST_GROUP_INVALID, { count: invalid }));
+  if (!includeArchived && archivedCount > 0) {
+    notes.push(t(SESSION_LIST_ARCHIVED_HIDDEN, { count: archivedCount }));
+  }
+  if (rows.length === 0 && extra.length === 0) {
+    const head = t('工作区：{workspace}', { workspace });
+    return notes.length
+      ? [head, ...notes].join('\n')
+      : t(`工作区：{workspace}
 该工作区暂无会话。`, { workspace });
+  }
   return [
     t('工作区：{workspace}', { workspace }),
     t('会话（{count}）：', { count: rows.length }),
     '',
-    ...rows.map((row, index) => `${index + 1}. ${row}`),
+    ...rows,
+    ...(extra.length > 0 ? ['', t(SESSION_LIST_ARCHIVED_HEADER), ...extra] : []),
+    ...(notes.length > 0 ? ['', ...notes] : []),
     '',
     currentWorkspace
       ? t('绑定用法：/session Session ID 或当前工作区序号（/session N）')
@@ -310,6 +456,112 @@ async function currentSessionListWorkspace(harness, conversationKey) {
   return current ?? null;
 }
 
+// Read-only decoration: a stale bot scope must degrade to "no marker" instead of
+// failing a listing that is otherwise complete.
+export function boundSessionIdFor(source, conversationKey) {
+  if (typeof source?.sessionFor !== 'function') return '';
+  if (typeof conversationKey !== 'string' || !conversationKey) return '';
+  try {
+    const sessionId = safeDisplayText(source.sessionFor(conversationKey));
+    return validSessionId(sessionId) ? sessionId : '';
+  } catch {
+    return '';
+  }
+}
+
+function workspaceGroupLabel(path, titles) {
+  const title = safeDisplayText(titles?.[path]);
+  return title ? `${title} — ${path}` : path;
+}
+
+async function listWorkspaceSessionsOrNull(harness, workspace) {
+  try {
+    const listed = await harness.listWorkspaceSessions(workspace);
+    if (!listed || !Array.isArray(listed.sessions)) {
+      throw new TypeError('Harness returned an invalid workspace session list');
+    }
+    return listed.sessions;
+  } catch (error) {
+    if (error?.code === 'workspace-bot-not-found') throw error;
+    return null;
+  }
+}
+
+/**
+ * `/sessionlist --all`: every registered Workspace in one answer. A Workspace
+ * whose session list cannot be read is left out rather than failing the whole
+ * command, so one broken Workspace never hides the others.
+ */
+async function allWorkspacesSessionListing(harness, limit, conversationKey, { includeArchived = false } = {}) {
+  if (typeof harness?.listWorkspaces !== 'function'
+    && typeof harness?.listWorkspaceEntries !== 'function') {
+    return commandResult(t('当前机器人暂不支持跨工作区列出会话。'));
+  }
+  const { current, paths, titles } = await workspacePathSnapshot(harness, {
+    includeTitles: true,
+    conversationKey,
+  });
+  if (paths.length === 0) {
+    return commandResult(t('当前 Harness Host 上没有仍然存在的已登记工作区。'));
+  }
+  const boundSessionId = boundSessionIdFor(harness, conversationKey);
+  const shownLimit = Number.isSafeInteger(limit) && limit > 0 ? limit : ALL_WORKSPACES_DEFAULT_LIMIT;
+  const groups = [];
+  let failed = 0;
+  for (const workspace of paths) {
+    const sessions = await listWorkspaceSessionsOrNull(harness, workspace);
+    if (sessions === null) {
+      failed += 1;
+      continue;
+    }
+    groups.push({ workspace, sessions });
+  }
+  harness.assertWorkspaceScope?.();
+  if (groups.length === 0) {
+    return commandResult(t('暂时无法获取工作区会话列表，请稍后重试。'));
+  }
+  // Rows are built once per group and every count below derives from them, so a
+  // group's total, its truncation note and its invalid-record note always agree.
+  const prepared = groups.map((group) => ({
+    ...group,
+    ...sessionRows(group.sessions, boundSessionId, { includeArchived }),
+  }));
+  const total = prepared.reduce((sum, group) => sum + group.rows.length, 0);
+  const lines = [t(SESSION_LIST_ALL_HEADER, { workspaces: prepared.length, sessions: total })];
+  if (current) lines.push(t(SESSION_LIST_ALL_CURRENT, { workspace: current }));
+  if (failed > 0) lines.push(t(SESSION_LIST_ALL_SKIPPED, { count: failed }));
+  lines.push(t(`绑定用法：/session Session ID
+提示：/session N 只按机器人当前工作区的序号绑定。`));
+  for (const group of prepared) {
+    const label = workspaceGroupLabel(group.workspace, titles);
+    lines.push('', t(SESSION_LIST_GROUP_HEADER, {
+      workspace: `${label}${group.workspace === current ? t('（当前）') : ''}`,
+      count: group.rows.length,
+    }));
+    const shown = group.rows.slice(0, shownLimit);
+    lines.push(...shown);
+    if (group.extra.length > 0) {
+      lines.push('', t(SESSION_LIST_ARCHIVED_HEADER), ...group.extra);
+    }
+    if (group.invalid > 0) {
+      lines.push(t(SESSION_LIST_GROUP_INVALID, { count: group.invalid }));
+    } else if (group.rows.length === 0 && group.extra.length === 0) {
+      lines.push(t(SESSION_LIST_GROUP_EMPTY));
+    }
+    if (!includeArchived && group.archivedCount > 0) {
+      lines.push(t(SESSION_LIST_ARCHIVED_HIDDEN, { count: group.archivedCount }));
+    }
+    if (shown.length < group.rows.length) {
+      lines.push(t(SESSION_LIST_GROUP_TRUNCATED, {
+        total: group.rows.length,
+        shown: shown.length,
+      }));
+    }
+  }
+  const message = lines.join('\n');
+  return commandResult(message, splitWorkspaceCommandMessage(message));
+}
+
 async function runSessionListCommand(match, harness, conversationKey) {
   const request = parseSessionListArgument(match[1]);
   if (request.error) return commandResult(request.error);
@@ -317,6 +569,11 @@ async function runSessionListCommand(match, harness, conversationKey) {
     return commandResult(t('当前机器人暂不支持列出工作区会话。'));
   }
   try {
+    if (request.all) {
+      return await allWorkspacesSessionListing(harness, request.limit, conversationKey, {
+        includeArchived: request.archived === true,
+      });
+    }
     const resolved = await resolveSessionListWorkspace(request.selector, harness, { conversationKey });
     if (resolved.error) return commandResult(resolved.error);
     const listed = await harness.listWorkspaceSessions(resolved.workspace);
@@ -326,11 +583,17 @@ async function runSessionListCommand(match, harness, conversationKey) {
     harness.assertWorkspaceScope?.();
     const workspace = normalizedWorkspacePath(listed.workspace) ?? resolved.workspace;
     const currentWorkspace = await currentSessionListWorkspace(harness, conversationKey);
-    const sessions = request.limit === null
-      ? listed.sessions
-      : listed.sessions.slice(0, request.limit);
-    const message = sessionListMessage(workspace, sessions, {
+    // Rows are numbered over the live Sessions (the order `/session N` binds
+    // against); --limit only truncates what is shown, so a displayed number is
+    // always the number that binding uses.
+    const includeArchived = request.archived === true;
+    const listing = sessionRows(listed.sessions, boundSessionIdFor(harness, conversationKey), {
+      includeArchived,
+    });
+    const rows = request.limit === null ? listing.rows : listing.rows.slice(0, request.limit);
+    const message = sessionListMessage(workspace, { ...listing, rows }, {
       currentWorkspace: workspace === currentWorkspace,
+      includeArchived,
     });
     return commandResult(message, splitWorkspaceCommandMessage(message));
   } catch (error) {
@@ -368,9 +631,104 @@ function sessionBindErrorMessage(error) {
   return t('暂时无法绑定会话，请稍后重试。');
 }
 
+// A single token that is neither an index nor an explicit Session ID is a
+// title keyword. Anything with control characters or an absurd length is not a
+// query at all, so it keeps failing as a malformed /session argument.
+function sessionTitleQuery(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= MAX_SESSION_TITLE_QUERY_LENGTH
+    && validSessionId(value)
+    && !SESSION_ID_PREFIX.test(value);
+}
+
+/**
+ * Title search across Workspaces. `workspacePathSnapshot` puts the
+ * conversation's effective Workspace first, so a local hit is visited before a
+ * same-named Session elsewhere and can be preferred by the caller. One
+ * unreadable Workspace is counted and skipped; a stale bot scope aborts.
+ *
+ * Archived Sessions are never bound by a keyword: a keyword is a guess, and
+ * moving an archived Session into this chat's Workspace is exactly the kind of
+ * side effect a guess must not have. They are collected separately so the
+ * answer can name them instead of pretending nothing matched.
+ */
+async function sessionTitleMatches(harness, conversationKey, keyword) {
+  const { current, paths, titles } = await workspacePathSnapshot(harness, {
+    includeTitles: true,
+    conversationKey,
+  });
+  const needle = keyword.toLowerCase();
+  const matches = [];
+  const archivedMatches = [];
+  let archivedExactSessionId = null;
+  let exactSessionId = null;
+  let failed = 0;
+  for (const workspace of paths) {
+    const sessions = await listWorkspaceSessionsOrNull(harness, workspace);
+    if (sessions === null) {
+      failed += 1;
+      continue;
+    }
+    for (const session of sessions) {
+      const sessionId = session?.sessionId;
+      if (!validSessionId(sessionId)) continue;
+      const archived = session?.archived === true;
+      // An ID remains an exact match even when its title is empty or does not
+      // contain the ID. Keep looking after the title candidate cap as well.
+      if (sessionId === keyword) {
+        if (archived) archivedExactSessionId = sessionId;
+        else exactSessionId = sessionId;
+      }
+      const title = safeDisplayText(session?.title);
+      if (!title) continue;
+      if (!title.toLowerCase().includes(needle)) continue;
+      const candidate = {
+        sessionId,
+        title,
+        workspace,
+        workspaceLabel: workspaceGroupLabel(workspace, titles),
+      };
+      if (archived) {
+        if (archivedMatches.length <= MAX_SESSION_TITLE_MATCHES) archivedMatches.push(candidate);
+      } else if (matches.length <= MAX_SESSION_TITLE_MATCHES) {
+        matches.push(candidate);
+      }
+    }
+  }
+  harness.assertWorkspaceScope?.();
+  return { current, matches, archivedMatches, archivedExactSessionId, failed, exactSessionId };
+}
+
+function sessionTitleCandidatesMessage(keyword, matches, header = SESSION_TITLE_AMBIGUOUS) {
+  const shown = matches.slice(0, MAX_SESSION_TITLE_MATCHES);
+  const lines = [t(header, { keyword }), ''];
+  for (const [index, match] of shown.entries()) {
+    lines.push(
+      `${index + 1}. ${match.title}`,
+      t('工作区：{workspace}', { workspace: match.workspaceLabel }),
+      `   ID: ${match.sessionId}`,
+    );
+  }
+  lines.push('');
+  if (matches.length > shown.length) {
+    lines.push(t(SESSION_TITLE_AMBIGUOUS_TRUNCATED, { count: shown.length }));
+  }
+  lines.push(t(SESSION_BIND_USAGE));
+  return lines.join('\n');
+}
+
 async function runSessionBindCommand(command, harness, conversationKey) {
   const match = SESSION_BIND_COMMAND.exec(command);
   let sessionId = match?.[1];
+  if (typeof sessionId === 'string'
+    && (sessionId.length > MAX_SESSION_ID_LENGTH || UNSAFE_DISPLAY_TEXT.test(sessionId))) {
+    return commandResult(t(SESSION_BIND_USAGE));
+  }
+  let titleQuery = false;
+  let titleSearchIncomplete = false;
+  let titleBindingWorkspace = null;
+  let titleBinding = null;
   if (typeof sessionId === 'string' && /^\d+$/u.test(sessionId)) {
     // Use the same effective-workspace resolver as /sessionlist, so its indexes
     // cannot select a session from the bot default after /conv sets an override.
@@ -387,12 +745,15 @@ async function runSessionBindCommand(command, harness, conversationKey) {
         throw new TypeError('Harness returned an invalid workspace session list');
       }
       harness.assertWorkspaceScope?.();
+      // Same rule as the listing: an index addresses the live (non-archived)
+      // Sessions it numbers, so an archived Session is only reachable by ID.
+      const { live } = splitArchived(listed.sessions);
       const position = Number(sessionId);
       if (!Number.isSafeInteger(position) || position < 1
-        || position > listed.sessions.length) {
+        || position > live.length) {
         return commandResult(t('会话序号不存在，请先执行 /sessionlist 查看序号。'));
       }
-      const selectedSessionId = listed.sessions[position - 1]?.sessionId;
+      const selectedSessionId = live[position - 1]?.sessionId;
       if (!validSessionId(selectedSessionId)) {
         throw new TypeError('Harness returned an invalid session id');
       }
@@ -403,6 +764,63 @@ async function runSessionBindCommand(command, harness, conversationKey) {
       }
       return commandResult(t('暂时无法获取会话列表，请稍后重试。'));
     }
+  } else if (sessionTitleQuery(sessionId)
+    && typeof harness?.listWorkspaceSessions === 'function'
+    && (typeof harness?.listWorkspaces === 'function'
+      || typeof harness?.listWorkspaceEntries === 'function')) {
+    titleQuery = true;
+    try {
+      const {
+        current, matches, archivedMatches, archivedExactSessionId, failed, exactSessionId,
+      } = await sessionTitleMatches(harness, conversationKey, sessionId);
+      titleSearchIncomplete = failed > 0;
+      const [unique] = matches;
+      if (exactSessionId) {
+        sessionId = exactSessionId;
+        titleQuery = false;
+      } else if (matches.length === 0 && archivedMatches.length > 0 && !archivedExactSessionId) {
+        // Only archived Sessions matched: name them instead of binding, and let
+        // the reader decide whether to bind one by its full ID.
+        const message = sessionTitleCandidatesMessage(
+          sessionId,
+          archivedMatches,
+          SESSION_TITLE_ARCHIVED,
+        );
+        return commandResult(message, splitWorkspaceCommandMessage(message));
+      } else if (matches.length > 1) {
+        const message = sessionTitleCandidatesMessage(
+          sessionId,
+          matches,
+          failed > 0 ? SESSION_TITLE_SEARCH_INCOMPLETE : SESSION_TITLE_AMBIGUOUS,
+        );
+        return commandResult(message, splitWorkspaceCommandMessage(message));
+      } else if (matches.length === 1) {
+        // Only the current conversation's Workspace may be adopted by title.
+        // Pass that constraint to the binding transaction so it preserves the
+        // bot default and rejects a Workspace change during the search.
+        if (failed === 0 && current && unique.workspace === current) {
+          sessionId = unique.sessionId;
+          titleQuery = false;
+          titleBindingWorkspace = current;
+          titleBinding = unique;
+        } else {
+          const message = sessionTitleCandidatesMessage(
+            sessionId,
+            matches,
+            failed > 0 ? SESSION_TITLE_SEARCH_INCOMPLETE : SESSION_TITLE_REMOTE,
+          );
+          return commandResult(message, splitWorkspaceCommandMessage(message));
+        }
+      }
+      // Zero matches: fall through to the legacy "treat the token as a Session
+      // ID" path, so an ID that simply has no title match still binds.
+    } catch (error) {
+      if (error?.code === 'workspace-bot-not-found') {
+        return commandResult(sessionBindErrorMessage(error));
+      }
+      titleQuery = false;
+      titleSearchIncomplete = false;
+    }
   }
   if (!validSessionId(sessionId)) return commandResult(t(SESSION_BIND_USAGE));
   if (typeof harness?.bindWorkspaceSession !== 'function') {
@@ -412,7 +830,9 @@ async function runSessionBindCommand(command, harness, conversationKey) {
     return commandResult(t('当前消息缺少可绑定的会话上下文。'));
   }
   try {
-    const bound = await harness.bindWorkspaceSession(conversationKey, sessionId);
+    const bound = titleBindingWorkspace
+      ? await harness.bindWorkspaceSession(conversationKey, sessionId, { expectedWorkspace: titleBindingWorkspace })
+      : await harness.bindWorkspaceSession(conversationKey, sessionId);
     harness.assertWorkspaceScope?.();
     const workspace = normalizedWorkspacePath(bound?.workspace);
     const boundSessionId = safeDisplayText(bound?.sessionId);
@@ -430,7 +850,119 @@ async function runSessionBindCommand(command, harness, conversationKey) {
     ].join('\n');
     return commandResult(message, splitWorkspaceCommandMessage(message));
   } catch (error) {
+    // A keyword that did resolve to one Session must not answer with the
+    // generic "cannot read this Session" line: name the match it tried, so the
+    // reader can retry with its ID instead of guessing which keyword failed.
+    if (titleBinding && (error?.code === 'session-summary-unavailable'
+      || error?.code === 'session-id-invalid'
+      || error?.code === 'session-not-registered'
+      || error?.code === 'session-subagent-unsupported'
+      || isSessionNotFound(error?.code))) {
+      return commandResult(t(SESSION_TITLE_BIND_FAILED, {
+        title: titleBinding.title,
+        sessionId: titleBinding.sessionId,
+        workspace: titleBinding.workspaceLabel,
+      }));
+    }
+    if (titleQuery && (error?.code === 'session-id-invalid'
+      || error?.code === 'session-not-registered'
+      || isSessionNotFound(error?.code))) {
+      return commandResult(t(
+        titleSearchIncomplete ? SESSION_TITLE_SEARCH_INCOMPLETE_MISS : SESSION_TITLE_MISS,
+        { keyword: sessionId },
+      ));
+    }
     return commandResult(sessionBindErrorMessage(error));
+  }
+}
+
+/**
+ * `/sessionarchive <Session ID | 序号>`: asks the Harness to archive one Session.
+ * The bot never archives on its own: it resolves the target, refuses the two
+ * cases that would leave this chat in a broken state, and reports what the Host
+ * said.
+ */
+async function runSessionArchiveCommand(command, harness, conversationKey) {
+  const match = SESSION_ARCHIVE_COMMAND.exec(command);
+  const target = match?.[1];
+  const stopActivity = Boolean(match?.[2]);
+  if (!validSessionId(target)) return commandResult(t(SESSION_ARCHIVE_USAGE));
+  if (typeof harness?.archiveWorkspaceSession !== 'function'
+    || typeof harness?.listWorkspaceSessions !== 'function') {
+    return commandResult(t('当前机器人暂不支持归档会话。'));
+  }
+  try {
+    const boundSessionId = boundSessionIdFor(harness, conversationKey);
+    let sessionId = target;
+    let title = '';
+    let archived = false;
+
+    if (/^\d+$/u.test(target)) {
+      const resolved = await resolveSessionListWorkspace('', harness, { conversationKey });
+      if (resolved.error) return commandResult(resolved.error);
+      const listed = await harness.listWorkspaceSessions(resolved.workspace);
+      if (!listed || !Array.isArray(listed.sessions)) {
+        throw new TypeError('Harness returned an invalid workspace session list');
+      }
+      const { live } = splitArchived(listed.sessions);
+      const position = Number(target);
+      if (!Number.isSafeInteger(position) || position < 1 || position > live.length) {
+        return commandResult(t('会话序号不存在，请先执行 /sessionlist 查看序号。'));
+      }
+      const picked = live[position - 1];
+      const pickedId = picked?.sessionId;
+      if (!validSessionId(pickedId)) {
+        throw new TypeError('Harness returned an invalid session id');
+      }
+      harness.assertWorkspaceScope?.();
+      const preview = [
+        t(SESSION_ARCHIVE_PREVIEW, { index: target }),
+        t('标题：{title}', { title: safeDisplayText(picked?.title) || t('暂无标题') }),
+        t('工作区：{workspace}', { workspace: resolved.workspace }),
+        `ID：${pickedId}`,
+        t(SESSION_ARCHIVE_PREVIEW_HINT, { sessionId: pickedId }),
+      ].join('\n');
+      return commandResult(preview, splitWorkspaceCommandMessage(preview));
+    } else {
+      // Best-effort lookup for a receipt title and the already-archived check;
+      // an id no listing shows is still handed to the Host.
+      const { paths } = await workspacePathSnapshot(harness, { includeTitles: true });
+      for (const workspace of paths) {
+        const sessions = await listWorkspaceSessionsOrNull(harness, workspace);
+        if (!sessions) continue;
+        const found = sessions.find((session) => session?.sessionId === sessionId);
+        if (!found) continue;
+        title = safeDisplayText(found.title);
+        archived = found.archived === true;
+        break;
+      }
+    }
+
+    harness.assertWorkspaceScope?.();
+    if (archived) return commandResult(t('该会话已经归档。'));
+    if (boundSessionId && boundSessionId === sessionId) {
+      return commandResult(t('这是本对话当前绑定的会话，请先 /new 或绑定其他会话，再归档它。'));
+    }
+
+    await harness.archiveWorkspaceSession(sessionId, { stopActivity });
+    harness.assertWorkspaceScope?.();
+    const message = [
+      t('已归档会话：'),
+      t('标题：{title}', { title: title || t('暂无标题') }),
+      `ID：${sessionId}`,
+    ].join('\n');
+    return commandResult(message, splitWorkspaceCommandMessage(message));
+  } catch (error) {
+    if (error?.code === 'workspace-bot-not-found') {
+      return commandResult(t('机器人正在移除或已重新接入，无法归档原会话的会话。'));
+    }
+    if (error?.code === 'harness-api-not-found') {
+      return commandResult(t('当前 DSH 版本不支持通过机器人归档会话。'));
+    }
+    if (['agent-busy', 'turn-blocked', 'session-archived'].includes(error?.code)) {
+      return commandResult(t('该会话仍有任务在运行，请先 /stop，或使用 /sessionarchive <目标> --stop。'));
+    }
+    return commandResult(t('暂时无法归档该会话，请稍后重试。'));
   }
 }
 
@@ -542,6 +1074,9 @@ export async function runWorkspaceCommand(text, harness, conversationKey) {
   if (threadMatch) {
     return runConversationWorkspaceCommand(command, harness, conversationKey);
   }
+  if (SESSION_ARCHIVE_PREFIX.test(command)) {
+    return runSessionArchiveCommand(command, harness, conversationKey);
+  }
   if (SESSION_BIND_PREFIX.test(command)) {
     return runSessionBindCommand(command, harness, conversationKey);
   }
@@ -584,6 +1119,7 @@ export function isWorkspaceCommand(text) {
   if (typeof text !== 'string') return false;
   const command = text.trim();
   return SESSION_BIND_PREFIX.test(command)
+    || SESSION_ARCHIVE_PREFIX.test(command)
     || SESSION_LIST_COMMAND.test(command)
     || WORKSPACE_LIST_COMMAND.test(command)
     || WORKSPACE_COMMAND.test(command)

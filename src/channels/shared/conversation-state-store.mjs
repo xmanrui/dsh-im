@@ -1,6 +1,11 @@
 import { deferredStateAccess, normalizeDeferredState } from './deferred-state.mjs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import {
+  createSessionRingSupport,
+  normalizePendingTitles,
+  normalizeSessionRings,
+} from './session-ring-support.mjs';
 
 /**
  * Additional persisted keys a subclass may own. Kept intentionally small and
@@ -119,6 +124,10 @@ function normalizeState(value) {
       : [],
     cursor: Number.isSafeInteger(value.cursor) && value.cursor >= 0 ? value.cursor : null,
   };
+  const rings = normalizeSessionRings(value.rings);
+  if (Object.keys(rings).length) normalized.rings = rings;
+  const pendingTitles = normalizePendingTitles(value.pendingTitles);
+  if (Object.keys(pendingTitles).length) normalized.pendingTitles = pendingTitles;
   // Channel-specific extensions survive a reload; each is normalized by the
   // subclass that owns it (see extensionKeys()).
   for (const key of EXTENSION_KEYS) {
@@ -135,6 +144,13 @@ export class ConversationStateStore {
 
   constructor(path) {
     this.#path = path;
+    // The ring is not a store of its own: it is a view over this state object,
+    // shared with the channels that assemble their own store, so both sides
+    // cannot drift apart.
+    Object.assign(this, createSessionRingSupport({
+      state: () => this.#state,
+      persist: () => this.#persist(),
+    }));
   }
 
   async load() {

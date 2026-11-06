@@ -10,6 +10,7 @@ import permission from './i18n-ru/permission.mjs';
 import sharedA from './i18n-ru/shared-a.mjs';
 import sharedB from './i18n-ru/shared-b.mjs';
 import sharedC from './i18n-ru/shared-c.mjs';
+import sharedD from './i18n-ru/shared-d.mjs';
 import feishu from './i18n-ru/feishu.mjs';
 import dingtalk from './i18n-ru/dingtalk.mjs';
 import wecom from './i18n-ru/wecom.mjs';
@@ -32,6 +33,7 @@ export const RU = Object.freeze(Object.assign(
   sharedA,
   sharedB,
   sharedC,
+  sharedD,
   feishu,
   dingtalk,
   wecom,

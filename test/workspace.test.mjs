@@ -20,6 +20,7 @@ import {
   rememberConnectionTestTarget,
 } from '../src/channels/shared/connection-test.mjs';
 import {
+  parseSessionListArgument,
   runWorkspaceCommand,
   splitWorkspaceCommandMessage,
   workspacePathSnapshot,
@@ -1355,11 +1356,14 @@ test('/sessionlist supports the current workspace, list numbers, and absolute pa
 
   const current = await runWorkspaceCommand('/SESSIONLIST', harness);
   assert.match(current.message, new RegExp(`工作区：${defaultWorkspace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-  assert.match(current.message, /会话（3）/);
+  // Archived Sessions are hidden unless asked for, and never take a number.
+  assert.match(current.message, /会话（2）/);
   assert.match(current.message, /1\. 安全标题 伪造 4\. injected\n   ID: session-current/);
   assert.doesNotMatch(current.message, /\u202e|\n4\. injected/);
-  assert.match(current.message, /2\. 暂无标题（已归档）\n   ID: session-archived/);
-  assert.match(current.message, /3\. 标题暂不可用\n   ID: session-missing-summary/);
+  assert.match(current.message, /2\. 标题暂不可用\n   ID: session-missing-summary/);
+  assert.doesNotMatch(current.message, /（已归档）/);
+  assert.match(current.message, /（已隐藏 1 条归档会话，用 --archived 查看）/);
+
   assert.match(current.message, /绑定用法：\/session Session ID 或当前工作区序号（\/session N）/);
   assert.equal(current.messages.join(''), current.message);
 
@@ -1373,6 +1377,12 @@ test('/sessionlist supports the current workspace, list numbers, and absolute pa
   assert.match(absolute.message, /该工作区暂无会话/);
   assert.deepEqual(listedWorkspaces, [defaultWorkspace, alternateWorkspace, thirdWorkspace]);
   assert.equal(workspaceListCalls, 1, 'only numeric selection needs the workspace registry order');
+
+  const withArchived = await runWorkspaceCommand('/SESSIONLIST --ARCHIVED', harness);
+  assert.match(withArchived.message, /会话（2）/);
+  assert.match(withArchived.message, /归档会话（只能用完整 Session ID 绑定）：/);
+  assert.match(withArchived.message, /• 暂无标题（已归档）\n   ID: session-archived/);
+  assert.doesNotMatch(withArchived.message, /已隐藏/);
 });
 
 test('/sessionlist and /sessions accept a one-off --limit for the current workspace', async (t) => {
@@ -1529,7 +1539,9 @@ test('/sessionlist splits a long complete session list without losing IDs', asyn
     archived: index % 9 === 0,
     summaryAvailable: true,
   }));
-  const result = await runWorkspaceCommand('/sessionlist', {
+  // --archived so this stays a whole-list check: the default answer hides the
+  // archived rows and would not carry their IDs at all.
+  const result = await runWorkspaceCommand('/sessionlist --archived', {
     currentWorkspace() { return defaultWorkspace; },
     async listWorkspaceSessions(workspace) { return { workspace, sessions }; },
   });
@@ -1603,11 +1615,13 @@ test('all nine channel bridge families advertise and fan out workspace command r
     const source = await readFile(new URL(file, import.meta.url), 'utf8');
     if (file.endsWith('/shared/text-harness-bridge.mjs')) {
       // Full rendered help for all four consumers is covered by command-help.test.mjs.
-      assert.match(source, /commandHelpLines\(this\.#descriptor\.key\)/);
+      assert.match(source, /commandHelpLines\(this\.#descriptor\.key, availableCommandCatalog/);
     } else {
       assert.match(source, /\/workspacelist  列出工作区绝对路径/);
       assert.match(source, /\/sessionlist 或 \/sessions \[工作区序号或绝对路径\]  列出会话 ID 和标题/);
+      assert.match(source, /\/sessionlist --all  跨工作区汇总会话/);
       assert.match(source, /\/sessionlist --limit N  仅列出当前工作区前 N 个会话/);
+      assert.match(source, /\/session Session ID、当前工作区序号或标题关键词/);
     }
     assert.match(source, /workspaceCommand\.messages \?\? \[workspaceCommand\.message\]/);
   }
@@ -2455,4 +2469,349 @@ test('workspace prompt preparation receives the resolved session and repeats aft
     { id: 'new-session', content: 'new-session: base content' },
   ]);
   assert.equal(result.sessionId, 'new-session');
+});
+
+
+test('/sessionlist marks the Session this conversation is already bound to', async (t) => {
+  const { defaultWorkspace } = await fixture(t);
+  const key = 'direct:conversation-1';
+  const harness = {
+    currentWorkspace() { return defaultWorkspace; },
+    async listWorkspaceSessions(workspace) {
+      return {
+        workspace,
+        sessions: [
+          { sessionId: 'session-bound', title: 'Bound session' },
+          { sessionId: 'session-other', title: 'Other session' },
+        ],
+      };
+    },
+    sessionFor(requested) {
+      assert.equal(requested, key);
+      return 'session-bound';
+    },
+  };
+
+  const listed = await runWorkspaceCommand('/sessionlist', harness, key);
+  assert.match(listed.message, /1\. Bound session（当前绑定）\n   ID: session-bound/);
+  assert.match(listed.message, /2\. Other session\n   ID: session-other/);
+
+  // A binding read that fails is decoration only: the list still renders.
+  const throwing = await runWorkspaceCommand('/sessionlist', {
+    ...harness,
+    sessionFor() { throw new Error('private scope detail'); },
+  }, key);
+  assert.match(throwing.message, /会话（2）/);
+  assert.doesNotMatch(throwing.message, /当前绑定|private scope detail/);
+
+  const unbound = await runWorkspaceCommand('/sessionlist', { ...harness, sessionFor: () => null }, key);
+  assert.doesNotMatch(unbound.message, /当前绑定/);
+});
+
+test('/sessionlist --all summarizes every workspace and honors --limit', async (t) => {
+  const { defaultWorkspace, alternateWorkspace } = await fixture(t);
+  const sessions = Array.from({ length: 12 }, (_, index) => ({
+    sessionId: 'all-session-' + (index + 1),
+    title: 'All Session ' + (index + 1),
+  }));
+  const calls = [];
+  const harness = {
+    currentWorkspace() { return defaultWorkspace; },
+    async listWorkspaces() { return [alternateWorkspace, defaultWorkspace]; },
+    async listWorkspaceSessions(workspace) {
+      calls.push(workspace);
+      return {
+        workspace,
+        sessions: workspace === defaultWorkspace
+          ? sessions
+          : [{ sessionId: 'alternate-session', title: 'Alternate only' }],
+      };
+    },
+  };
+
+  const all = await runWorkspaceCommand('/sessionlist --all', harness);
+  assert.match(all.message, /^跨工作区会话（2 个工作区，共 13 个会话）：/);
+  assert.ok(all.message.includes('当前工作区：' + defaultWorkspace));
+  assert.ok(all.message.includes(defaultWorkspace + '（当前）（12 个会话）'));
+  assert.match(all.message, /ID: all-session-10\n/);
+  assert.doesNotMatch(all.message, /all-session-1[12]/);
+  assert.match(all.message, /（共 12 个，显示前 10 个；用 --limit N 调整）/);
+  assert.match(all.message, /Alternate only/);
+  assert.match(all.message, /绑定用法：\/session Session ID/);
+  // The snapshot always puts the bot's current Workspace first.
+  assert.deepEqual(calls, [defaultWorkspace, alternateWorkspace]);
+  assert.equal(all.messages.join(''), all.message);
+
+  const limited = await runWorkspaceCommand('/sessionlist --all --limit 2', harness);
+  assert.match(limited.message, /ID: all-session-2\n/);
+  assert.doesNotMatch(limited.message, /all-session-3/);
+  assert.doesNotMatch(limited.message, /显示前 10 个/);
+
+  const reordered = await runWorkspaceCommand('/SESSIONS --LIMIT 1 --ALL', harness);
+  assert.match(reordered.message, /ID: all-session-1\n/);
+  assert.doesNotMatch(reordered.message, /all-session-2/);
+
+  // Empty and unreadable workspaces degrade instead of failing the summary.
+  const partial = await runWorkspaceCommand('/sessionlist --all', {
+    currentWorkspace() { return defaultWorkspace; },
+    async listWorkspaces() { return [alternateWorkspace, defaultWorkspace]; },
+    async listWorkspaceSessions(workspace) {
+      if (workspace === alternateWorkspace) throw new Error('private workspace detail');
+      return { workspace, sessions: [] };
+    },
+  });
+  assert.match(partial.message, /^跨工作区会话（1 个工作区，共 0 个会话）：/);
+  assert.match(partial.message, /另有 1 个工作区暂时无法读取，未包含在汇总中。/);
+  assert.match(partial.message, /该工作区暂无会话。/);
+  assert.doesNotMatch(partial.message, /private workspace detail/);
+
+  const unsupported = await runWorkspaceCommand('/sessionlist --all', {
+    currentWorkspace() { return defaultWorkspace; },
+    async listWorkspaceSessions(workspace) { return { workspace, sessions: [] }; },
+  });
+  assert.match(unsupported.message, /暂不支持跨工作区列出会话/);
+});
+
+test('parseSessionListArgument keeps its shape and accepts --all in any order', () => {
+  assert.deepEqual(parseSessionListArgument(''), { selector: '', limit: null });
+  assert.deepEqual(parseSessionListArgument('/tmp'), { selector: '/tmp', limit: null });
+  assert.deepEqual(parseSessionListArgument('--limit 3'), { selector: '', limit: 3 });
+  assert.deepEqual(parseSessionListArgument('--all'), { selector: '', limit: null, all: true });
+  assert.deepEqual(parseSessionListArgument('--all --limit 2'), { selector: '', limit: 2, all: true });
+  assert.deepEqual(parseSessionListArgument('--limit 2 --all'), { selector: '', limit: 2, all: true });
+  assert.match(parseSessionListArgument('--limit3').error, /\/sessionlist --limit N/);
+  for (const value of ['--all --limit', '--all --limit 0', '--all --limit x', '--all extra', '--limit 2 1']) {
+    assert.match(parseSessionListArgument(value).error, /\/sessionlist --limit N/);
+  }
+});
+
+test('/session <keyword> searches the conversation workspace first', async (t) => {
+  const { defaultWorkspace, alternateWorkspace } = await fixture(t);
+  const key = 'direct:conversation-1';
+  const calls = [];
+  const harness = {
+    currentWorkspace() { return defaultWorkspace; },
+    currentConversationWorkspace(requested) {
+      assert.equal(requested, key);
+      return alternateWorkspace;
+    },
+    async listWorkspaces() { return [defaultWorkspace, alternateWorkspace]; },
+    async listWorkspaceSessions(workspace) {
+      calls.push(workspace);
+      return {
+        workspace,
+        sessions: workspace === alternateWorkspace
+          ? [{ sessionId: 'alt-session', title: '目标 会话' }]
+          : [],
+      };
+    },
+    async bindWorkspaceSession(_key, sessionId) {
+      return { sessionId, workspace: alternateWorkspace, title: '目标 会话' };
+    },
+  };
+
+  const result = await runWorkspaceCommand('/session 目标', harness, key);
+  assert.deepEqual(calls, [alternateWorkspace, defaultWorkspace]);
+  assert.match(result.message, /ID：alt-session/);
+});
+
+test('/sessionlist --all follows the conversation workspace and marks it once', async (t) => {
+  const { defaultWorkspace, alternateWorkspace } = await fixture(t);
+  const key = 'direct:conversation-1';
+  const calls = [];
+  const harness = {
+    currentWorkspace() { return defaultWorkspace; },
+    currentConversationWorkspace(requested) {
+      assert.equal(requested, key);
+      return alternateWorkspace;
+    },
+    async listWorkspaces() { return [defaultWorkspace, alternateWorkspace]; },
+    async listWorkspaceSessions(workspace) {
+      calls.push(workspace);
+      return {
+        workspace,
+        sessions: [{ sessionId: workspace === defaultWorkspace ? 'default-session' : 'alternate-session' }],
+      };
+    },
+  };
+
+  const result = await runWorkspaceCommand('/sessionlist --all', harness, key);
+  assert.ok(result.message.includes('当前工作区：' + alternateWorkspace));
+  assert.ok(result.message.includes(alternateWorkspace + '（当前）（1 个会话）'));
+  assert.ok(!result.message.includes(defaultWorkspace + '（当前）（1 个会话）'));
+  assert.ok(
+    result.message.indexOf(alternateWorkspace + '（当前）（1 个会话）')
+      < result.message.indexOf(defaultWorkspace + '（1 个会话）'),
+  );
+  assert.deepEqual(calls, [alternateWorkspace, defaultWorkspace]);
+});
+
+test('/sessionlist --all includes the isolated conversation directory and title search binds locally', async (t) => {
+  const { root, defaultWorkspace } = await fixture(t);
+  const isolated = join(root, 'conversation-isolated');
+  await mkdir(isolated);
+  const key = 'direct:conversation-1';
+  const calls = [];
+  const bindings = [];
+  const harness = {
+    currentWorkspace() { return defaultWorkspace; },
+    currentConversationWorkspace(requested) {
+      assert.equal(requested, key);
+      return isolated;
+    },
+    conversationDirectoryPaths() { return [isolated]; },
+    async listWorkspaces() { return [defaultWorkspace, isolated]; },
+    async listWorkspaceSessions(workspace) {
+      calls.push(workspace);
+      return {
+        workspace,
+        sessions: workspace === isolated
+          ? [{ sessionId: 'isolated-session', title: '目标 隔离会话' }]
+          : [],
+      };
+    },
+    assertWorkspaceScope() {},
+    async bindWorkspaceSession(requestedKey, sessionId) {
+      bindings.push({ key: requestedKey, sessionId });
+      return { sessionId, workspace: isolated, title: '目标 隔离会话' };
+    },
+  };
+
+  const all = await runWorkspaceCommand('/sessionlist --all', harness, key);
+  assert.ok(all.message.includes('当前工作区：' + isolated));
+  assert.ok(all.message.includes(isolated + '（当前）（1 个会话）'));
+  assert.deepEqual(calls, [isolated, defaultWorkspace]);
+
+  const bound = await runWorkspaceCommand('/session 目标', harness, key);
+  assert.deepEqual(bindings, [{ key, sessionId: 'isolated-session' }]);
+  assert.match(bound.message, /ID：isolated-session/);
+});
+
+test('/sessionlist --all skips invalid Session rows without hiding other groups', async (t) => {
+  const { defaultWorkspace, alternateWorkspace } = await fixture(t);
+  const harness = {
+    currentWorkspace() { return defaultWorkspace; },
+    async listWorkspaces() { return [defaultWorkspace, alternateWorkspace]; },
+    async listWorkspaceSessions(workspace) {
+      return {
+        workspace,
+        sessions: workspace === alternateWorkspace
+          ? [{ title: 'Broken row' }]
+          : [{ sessionId: 'valid-session', title: 'Valid row' }],
+      };
+    },
+  };
+
+  const result = await runWorkspaceCommand('/sessionlist --all', harness);
+  assert.match(result.message, /ID: valid-session/);
+  assert.match(result.message, /（1 条会话记录无效，已跳过）/);
+});
+
+test('workspacePathSnapshot falls back to the bot workspace when the override is gone', async (t) => {
+  const { root, defaultWorkspace } = await fixture(t);
+  const missing = join(root, 'removed-conversation');
+  const harness = {
+    currentWorkspace: () => defaultWorkspace,
+    resolveConversationWorkspace: async () => missing,
+    listWorkspaces: async () => [defaultWorkspace],
+  };
+  assert.deepEqual(await workspacePathSnapshot(harness, { conversationKey: 'direct:conversation-1' }), {
+    current: defaultWorkspace,
+    paths: [defaultWorkspace],
+  });
+});
+
+
+test('/sessionlist skips an invalid Session row instead of failing the listing', async (t) => {
+  const { defaultWorkspace } = await fixture(t);
+  const harness = {
+    currentWorkspace() { return defaultWorkspace; },
+    async listWorkspaceSessions(workspace) {
+      return {
+        workspace,
+        sessions: [
+          { sessionId: 'session-first', title: 'First' },
+          { title: 'Broken row' },
+          { sessionId: 'session-third', title: 'Third' },
+        ],
+      };
+    },
+  };
+
+  const listed = await runWorkspaceCommand('/sessionlist', harness);
+  assert.doesNotMatch(listed.message, /暂时无法获取工作区会话列表/);
+  assert.match(listed.message, /会话（2）：/);
+  assert.match(listed.message, /1\. First\n   ID: session-first/);
+  assert.match(listed.message, /3\. Third\n   ID: session-third/);
+  assert.match(listed.message, /（1 条会话记录无效，已跳过）/);
+  assert.equal(listed.messages.join(''), listed.message);
+
+  // Every record broken: the listing still answers instead of erroring.
+  const broken = await runWorkspaceCommand('/sessionlist', {
+    currentWorkspace() { return defaultWorkspace; },
+    async listWorkspaceSessions(workspace) {
+      return { workspace, sessions: [{ title: 'Broken A' }, { title: 'Broken B' }] };
+    },
+  });
+  assert.match(broken.message, /（2 条会话记录无效，已跳过）/);
+  assert.doesNotMatch(broken.message, /该工作区暂无会话|暂时无法获取/);
+});
+
+test('/sessionlist --all counts invalid rows outside the --limit window', async (t) => {
+  const { defaultWorkspace, alternateWorkspace } = await fixture(t);
+  const sessions = [
+    { sessionId: 'session-one', title: 'One' },
+    { title: 'Broken one' },
+    { sessionId: 'session-two', title: 'Two' },
+    { sessionId: 'session-three', title: 'Three' },
+    { title: 'Broken two' },
+  ];
+  const harness = {
+    currentWorkspace() { return defaultWorkspace; },
+    async listWorkspaces() { return [alternateWorkspace, defaultWorkspace]; },
+    async listWorkspaceSessions(workspace) {
+      return { workspace, sessions: workspace === defaultWorkspace ? sessions : [] };
+    },
+  };
+
+  const limited = await runWorkspaceCommand('/sessionlist --all --limit 2', harness);
+  // Every count below describes readable sessions only; the two broken records
+  // are reported separately, including the one past the limit window.
+  assert.match(limited.message, /^跨工作区会话（2 个工作区，共 3 个会话）：/);
+  assert.match(limited.message, /（3 个会话）/);
+  assert.match(limited.message, /1\. One\n   ID: session-one/);
+  assert.match(limited.message, /3\. Two\n   ID: session-two/);
+  assert.doesNotMatch(limited.message, /ID: session-three/);
+  assert.match(limited.message, /（2 条会话记录无效，已跳过）/);
+  assert.match(limited.message, /（共 3 个，显示前 2 个/);
+});
+
+
+test('/sessionlist --all hides archived Sessions unless --archived is given', async (t) => {
+  const { defaultWorkspace, alternateWorkspace } = await fixture(t);
+  const harness = {
+    currentWorkspace() { return defaultWorkspace; },
+    async listWorkspaces() { return [alternateWorkspace, defaultWorkspace]; },
+    async listWorkspaceSessions(workspace) {
+      return {
+        workspace,
+        sessions: workspace === defaultWorkspace
+          ? [
+              { sessionId: 'session-live', title: 'Live', archived: false },
+              { sessionId: 'session-old', title: 'Old', archived: true },
+            ]
+          : [],
+      };
+    },
+  };
+
+  const hidden = await runWorkspaceCommand('/sessionlist --all', harness);
+  assert.doesNotMatch(hidden.message, /ID: session-old/);
+  assert.match(hidden.message, /（已隐藏 1 条归档会话，用 --archived 查看）/);
+
+  const shown = await runWorkspaceCommand('/sessionlist --all --archived --limit 5', harness);
+  assert.match(shown.message, /ID: session-live/);
+  assert.match(shown.message, /归档会话（只能用完整 Session ID 绑定）：/);
+  assert.match(shown.message, /• Old（已归档）\n   ID: session-old/);
+  assert.doesNotMatch(shown.message, /已隐藏/);
 });

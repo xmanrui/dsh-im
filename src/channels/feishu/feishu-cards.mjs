@@ -15,6 +15,7 @@
  */
 
 import { t } from '../shared/i18n.mjs';
+import { SESSION_NAV_HELP_LINES } from '../shared/command-catalog.mjs';
 import { workspaceLabels } from '../shared/workspace-labels.mjs';
 import { normalizeFeishuStepCardPanels } from './step-push-mode.mjs';
 
@@ -591,12 +592,14 @@ export function menuHelpText() {
     '',
     '📋 会话 / 工作区',
     '/sessionlist 或 /sessions  列出工作区会话',
+    '/sessionlist --all  跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）',
     '/sessionlist --limit N  仅列出当前工作区前 N 个会话',
-    '/session ID  绑定已有会话',
+    '/session Session ID、当前工作区序号或标题关键词  将当前聊天绑定到指定会话',
     '/workspacelist  列出工作区',
     '/workspace 工作区序号或绝对路径  切换工作区',
     '/ws、/wsl、/workspaces  工作区命令别名',
     '/new  开启全新会话',
+    ...SESSION_NAV_HELP_LINES.map((line) => t(line)),
     '',
     '📊 状态 / 压缩',
     '/status  连接状态',
@@ -662,8 +665,9 @@ const HELP_TEXT_COMMANDS = [
   '',
   '`/m` — 打开菜单卡片',
   '`/new` — 开启全新会话',
-  '`/session ID` — 绑定已有会话',
+  '`/session Session ID、当前工作区序号或标题关键词` — 绑定已有会话',
   '`/sessionlist [工作区]` 或 `/sessions [工作区]` — 列出会话',
+  '`/sessionlist --all` 或 `/sessions --all` — 跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）',
   '`/sessionlist --limit N` 或 `/sessions --limit N` — 仅列出当前工作区前 N 个会话',
   '`/workspace 工作区序号或绝对路径` — 切换工作区',
   '`/workspacelist` — 列出工作区',
@@ -763,7 +767,7 @@ export function cardActionProbeCard(nonce) {
  * in the label. `watchedSessionIds` is a Set-like of ids this conversation
  * already watches.
  */
-export function sessionListCard(workspace, sessions, page, total, watchedSessionIds = new Set()) {
+export function sessionListCard(workspace, sessions, page, total, watchedSessionIds = new Set(), boundSessionId = '') {
   const start = page * MENU_PAGE_SIZE;
   const slice = sessions.slice(start, start + MENU_PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(total / MENU_PAGE_SIZE));
@@ -788,7 +792,9 @@ export function sessionListCard(workspace, sessions, page, total, watchedSession
     })) },
     ...slice.map((session, offset) => {
       // Page-local numbering: number replies resolve against this page.
-      const label = `${offset + 1}. ${safeTitle(session.title)}${session.archived === true ? t('（已归档）') : ''}`;
+      const label = `${offset + 1}. ${safeTitle(session.title)}`
+        + `${session.archived === true ? t('（已归档）') : ''}`
+        + `${session.sessionId === boundSessionId ? t('（当前绑定）') : ''}`;
       const watching = watched(session.sessionId);
       return row(
         buttonElement(watching ? t('⭐ 取消关注') : t('☆ 关注'), watching ? `unwatch:${session.sessionId}` : `watch:${session.sessionId}`),

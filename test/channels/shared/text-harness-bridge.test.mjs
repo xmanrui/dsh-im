@@ -8,6 +8,7 @@ import manifest from '../../../package.json' with { type: 'json' };
 import { DiscordHarnessBridge } from '../../../src/channels/discord/discord-bridge.mjs';
 import { connectionTestTarget } from '../../../src/channels/shared/connection-test.mjs';
 import { COMMAND_PERMISSION_DENIED_MESSAGE } from '../../../src/channels/shared/inbound-access.mjs';
+import { ConversationStateStore } from '../../../src/channels/shared/conversation-state-store.mjs';
 import { InboundFileError } from '../../../src/channels/shared/inbound-file.mjs';
 import {
   OUTBOUND_ARTIFACT_TOOL,
@@ -311,6 +312,7 @@ test('all four shared text channels enforce fail-closed live access before side 
     const asks = [];
     let imageLoads = 0;
     let sessionClears = 0;
+    let sessionCreates = 0;
     let policyReadFails = true;
     let settings = null;
     const originalClearSession = fixture.state.clearSession.bind(fixture.state);
@@ -329,7 +331,10 @@ test('all four shared text channels enforce fail-closed live access before side 
       bot: { sendText: async (_target, text) => sent.push(text) },
       state: fixture.state,
       harness: {
-        createSession: async () => `session-access-${name}`,
+        createSession: async () => {
+          sessionCreates += 1;
+          return `session-access-${name}`;
+        },
         sessionExists: async () => true,
         ask: async (_sessionId, content) => {
           asks.push(content);
@@ -368,11 +373,12 @@ test('all four shared text channels enforce fail-closed live access before side 
     await bridge.accept(message(`access-command-denied-${name}`, '/new'));
     assert.equal(asks.length, 1, `${name} denied command never reaches Harness`);
     assert.equal(sessionClears, 0, `${name} denied command has no command side effect`);
+    assert.equal(sessionCreates, 1, `${name} denied command does not create an extra session`);
     assert.equal(sent.at(-1), COMMAND_PERMISSION_DENIED_MESSAGE, `${name} explains command denial`);
 
     settings = accessPolicy({ canExecuteCommands: true });
     await bridge.accept(message(`access-command-allowed-${name}`, '/new'));
-    assert.equal(sessionClears, 1, `${name} policy hot-update applies without rebuilding the bridge`);
+    assert.equal(sessionCreates, 2, `${name} policy hot-update applies without rebuilding the bridge`);
     assert.equal(asks.length, 1, `${name} allowed local command is not a model prompt`);
   }
 });
@@ -3293,6 +3299,7 @@ test('a decorated body still has its command gated by canExecuteCommands', async
   const sent = [];
   const asks = [];
   let sessionClears = 0;
+  let sessionCreates = 0;
   const originalClearSession = fixture.state.clearSession.bind(fixture.state);
   fixture.state.clearSession = async (...args) => {
     sessionClears += 1;
@@ -3309,7 +3316,10 @@ test('a decorated body still has its command gated by canExecuteCommands', async
     },
     bot: { sendText: async (_target, text) => sent.push(text) },
     harness: {
-      createSession: async () => 'session-header-gate',
+      createSession: async () => {
+        sessionCreates += 1;
+        return 'session-header-gate';
+      },
       sessionExists: async () => true,
       ask: async (_sessionId, content) => {
         asks.push(content);
@@ -3325,12 +3335,13 @@ test('a decorated body still has its command gated by canExecuteCommands', async
   await bridge.accept(emailMessage('header-command-denied', '/new'));
   assert.equal(sessionClears, 0,
     'a decorated `/new` is still recognized as a command and refused');
+  assert.equal(sessionCreates, 1, 'a denied `/new` does not create an extra session');
   assert.equal(sent.at(-1), COMMAND_PERMISSION_DENIED_MESSAGE,
     'the sender is told the command was denied');
 
   settings = accessPolicy({ canExecuteCommands: true });
   await bridge.accept(emailMessage('header-command-allowed', '/new'));
-  assert.equal(sessionClears, 1, 'a permitted sender may still run the command');
+  assert.equal(sessionCreates, 2, 'a permitted sender may still run the command');
 });
 
 test('an approval reply in a decorated body claims the pending request', async () => {
@@ -4095,4 +4106,94 @@ test('an over-budget follow-up that falls back to the queue stays readable in th
   await eventually(() => retired.length === 1);
   assert.deepEqual(retired, [{ conversationKey: 'group:room-budget-hook', messageId: 'budget-hook-one' }],
     'only the steered bubble is retired; the queued follow-up still owes its own turn and stays in the window');
+});
+
+async function navAskState() {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-im-nav-ask-'));
+  const state = await new ConversationStateStore(join(root, 'state.json')).load();
+  await state.setSession('direct:chat-a', 's1');
+  await state.ensureSessionRing('direct:chat-a', 's1', { title: 'one' });
+  await state.setSession('direct:chat-a', 's2');
+  await state.ensureSessionRing('direct:chat-a', 's2', { title: 'two' });
+  await state.appendRing('direct:chat-a', 2);
+  return state;
+}
+
+function navAskHarness(state, { ask }) {
+  return {
+    async bindWorkspaceSession(k, sessionId) {
+      await state.setSession(k, sessionId);
+      await state.ensureSessionRing(k, sessionId);
+      return { sessionId, workspace: '/workspace', title: null, archived: false };
+    },
+    workspaceSession(sessionId) {
+      return {
+        sessionId,
+        async sessionExists() { return true; },
+        ask,
+        async renameTitle() { return 'titled'; },
+        readHistory() { return Promise.resolve([]); },
+      };
+    },
+    async listWorkspaceSessions() { return { sessions: [] }; },
+    async isSessionArchived() { return false; },
+  };
+}
+
+test('/go N <text> enqueues the follow-up without awaiting it, and the queue drains after', async () => {
+  const state = await navAskState();
+  const asks = [];
+  const askGate = deferred();
+  const sent = [];
+  const harness = navAskHarness(state, {
+    ask: async (prompt) => {
+      asks.push(prompt);
+      await askGate.promise;
+      return 'follow-up answer';
+    },
+  });
+  const bridge = createBridge({ harness, state, bot: { sendText: async (_target, text) => sent.push(text) } });
+
+  const accepted = bridge.accept(message('nav-ask', '/go 1 привет'));
+  await within(accepted, 1_000, 'the nav command must not await its own follow-up');
+  assert.equal(state.sessionFor('direct:chat-a'), 's1', 'the switch applies before the follow-up');
+  assert.equal(asks.length, 0, 'the follow-up is queued, not awaited');
+
+  askGate.resolve();
+  await bridge.waitForIdle();
+  assert.equal(asks.length, 1);
+  assert.equal(asks[0], 'привет');
+  assert.match(sent[0], /已切换到会话/, 'the switch confirmation is sent first');
+  assert.ok(sent.includes('follow-up answer'), 'the follow-up answer is delivered');
+});
+
+test('a rejected follow-up reports an error to the chat', async () => {
+  const state = await navAskState();
+  const originalMarkSeen = state.markSeen.bind(state);
+  state.markSeen = async (messageId) => {
+    if (messageId === 'nav-ask-reject-ask') throw new Error('markSeen refused');
+    return originalMarkSeen(messageId);
+  };
+  const sent = [];
+  const harness = navAskHarness(state, { ask: async () => 'answer' });
+  const bridge = createBridge({ harness, state, bot: { sendText: async (_target, text) => sent.push(text) } });
+
+  await bridge.accept(message('nav-ask-reject', '/go 1 привет'));
+  await bridge.waitForIdle();
+  await eventually(() => sent.some((text) => /提问发送失败/.test(text)));
+});
+
+test('/go N without text never enqueues a follow-up', async () => {
+  const state = await navAskState();
+  const asks = [];
+  const harness = navAskHarness(state, {
+    ask: async (prompt) => { asks.push(prompt); return 'answer'; },
+  });
+  const sent = [];
+  const bridge = createBridge({ harness, state, bot: { sendText: async (_target, text) => sent.push(text) } });
+
+  await bridge.accept(message('nav-plain', '/go 1'));
+  await bridge.waitForIdle();
+  assert.equal(asks.length, 0, 'no follow-up is enqueued for a plain switch');
+  assert.equal(state.sessionFor('direct:chat-a'), 's1');
 });

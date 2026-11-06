@@ -23,8 +23,14 @@ function defineCatalogCommand(name, description, help, { aliases = [], ...option
 // enabled: false removes a definition from both consumers; menuVisible: false
 // hides a command (or alias) only from the native menu, leaving help available.
 export const SHARED_COMMAND_CATALOG = Object.freeze([
-  defineCatalogCommand('new', '开启一个全新会话', [
-    '/new  开启一个全新会话',
+  defineCatalogCommand('new', '开启一个全新会话（可带标题）', [
+    '/new [标题]  开启一个全新会话（可指定标题）',
+  ]),
+  defineCatalogCommand('fork', '从当前会话分支一个新会话', [
+    '/fork [标题]  从当前会话分支一个新会话（默认沿用父会话标题加“ (fork)”）',
+  ], { requiresSessionFork: true }),
+  defineCatalogCommand('reset', '重置当前会话上下文（保留会话编号）', [
+    '/reset  重置当前会话上下文（保留会话编号，旧会话可 /session 找回）',
   ]),
   defineCatalogCommand('compact', '压缩当前会话的较早上下文', [
     '/compact  压缩当前会话的较早上下文',
@@ -67,11 +73,42 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   }),
   defineCatalogCommand('sessionlist', '列出会话 ID 和标题', [
     '/sessionlist 或 /sessions [工作区序号或绝对路径]  列出会话 ID 和标题',
+    '/sessionlist --all  跨工作区汇总会话（每个工作区默认显示 10 个，可用 --limit N 调整）',
     '/sessionlist --limit N  仅列出当前工作区前 N 个会话',
   ], { aliases: [{ name: 'sessions', menuVisible: false }] }),
   defineCatalogCommand('session', '将当前聊天绑定到指定会话', [
-    '/session Session ID 或当前工作区序号  将当前聊天绑定到指定会话',
+    '/session Session ID、当前工作区序号或标题关键词  将当前聊天绑定到指定会话',
+    '/sess  同一命令的别名（/session 被客户端同名命令抢占时使用）',
+  ], { aliases: [{ name: 'sess', menuVisible: false }] }),
+  defineCatalogCommand('sessionarchive', '归档指定会话（DSH 能力）', [
+    '/sessionarchive（或 /sessarchive）Session ID  归档一个会话；序号只做预览',
+    '/sessionarchive <Session ID> --stop  归档前先停止该会话正在运行的任务',
+  ], { aliases: [{ name: 'sessarchive', menuVisible: false }] }),
+  defineCatalogCommand('ls', '列出本聊天使用过的会话（按聊天/话题隔离）', [
+    '/ls 或 /list  列出本聊天使用过的会话（● 当前，←/→ 可前后切换，✕ 已失效；列表按聊天隔离，论坛群按话题）',
+  ], { aliases: [{ name: 'list', menuVisible: false }] }),
+  defineCatalogCommand('go', '切换到指定编号的会话', [
+    '/go 会话编号  切换到该会话（编号见 /ls）',
   ]),
+  defineCatalogCommand('prev', '回到上一个会话', [
+    '/prev  回到上一个会话',
+  ]),
+  defineCatalogCommand('next', '前进到下一个会话', [
+    '/next  前进到下一个会话',
+  ]),
+  defineCatalogCommand('drop', '从会话列表移除一条记录', [
+    '/drop 会话编号  从本聊天会话列表移除该条记录（不删除 Harness 会话）',
+    '/drop all  移除除当前会话外的全部记录（不删除 Harness 会话）',
+  ]),
+  defineCatalogCommand('title', '查看或重命名会话标题', [
+    '/title  查看当前会话标题',
+    '/title 新标题  重命名当前会话',
+    '/title 会话编号 新标题  重命名指定会话',
+  ]),
+  defineCatalogCommand('tail', '预览或导出会话内容', [
+    '/tail 或 /peek [编号] [条数]  预览最近消息（默认 5 条，仅提问与回答）',
+    '/tail 或 /peek [编号] file  导出整个会话为 Markdown 文件',
+  ], { aliases: [{ name: 'peek', menuVisible: false }] }),
   defineCatalogCommand('models', '按序号列出所有可用模型', [
     '/models  按序号列出所有可用模型',
   ]),
@@ -122,6 +159,34 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
 export function commandsForChannel(channel, catalog = SHARED_COMMAND_CATALOG) {
   return catalog.filter((item) => item.enabled !== false && item.channels.includes(channel));
 }
+
+/**
+ * Drop entries whose required Host capability is absent (e.g. /fork when the
+ * host facade exposes no sessions.fork member), so the menu and /help never
+ * promise a command that always refuses.
+ */
+export function availableCommandCatalog(catalog = SHARED_COMMAND_CATALOG, { supportsFork = true } = {}) {
+  return catalog.filter((item) => item.requiresSessionFork !== true || supportsFork);
+}
+
+/**
+ * The session-navigation help lines every channel that handles them should
+ * list, without the file-export form of /tail (only file-capable channels
+ * document that). Kept here so the non-text bridges cannot drift from /ls.
+ */
+export const SESSION_NAV_HELP_LINES = Object.freeze([
+  '/ls 或 /list  列出本聊天使用过的会话（● 当前，←/→ 可前后切换，✕ 已失效；列表按聊天隔离，论坛群按话题）',
+  '/go 会话编号  切换到该会话（编号见 /ls）',
+  '/prev  回到上一个会话',
+  '/next  前进到下一个会话',
+  '/drop 会话编号  从本聊天会话列表移除该条记录（不删除 Harness 会话）',
+  '/title  查看当前会话标题',
+  '/title 新标题  重命名当前会话',
+  '/title 会话编号 新标题  重命名指定会话',
+  '/fork [标题]  从当前会话分支一个新会话（默认沿用父会话标题加“ (fork)”）',
+  '/reset  重置当前会话上下文（保留会话编号，旧会话可 /session 找回）',
+  '/tail 或 /peek [编号] [条数]  预览最近消息（默认 5 条，仅提问与回答）',
+]);
 
 export function commandHelpLines(channel, catalog = SHARED_COMMAND_CATALOG) {
   return commandsForChannel(channel, catalog).flatMap((item) => item.help.map((line) => t(line)));
