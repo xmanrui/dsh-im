@@ -278,8 +278,8 @@ test('client startup waits for configuration before showing the sidebar', async 
         renderer = create(React.createElement(page.component, page.options.inject()));
         await flush();
       });
-      const entry = renderer.root.findByProps({ className: 'dim-pluginOpen dim-sessionHistoryButton' });
-      assert.deepEqual(entry.children, ['会话记录']);
+      const entry = renderer.root.findByProps({ className: 'dim-sessionHistoryButton' });
+      assert.equal(entry.props['aria-label'], '会话记录');
       act(() => entry.props.onClick());
       assert.deepEqual(selected, [CHANNEL_SESSIONS_PANEL_ID]);
       act(() => renderer.unmount());

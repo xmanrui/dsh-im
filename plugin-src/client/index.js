@@ -263,6 +263,7 @@ export function IMSettingsTab({
     [emailEnabled],
   );
   const githubTooltipId = React.useId();
+  const sessionHistoryTooltipId = React.useId();
   const generalSettingsTooltipId = React.useId();
   const globalSettingsSelected = selected === GLOBAL_SETTINGS_TAB_ID;
   const active = visibleChannels.find((channel) => channel.id === selected) ?? visibleChannels[0];
@@ -364,11 +365,25 @@ export function IMSettingsTab({
           className: 'dim-githubTooltip',
           role: 'tooltip',
         }, '帮助与反馈 · 前往 GitHub')),
-      onOpenSessionHistory ? h('button', {
-        type: 'button',
-        className: 'dim-pluginOpen dim-sessionHistoryButton',
-        onClick: onOpenSessionHistory,
-      }, '会话记录') : null,
+      onOpenSessionHistory ? h('span', { className: 'dim-sessionHistoryAction' },
+        h('button', {
+          type: 'button',
+          className: 'dim-sessionHistoryButton',
+          'aria-label': '会话记录',
+          'aria-describedby': sessionHistoryTooltipId,
+          onClick: onOpenSessionHistory,
+        }, h('svg', {
+          width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none',
+          stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round',
+          focusable: 'false', 'aria-hidden': 'true',
+        },
+        h('path', { d: 'M21 15a3 3 0 0 1-3 3H7l-4 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3Z' }),
+        h('path', { d: 'M8 8h8M8 12h5' }))),
+        h('span', {
+          id: sessionHistoryTooltipId,
+          className: 'dim-sessionHistoryTooltip',
+          role: 'tooltip',
+        }, '会话记录')) : null,
       h('span', { className: 'dim-generalSettingsAction' },
         h('button', {
           type: 'button',
