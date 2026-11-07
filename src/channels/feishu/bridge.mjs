@@ -3,7 +3,7 @@ import { BusyMessageDispatcher, canAutomaticallySteer } from '../shared/busy-mes
 import { isPermissionCommand, runPermissionCommand } from '../shared/permission-command.mjs';
 import { randomUUID } from 'node:crypto';
 import { chunkMarkdownText } from '../shared/markdown-chunks.mjs';
-import QRCode from 'qrcode';
+import QRCode from '../shared/qrcode.mjs';
 import { waitForFeishuOperation } from './feishu-channel.mjs';
 import { startNewConversation, isNewCommand, newCommandTitle } from '../shared/new-command.mjs';
 import {

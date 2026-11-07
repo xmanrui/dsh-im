@@ -3,7 +3,7 @@ import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-det
 import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
-import QRCode from 'qrcode';
+import QRCode from '../../../../src/channels/shared/qrcode.mjs';
 import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';

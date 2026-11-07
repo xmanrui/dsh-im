@@ -2,7 +2,7 @@ import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload } from '../../../../
 import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
-import QRCode from 'qrcode';
+import QRCode from '../../../../src/channels/shared/qrcode.mjs';
 import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 
 import { publicConnectionTestResult } from '../../../../src/channels/shared/connection-test.mjs';

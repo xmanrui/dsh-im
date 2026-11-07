@@ -4,7 +4,7 @@ import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../sr
 import { normalizeBotAlias } from '../../../../src/channels/shared/bot-alias.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
-import QRCode from 'qrcode';
+import QRCode from '../../../../src/channels/shared/qrcode.mjs';
 import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 import {
   normalizeAgentPresetCatalog,

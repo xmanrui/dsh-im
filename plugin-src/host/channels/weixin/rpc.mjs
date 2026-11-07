@@ -1,7 +1,7 @@
 import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload } from '../../../../src/channels/shared/message-mode.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
-import QRCode from 'qrcode';
+import QRCode from '../../../../src/channels/shared/qrcode.mjs';
 import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 import { createWeixinDiagnostics, weixinStageError } from '../../../../src/channels/weixin/connection-error.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
