@@ -76,6 +76,7 @@ import {
   setLastMessageFailure,
 } from './message-failure.mjs';
 import { logDeliveryFailure } from './delivery-failure-log.mjs';
+import { appendFailureLog } from './failure-log-file.mjs';
 import { beginStatusReaction } from './status-reaction.mjs';
 import { startNewConversation, isNewCommand, newCommandTitle } from './new-command.mjs';
 import {
@@ -787,10 +788,15 @@ export class TextHarnessBridge {
       message.statusReaction?.error();
       this.#status.lastError = error?.message ?? String(error);
       const failure = setLastMessageFailure(this.#status, error);
+      const diagnostic = messageFailureDiagnostic(error, failure);
       this.#logger.error?.(
         `[dsh-im:${this.#descriptor.key}] failed to process a batch input message [${failure.referenceId}]:`,
-        messageFailureDiagnostic(error, failure),
+        diagnostic,
       );
+      appendFailureLog(failure, {
+        channel: this.#descriptor.key,
+        details: diagnostic.details ?? null,
+      });
     }).finally(() => {
       this.#acceptedMessageIds.delete(messageId);
       this.#commandTasks.delete(task);
@@ -1638,10 +1644,18 @@ export class TextHarnessBridge {
       const failureText = failedBatch?.retained
         ? `${messageFailureText(failure)}\n\n${failedBatch.message}`
         : messageFailureText(failure);
+      const diagnostic = messageFailureDiagnostic(error, failure);
       this.#logger.error?.(
         `[dsh-im:${this.#descriptor.key}] failed to process a message [${failure.referenceId}]:`,
-        messageFailureDiagnostic(error, failure),
+        diagnostic,
       );
+      // A console line only survives when somebody captures stdout; a desktop
+      // app started from the dock has no captured stream, so the reference id
+      // the user quotes back needs a durable line of its own.
+      appendFailureLog(failure, {
+        channel: this.#descriptor.key,
+        details: diagnostic.details ?? null,
+      });
       // One line per failed or unconfirmed delivery, carrying the same id the
       // user will quote back: a reference id nobody can grep is useless.
       logDeliveryFailure(this.#logger, this.#descriptor.key, failure, error?.deliveryEvidence);
