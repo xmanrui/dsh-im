@@ -93,6 +93,21 @@ function interactionResolvedText() {
 }
 const DEFAULT_FILE_UPLOAD_TIMEOUT_MS = 120_000;
 
+/**
+ * Minimum gap between progress notices on one conversation. The turn's own
+ * updates arrive faster than a person can read them, and QQ rate-limits active
+ * sends, so the trace is paced instead of forwarded verbatim.
+ */
+const QQ_TOOL_PROGRESS_MIN_INTERVAL_MS = 10_000;
+
+/**
+ * Ceiling for one progress line, kept only so a pathologically long step cannot
+ * produce a message the platform rejects outright. It is not a content trim: a
+ * normal step's prose sits far below it, and the final answer arrives separately
+ * as Markdown.
+ */
+const QQ_PROGRESS_TEXT_MAX_CHARS = 1000;
+
 export const QQ_IMAGE_HOSTS = Object.freeze([
   '.myqcloud.com',
   '.qpic.cn',
@@ -118,6 +133,7 @@ function helpText() {
     t('直接发送文字、图片或文件即可继续当前会话。'),
     t('/menu 或 /m  打开可点击的功能菜单'),
     t('/new  开启一个全新会话'),
+    t('/progress on 或 /progress off  开关工具执行与失败通知'),
     t('/compact  压缩当前会话的较早上下文'),
     t('/clear  清空当前会话上下文（保留 Session 绑定和历史记录）'),
     t('/history [数量]  查看最近历史消息（默认 3 条，最多 5 条）'),
@@ -502,6 +518,8 @@ export class QqHarnessBridge {
   #batchInputs = new BatchInputManager();
   #menus = new QqMenuStore();
   #menuTasks = new Map();
+  // Last progress notice per conversation key; see #pushProgress.
+  #toolProgressSentAt = new Map();
 
   constructor({
     bot,
@@ -1038,6 +1056,11 @@ export class QqHarnessBridge {
       if (isClearCommand(command)) return runClearCommand(command, this.#harness, this.#state, key, options);
       if (isResetCommand(command)) return runResetCommand(command, this.#harness, this.#state, key, options);
       if (command === '/compact') return runCompactCommand(command, this.#harness, this.#state, key, options);
+      // 菜单按钮与直接打字共用命令文本，但这条路不经过 #process：/progress
+      // 必须在此显式处理，否则会落进下面的工作区命令兜底被无声吞掉。
+      if (/^\/progress(?:\s|$)/u.test(command)) {
+        return { message: await this.#runProgressCommand(command) };
+      }
       return runWorkspaceCommand(command, this.#harness, key);
     };
     // Stop/steer must stay available while a slower menu mutation is pending.
@@ -1155,6 +1178,53 @@ export class QqHarnessBridge {
     });
     this.#commandTasks.add(task);
     return task;
+  }
+
+  /**
+   * Push one progress line to the chat while the turn is still running.
+   *
+   * Both sources share this path: a tool call (rendered as a short notice) and
+   * the model's own per-step text. Pacing is per conversation — the first line
+   * of a turn goes out immediately, the rest at most one per
+   * QQ_TOOL_PROGRESS_MIN_INTERVAL_MS — so a chat that speaks fast cannot flood
+   * the room. A failed notice is logged and dropped: the turn's final answer
+   * still carries the result, so progress must never be able to fail it.
+   */
+  async #pushProgress(target, key, text) {
+    const now = Date.now();
+    const last = this.#toolProgressSentAt.get(key) ?? 0;
+    if (now - last < QQ_TOOL_PROGRESS_MIN_INTERVAL_MS) return;
+    this.#toolProgressSentAt.set(key, now);
+    const line = text.replace(/[\r\n]+/gu, ' ').trim().slice(0, QQ_PROGRESS_TEXT_MAX_CHARS);
+    if (!line) return;
+    try {
+      await this.#bot.sendText(target, line);
+    } catch (error) {
+      this.#logger.warn?.('[dsh-im:qq] progress notice failed:', error);
+    }
+  }
+
+  /**
+   * /progress [on|off] — toggle the machine-voiced notices of a turn.
+   *
+   * One switch governs both tool-execution lines and the tool-failure summary
+   * appended after the final answer: both are machine noise next to the model's
+   * own per-step text, which is always pushed. State is per bot and survives
+   * restarts.
+   */
+  async #runProgressCommand(command) {
+    const argument = command.split(/\s+/u)[1];
+    if (argument === 'on') {
+      await this.#state.setToolProgressNotices(true);
+      return t('工具通知已开启：执行每个工具时发一条消息，失败时在答案后附汇总。');
+    }
+    if (argument === 'off') {
+      await this.#state.setToolProgressNotices(false);
+      return t('工具通知已关闭，我仍会在每一步说明正在做什么。');
+    }
+    return this.#state.includesToolProgressNotices()
+      ? `${t('工具通知当前已开启。')}\n${t('用法：/progress on 或 /progress off')}`
+      : `${t('工具通知当前已关闭。')}\n${t('用法：/progress on 或 /progress off')}`;
   }
 
   async #deliverArtifacts(target, replyTo, artifacts = [], baseReceipt = null) {
@@ -1278,6 +1348,12 @@ export class QqHarnessBridge {
         await markMessageSeen();
         return;
       }
+      if (!hasImages && !hasFiles && /^\/progress(?:\s|$)/.test(command)) {
+        const reply = await this.#runProgressCommand(command);
+        await this.#bot.sendText(target, reply);
+        await markMessageSeen();
+        return;
+      }
       const clearCommand = await runClearCommand(text, this.#harness, this.#state, key, {
         signal: this.#signal,
         hasImages,
@@ -1345,6 +1421,9 @@ export class QqHarnessBridge {
       // QQ stream_messages can acknowledge a final frame without rendering it in
       // some C2C clients. Standard Markdown delivery is the reliable reply path.
       const toolErrors = [];
+      // The newest per-step assistant text, held back from #pushProgress; see
+      // the assistant-message branch of onUpdate below.
+      let heldStepText = null;
       let answer;
       let artifacts = [];
       try {
@@ -1395,6 +1474,33 @@ export class QqHarnessBridge {
                   { name },
                 ));
               }
+              // A long turn would otherwise stay silent until its final answer.
+              // The tool events are already subscribed below; only their
+              // delivery to the chat was missing. Group chats keep their
+              // deliberate silence: a room is read by everyone. Tool-name
+              // notices are opt-in (/progress on) because the model's own text
+              // below already says what is happening.
+              if (update.type === 'tool' && message.kind !== 'group'
+                && this.#state.includesToolProgressNotices()) {
+                const label = nonEmptyString(update.name) ?? t('工具');
+                void this.#pushProgress(target, key, t('🔧 正在执行：{name}', { name: label }));
+              }
+              // The model's own per-step text is the progress worth reading: it
+              // says what is being done and why, not just which tool ran.
+              // The newest one is held back rather than pushed: the harness's
+              // last canonical message IS the answer the Markdown delivery
+              // below sends as its own message, and QQ can neither edit nor
+              // recall a message it already sent. Pushing it here as well
+              // would show the reply twice — once flattened into a plain
+              // progress line, once rendered. A later step proves the held
+              // line was only intermediate and releases it; a turn that ends
+              // while one is held drops it, because that text is the answer.
+              if (update.type === 'assistant-message' && message.kind !== 'group') {
+                if (heldStepText !== null) {
+                  void this.#pushProgress(target, key, heldStepText);
+                }
+                heldStepText = nonEmptyString(update.text) ?? null;
+              }
             },
             onInteraction: (interaction) => this.#handleInteraction(interaction, {
               key,
@@ -1407,6 +1513,16 @@ export class QqHarnessBridge {
             images: promptMessage.images,
           },
         }));
+        // The turn is over: the held step text is the answer the delivery
+        // below sends, so it must not also go out as a plain progress line.
+        // A turn that produced no text at all is the one exception — there
+        // the held line is the only thing the reader would otherwise see.
+        if (nonEmptyString(answer)) {
+          heldStepText = null;
+        } else if (heldStepText !== null) {
+          void this.#pushProgress(target, key, heldStepText);
+          heldStepText = null;
+        }
         if (batchSubmission) {
           this.#batchInputs.complete(key, batchSubmission.token);
           batchSettled = true;
@@ -1419,7 +1535,10 @@ export class QqHarnessBridge {
       }
       this.#signal?.throwIfAborted();
       const answerText = answerTextForDelivery(answer, artifacts);
-      const displayAnswer = toolErrors.length > 0
+      // 工具失败汇总与工具执行通知同属机器噪音，归同一个开关管：默认关闭，
+      // 只给最终答案。失败的固定文案不暴露 provider 细节，这一点在开关打开
+      // 时依然成立。
+      const displayAnswer = toolErrors.length > 0 && this.#state.includesToolProgressNotices?.()
         ? `${answerText}\n\n---\n\n${toolErrors.join('\n\n')}`
         : answerText;
       let textReceipt = null;

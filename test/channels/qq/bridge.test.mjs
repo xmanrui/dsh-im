@@ -45,6 +45,7 @@ async function eventually(predicate, messageText = 'condition was not met') {
 function stateFixture(initialSessions = []) {
   const sessions = new Map(initialSessions);
   const seen = new Set();
+  let toolProgressNotices = false;
   return {
     sessions,
     seen,
@@ -54,6 +55,8 @@ function stateFixture(initialSessions = []) {
       sessionFor: (key) => sessions.get(key) ?? null,
       setSession: async (key, sessionId) => sessions.set(key, sessionId),
       clearSession: async (key) => sessions.delete(key),
+      includesToolProgressNotices: () => toolProgressNotices,
+      setToolProgressNotices: async (include) => { toolProgressNotices = include === true; },
     },
   };
 }
@@ -1179,7 +1182,7 @@ test('QQ group messages suppress every successful progress update', async () => 
   assert.equal(streamCalls, 0);
 });
 
-test('QQ group messages append a stable tool failure notice without exposing provider details', async () => {
+test('QQ group messages hide the tool failure notice by default and never expose provider details', async () => {
   const sent = [];
   const bridge = new QqHarnessBridge({
     bot: {
@@ -1219,19 +1222,18 @@ test('QQ group messages append a stable tool failure notice without exposing pro
     messageId: 'msg-tool-error',
     replyTarget: { scope: 'group', targetId: 'group-error', msgId: 'msg-tool-error' },
   }));
-  assert.deepEqual(sent, [
-    '已存入两套记忆。\n\n---\n\n工具调用「add_observations」未成功，请检查工具配置或稍后重试。',
-  ]);
-  assert.doesNotMatch(sent[0], /Error calling|Status code|404/);
+  // 群聊与默认关闭的开关一致：只给最终答案。
+  assert.deepEqual(sent, ['已存入两套记忆。']);
 });
 
-test('QQ sends neutral completion replies and retains tool failure notices', async () => {
-  for (const toolFailed of [false, true]) {
+test('QQ sends neutral completion replies and hides tool failure notices by default', async () => {
+  for (const notices of [false, true]) {
     const sent = [];
     const status = createQqBridgeStatus();
     status.lastError = 'previous failure';
     status.lastMessageError = { code: 'MODEL_EMPTY_REPLY' };
     const fixture = stateFixture([['c2c:owner-openid', 'session-empty-completed']]);
+    if (notices) await fixture.state.setToolProgressNotices(true);
     const bridge = new QqHarnessBridge({
       bot: { sendText: async (_target, text) => sent.push(text) },
       ownerUserOpenid: 'owner-openid',
@@ -1239,14 +1241,15 @@ test('QQ sends neutral completion replies and retains tool failure notices', asy
       harness: {
         sessionExists: async () => true,
         ask: async (_session, _text, { onUpdate }) => {
-          if (toolFailed) await onUpdate({ type: 'status', toolName: 'bash', error: 'private detail' });
+          await onUpdate({ type: 'status', toolName: 'bash', error: 'private detail' });
           return '本轮处理已结束，没有文本回复。';
         },
       },
       state: fixture.state,
     });
     await bridge.accept(message());
-    assert.deepEqual(sent, [toolFailed
+    // 默认只给中性完成回复；开关打开时才附失败汇总，且仍不暴露 provider 细节。
+    assert.deepEqual(sent, [notices
       ? '本轮处理已结束，没有文本回复。\n\n---\n\n工具调用「bash」未成功，请检查工具配置或稍后重试。'
       : '本轮处理已结束，没有文本回复。']);
     assert.equal(status.messagesReplied, 1);
@@ -1363,9 +1366,296 @@ test('QQ announces a stopped turn and closes its unused private stream', async (
 
   await bridge.accept(message({ messageId: 'qq-stopped-stream' }));
 
+  // 工具通知默认关闭，只保留停止播报。
   assert.deepEqual(sent, ['已停止。']);
   assert.equal(loggedErrors, 0);
   assert.equal(fixture.seen.has('qq-stopped-stream'), true);
+});
+
+test('QQ paces private tool progress to one notice per interval once enabled', async () => {
+  const fixture = stateFixture([['c2c:owner-openid', 'session-progress-pace']]);
+  const sent = [];
+  const markdown = [];
+  const bridge = new QqHarnessBridge({
+    bot: {
+      sendText: async (_target, text) => sent.push(text),
+      send: async (options) => {
+        markdown.push(options);
+        return { message: { id: 'qq-progress-markdown' } };
+      },
+    },
+    ownerUserOpenid: 'owner-openid',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_session, _text, { onUpdate }) => {
+        // 第一个工具立即通知，节流窗口内的后续工具被吞掉，最终答案照常投递。
+        await onUpdate({ type: 'tool', name: 'bash' });
+        await onUpdate({ type: 'tool', name: 'read' });
+        await onUpdate({ type: 'tool', name: 'grep' });
+        return '已完成';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message({ messageId: 'qq-progress-on' }));
+  // 默认关闭：工具事件不产生任何推送。
+  assert.deepEqual(sent, []);
+  assert.equal(markdown.length, 1);
+
+  await fixture.state.setToolProgressNotices(true);
+  await bridge.accept(message({ messageId: 'qq-progress-pace' }));
+
+  assert.deepEqual(sent, ['🔧 正在执行：bash']);
+  assert.equal(markdown.length, 2);
+});
+
+test('QQ /progress reports and toggles the tool notice state', async () => {
+  const fixture = stateFixture([['c2c:owner-openid', 'session-progress-command']]);
+  const sent = [];
+  const bridge = new QqHarnessBridge({
+    bot: { sendText: async (_target, text) => sent.push(text) },
+    ownerUserOpenid: 'owner-openid',
+    harness: { sessionExists: async () => true, ask: async () => '答案' },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message({ messageId: 'qq-progress-query', content: '/progress' }));
+  await bridge.accept(message({ messageId: 'qq-progress-turn-on', content: '/progress on' }));
+  await bridge.accept(message({ messageId: 'qq-progress-turn-off', content: '/progress OFF' }));
+  await bridge.accept(message({ messageId: 'qq-progress-bogus', content: '/progress maybe' }));
+
+  assert.equal(fixture.state.includesToolProgressNotices(), false);
+  assert.equal(sent.length, 4);
+  assert.match(sent[0], /当前已关闭/);
+  assert.match(sent[1], /已开启/);
+  // 命令大小写不敏感；第三条把开关重新关上，所以末条回到「已关闭」。
+  assert.match(sent[2], /已关闭/);
+  assert.match(sent[3], /当前已关闭/);
+});
+
+test('QQ pushes the model per-step text as private progress', async () => {
+  const fixture = stateFixture([['c2c:owner-openid', 'session-progress-text']]);
+  const sent = [];
+  const markdown = [];
+  const bridge = new QqHarnessBridge({
+    bot: {
+      sendText: async (_target, text) => sent.push(text),
+      send: async (options) => {
+        markdown.push(options);
+        return { message: { id: 'qq-progress-text-markdown' } };
+      },
+    },
+    ownerUserOpenid: 'owner-openid',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_session, _text, { onUpdate }) => {
+        await onUpdate({ type: 'assistant-message', step: 0, text: '我先看看配置文件在哪。' });
+        // 同一节流窗口内的第二步文字被吞掉。
+        await onUpdate({ type: 'assistant-message', step: 1, text: '第二步，不该出现。' });
+        return '最终答案';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message({ messageId: 'qq-progress-text' }));
+
+  assert.deepEqual(sent, ['我先看看配置文件在哪。']);
+  assert.equal(markdown.length, 1);
+  assert.equal(markdown[0].markdown.content, '最终答案');
+});
+
+test('QQ never echoes the final answer back as a plain progress line', async () => {
+  const fixture = stateFixture([['c2c:owner-openid', 'session-progress-final-echo']]);
+  const sent = [];
+  const markdown = [];
+  const bridge = new QqHarnessBridge({
+    bot: {
+      sendText: async (_target, text) => sent.push(text),
+      send: async (options) => {
+        markdown.push(options);
+        return { message: { id: 'qq-final-echo-markdown' } };
+      },
+    },
+    ownerUserOpenid: 'owner-openid',
+    harness: {
+      sessionExists: async () => true,
+      // 单步回合：模型唯一一条 assistant-message 就是最终答案本身。
+      ask: async (_session, _text, { onUpdate }) => {
+        await onUpdate({ type: 'assistant-message', step: 0, text: '**最终答案**\n\n这是完整回答。' });
+        return '**最终答案**\n\n这是完整回答。';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message({ messageId: 'qq-progress-final-echo' }));
+
+  // 答案只投递一次，且带 Markdown 格式；不再另发一条压平换行的纯文本副本。
+  assert.deepEqual(sent, []);
+  assert.equal(markdown.length, 1);
+  assert.equal(markdown[0].markdown.content, '**最终答案**\n\n这是完整回答。');
+});
+
+test('QQ keeps intermediate per-step progress and drops only the step that is the answer', async () => {
+  const fixture = stateFixture([['c2c:owner-openid', 'session-progress-final-step']]);
+  const sent = [];
+  const markdown = [];
+  const bridge = new QqHarnessBridge({
+    bot: {
+      sendText: async (_target, text) => sent.push(text),
+      send: async (options) => {
+        markdown.push(options);
+        return { message: { id: 'qq-final-step-markdown' } };
+      },
+    },
+    ownerUserOpenid: 'owner-openid',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_session, _text, { onUpdate }) => {
+        await onUpdate({ type: 'assistant-message', step: 0, text: '我先看看配置文件在哪。' });
+        await onUpdate({ type: 'tool', name: 'bash' });
+        await onUpdate({ type: 'assistant-message', step: 1, text: '配置在 ~/.config 里。' });
+        return '我先看看配置文件在哪。\n\n配置在 ~/.config 里。';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message({ messageId: 'qq-progress-final-step' }));
+
+  // 中间步骤仍作为过程文字推送；最后一步就是答案，只走 Markdown 投递。
+  assert.deepEqual(sent, ['我先看看配置文件在哪。']);
+  assert.equal(markdown.length, 1);
+  assert.equal(markdown[0].markdown.content, '我先看看配置文件在哪。\n\n配置在 ~/.config 里。');
+});
+
+test('QQ passes a normal-length per-step line through and only trims a runaway one', async () => {
+  const fixture = stateFixture([['c2c:owner-openid', 'session-progress-truncate']]);
+  const sent = [];
+  const bridge = new QqHarnessBridge({
+    bot: {
+      sendText: async (_target, text) => sent.push(text),
+      send: async () => ({ message: { id: 'qq-truncate-markdown' } }),
+    },
+    ownerUserOpenid: 'owner-openid',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_session, _text, { onUpdate }) => {
+        await onUpdate({ type: 'assistant-message', step: 0, text: 'y'.repeat(600) });
+        // 后一步证明上一行只是过程文字，它才会作为进度推送出去。
+        await onUpdate({ type: 'assistant-message', step: 1, text: '整理中' });
+        return '答案';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message({ messageId: 'qq-progress-normal' }));
+
+  // 正常一步的篇幅原样通过，不做内容裁剪。
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].length, 600);
+});
+
+test('QQ trims a per-step line only past the runaway ceiling', async () => {
+  const fixture = stateFixture([['c2c:owner-openid', 'session-progress-runaway']]);
+  const sent = [];
+  const bridge = new QqHarnessBridge({
+    bot: {
+      sendText: async (_target, text) => sent.push(text),
+      send: async () => ({ message: { id: 'qq-runaway-markdown' } }),
+    },
+    ownerUserOpenid: 'owner-openid',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_session, _text, { onUpdate }) => {
+        await onUpdate({ type: 'assistant-message', step: 0, text: 'x'.repeat(5000) });
+        // 后一步证明上一行只是过程文字，它才会作为进度推送出去。
+        await onUpdate({ type: 'assistant-message', step: 1, text: '整理中' });
+        return '答案';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message({ messageId: 'qq-progress-runaway' }));
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].length, 1000);
+});
+
+test('QQ still surfaces a held step line when the turn produced no answer text', async () => {
+  const fixture = stateFixture([['c2c:owner-openid', 'session-progress-no-answer']]);
+  const sent = [];
+  const markdown = [];
+  const bridge = new QqHarnessBridge({
+    bot: {
+      sendText: async (_target, text) => sent.push(text),
+      send: async (options) => {
+        markdown.push(options);
+        return { message: { id: 'qq-no-answer-markdown' } };
+      },
+    },
+    ownerUserOpenid: 'owner-openid',
+    harness: {
+      sessionExists: async () => true,
+      // 纯工具回合：没有任何文本答案，唯一的过程文字不能一起被留痕吞掉。
+      ask: async (_session, _text, { onUpdate }) => {
+        await onUpdate({ type: 'assistant-message', step: 0, text: '我正在生成结果文件。' });
+        return '';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message({ messageId: 'qq-progress-no-answer' }));
+
+  assert.deepEqual(sent, ['我正在生成结果文件。']);
+  assert.equal(markdown.length, 0);
+});
+
+test('QQ keeps group chats silent for per-step text progress', async () => {
+  const sent = [];
+  const markdown = [];
+  const bridge = new QqHarnessBridge({
+    bot: {
+      sendText: async (_target, text) => sent.push(text),
+      send: async (options) => {
+        markdown.push(options);
+        return { message: { id: 'qq-group-text-markdown' } };
+      },
+    },
+    ownerUserOpenid: 'owner-openid',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_session, _text, { onUpdate }) => {
+        await onUpdate({ type: 'assistant-message', step: 0, text: '群里的过程文字' });
+        return '群最终答案';
+      },
+    },
+    state: {
+      hasSeen: () => false,
+      markSeen: async () => {},
+      sessionFor: () => 'session-group-text',
+      setSession: async () => {},
+      clearSession: async () => {},
+    },
+  });
+
+  await bridge.accept(message({
+    kind: 'group',
+    rawEventType: 'GROUP_AT_MESSAGE_CREATE',
+    groupOpenid: 'group-progress-text',
+    messageId: 'msg-group-progress-text',
+    replyTarget: { scope: 'group', targetId: 'group-progress-text', msgId: 'msg-group-progress-text' },
+  }));
+
+  // 过程文字不推，最终答案照常走 Markdown 投递。
+  assert.deepEqual(sent, []);
+  assert.equal(markdown.length, 1);
+  assert.equal(markdown[0].markdown.content, '群最终答案');
 });
 
 test('QQ keeps a stopped turn terminal when its notice cannot be sent', async () => {

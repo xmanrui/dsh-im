@@ -93,22 +93,52 @@ async function fixture(t, { rejection, policy, group = false } = {}) {
   return { dir, other, route, state, calls, sent, harness, bridge, bot, send, message, pick, latestMenu, sessions };
 }
 
-test('QQ main menu contains the agreed thirteen actions without watches or reasoning selection', async (t) => {
+test('QQ main menu contains the agreed fourteen actions without watches or reasoning selection', async (t) => {
   const f = await fixture(t);
   await f.send('/m');
   const menu = f.latestMenu();
   const buttons = menu.keyboard.content.rows.flatMap((r) => r.buttons);
-  assert.equal(buttons.length, 13);
+  assert.equal(buttons.length, 14);
   assert.ok(menu.keyboard.content.rows.length <= 5);
   assert.ok(menu.keyboard.content.rows.every((r) => r.buttons.length <= 5));
   assert.doesNotMatch(menu.text, /关注|推理等级/);
   assert.match(menu.text, /标准模式/);
+  // 工具通知默认关闭，按钮因此显示「开启」；detail 行同步显示当前状态。
+  const progressButton = buttons.find((button) => /工具通知/.test(button.render_data.label));
+  assert.ok(progressButton, 'main menu carries the tool-notice toggle');
+  assert.match(progressButton.render_data.label, /开启/);
+  assert.match(menu.text, /工具通知：关闭/);
   for (const button of buttons) {
     assert.equal(button.action.type, 2);
     assert.equal(button.action.enter, true);
     assert.ok(parseQqMenuCommand(button.action.data).token);
   }
   assert.equal(f.calls.length, 0);
+});
+
+test('QQ main menu tool-notice button flips with the persisted switch', async (t) => {
+  const f = await fixture(t);
+  const labels = async () => {
+    await f.send('/m');
+    return f.latestMenu().keyboard.content.rows.flatMap((r) => r.buttons)
+      .filter((button) => /工具通知/.test(button.render_data.label))
+      .map((button) => button.render_data.label);
+  };
+
+  assert.deepEqual(await labels(), ['🔔 开启工具通知']);
+
+  // 点按钮等于发 /progress on。
+  await f.pick(12);
+  assert.equal(f.state.includesToolProgressNotices(), true);
+  assert.deepEqual(await labels(), ['🔕 关闭工具通知']);
+  assert.match(f.latestMenu().text, /工具通知：开启/);
+
+  await f.pick(12);
+  assert.equal(f.state.includesToolProgressNotices(), false);
+  assert.deepEqual(await labels(), ['🔔 开启工具通知']);
+
+  const restored = await new QqStateStore(join(f.dir, 'state.json')).load();
+  assert.equal(restored.includesToolProgressNotices(), false);
 });
 
 test('QQ all-message events retain menu commands and numeric selection after self mention cleanup', async (t) => {
@@ -337,7 +367,7 @@ test('QQ status, help and partial catalogs retain usable navigation and escape M
   f.harness.listModels = async () => { throw new Error('catalog down'); };
   f.harness.workspaceSession = () => ({ models: f.harness.listModels });
   await f.send('/m');
-  assert.equal(f.latestMenu().keyboard.content.rows.flatMap((r) => r.buttons).length, 13);
+  assert.equal(f.latestMenu().keyboard.content.rows.flatMap((r) => r.buttons).length, 14);
   assert.match(f.latestMenu().text, /部分设置暂未加载/);
   const view = { title: '菜单', entries: [{ label: '[标题](https://example.invalid)', action: { kind: 'command', text: '/new' } }] };
   assert.ok(qqMenuText(view).includes('[标题]'));
