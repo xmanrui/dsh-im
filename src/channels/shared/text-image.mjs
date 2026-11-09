@@ -2,7 +2,7 @@
 // 审批卡片、长消息、报告都走这里，避免各渠道各写一套排版。
 // 渲染不是必需路径：sharp 缺失、字体找不到、排版失败一律返回空数组，调用方回退文本。
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -38,23 +38,48 @@ function loadSharp() {
 }
 
 /**
- * sharp 内置的 libvips 走 fontconfig，Guix 上没有 /etc/fonts/fonts.conf，
- * 不指定 FONTCONFIG_FILE 时 Pango 找不到任何字体，渲染出来是空白图。
- * 只在宿主进程没显式配置时补一个默认值。
+ * sharp 内置的 libvips 走 fontconfig。直接沿用系统配置有两个坑：
+ * Guix 没有 /etc/fonts/fonts.conf；而 ~/.cache/fontconfig 里的旧缓存可能
+ * 指向已失效的 store 字体路径，Pango 于是只画得出豆腐块。
+ * 因此这里给插件一套专用配置与专用缓存目录，完全不读全局缓存。
  */
+let fontconfigReady = false;
 function ensureFontconfig() {
-  if (process.env.FONTCONFIG_FILE) return true;
-  const candidates = [
-    join(homedir(), '.guix-home/profile/etc/fonts/fonts.conf'),
-    '/etc/fonts/fonts.conf',
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      process.env.FONTCONFIG_FILE = candidate;
-      return true;
-    }
+  if (fontconfigReady) return true;
+  if (process.env.DSH_IM_FONTCONFIG_FILE) {
+    fontconfigReady = true;
+    return true;
   }
-  return false;
+  const fontDirs = [
+    join(homedir(), '.guix-home/profile/share/fonts'),
+    join(homedir(), '.local/share/fonts'),
+    '/run/current-system/profile/share/fonts',
+    '/usr/share/fonts',
+  ].filter((dir) => existsSync(dir));
+  if (fontDirs.length === 0) return false;
+  const cacheRoot = process.env.XDG_CACHE_HOME || join(homedir(), '.cache');
+  const configDir = join(cacheRoot, 'dsh-im');
+  const configPath = join(configDir, 'fonts.conf');
+  try {
+    mkdirSync(join(configDir, 'fontconfig'), { recursive: true });
+    writeFileSync(configPath, [
+      '<?xml version="1.0"?>',
+      '<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">',
+      '<fontconfig>',
+      ...fontDirs.map((dir) => `  <dir>${dir}</dir>`),
+      `  <cachedir>${join(configDir, 'fontconfig')}</cachedir>`,
+      '  <alias><family>monospace</family><prefer><family>Sarasa Mono CL</family></prefer></alias>',
+      '</fontconfig>',
+      '',
+    ].join('\n'), 'utf8');
+  } catch {
+    return false;
+  }
+  // 覆盖宿主可能已设的全局配置：那份配置解析出的缓存是坏的
+  process.env.FONTCONFIG_FILE = configPath;
+  process.env.DSH_IM_FONTCONFIG_FILE = configPath;
+  fontconfigReady = true;
+  return true;
 }
 
 function classify(raw) {
@@ -228,3 +253,7 @@ export async function renderTextImages(text, { signal, ...overrides } = {}) {
   const omittedRows = chunks.slice(options.maxImages).reduce((sum, chunk) => sum + chunk.length, 0);
   return { images, omittedRows };
 }
+
+// 插件加载时就固化 fontconfig 配置：进程内 fontconfig 只会初始化一次，
+// 等第一次渲染再设环境变量就晚了，那时可能已经读进坏缓存。
+ensureFontconfig();
