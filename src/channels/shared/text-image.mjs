@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 const DEFAULTS = Object.freeze({
   width: 760,
@@ -40,11 +40,36 @@ function loadSharp() {
 }
 
 /**
- * sharp 内置的 libvips 走 fontconfig。直接沿用系统配置有两个坑：
- * Guix 没有 /etc/fonts/fonts.conf；而 ~/.cache/fontconfig 里的旧缓存可能
- * 指向已失效的 store 字体路径，Pango 于是只画得出豆腐块。
- * 因此这里给插件一套专用配置与专用缓存目录，完全不读全局缓存。
+ * sharp 内置的 libvips 通过 fontconfig 找字体。直接沿用系统配置有两个坑：
+ * 精简镜像、容器与非 FHS 布局的环境可能根本没有系统级 fonts.conf；
+ * 而用户缓存里的字体路径可能指向已被清理的文件，Pango 于是只画得出豆腐块。
+ * 因此这里自行列出字体目录并配一个专用缓存目录，不依赖既有全局缓存。
+ * 目录集合按 XDG 约定推导，发行版把字体装在哪里都能自动命中。
  */
+const MONOSPACE_CJK_FAMILIES = [
+  'Sarasa Mono CL',
+  'Sarasa Mono SC',
+  'Noto Sans Mono CJK SC',
+  'Source Han Mono SC',
+  'WenQuanYi Zen Hei Mono',
+  'M+ 1m',
+];
+
+function fontDirectories() {
+  const dataHome = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
+  const dataDirs = (process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share')
+    .split(delimiter)
+    .filter((entry) => entry !== '');
+  const candidates = [
+    join(dataHome, 'fonts'),
+    ...dataDirs.map((dir) => join(dir, 'fonts')),
+    join(homedir(), '.fonts'),
+    '/usr/local/share/fonts',
+    '/usr/share/fonts',
+  ];
+  return [...new Set(candidates)].filter((dir) => existsSync(dir));
+}
+
 let fontconfigReady = false;
 function ensureFontconfig() {
   if (fontconfigReady) return true;
@@ -52,12 +77,7 @@ function ensureFontconfig() {
     fontconfigReady = true;
     return true;
   }
-  const fontDirs = [
-    join(homedir(), '.guix-home/profile/share/fonts'),
-    join(homedir(), '.local/share/fonts'),
-    '/run/current-system/profile/share/fonts',
-    '/usr/share/fonts',
-  ].filter((dir) => existsSync(dir));
+  const fontDirs = fontDirectories();
   if (fontDirs.length === 0) return false;
   const cacheRoot = process.env.XDG_CACHE_HOME || join(homedir(), '.cache');
   const configDir = join(cacheRoot, 'dsh-im');
@@ -70,14 +90,21 @@ function ensureFontconfig() {
       '<fontconfig>',
       ...fontDirs.map((dir) => `  <dir>${dir}</dir>`),
       `  <cachedir>${join(configDir, 'fontconfig')}</cachedir>`,
-      '  <alias><family>monospace</family><prefer><family>Sarasa Mono CL</family></prefer></alias>',
+      // 等宽网格是排版前提：按序挑第一款装了的等宽 CJK 字体，
+      // 一款都没有时仍回落到系统自己的 monospace
+      '  <alias binding="same">',
+      '    <family>monospace</family>',
+      '    <prefer>',
+      ...MONOSPACE_CJK_FAMILIES.map((family) => `      <family>${family}</family>`),
+      '    </prefer>',
+      '  </alias>',
       '</fontconfig>',
       '',
     ].join('\n'), 'utf8');
   } catch {
     return false;
   }
-  // 覆盖宿主可能已设的全局配置：那份配置解析出的缓存是坏的
+  // 覆盖宿主可能已设的全局配置：那份配置解析出的缓存未必可用
   process.env.FONTCONFIG_FILE = configPath;
   process.env.DSH_IM_FONTCONFIG_FILE = configPath;
   fontconfigReady = true;
@@ -105,10 +132,12 @@ function stripLine(line) {
 
 function wrapRow(line, columns) {
   if (line === '') return [''];
-  // 缩进是排版信息：键值块的值靠它挂在键下面，续行也要保持
+  // 缩进是排版信息：键值块的值靠它挂在键下面，续行也要保持。
+  // 但它占的列宽必须从预算里扣掉，否则带缩进的行整体右移、把右边距压没。
   const indent = line.match(/^ */u)?.[0] ?? '';
   const body = line.slice(indent.length);
   if (body === '') return [line];
+  const budget = Math.max(1, columns - indent.length);
   const rows = [];
   let remaining = body;
   while (remaining !== '') {
@@ -116,7 +145,7 @@ function wrapRow(line, columns) {
     let cut = 0;
     for (const char of remaining) {
       const size = WIDE_CHAR.test(char) ? 2 : 1;
-      if (width + size > columns) break;
+      if (width + size > budget) break;
       width += size;
       cut += char.length;
     }
@@ -137,7 +166,10 @@ function wrapRow(line, columns) {
 }
 
 function prepareRows(text, options) {
-  const columns = Math.floor((options.width - options.paddingX * 2) / (options.fontSize / 2));
+  // 列宽按字号换算：标题字号更大，共用正文预算会让长标题顶出右边界
+  const columnsFor = (size) => Math.floor((options.width - options.paddingX * 2) / (size / 2));
+  const bodyColumns = columnsFor(options.fontSize);
+  const headingColumns = columnsFor(options.headingSize);
   const rows = [];
   let firstLine = true;
   for (const raw of String(text).replace(/\r\n?/gu, '\n').split('\n')) {
@@ -154,7 +186,9 @@ function prepareRows(text, options) {
       line = line.trim();
       if (line.startsWith('===') && line.endsWith('===')) line = line.replace(/^=+|=+$/gu, '').trim();
     }
-    for (const piece of wrapRow(line, columns)) rows.push({ kind, text: piece });
+    for (const piece of wrapRow(line, kind === 'heading' ? headingColumns : bodyColumns)) {
+      rows.push({ kind, text: piece });
+    }
   }
   return rows;
 }
@@ -212,7 +246,7 @@ function buildSvg(rows, options, { page = 1, pages = 1 } = {}) {
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${options.width}" height="${height}">`
     + `<rect width="100%" height="100%" fill="${options.background}"/>`
-    + `<g font-family="Sarasa Mono CL, Noto Sans Mono CJK SC, Noto Color Emoji, monospace">${parts.join('')}</g></svg>`;
+    + `<g font-family="${[...MONOSPACE_CJK_FAMILIES, 'Noto Color Emoji', 'monospace'].join(', ')}">${parts.join('')}</g></svg>`;
 }
 
 function chunkRows(rows, options) {
