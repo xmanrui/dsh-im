@@ -37,6 +37,11 @@ export const WEIXIN_ENDPOINTS = Object.freeze({
   setBusyMessageMode: SET_MESSAGE_MODE_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
+  // Read and rewrite the conversation → Session mapping that /session writes.
+  // A Host-driven handoff creates a new Session; without these the channel
+  // stays bound to the retired one until the owner types /session by hand.
+  getSessionBinding: 'bot.session-binding.get',
+  setSessionBinding: 'bot.session-binding.set',
 });
 export const WEIXIN_RPC_ENDPOINTS = Object.freeze(Object.values(WEIXIN_ENDPOINTS));
 
@@ -50,6 +55,19 @@ function exactKeys(value, allowed) {
 
 function validId(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
+/**
+ * A conversation key is the channel's own addressing string (for Weixin it is
+ * `p2p:<user id>`), so it carries separators an id does not. Only the shape is
+ * checked here: the address is opaque to this layer, and rejecting an unfamiliar
+ * one would break whichever account the channel is actually configured with.
+ */
+function validConversationKey(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= 1_024
+    && !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
 function payloadFailure(endpoint, payload) {
@@ -113,6 +131,21 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === WEIXIN_ENDPOINTS.setAlias) {
     return validAliasPayload(payload)
       ? null : '请输入有效的别名（最多 80 个字符）。';
+  }
+  if (endpoint === WEIXIN_ENDPOINTS.getSessionBinding) {
+    return exactKeys(payload, ['botId', 'conversationKey'])
+      && validId(payload.botId)
+      && (payload.conversationKey === undefined || validConversationKey(payload.conversationKey))
+      ? null
+      : 'bot.session-binding.get requires a botId and optional conversationKey.';
+  }
+  if (endpoint === WEIXIN_ENDPOINTS.setSessionBinding) {
+    return exactKeys(payload, ['botId', 'conversationKey', 'sessionId'])
+      && validId(payload.botId)
+      && validConversationKey(payload.conversationKey)
+      && validId(payload.sessionId)
+      ? null
+      : 'bot.session-binding.set requires a botId, a conversationKey, and a sessionId.';
   }
   return 'Unknown Weixin endpoint.';
 }
@@ -268,6 +301,23 @@ export function createWeixinRpcHandler(controller, { encodeQr = qrDataUrl, logge
           await controller.updateAgentPreset(payload.botId, payload.agentPreset),
           cachedEncode,
         );
+      } else if (endpoint === WEIXIN_ENDPOINTS.getSessionBinding) {
+        if (typeof controller.getSessionBinding !== 'function') throw new Error('Session binding read is unavailable');
+        const current = await controller.getSessionBinding(payload.botId);
+        const sessions = current?.sessions ?? {};
+        value = payload.conversationKey === undefined
+          ? { botId: payload.botId, sessions }
+          : {
+            botId: payload.botId,
+            conversationKey: payload.conversationKey,
+            sessionId: sessions[payload.conversationKey] ?? null,
+          };
+      } else if (endpoint === WEIXIN_ENDPOINTS.setSessionBinding) {
+        if (typeof controller.setSessionBinding !== 'function') throw new Error('Session binding write is unavailable');
+        value = await controller.setSessionBinding(payload.botId, {
+          conversationKey: payload.conversationKey,
+          sessionId: payload.sessionId,
+        });
       } else {
         value = await publicStatus(await controller.deleteBot(payload.botId), cachedEncode);
       }
@@ -280,6 +330,8 @@ export function createWeixinRpcHandler(controller, { encodeQr = qrDataUrl, logge
         'provision.poll': ['qr.poll'], 'provision.verify': ['qr.verify'], 'provision.cancel': ['qr.cancel'],
         'bot.reconnect': ['connection.start', 'connection-start-failed'],
         'bot.delete': ['account.remove'], 'bot.workspace.set': ['workspace.write', 'workspace-save-failed'],
+        'bot.session-binding.get': ['session.binding.read', 'session-binding-read-failed'],
+        'bot.session-binding.set': ['session.binding.write', 'session-binding-save-failed'],
       }[endpoint] ?? ['workspace.write', 'workspace-save-failed'];
       return { ok: false, error: diagnostics.report(error, {
         operation: endpoint, stage: context[0], code: context[1], botId: payload.botId,
