@@ -271,4 +271,6 @@ export default {
   '多选问题请直接回复文字。':
     'Please answer a multi-select question by replying with text.',
   '已选择：{label}': 'Selected: {label}',
+  '还有 {count} 条没发出：微信每条用户消息最多回复 10 条，回复「继续」接着发。':
+    '{count} more message(s) could not be sent: Weixin allows about 10 replies per inbound message. Reply “继续” to send them.',
 };
