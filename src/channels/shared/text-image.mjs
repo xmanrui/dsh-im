@@ -26,6 +26,8 @@ const DEFAULTS = Object.freeze({
 
 const HEADING_LINE = /^(?:={3,}.*={3,}|【.*】|#{1,6}\s+.*)$/u;
 const RULE_LINE = /^-{3,}$/u;
+/** 参数键行：`id:`、`cross_workspace:` 这类，渲染成加粗的强调色。 */
+const KEY_LINE = /^[A-Za-z_][\w.-]*:$/u;
 /** 断行时优先落在这类字符之后，避免把英文单词或数字从中间劈开。 */
 const BREAK_AFTER = new Set([...' \t，。、；：！？,.;:!?)]）】」』']);
 /** 全角与 emoji 都占两列；等宽网格靠它算换行位置。 */
@@ -86,6 +88,7 @@ function classify(raw) {
   const stripped = raw.trim();
   if (RULE_LINE.test(stripped)) return 'rule';
   if (HEADING_LINE.test(stripped)) return 'heading';
+  if (KEY_LINE.test(stripped)) return 'key';
   return 'body';
 }
 
@@ -102,8 +105,12 @@ function stripLine(line) {
 
 function wrapRow(line, columns) {
   if (line === '') return [''];
+  // 缩进是排版信息：键值块的值靠它挂在键下面，续行也要保持
+  const indent = line.match(/^ */u)?.[0] ?? '';
+  const body = line.slice(indent.length);
+  if (body === '') return [line];
   const rows = [];
-  let remaining = line;
+  let remaining = body;
   while (remaining !== '') {
     let width = 0;
     let cut = 0;
@@ -123,7 +130,7 @@ function wrapRow(line, columns) {
         }
       }
     }
-    rows.push(remaining.slice(0, cut).trimEnd());
+    rows.push(indent + remaining.slice(0, cut).trimEnd());
     remaining = remaining.slice(cut).trimStart();
   }
   return rows.length > 0 ? rows : [''];
@@ -184,7 +191,7 @@ function buildSvg(rows, options, { page = 1, pages = 1 } = {}) {
       if (index > 0) y += 14;
       // 左侧竖色条替代纯加粗：不依赖字体变体，缩略图里也能看出层级
       parts.push(`<rect x="${options.paddingX - 16}" y="${y + 2}" width="4" height="30" rx="2" fill="${options.accent}"/>`);
-      parts.push(`<text x="${options.paddingX}" y="${y + 30}" font-size="${options.headingSize}" font-weight="bold" fill="${options.headingColor}">${escapeXml(row.text)}</text>`);
+      parts.push(`<text xml:space="preserve" x="${options.paddingX}" y="${y + 30}" font-size="${options.headingSize}" font-weight="bold" fill="${options.headingColor}">${escapeXml(row.text)}</text>`);
       y += options.headingLineHeight;
     } else if (row.kind === 'rule') {
       y += 14;
@@ -192,7 +199,10 @@ function buildSvg(rows, options, { page = 1, pages = 1 } = {}) {
       y += 20;
     } else {
       if (row.text !== '') {
-        parts.push(`<text x="${options.paddingX}" y="${y + 26}" font-size="${options.fontSize}" fill="${options.bodyColor}">${escapeXml(row.text)}</text>`);
+        const paint = row.kind === 'key'
+          ? `font-weight="bold" fill="${options.accent}"`
+          : `fill="${options.bodyColor}"`;
+        parts.push(`<text xml:space="preserve" x="${options.paddingX}" y="${y + 26}" font-size="${options.fontSize}" ${paint}>${escapeXml(row.text)}</text>`);
       }
       y += options.lineHeight;
     }

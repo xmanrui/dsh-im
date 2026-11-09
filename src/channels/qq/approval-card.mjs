@@ -10,7 +10,7 @@ const VALUE_PREVIEW_CHARS = 72;
 const APPROVAL_ACCENT = '#b4534b';
 
 /**
- * 参数 JSON 拆成可读的 key: value 行。
+ * 参数 JSON 拆成「键一行、值缩进一行、参数之间留白」的块。
  * 审批要判断的是"改了什么对象"，不是逐字读完 prompt，所以长值截断。
  */
 function summarizeArguments(toolCall) {
@@ -23,18 +23,25 @@ function summarizeArguments(toolCall) {
     parsed = null;
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return raw.trim().split('\n').slice(0, ARGUMENT_PREVIEW_LIMIT).map((line) =>
-      (line.length > VALUE_PREVIEW_CHARS ? `${line.slice(0, VALUE_PREVIEW_CHARS)}…` : line));
+    return raw.trim().split('\n').slice(0, ARGUMENT_PREVIEW_LIMIT)
+      .map((line) => (line.length > VALUE_PREVIEW_CHARS ? `${line.slice(0, VALUE_PREVIEW_CHARS)}…` : line))
+      .join('\n\n')
+      .split('\n');
   }
   const keys = Object.keys(parsed);
-  const lines = keys.slice(0, ARGUMENT_PREVIEW_LIMIT).map((key) => {
+  const blocks = [];
+  for (const key of keys.slice(0, ARGUMENT_PREVIEW_LIMIT)) {
     const value = parsed[key];
     const text = typeof value === 'string' ? value : JSON.stringify(value);
     const flat = String(text ?? '').replace(/\s+/gu, ' ').trim();
-    return `${key}: ${flat.length > VALUE_PREVIEW_CHARS ? `${flat.slice(0, VALUE_PREVIEW_CHARS)}…` : flat}`;
-  });
-  if (keys.length > ARGUMENT_PREVIEW_LIMIT) lines.push(t('…另有 {count} 个参数', { count: keys.length - ARGUMENT_PREVIEW_LIMIT }));
-  return lines;
+    const clipped = flat.length > VALUE_PREVIEW_CHARS ? `${flat.slice(0, VALUE_PREVIEW_CHARS)}…` : flat;
+    blocks.push(`${key}:\n    ${clipped}`);
+  }
+  if (keys.length > ARGUMENT_PREVIEW_LIMIT) {
+    blocks.push(t('…另有 {count} 个参数', { count: keys.length - ARGUMENT_PREVIEW_LIMIT }));
+  }
+  // 参数之间空一行：连续多行参数挤在一起时，人眼分不出哪行属于哪个键
+  return blocks.join('\n\n').split('\n');
 }
 
 /** 卡片正文：工具、原因、参数摘要，其余细节交给 Web 端。 */
