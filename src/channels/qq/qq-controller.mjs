@@ -297,6 +297,21 @@ export class QqController {
     });
   }
 
+  // 主动投递媒体：QqController 独立于 TokenBotController，需单独转发给 runtime。
+  async sendProactiveMedia(botId, target, media, options = {}) {
+    const config = this.#configStore.get(botId);
+    if (!config) throw new Error('Unknown QQ bot');
+    return this.#withBotTransition(botId, async () => {
+      const runtime = this.#runtimes.get(botId);
+      if (!runtime?.status?.ready || typeof runtime.sendProactiveMedia !== 'function') {
+        const error = new Error(t('QQ机器人尚未连接'));
+        error.code = 'bot-not-connected';
+        throw error;
+      }
+      return runtime.sendProactiveMedia(target, media, options);
+    });
+  }
+
   async presentSessionSyncApproval(botId, target, interaction, options = {}) {
     const config = this.#configStore.get(botId);
     if (!config) throw new Error('Unknown QQ bot');

@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { basename, extname } from 'node:path';
 import { normalizeDeliveryTarget } from './delivery-adapter.mjs';
 import { deliverySuggestionFromConversationKey } from './delivery-suggestions.mjs';
 import { COMPETITIVE_APPROVAL_CHANNELS } from '../../src/channels/shared/harness-approval.mjs';
@@ -9,6 +11,32 @@ const BOT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const TARGET_ID_PATTERN = /^[A-Za-z0-9._:@-]{1,128}$/;
 const CHANNEL_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const DRAFT_TARGET_ID = '__test__';
+const MAX_PROACTIVE_MEDIA_BYTES = 32 * 1024 * 1024;
+
+// 只做类型标注：真正的渠道能力由 runtime 判定，这里不限制能发什么。
+const MEDIA_TYPE_BY_EXTENSION = Object.freeze(new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.bmp', 'image/bmp'],
+  ['.mp4', 'video/mp4'],
+  ['.mov', 'video/quicktime'],
+  ['.mp3', 'audio/mpeg'],
+  ['.wav', 'audio/wav'],
+  ['.ogg', 'audio/ogg'],
+  ['.pdf', 'application/pdf'],
+  ['.zip', 'application/zip'],
+  ['.csv', 'text/csv'],
+  ['.json', 'application/json'],
+  ['.md', 'text/markdown'],
+  ['.txt', 'text/plain'],
+  ['.doc', 'application/msword'],
+  ['.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ['.xls', 'application/vnd.ms-excel'],
+  ['.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+]));
 
 const ADAPTER_METHODS = Object.freeze([
   'ownsBot',
@@ -65,6 +93,31 @@ function deliveryError(code, message = code, options) {
   const error = new Error(message, options);
   error.code = code;
   return error;
+}
+
+// 读取主动投递的媒体文件。调用方（本机定时任务）负责给出可读的绝对路径。
+async function proactiveMediaOf(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw deliveryError('bad-request', 'Media input must be an object');
+  }
+  const filePath = typeof input.path === 'string' ? input.path : '';
+  if (!filePath.trim()) throw deliveryError('bad-request', 'Media path is required');
+  let bytes;
+  try {
+    bytes = await readFile(filePath);
+  } catch (error) {
+    throw deliveryError('bad-request', 'Media file is unreadable', { cause: error });
+  }
+  if (bytes.length === 0) throw deliveryError('bad-request', 'Media file is empty');
+  if (bytes.length > MAX_PROACTIVE_MEDIA_BYTES) {
+    throw deliveryError('bad-request', 'Media file is too large');
+  }
+  const fileName = typeof input.fileName === 'string' && input.fileName.trim()
+    ? input.fileName.trim()
+    : basename(filePath);
+  const mediaType = MEDIA_TYPE_BY_EXTENSION.get(extname(filePath).toLowerCase())
+    ?? 'application/octet-stream';
+  return { fileName, mediaType, bytes };
 }
 
 function botIdOf(value) {
@@ -772,6 +825,49 @@ export class DeliveryService {
       if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
         throw deliveryError('cancelled', 'Request cancelled', { cause: error });
       }
+      throw publicOperationError(error);
+    }
+  }
+
+  // 主动投递媒体：供定时任务等无会话调用方使用。text 可选，先发文本再发文件。
+  async sendMedia(botId, targetIdOrDraft, media, { signal, text } = {}) {
+    const id = botIdOf(botId);
+    const targetKey = typeof targetIdOrDraft === 'string'
+      ? targetIdOf(targetIdOrDraft)
+      : null;
+    const draft = targetKey === null ? draftTargetObject(targetIdOrDraft) : null;
+    const payload = await proactiveMediaOf(media);
+    if (text !== undefined && (typeof text !== 'string' || (text !== '' && !text.trim()))) {
+      throw deliveryError('bad-request', 'Message text must be a non-empty string');
+    }
+    cancellation(signal);
+    const adapter = await this.#adapterFor(id);
+    if (typeof adapter.sendMedia !== 'function') {
+      throw deliveryError('capability-unavailable', 'Channel does not support proactive media');
+    }
+    try {
+      let target;
+      if (draft) {
+        target = { targetId: DRAFT_TARGET_ID, ...draft };
+      } else {
+        const targets = await adapter.listTargets(id);
+        if (!Array.isArray(targets)) throw new TypeError('Adapter returned invalid targets');
+        target = targets.find((candidate) => candidate?.targetId === targetKey);
+        if (!target) throw deliveryError('unknown-target', 'Unknown target');
+      }
+      cancellation(signal);
+      if (typeof text === 'string' && text.trim()) {
+        await adapter.sendText(id, target, text, { signal });
+      }
+      await adapter.sendMedia(id, target, payload, { signal });
+      return { sent: true, fileName: payload.fileName, size: payload.bytes.length };
+    } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
+        throw deliveryError('cancelled', 'Request cancelled', { cause: error });
+      }
+      // 媒体投递的原始错误码走 publicOperationError 会被压成 delivery-failed，
+      // 这里先留一条诊断，排障时看 dsh web 日志。
+      console.error('[dsh-im] 主动媒体投递失败:', error?.code ?? error?.name ?? 'Error', error?.message ?? '');
       throw publicOperationError(error);
     }
   }

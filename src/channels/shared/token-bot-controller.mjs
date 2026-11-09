@@ -247,6 +247,23 @@ export class TokenBotController {
     });
   }
 
+  // 主动投递媒体：与 sendProactiveText 同一条通道，供定时任务等无会话调用方使用。
+  async sendProactiveMedia(botId, target, media, options = {}) {
+    const config = this.#configStore.get(botId);
+    if (!config) throw new Error(`Unknown ${this.#descriptor.label} bot`);
+    return this.#withBotTransition(botId, async () => {
+      const runtime = this.#runtimes.get(botId);
+      if (!runtime?.status?.ready || typeof runtime.sendProactiveMedia !== 'function') {
+        const error = new Error(t('{label}机器人尚未连接', {
+          label: this.#descriptor.label,
+        }));
+        error.code = 'bot-not-connected';
+        throw error;
+      }
+      return runtime.sendProactiveMedia(target, media, options);
+    });
+  }
+
   async presentSessionSyncApproval(botId, target, interaction, options = {}) {
     const config = this.#configStore.get(botId);
     if (!config) throw new Error(`Unknown ${this.#descriptor.label} bot`);

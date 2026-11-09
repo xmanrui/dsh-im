@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import {
   DELIVERY_HTTP_PATH,
+  DELIVERY_MEDIA_HTTP_PATH,
   createDeliveryHttpHandler,
   installDeliveryHttp,
 } from '../plugin-src/host/delivery-http.mjs';
@@ -172,11 +173,12 @@ test('delivery HTTP maps only stable delivery errors to HTTP status codes', asyn
   });
 });
 
-test('delivery HTTP installs one exact WebServer route with Cordis lifecycle ownership', () => {
+test('delivery HTTP installs exact WebServer routes with Cordis lifecycle ownership', () => {
   const { service } = serviceFixture();
   const registrations = [];
   const effects = [];
-  const dispose = () => {};
+  let disposed = 0;
+  const dispose = () => { disposed += 1; };
   const ctx = {
     webServer: {
       register(route) {
@@ -190,10 +192,14 @@ test('delivery HTTP installs one exact WebServer route with Cordis lifecycle own
     },
   };
 
-  assert.equal(installDeliveryHttp(ctx, service), dispose);
-  assert.deepEqual(effects, [`dsh-im: ${DELIVERY_HTTP_PATH}`]);
-  assert.equal(registrations.length, 1);
-  assert.equal(registrations[0].kind, 'exact');
-  assert.equal(registrations[0].path, DELIVERY_HTTP_PATH);
-  assert.equal(typeof registrations[0].handler, 'function');
+  const cleanup = installDeliveryHttp(ctx, service);
+  assert.equal(typeof cleanup, 'function');
+  assert.deepEqual(effects, [`dsh-im: ${DELIVERY_HTTP_PATH}, ${DELIVERY_MEDIA_HTTP_PATH}`]);
+  assert.deepEqual(registrations.map((route) => route.path), [DELIVERY_HTTP_PATH, DELIVERY_MEDIA_HTTP_PATH]);
+  for (const route of registrations) {
+    assert.equal(route.kind, 'exact');
+    assert.equal(typeof route.handler, 'function');
+  }
+  cleanup();
+  assert.equal(disposed, 2);
 });

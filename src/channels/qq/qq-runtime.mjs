@@ -148,6 +148,47 @@ export class QqRuntime {
     return this.#bot.sendText(replyTarget, text);
   }
 
+  // 主动投递媒体：与 sendProactiveText 共用目标解析，按 mediaType 走图片或文件消息。
+  async sendProactiveMedia(target, media, { signal } = {}) {
+    const nativeId = target?.kind === 'user'
+      ? (typeof target?.route?.userOpenId === 'string' ? target.route.userOpenId.trim() : '')
+      : target?.kind === 'group'
+        ? (typeof target?.route?.groupOpenId === 'string' ? target.route.groupOpenId.trim() : '')
+        : '';
+    if (!nativeId) {
+      const error = new TypeError('Invalid QQ proactive delivery target');
+      error.code = 'invalid-target';
+      throw error;
+    }
+    if (!this.#status.ready || !this.#bot) {
+      const error = new Error('QQ bot is not connected');
+      error.code = 'bot-not-connected';
+      throw error;
+    }
+    const bytes = media?.bytes;
+    if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+      const error = new Error('media bytes are required');
+      error.code = 'bad-request';
+      throw error;
+    }
+    signal?.throwIfAborted();
+    const replyTarget = {
+      scope: target.kind === 'user' ? 'c2c' : 'group',
+      targetId: nativeId,
+    };
+    const fileName = typeof media.fileName === 'string' && media.fileName ? media.fileName : 'file';
+    const isImage = typeof media.mediaType === 'string' && media.mediaType.startsWith('image/');
+    if (isImage && typeof this.#bot.sendImage === 'function') {
+      return this.#bot.sendImage(replyTarget, { buffer: bytes });
+    }
+    if (typeof this.#bot.sendFile === 'function') {
+      return this.#bot.sendFile(replyTarget, { buffer: bytes }, { fileName });
+    }
+    const error = new Error('QQ media delivery unavailable');
+    error.code = 'capability-unavailable';
+    throw error;
+  }
+
   async start() {
     if (this.#status.ready && this.#bot) return this.status;
     if (this.#starting) return this.#starting;

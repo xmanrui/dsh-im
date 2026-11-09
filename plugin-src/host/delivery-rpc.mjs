@@ -9,6 +9,7 @@ export const DELIVERY_ENDPOINTS = Object.freeze({
   bindDsBot: 'ds-bot.bind',
   unbindDsBot: 'ds-bot.unbind',
   send: 'message.send',
+  sendMedia: 'message.sendMedia',
   listTargets: 'target.list',
   listSuggestions: 'target.suggestion.list',
   createTarget: 'target.create',
@@ -85,6 +86,16 @@ function validPayload(endpoint, payload) {
           && ['plain', 'markdown'].includes(payload.format)))
       && validBotId(payload.botId) && validTargetId(payload.targetId)
       && typeof payload.text === 'string' && Boolean(payload.text.trim());
+  }
+  if (endpoint === DELIVERY_ENDPOINTS.sendMedia) {
+    const allowed = ['botId', 'targetId', 'path', 'fileName', 'text'];
+    return isRecord(payload)
+      && Object.keys(payload).every((key) => allowed.includes(key))
+      && validBotId(payload.botId) && validTargetId(payload.targetId)
+      && typeof payload.path === 'string' && Boolean(payload.path.trim())
+      && (payload.fileName === undefined
+        || (typeof payload.fileName === 'string' && Boolean(payload.fileName.trim())))
+      && (payload.text === undefined || typeof payload.text === 'string');
   }
   if (endpoint === DELIVERY_ENDPOINTS.listTargets
     || endpoint === DELIVERY_ENDPOINTS.dsBotStatus
@@ -165,6 +176,17 @@ export function createDeliveryRpcHandler(service) {
         value = await service.send(payload.botId, payload.targetId, payload.text, {
           signal,
           ...(payload.format === undefined ? {} : { format: payload.format }),
+        });
+      } else if (endpoint === DELIVERY_ENDPOINTS.sendMedia) {
+        if (typeof service.sendMedia !== 'function') {
+          throw new TypeError('Proactive media delivery is unavailable');
+        }
+        value = await service.sendMedia(payload.botId, payload.targetId, {
+          path: payload.path,
+          ...(payload.fileName === undefined ? {} : { fileName: payload.fileName }),
+        }, {
+          signal,
+          ...(payload.text === undefined ? {} : { text: payload.text }),
         });
       } else if (endpoint === DELIVERY_ENDPOINTS.listTargets) {
         value = await service.listTargets(payload.botId);
