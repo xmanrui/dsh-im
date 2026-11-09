@@ -80,6 +80,7 @@ import {
 } from '../shared/inbound-access.mjs';
 import { ApiError } from '@tencent-connect/qqbot-nodejs';
 import { sendMarkdownReply } from './markdown-reply.mjs';
+import { sendApprovalCard } from './approval-card.mjs';
 import {
   isQqMenuCommand, parseQqMenuCommand, QqMenuStore,
   qqMenuPage, qqMenuView, sendQqMenu,
@@ -1653,6 +1654,8 @@ export class QqHarnessBridge {
         actor,
         requiresMention,
         send: (text) => this.#bot.sendText(target, text),
+        // 审批卡片：参数摘要图 + 批准/拒绝按钮，替掉整段 JSON 铺屏的纯文本
+        render: (pending) => sendApprovalCard(this.#bot, target, pending, { logger: this.#logger }),
       });
     }
     if (interaction?.kind !== 'question') return;
