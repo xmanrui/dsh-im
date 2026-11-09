@@ -69,6 +69,10 @@ const MESSAGES = Object.freeze({
   'model-selection-unavailable': '模型不存在或不可用。',
   'model-reasoning-unavailable': '当前模型不支持所选思考强度，请重新选择。',
   'context-enhancement-invalid': '上下文增强设置无效。',
+  'session-binding-read-failed': '无法读取当前对话绑定的会话，请重新读取；之前的操作可能已完成。',
+  'session-binding-save-failed': '无法把当前对话绑定到该会话，请重新读取状态后重试。',
+  'session-binding-changed': '会话绑定在写入期间被改动，请重新读取当前绑定后再试。',
+  'session-archived': '该会话已归档，不能绑定；请选择其他会话或先恢复归档。',
 });
 
 const ownedStages = new WeakMap();

@@ -170,3 +170,78 @@ test('RPC sends a Weixin connection test only after reconnect reports the accoun
     botId, sendTest: false,
   })).ok, false);
 });
+
+function bindingFixture(initial = {}) {
+  const sessions = { ...initial };
+  const writes = [];
+  const controller = {
+    ...controllerFixture(),
+    getSessionBinding: async (botId) => ({ botId, sessions: { ...sessions } }),
+    setSessionBinding: async (botId, { conversationKey, sessionId }) => {
+      writes.push([conversationKey, sessionId]);
+      sessions[conversationKey] = sessionId;
+      return { botId, conversationKey, sessionId };
+    },
+  };
+  return { controller, sessions, writes };
+}
+
+test('RPC reads and writes the conversation Session binding', async () => {
+  const botId = 'wx_0123456789abcdef01234567';
+  const key = 'p2p:o9cq804hwOnMsSHBxFvne5vh-Hqg@im.wechat';
+  const { controller, writes } = bindingFixture();
+  const handler = createWeixinRpcHandler(controller);
+  const signal = new AbortController().signal;
+
+  const before = await handler(WEIXIN_ENDPOINTS.getSessionBinding, { botId }, signal);
+  assert.equal(before.ok, true);
+  assert.deepEqual(before.value, { botId, sessions: {} });
+
+  const written = await handler(WEIXIN_ENDPOINTS.setSessionBinding, {
+    botId, conversationKey: key, sessionId: 'session-abc123',
+  }, signal);
+  assert.equal(written.ok, true);
+  assert.deepEqual(writes, [[key, 'session-abc123']]);
+
+  const single = await handler(WEIXIN_ENDPOINTS.getSessionBinding, {
+    botId, conversationKey: key,
+  }, signal);
+  assert.deepEqual(single.value, { botId, conversationKey: key, sessionId: 'session-abc123' });
+
+  const absent = await handler(WEIXIN_ENDPOINTS.getSessionBinding, {
+    botId, conversationKey: 'p2p:someone-else@im.wechat',
+  }, signal);
+  assert.equal(absent.value.sessionId, null);
+});
+
+test('RPC rejects malformed Session binding payloads', async () => {
+  const botId = 'wx_0123456789abcdef01234567';
+  const handler = createWeixinRpcHandler(bindingFixture().controller);
+  const signal = new AbortController().signal;
+  const rejects = [
+    [{}, WEIXIN_ENDPOINTS.setSessionBinding],
+    [{ botId, sessionId: 'session-abc123' }, WEIXIN_ENDPOINTS.setSessionBinding],
+    [{ botId, conversationKey: '' , sessionId: 'session-abc123' }, WEIXIN_ENDPOINTS.setSessionBinding],
+    [{ botId, conversationKey: 'p2p:x', sessionId: 'has space' }, WEIXIN_ENDPOINTS.setSessionBinding],
+    [{ botId, conversationKey: 'p2p:x', sessionId: 'session-abc123', extra: 1 }, WEIXIN_ENDPOINTS.setSessionBinding],
+    [{ botId: 'not a valid id!', conversationKey: 'p2p:x' }, WEIXIN_ENDPOINTS.getSessionBinding],
+  ];
+  for (const [payload, endpoint] of rejects) {
+    const result = await handler(endpoint, payload, signal);
+    assert.equal(result.ok, false, `${endpoint} accepted ${JSON.stringify(payload)}`);
+    assert.equal(result.error.code, 'bad-request');
+  }
+  assert.deepEqual(bindingFixture().writes, []);
+});
+
+test('RPC refuses Session binding endpoints the controller does not provide', async () => {
+  const handler = createWeixinRpcHandler(controllerFixture());
+  const botId = 'wx_0123456789abcdef01234567';
+  const signal = new AbortController().signal;
+  const read = await handler(WEIXIN_ENDPOINTS.getSessionBinding, { botId }, signal);
+  assert.equal(read.ok, false);
+  const write = await handler(WEIXIN_ENDPOINTS.setSessionBinding, {
+    botId, conversationKey: 'p2p:x', sessionId: 'session-abc123',
+  }, signal);
+  assert.equal(write.ok, false);
+});

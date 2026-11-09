@@ -227,6 +227,42 @@ export async function createProductionController(ctx, config = {}, internals = {
   });
   const controller = new Proxy(workspaceController, {
     get(target, property) {
+      // Session binding for one conversation. The settings page needs to read
+      // and write the same mapping that /session writes, without going through
+      // the chat: a Host-driven handoff creates a new Session and the channel
+      // would otherwise stay bound to the retired one until the owner types
+      // /session by hand.
+      if (property === 'getSessionBinding') return async (botId) => {
+        const state = await stateFor(botId);
+        const sessions = state?.snapshot?.()?.sessions ?? {};
+        return { botId, sessions: { ...sessions } };
+      };
+      if (property === 'setSessionBinding') return async (botId, { conversationKey, sessionId } = {}) => {
+        const state = await stateFor(botId);
+        // Reuse the scope the runtime itself binds through, so adoption, the
+        // DS-Bot guard and the generation fences all apply here too.
+        const scope = createBotWorkspaceScope(harness, {
+          dsBot: config.deliveryService?.dsBot,
+          botId, workspaces, state, agentPresetCatalog,
+        });
+        const bound = await scope.harness.bindWorkspaceSession(conversationKey, sessionId, {
+          navigation: true,
+        });
+        if (bound?.archived === true) {
+          const error = new Error('The Session is archived and cannot be bound');
+          error.code = 'session-archived';
+          throw error;
+        }
+        if (state.sessionFor(conversationKey) !== sessionId || bound?.sessionId !== sessionId) {
+          // A stale scope can report success while refusing the actual write;
+          // surfacing it as "switched" would strand the conversation on the
+          // Session it was supposed to leave behind.
+          const error = new Error('The session binding did not change');
+          error.code = 'session-binding-changed';
+          throw error;
+        }
+        return { botId, conversationKey, sessionId: bound.sessionId, workspace: bound.workspace };
+      };
       if (property === 'deleteBot') return async (...args) => {
         const existed = Boolean(configStore.get(args[0]));
         try { return await target.deleteBot(...args); }
