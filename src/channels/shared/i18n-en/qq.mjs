@@ -94,4 +94,14 @@ export default {
   'QQ 连接当前离线': 'The QQ connection is currently offline',
   'QQ 已授权，但无法安全保存接入配置。':
     'QQ authorization succeeded, but the connection configuration could not be saved safely.',
+  '🔧 正在执行：{name}': '🔧 Running: {name}',
+  '工具执行通知已开启，我会在执行每个工具时额外发一条消息。':
+    'Tool-execution notices are on. I will send one extra message per tool call.',
+  '工具执行通知已关闭，我仍会在每一步说明正在做什么。':
+    'Tool-execution notices are off. I will still describe each step as I work.',
+  '工具执行通知当前已开启。': 'Tool-execution notices are currently on.',
+  '工具执行通知当前已关闭。': 'Tool-execution notices are currently off.',
+  '用法：/progress on 或 /progress off': 'Usage: /progress on or /progress off',
+  '/progress on 或 /progress off  开关执行工具时的额外通知':
+    '/progress on or /progress off  toggle the extra tool-execution notices',
 };

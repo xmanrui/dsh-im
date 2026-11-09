@@ -27,7 +27,8 @@ test('QQ loads normal conversation and deferred state without rewriting it', asy
   const bytes = JSON.stringify(state);
   const f = await fixture(t, bytes);
   assert.equal(await f.store.load(), f.store);
-  assert.deepEqual(f.store.snapshot(), state);
+  // normalizeState 会补上默认关闭的 toolProgressNotices 键；除它之外原样保留。
+  assert.deepEqual(f.store.snapshot(), { ...state, toolProgressNotices: false });
   assert.equal(await fs.readFile(f.path, 'utf8'), bytes);
   assert.deepEqual(await fs.readdir(f.directory), ['state.json']);
   assert.equal(f.warnings.length, 0);
@@ -45,6 +46,19 @@ test('QQ persists the last conversation author', async (t) => {
   });
   const reloaded = await new QqStateStore(f.path).load();
   assert.equal(reloaded.authorFor('group:chat:thread-1').senderId, 'user-1');
+});
+
+test('QQ persists the tool progress notice switch across reloads', async (t) => {
+  const f = await fixture(t);
+  await f.store.load();
+  assert.equal(f.store.includesToolProgressNotices(), false);
+  await f.store.setToolProgressNotices(true);
+  assert.equal(f.store.includesToolProgressNotices(), true);
+
+  const reloaded = await new QqStateStore(f.path).load();
+  assert.equal(reloaded.includesToolProgressNotices(), true);
+  await reloaded.setToolProgressNotices(false);
+  assert.equal((await new QqStateStore(f.path).load()).includesToolProgressNotices(), false);
 });
 
 test('QQ creates a missing state file', async (t) => {
