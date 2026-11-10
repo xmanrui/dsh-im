@@ -246,13 +246,15 @@ test('a Session delivery follows the binding instead of a configured target', as
     sent: false,
     reason: 'unroutable',
   });
-  // A legacy `direct:<chatId>:<threadId>` key is reported, never reinterpreted
-  // as a chat: guessing a recipient would drop the thread and message the wrong
-  // place.
-  assert.deepEqual(await service.deliverSessionText('session-legacy', body), {
-    sent: false,
-    reason: 'unroutable',
-  });
+  // A private topic keeps messageThreadId. Delivering it as the parent chat
+  // would drop the thread and message the wrong place.
+  assert.deepEqual(await service.deliverSessionText('session-legacy', body), { sent: true });
+  assert.deepEqual(sends[2], [
+    'bot_one',
+    { targetId: '__test__', kind: 'topic', route: { chatId: '777', messageThreadId: 42 } },
+    body,
+    { signal: undefined },
+  ]);
 
 test('deliverSessionText resolves a rolled-over DS Bot session through dsBot.status()', async () => {
   const service = createDeliveryService({
@@ -282,13 +284,11 @@ test('deliverSessionText resolves a rolled-over DS Bot session through dsBot.sta
     { signal: undefined },
   ]]);
 });
-  assert.equal(sends.length, 2, 'no legacy key reached a chat');
+  assert.equal(sends.length, 3, 'the private topic is delivered with its thread');
   assert.deepEqual(warnings, [
     '[dsh-im] Session text was not delivered [unbound] session=session-unbound',
     '[dsh-im] Session text was not delivered [unroutable] session=session-unroutable'
       + ' channel=telegram conversationKey=unroutable-key',
-    '[dsh-im] Session text was not delivered [unroutable] session=session-legacy'
-      + ' channel=telegram conversationKey=direct:777:42',
   ]);
   assert.doesNotMatch(warnings.join('\n'), /body that must not be logged/);
 
@@ -302,7 +302,7 @@ test('deliverSessionText resolves a rolled-over DS Bot session through dsBot.sta
   await assert.rejects(service.deliverSessionText('session-topic', 'text', { signal: abort.signal }), {
     code: 'cancelled',
   });
-  assert.equal(sends.length, 2);
+  assert.equal(sends.length, 3);
 });
 
 test('a group Session receives mirrored text but never a synced question or approval', async () => {

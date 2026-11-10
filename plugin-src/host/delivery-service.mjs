@@ -595,10 +595,9 @@ export class DeliveryService {
     }
     const draft = deliverySuggestionFromConversationKey(described.channel, described.conversationKey);
     if (!draft) {
-      // A key the channel persisted but no route covers stays unroutable. An
-      // older shape such as `direct:<chatId>:<threadId>` is deliberately not
-      // reinterpreted as a chat: guessing a recipient would drop the thread and
-      // message the wrong place, so the key is only reported here.
+      // A key the channel persisted but no route covers stays unroutable.
+      // Do not guess a parent chat for an unrecognized key: that would drop a
+      // thread id and message the wrong place.
       this.#warnUndelivered(sessionId, 'unroutable', described);
       return { sent: false, reason: 'unroutable' };
     }
