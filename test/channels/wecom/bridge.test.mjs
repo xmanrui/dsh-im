@@ -335,6 +335,16 @@ test('Enterprise WeChat sends quote context to Harness but does not execute quot
   assert.deepEqual(prompt.at(-1), { type: 'text', text: '这条指令是什么意思？' });
 });
 
+test('Enterprise WeChat explicit steer records quote with unknown target', async () => {
+  const transport = testClient(); const fixture = state(); let options;
+  const bridge = new WecomHarnessBridge({ botId: 'bot', client: transport.client, state: fixture,
+    harness: { workspaceSession: () => ({ steerActiveTurn: async (_text, _control, value) => { options = value; return true; } }) },
+  });
+  await bridge.accept(frame({ msgid: 'input', text: { content: '/steer 修正' }, quote: { msgtype: 'text', text: { content: 'old' } } }));
+  assert.equal(options.inboundReference.hasReference, true);
+  assert.equal(options.inboundReference.replyToMessageId, undefined);
+});
+
 test('Enterprise WeChat delivers native quoted images once in the current Session', async (t) => {
   for (const mixed of [false, true]) {
     await t.test(mixed ? 'mixed quote in a group' : 'image quote in a new Session', async () => {

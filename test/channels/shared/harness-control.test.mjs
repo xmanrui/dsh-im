@@ -638,6 +638,20 @@ test('in-process control executor receives exact ownership and suppresses contro
   await assert.rejects(asking, (error) => error?.code === 'turn-stopped');
 });
 
+test('steering through session.prompt retains the exact reference RPC id', async () => {
+  const turn = controlledTurn();
+  const control = { owner: {}, key: 'direct:reference-http' };
+  const source = { channel: 'feishu', chatId: 'chat', messageId: 'incoming', replyToMessageId: 'parent', relationKind: 'reply' };
+  const asking = turn.client.ask(turn.id, 'work', { control, timeoutMs: 2_000 });
+  await turn.admitted;
+  assert.equal(await turn.client.steerActiveTurn(turn.id, 'correction', control, { inboundReference: source }), true);
+  const steer = turn.calls.find(({ method, payload }) => method === 'session.prompt' && payload.mode === 'steer');
+  assert.deepEqual(inboundReferenceRegistry.get(turn.id, steer.options.rpcId), source);
+  assert.equal(inboundReferenceRegistry.get(turn.id, turn.promptRpcId()), undefined);
+  turn.finish({ text: 'done', reason: 'completed' });
+  assert.equal(await asking, 'done');
+});
+
 test('a refused in-process control action never falls through to HTTP', async () => {
   const turn = controlledTurn({ controlExecutor: () => false });
   const control = { owner: {}, key: 'direct:executor-race' };

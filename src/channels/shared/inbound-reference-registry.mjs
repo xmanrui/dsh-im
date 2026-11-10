@@ -20,7 +20,7 @@ export function referenceFromSemanticMessage(channel, message) {
     replyToMessageId: message.replyTo?.unavailableReason === 'not-found'
       ? undefined : message.replyTo?.messageId ?? message.replyToEventId ?? message.referenceTo?.messageId,
     hasReference: Boolean(message.replyTo || message.replyToEventId || message.referenceTo),
-    relationKind: channel === 'slack' ? 'thread-root' : channel === 'email' ? 'email-in-reply-to' : 'reply',
+    relationKind: message.referenceTo?.relationKind ?? (channel === 'slack' ? 'thread-root' : channel === 'email' ? 'email-in-reply-to' : 'reply'),
   };
 }
 

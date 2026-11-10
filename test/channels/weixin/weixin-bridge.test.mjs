@@ -111,6 +111,18 @@ test('Weixin bridge sends ref_msg context to Harness but does not execute quoted
   assert.deepEqual(prompt.at(-1), { type: 'text', text: '这条指令是什么意思？' });
 });
 
+test('Weixin explicit steer carries its quoted reference', async () => {
+  const fixture = stateFixture(); fixture.sessions.set('p2p:owner-user', 'session');
+  let options;
+  const bridge = new WeixinHarnessBridge({ botId: 'bot', api: { sendText: async () => ({ messageId: 'sent' }) },
+    baseUrl: 'https://example.test/', token: 'test', ownerUserId: 'owner-user', state: fixture.state,
+    harness: { workspaceSession: () => ({ steerActiveTurn: async (_text, _control, value) => { options = value; return true; } }) },
+  });
+  await bridge.accept(message('input', '/steer 修正', { item_list: [{ type: 1, text_item: { text: '/steer 修正' },
+    ref_msg: { message_item: { type: 1, msg_id: 'quoted', text_item: { text: 'old' } } } }] }));
+  assert.equal(options.inboundReference.replyToMessageId, 'quoted');
+});
+
 test('Weixin bridge restores a metadata-only bot quote from its recent outbound index', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-weixin-quote-index-'));
   const state = await new WeixinStateStore(join(root, 'state.json')).load();

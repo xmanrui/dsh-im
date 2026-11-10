@@ -130,6 +130,7 @@ export function normalizeIMessage(value, { botId } = {}) {
   if (text.startsWith(IMESSAGE_BOT_REPLY_PREFIX)) return null;
   if (value.isFromMe === 1 || value.isFromMe === true) return null;
   if (botId && sender === botId) return null;
+  const threadOriginatorGuid = cleanString(value.threadOriginatorGuid);
   return Object.freeze({
     messageId: guid,
     providerMessageId: guid,
@@ -137,6 +138,7 @@ export function normalizeIMessage(value, { botId } = {}) {
     kind: 'direct',
     senderId: sender,
     senderName: sender,
+    ...(threadOriginatorGuid ? { referenceTo: { messageId: threadOriginatorGuid, relationKind: 'thread-root' } } : {}),
     content: text,
     addressed: true,
     replyTarget: { chatGuid, address: sender, serviceName: 'iMessage' },
@@ -205,7 +207,18 @@ export class MacOSMessagesApi {
         AND c.service_name = 'iMessage'${chatFilter}
       ORDER BY m.ROWID ASC LIMIT ${boundedLimit};`;
     try {
-      const { stdout } = await this.#execFile('/usr/bin/sqlite3', ['-json', this.#dbPath, query], this.#execFileOptions);
+      // Some older databases lack the optional inline-reply column. Fall back
+      // only for that specific schema difference, never on permission errors.
+      let output;
+      const withThreadOrigin = query.replace('hex(m.attributedBody) AS attributedBodyHex,',
+        'hex(m.attributedBody) AS attributedBodyHex, m.thread_originator_guid AS threadOriginatorGuid,');
+      try {
+        output = await this.#execFile('/usr/bin/sqlite3', ['-json', this.#dbPath, withThreadOrigin], this.#execFileOptions);
+      } catch (error) {
+        if (!/no such column:\s*(?:m\.)?thread_originator_guid/i.test(`${error?.message ?? ''}\n${error?.stderr ?? ''}`)) throw error;
+        output = await this.#execFile('/usr/bin/sqlite3', ['-json', this.#dbPath, query], this.#execFileOptions);
+      }
+      const { stdout } = output;
       return decodeRows(stdout);
     } catch (error) {
       if (/authorization denied|not authorized|unable to open database/i.test(String(error?.stderr ?? error))) {

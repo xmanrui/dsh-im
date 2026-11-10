@@ -1255,6 +1255,10 @@ export class WecomHarnessBridge {
     this.#status.lastMessageAt = new Date().toISOString();
     const result = await runner(message.content, this.#harness, this.#state, key, {
       signal: this.#signal,
+      inboundReference: message.replyTo ? {
+        channel: 'wecom', botId: this.#botId, chatId, messageId,
+        replyToMessageId: message.replyTo.messageId, hasReference: true, relationKind: 'reply',
+      } : undefined,
       isDirect: bodyOf(frame).chattype === 'single',
       hasImages: hasInboundImages(message),
       hasFiles: hasInboundFiles(message),

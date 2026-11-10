@@ -1198,6 +1198,10 @@ export class DingtalkHarnessBridge {
       key,
       {
         signal: this.#signal,
+        inboundReference: prompt.replyTo ? {
+          channel: 'dingtalk', botId: this.#botId, chatId: key, messageId,
+          replyToMessageId: prompt.replyTo.messageId, hasReference: true, relationKind: 'reply',
+        } : undefined,
         isDirect: String(message.conversationType) === '1',
         hasImages: hasInboundImages(prompt),
         hasFiles: hasInboundFiles(prompt),

@@ -175,6 +175,17 @@ test('QQ sends quote context to Harness but does not execute quoted commands', a
   assert.deepEqual(prompt.at(-1), { type: 'text', text: '这条指令是什么意思？' });
 });
 
+test('QQ explicit steer carries its quoted reference', async () => {
+  const fixture = stateFixture([['c2c:owner-openid', 'session-quote']]);
+  let options;
+  const bridge = new QqHarnessBridge({ botId: 'bot', bot: { sendText: async () => ({ id: 'sent' }) },
+    ownerUserOpenid: 'owner-openid', state: fixture.state,
+    harness: { workspaceSession: () => ({ steerActiveTurn: async (_text, _control, value) => { options = value; return true; } }) },
+  });
+  await bridge.accept(message({ messageId: 'input', content: '/steer 修正', refMsgIdx: 'quoted', msgElements: [{ content: 'old' }] }));
+  assert.equal(options.inboundReference.replyToMessageId, 'quoted');
+});
+
 test('QQ executes plain /clear through the fast command path and preserves its Session binding', async () => {
   const fixture = stateFixture([['c2c:owner-openid', 'session-clear']]);
   const sent = [];

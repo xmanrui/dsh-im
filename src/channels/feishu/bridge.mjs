@@ -1738,6 +1738,7 @@ export class FeishuHarnessBridge {
       key,
       {
         signal: this.#signal,
+        inboundReference: this.#interactionAskOptions(event, key, [], []).inboundReference,
         isDirect: event.message.chat_type === 'p2p',
         hasImages: hasInboundImages(message),
         deferredDelivery: this.#deferred,

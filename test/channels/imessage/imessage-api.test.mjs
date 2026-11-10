@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { referenceFromSemanticMessage } from '../../../src/channels/shared/inbound-reference-registry.mjs';
 
 import {
   MacOSMessagesApi,
@@ -59,6 +63,59 @@ test('normalizes private native Messages rows and ignores bot identities', () =>
   assert.equal(message.replyTarget.address, '+8613800000000');
   assert.equal(message.replyTarget.serviceName, 'iMessage');
   assert.equal(normalizeIMessage({ guid: 'p:2', chatGuid: 'c', text: 'echo', sender: 'macos-messages' }, { botId: 'macos-messages' }), null);
+});
+
+test('preserves iMessage thread origin as a thread root rather than a direct reply', () => {
+  const row = { guid: 'reply', chatGuid: 'chat', sender: 'user', text: 'hello', threadOriginatorGuid: 'root' };
+  assert.deepEqual(normalizeIMessage(row).referenceTo, { messageId: 'root', relationKind: 'thread-root' });
+  assert.equal(normalizeIMessage({ ...row, threadOriginatorGuid: '' }).referenceTo, undefined);
+});
+
+test('reads thread origins from databases with the optional column and degrades on older schemas', async (t) => {
+  for (const hasColumn of [true, false]) {
+    const db = new DatabaseSync(':memory:');
+    t.after(() => db.close());
+    db.exec(`CREATE TABLE message (guid TEXT, text TEXT, attributedBody BLOB, handle_id INTEGER,
+      date INTEGER, is_from_me INTEGER${hasColumn ? ', thread_originator_guid TEXT' : ''});
+      CREATE TABLE chat (guid TEXT, service_name TEXT);
+      CREATE TABLE chat_message_join (message_id INTEGER, chat_id INTEGER);
+      CREATE TABLE handle (id TEXT);`);
+    db.exec(`INSERT INTO chat VALUES ('chat', 'iMessage'); INSERT INTO handle VALUES ('user');`);
+    db.prepare(`INSERT INTO message (guid,text,handle_id,date,is_from_me${hasColumn ? ',thread_originator_guid' : ''}) VALUES ('reply','hello',1,0,0${hasColumn ? ",'root'" : ''})`).run();
+    db.exec('INSERT INTO chat_message_join VALUES (1,1)');
+    const api = new MacOSMessagesApi({ execFileImpl: async (_file, args) => ({ stdout: JSON.stringify(db.prepare(args.at(-1)).all()) }) });
+    const [row] = await api.listMessages();
+    assert.equal(normalizeIMessage(row).referenceTo?.messageId, hasColumn ? 'root' : undefined);
+  }
+});
+
+test('reads synthetic native message databases through the real sqlite3 executable', { skip: process.platform !== 'darwin' }, async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-imessage-reference-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const hasColumn of [true, false]) {
+    const path = join(dir, `${hasColumn}.db`);
+    const db = new DatabaseSync(path);
+    db.exec(`CREATE TABLE message (guid TEXT, text TEXT, attributedBody BLOB, handle_id INTEGER,
+      date INTEGER, is_from_me INTEGER${hasColumn ? ', thread_originator_guid TEXT' : ''});
+      CREATE TABLE chat (guid TEXT, service_name TEXT);
+      CREATE TABLE chat_message_join (message_id INTEGER, chat_id INTEGER);
+      CREATE TABLE handle (id TEXT);
+      INSERT INTO chat VALUES ('chat', 'iMessage'); INSERT INTO handle VALUES ('user');
+      INSERT INTO message (guid,text,handle_id,date,is_from_me${hasColumn ? ',thread_originator_guid' : ''}) VALUES ('reply','hello',1,0,0${hasColumn ? ",'root'" : ''});
+      INSERT INTO chat_message_join VALUES (1,1);`);
+    db.close();
+    const [row] = await new MacOSMessagesApi({ dbPath: path }).listMessages();
+    const source = referenceFromSemanticMessage('imessage', normalizeIMessage(row));
+    assert.equal(source.replyToMessageId, hasColumn ? 'root' : undefined);
+    if (hasColumn) assert.equal(source.relationKind, 'thread-root');
+  }
+});
+
+test('does not retry the iMessage query for unrelated database failures', async () => {
+  let calls = 0;
+  const api = new MacOSMessagesApi({ execFileImpl: async () => { calls++; throw new Error('database is locked'); } });
+  await assert.rejects(api.listMessages(), /database is locked/);
+  assert.equal(calls, 1);
 });
 
 test('reads Messages database rows after a durable cursor', async () => {

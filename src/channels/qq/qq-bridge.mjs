@@ -1074,6 +1074,10 @@ export class QqHarnessBridge {
     this.#status.lastMessageAt = new Date().toISOString();
     const result = await runner(text, this.#harness, this.#state, key, {
       signal: this.#signal,
+      inboundReference: qqReplyReference(message) ? {
+        channel: 'qq', botId: this.#botId, chatId: key, messageId,
+        replyToMessageId: qqReplyReference(message)?.messageId, hasReference: true, relationKind: 'provider-reference',
+      } : undefined,
       isDirect: message.kind === 'c2c',
       hasImages: hasQqImageAttachments(message),
       hasFiles: hasQqFileAttachments(message),

@@ -446,6 +446,20 @@ test('all four shared text channels resolve replies only after trigger and comma
   }
 });
 
+test('shared channel explicit steer carries the reply reference', async () => {
+  for (const [name, Bridge] of [['slack', SlackHarnessBridge], ['telegram', TelegramHarnessBridge],
+    ['discord', DiscordHarnessBridge], ['whatsapp', WhatsappHarnessBridge]]) {
+    const fixture = stateFixture({ 'direct:chat-a': 'session' });
+    let options;
+    const bridge = new Bridge({ botId: `bot-${name}`, bot: { sendText: async () => {} }, state: fixture.state,
+      harness: { workspaceSession: () => ({ steerActiveTurn: async (_text, _control, value) => { options = value; return true; } }) },
+    });
+    await bridge.accept(message('input', '/steer 修正', { replyTo: { messageId: 'quoted', content: 'old' } }));
+    assert.equal(options.inboundReference.replyToMessageId, 'quoted', name);
+    assert.equal(options.inboundReference.botId, `bot-${name}`, name);
+  }
+});
+
 test('runtime abort clears a queued interaction reply reaction instead of marking success', async () => {
   const fixture = stateFixture();
   const controller = new AbortController();
@@ -3520,6 +3534,26 @@ test('consecutive plain-text posts from one sender fold into a single dispatch',
   assert.equal(fixture.seen.has('fold-one'), true);
   assert.equal(fixture.seen.has('fold-two'), true);
   assert.equal(sent.length, 1, 'one folded turn delivers one answer');
+});
+
+test('messages with semantic references never lose their identity in a coalescing window', async () => {
+  for (const reference of [{ replyTo: { messageId: 'parent' } }, { referenceTo: { messageId: 'parent', relationKind: 'email-in-reply-to' } }, { replyToEventId: 'parent' }]) {
+    const fixture = stateFixture({ 'direct:chat-a': 'session-coalesce' });
+    const asks = [];
+    const bridge = new TextHarnessBridge({
+      descriptor: { key: 'test', label: 'Test' }, state: fixture.state,
+      bot: { sendText: async () => {} },
+      harness: { sessionExists: async () => true, ask: async (_session, content, options) => { asks.push({ content, options }); return 'ok'; } },
+      logger: { warn() {}, error() {} }, coalesceWindowMs: 30,
+    });
+    await bridge.accept(message('normal', 'normal'));
+    await bridge.accept(message('referenced', 'correction', reference));
+    await bridge.waitForIdle();
+    assert.equal(asks.length, 2);
+    const correction = asks.find((item) => item.options.inboundReference?.messageId === 'referenced');
+    assert.equal(correction.options.inboundReference.messageId, 'referenced');
+    assert.equal(correction.options.inboundReference.replyToMessageId, 'parent');
+  }
 });
 
 test('a mid-turn follow-up from the same sender steers the in-flight turn instead of queueing', async () => {

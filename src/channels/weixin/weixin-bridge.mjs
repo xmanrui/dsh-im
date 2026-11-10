@@ -755,6 +755,10 @@ export class WeixinHarnessBridge {
     this.#status.lastMessageAt = new Date().toISOString();
     const result = await runner(text, this.#harness, this.#state, key, {
       signal: this.#signal,
+      inboundReference: extractWeixinReplyReference(message) ? {
+        channel: 'weixin', botId: this.#botId, chatId: sender, messageId,
+        replyToMessageId: extractWeixinReplyReference(message)?.messageId, hasReference: true, relationKind: 'reply',
+      } : undefined,
       isDirect: true,
       hasImages: hasWeixinImageItems(message),
       hasFiles: hasWeixinFileItems(message),
