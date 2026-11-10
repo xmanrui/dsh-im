@@ -1,4 +1,5 @@
 import { installGroupHistoryTools } from '../../src/channels/shared/group-history-access.mjs';
+import { inboundReferenceRegistry } from '../../src/channels/shared/inbound-reference-registry.mjs';
 import { apply as applyDingtalk } from './channels/dingtalk/index.mjs';
 import { apply as applyDiscord } from './channels/discord/index.mjs';
 import { apply as applyOffice } from './channels/office/index.mjs';
@@ -141,6 +142,8 @@ export function createImHostPlugin(internals = {}) {
           contractVersion: 1,
           receiptVersion: 1,
           inboundVersion: 1,
+          // Returns provider evidence only when an exact session and input RPC match.
+          getInboundReference: (sessionId, rpcId) => inboundReferenceRegistry.get(sessionId, rpcId),
           consumeInbound: (botId, options) => deliveryService.consumeInbound(botId, options),
           historyChecked: (botId, route, query, options) => deliveryService.historyChecked(botId, route, query, options),
           replyChecked: (botId, route, text, options) => deliveryService.replyChecked(botId, route, text, options),

@@ -469,3 +469,6 @@ const page = await ctx.dshIm.historyChecked(botId, event.reply,
   { expectedFingerprint: account.account.fingerprint, signal: lifecycleSignal });
 // Persist/reconcile only after application authorization. Do not turn reads into intake.
 ```
+# Host-side inbound reference lookup
+
+Same-Host plugins can call `ctx.dshIm.getInboundReference(sessionId, rpcId)` with the `data.source.rpcId` from an actual Session `user/message` event. For a Feishu inbound message with an explicit parent, the result contains `channel`, `botId`, `chatId`, `messageId`, and `replyToMessageId`. Missing, evicted, expired, or unavailable references return `undefined`; do not infer a match from message text. This is an in-process, bounded lookup, retained for at most one hour and lost on restart. Consumers that need durable associations must persist them themselves. It currently covers ordinary Feishu prompts, not `/steer` or other channels; identifiers are not added to the model prompt or exposed through HTTP/browser APIs.

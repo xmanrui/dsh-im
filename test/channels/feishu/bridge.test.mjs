@@ -8345,6 +8345,26 @@ function activeTurnHarness({ stopped = true, steered = true } = {}) {
   };
 }
 
+test('Feishu passes provider reference evidence outside the model prompt', async () => {
+  const fixture = stateFixture([['p2p:ou_owner', 'session-active']]);
+  const { harness } = activeTurnHarness();
+  let received;
+  harness.ask = async (_sessionId, prompt, options) => {
+    received = { prompt, reference: options.inboundReference };
+    return 'ok';
+  };
+  const bridge = new FeishuHarnessBridge({
+    botId: 'bot-a', client: textClient(async () => {}), channel: {}, harness,
+    state: fixture.state, status: bridgeStatus(), allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await bridge.accept(event('reply-1', 'feedback', { senderOpenId: 'ou_owner', parent_id: 'original-1' }));
+  await bridge.waitForIdle();
+  assert.deepEqual(received.reference, {
+    channel: 'feishu', botId: 'bot-a', chatId: 'oc_chat', messageId: 'reply-1', replyToMessageId: 'original-1',
+  });
+  assert.doesNotMatch(JSON.stringify(received.prompt), /original-1/);
+});
+
 function steerDropdownEvent(messageId, option, operatorOpenId) {
   return {
     operator: { open_id: operatorOpenId },

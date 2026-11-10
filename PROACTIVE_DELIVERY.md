@@ -426,6 +426,8 @@ options 必须包含 `expectedFingerprint`、`expectedTargetDigest`，可选 `si
 
 调用 `describeBot(botId)` 校验身份和 `exclusive-text-consumer`、`reply-text-checked` 能力，然后调用 `consumeInbound(botId, {expectedFingerprint, signal, onEvent})`。`onEvent(event, {signal})` 应先进行群授权、去重和应用持久提交，再返回 `{accepted: true}`。返回的释放函数应随应用 Registration/Fiber 释放。回调仅用于同 Host Service，不暴露至浏览器 RPC 或 HTTP。完整示例见[英文契约](PROACTIVE_DELIVERY.en.md#exclusive-feishulark-text-intake-same-host)。
 
+同 Host 插件还可以使用 `ctx.dshIm.getInboundReference(sessionId, rpcId)` 查询普通飞书输入的引用关系。`rpcId` 取该 Session 中真实 `user/message` 事件的 `data.source.rpcId`；命中时返回渠道、机器人、会话、入站消息和被引用消息的 ID。无引用、信息缺失、过期或找不到返回 `undefined`，不得按正文猜测。记录只在进程内保留，最多一小时且有数量上限，重启后不可用；需要长期使用时由消费者保存自己的关联。该接口不向模型提示词、HTTP 或浏览器暴露 ID，目前只覆盖普通飞书输入，不覆盖 `/steer` 或其他渠道。
+
 事件 v1 携带平台、账号和可信 fingerprint、eventId/messageId、发送人原始 ID、群/私聊 ID、mentions、mentionedAccount、ISO 时间、原始文本和原消息回复路由（messageId/conversationId/actorId/threadId/rootId/parentId）。平台提供的可选姓名仅用于展示；此切片不提供头像或附件，有界历史读取见下文。应用自行决定收件范围和唤醒策略。
 
 每个账号只能有一个 Consumer；冲突返回 `consumer-conflict`。`consumerMode: external-consumer` 持久保存后，不创建独立 Session，不执行原生卡片或 slash command。释放 Consumer、Registration 替换、Host 重启均不自动回退独立处理；需重新注册 Consumer，或者明确修改账号模式并重连。应用持久提交需响应取消；已完成的提交不能被释放操作撤销。

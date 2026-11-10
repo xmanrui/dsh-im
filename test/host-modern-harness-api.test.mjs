@@ -6,6 +6,7 @@ import { modernHarnessApi } from '../plugin-src/host/modern-harness-api.mjs';
 import { HarnessApprovalQueue } from '../src/channels/shared/harness-approval.mjs';
 import { HarnessClient, HarnessRpcError } from '../src/channels/shared/harness-client.mjs';
 import { classifyMessageFailure } from '../src/channels/shared/message-failure.mjs';
+import { inboundReferenceRegistry } from '../src/channels/shared/inbound-reference-registry.mjs';
 
 function asyncValues(...values) {
   return {
@@ -732,6 +733,9 @@ forEachSessionApi('an approval', async (sessionApi) => {
       }
       if (endpoint === 'session/prompt') {
         const rpcId = request.args.request.requestId;
+        assert.deepEqual(inboundReferenceRegistry.get('session', rpcId), {
+          channel: 'feishu', botId: 'bot', chatId: 'chat', messageId: 'reply', replyToMessageId: 'original',
+        });
         turnTask = (async () => {
           append({ type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } });
           append({
@@ -789,6 +793,7 @@ forEachSessionApi('an approval', async (sessionApi) => {
   const resolutions = [];
   const answer = await client.ask('session', 'approve it', {
     timeoutMs: 5_000,
+    inboundReference: { channel: 'feishu', botId: 'bot', chatId: 'chat', messageId: 'reply', replyToMessageId: 'original' },
     onInteraction: async (interaction) => {
       interactions.push(interaction);
       await interaction.respond({

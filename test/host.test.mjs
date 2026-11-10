@@ -5,6 +5,7 @@ import { Context } from '@deepseek-ai/cordis';
 
 import { setImHostLanguage } from '../src/channels/shared/i18n.mjs';
 import { createImHostPlugin, inject, name } from '../plugin-src/host/index.mjs';
+import { inboundReferenceRegistry } from '../src/channels/shared/inbound-reference-registry.mjs';
 
 const NO_CHANNELS = Object.freeze({
   applyFeishu: async () => {}, applyWeixin: async () => {}, applyDingtalk: async () => {},
@@ -101,6 +102,10 @@ test('Host-provided describeConversation delegates through ctx.provide', async (
 
   await plugin.apply(ctx, {});
   assert.deepEqual(await provided.describeConversation('session-1'), described);
+  const reference = { channel: 'feishu', botId: 'bot', chatId: 'chat', messageId: 'reply', replyToMessageId: 'origin' };
+  inboundReferenceRegistry.record('session-1', 'rpc-1', reference);
+  assert.deepEqual(provided.getInboundReference('session-1', 'rpc-1'), reference);
+  assert.equal(provided.getInboundReference('session-1', 'other'), undefined);
 });
 
 test('Host composes IM channels and the AI Office connector inside one plugin context', async () => {
