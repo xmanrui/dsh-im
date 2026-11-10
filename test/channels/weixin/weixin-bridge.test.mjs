@@ -76,6 +76,7 @@ test('Weixin bridge sends ref_msg context to Harness but does not execute quoted
   let reference;
   fixture.state.clearSession = async () => { clears += 1; };
   const bridge = new WeixinHarnessBridge({
+    botId: 'bot-weixin',
     api: { sendText: async () => ({ messageId: 'weixin-quote-answer' }) },
     baseUrl: 'https://ilinkai.weixin.qq.com/',
     token: 'host-token',
@@ -103,6 +104,7 @@ test('Weixin bridge sends ref_msg context to Harness but does not execute quoted
 
   assert.equal(clears, 0);
   assert.equal(reference.replyToMessageId, 'quoted-command');
+  assert.equal(reference.botId, 'bot-weixin');
   assert.equal(Array.isArray(prompt), true);
   assert.match(prompt[0].text, /<dsh_im_reply_to>/);
   assert.match(prompt[0].text, /"content":"\/new"/);

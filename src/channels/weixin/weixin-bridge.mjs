@@ -312,6 +312,7 @@ export function createWeixinBridgeStatus() {
 }
 
 export class WeixinHarnessBridge {
+  #botId;
   #api;
   #baseUrl;
   #token;
@@ -347,6 +348,7 @@ export class WeixinHarnessBridge {
   #typingTicketStale = false;
 
   constructor({
+    botId,
     api,
     baseUrl,
     token,
@@ -368,6 +370,7 @@ export class WeixinHarnessBridge {
     if (!Number.isFinite(typingKeepaliveMs) || typingKeepaliveMs <= 0) {
       throw new TypeError('typingKeepaliveMs must be a positive number');
     }
+    this.#botId = botId;
     this.#api = api;
     this.#baseUrl = baseUrl;
     this.#token = token;
@@ -950,7 +953,7 @@ export class WeixinHarnessBridge {
           existsOptions: { signal: this.#signal },
           askOptions: {
             inboundReference: !batchSubmission ? {
-              channel: 'weixin', chatId: sender, messageId,
+              channel: 'weixin', botId: this.#botId, chatId: sender, messageId,
               replyToMessageId: promptMessage.replyTo?.messageId, relationKind: 'reply',
             } : undefined,
             timeoutMs: this.#replyTimeoutMs,

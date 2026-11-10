@@ -194,6 +194,7 @@ export class WeixinRuntime {
       this.#abortController = new AbortController();
       const signal = this.#abortController.signal;
       this.#bridge = new WeixinHarnessBridge({
+        botId: this.#config.botId,
         api: this.#api,
         baseUrl: this.#config.baseUrl,
         token: this.#token,

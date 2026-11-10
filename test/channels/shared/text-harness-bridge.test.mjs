@@ -408,6 +408,7 @@ test('all four shared text channels resolve replies only after trigger and comma
       },
     });
     const bridge = new Bridge({
+      botId: `bot-${name}`,
       bot: { sendText: async (_target, text) => sent.push(text) },
       state: fixture.state,
       harness: {
@@ -439,6 +440,7 @@ test('all four shared text channels resolve replies only after trigger and comma
     assert.match(asks[0][0].text, /\/new 只是被引用的原文/, name);
     assert.deepEqual(asks[0][1], { type: 'text', text: '当前问题' }, name);
     assert.equal(references[0].channel, name);
+    assert.equal(references[0].botId, `bot-${name}`);
     assert.equal(references[0].replyToMessageId, `quoted-${name}`);
     assert.equal(references[0].relationKind, name === 'slack' ? 'thread-root' : 'reply');
   }

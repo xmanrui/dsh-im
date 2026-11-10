@@ -1676,6 +1676,7 @@ export class TelegramRuntime {
         thinkingIntervalSeconds: this.#config?.thinkingIntervalSeconds,
       });
       this.#bridge = new TelegramHarnessBridge({
+        botId: this.#config.botId,
         bot: client,
         harness: this.#harness,
         state: this.#state,

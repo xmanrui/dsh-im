@@ -241,6 +241,7 @@ export class DingtalkRuntime {
         this.#status.pendingSenders = this.#pendingSenders();
       }
       this.#bridge = new DingtalkHarnessBridge({
+        botId: this.#config.botId,
         api: this.#api,
         clientId: this.#config.clientId,
         clientSecret: this.#clientSecret,

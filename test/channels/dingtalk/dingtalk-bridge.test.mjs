@@ -99,6 +99,7 @@ test('DingTalk sends quote context to Harness but does not execute quoted comman
   let reference;
   fixture.state.clearSession = async () => { clears += 1; };
   const bridge = new DingtalkHarnessBridge({
+    botId: 'bot-dingtalk',
     api: { sendText: async () => ({ messageId: 'ding-quote-answer' }) },
     clientId: 'ding-client',
     clientSecret: 'host-secret',
@@ -119,6 +120,7 @@ test('DingTalk sends quote context to Harness but does not execute quoted comman
 
   assert.equal(clears, 0);
   assert.equal(reference.replyToMessageId, 'quoted-command');
+  assert.equal(reference.botId, 'bot-dingtalk');
   assert.equal(Array.isArray(prompt), true);
   assert.match(prompt[0].text, /<dsh_im_reply_to>/);
   assert.match(prompt[0].text, /"content":"\/new"/);

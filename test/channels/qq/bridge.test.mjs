@@ -148,6 +148,7 @@ test('QQ sends quote context to Harness but does not execute quoted commands', a
   let reference;
   fixture.state.clearSession = async () => { clears += 1; };
   const bridge = new QqHarnessBridge({
+    botId: 'bot-qq',
     bot: { sendText: async () => ({ id: 'qq-quote-answer' }) },
     ownerUserOpenid: 'owner-openid',
     harness: {
@@ -166,6 +167,7 @@ test('QQ sends quote context to Harness but does not execute quoted commands', a
 
   assert.equal(clears, 0);
   assert.equal(reference.replyToMessageId, 'quoted-command');
+  assert.equal(reference.botId, 'bot-qq');
   assert.equal(reference.relationKind, 'provider-reference');
   assert.equal(Array.isArray(prompt), true);
   assert.match(prompt[0].text, /<dsh_im_reply_to>/);

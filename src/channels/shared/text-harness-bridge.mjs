@@ -200,6 +200,7 @@ const TAIL_HIDE_CALLBACK_PREFIX = 'tailhide|';
 
 export class TextHarnessBridge {
   #descriptor;
+  #botId;
   #bot;
   #harness;
   #state;
@@ -251,6 +252,7 @@ export class TextHarnessBridge {
 
   constructor({
     descriptor,
+    botId,
     bot,
     harness,
     state,
@@ -275,6 +277,7 @@ export class TextHarnessBridge {
     if (!bot || typeof bot.sendText !== 'function') throw new TypeError('A bot client is required');
     if (!harness || !state) throw new TypeError('Harness client and state store are required');
     this.#descriptor = descriptor;
+    this.#botId = botId;
     this.#bot = bot;
     this.#harness = harness;
     this.#state = state;
@@ -652,7 +655,7 @@ export class TextHarnessBridge {
         return this.#harness
           .steerActiveTurn(sessionId, text, { owner: this, key }, {
             ...(this.#signal ? { signal: this.#signal } : {}),
-            inboundReference: referenceFromSemanticMessage(this.#descriptor.key, message),
+            inboundReference: { ...referenceFromSemanticMessage(this.#descriptor.key, message), botId: this.#botId },
           })
           .then((steered) => (steered
             ? this.#settleSteeredTurn(author, messageId, key)
@@ -1409,7 +1412,7 @@ export class TextHarnessBridge {
         createOptions: this.#signal ? { signal: this.#signal } : undefined,
         existsOptions: this.#signal ? { signal: this.#signal } : undefined,
         askOptions: {
-          inboundReference: !batchSubmission ? referenceFromSemanticMessage(this.#descriptor.key, message) : undefined,
+          inboundReference: !batchSubmission ? { ...referenceFromSemanticMessage(this.#descriptor.key, message), botId: this.#botId } : undefined,
           groupHistory: message.groupHistory,
           timeoutMs: this.#replyTimeoutMs,
           signal: this.#signal,

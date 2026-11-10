@@ -474,6 +474,7 @@ export function createQqBridgeStatus() {
 }
 
 export class QqHarnessBridge {
+  #botId;
   #bot;
   #ownerUserOpenid;
   #harness;
@@ -504,6 +505,7 @@ export class QqHarnessBridge {
   #menuTasks = new Map();
 
   constructor({
+    botId,
     bot,
     ownerUserOpenid,
     harness,
@@ -525,6 +527,7 @@ export class QqHarnessBridge {
     if (!Number.isInteger(fileUploadTimeoutMs) || fileUploadTimeoutMs < 1) {
       throw new TypeError('fileUploadTimeoutMs must be a positive integer');
     }
+    this.#botId = botId;
     this.#bot = bot;
     this.#ownerUserOpenid = ownerUserOpenid;
     this.#harness = harness;
@@ -1380,7 +1383,7 @@ export class QqHarnessBridge {
           existsOptions: { signal: this.#signal },
           askOptions: {
             inboundReference: !batchSubmission ? {
-              channel: 'qq', chatId: key, messageId,
+              channel: 'qq', botId: this.#botId, chatId: key, messageId,
               replyToMessageId: promptMessage.replyTo?.messageId, relationKind: 'provider-reference',
             } : undefined,
             groupHistory: message.groupHistory,
