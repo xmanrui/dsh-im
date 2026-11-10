@@ -2104,6 +2104,9 @@ export class HarnessClient {
         return deliveredArtifactCount;
       }
       artifactsDelivered = true;
+      // Files the host `present` tool recorded live on the Session, not in the
+      // registry: adopt them before claiming, or they are dropped silently.
+      await outboundArtifactRegistry.adoptionsSettled(sessionId, tracker.turn);
       const artifacts = outboundArtifactRegistry.take(sessionId, tracker.turn, { signal });
       for (const artifact of artifacts) {
         try {
