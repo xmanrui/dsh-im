@@ -405,7 +405,7 @@ test('suggestion parser strictly filters malformed keys, de-duplicates routes, a
     'direct:88': 'secret-session-one',
     'group:88': { sessionId: 'secret-session-two', replyToMessageId: 7 },
     'group:-100:42': 'secret-topic-session',
-    'direct:88:7': 'transient-reply-key',
+    'direct:88:7': 'secret-private-topic',
     'group:-100:0': 'invalid-topic',
     'group:not-a-number': 'invalid-chat',
     'other:88': 'wrong-prefix',
@@ -414,10 +414,11 @@ test('suggestion parser strictly filters malformed keys, de-duplicates routes, a
   assert.deepEqual(suggestions, [
     { kind: 'chat', route: { chatId: '88' } },
     { kind: 'topic', route: { chatId: '-100', messageThreadId: 42 } },
+    { kind: 'topic', route: { chatId: '88', messageThreadId: 7 } },
   ]);
   assert.deepEqual(
     suggestions.map((suggestion) => Object.keys(suggestion)),
-    [['kind', 'route'], ['kind', 'route']],
+    [['kind', 'route'], ['kind', 'route'], ['kind', 'route']],
   );
   assert.doesNotMatch(JSON.stringify(suggestions), /session|reply|secret/i);
   assert.deepEqual(deliverySuggestionsFromSessions('telegram', null), []);

@@ -13,6 +13,22 @@ import {
 const TOPIC_TARGET = { kind: 'topic', route: { chatId: '-1001234567890', messageThreadId: 42 } };
 const CHAT_TARGET = { kind: 'chat', route: { chatId: '88' } };
 
+test('a Telegram private topic key keeps its thread', () => {
+  const key = 'direct:123456789:24962';
+  const target = { kind: 'topic', route: { chatId: '123456789', messageThreadId: 24962 } };
+  assert.deepEqual(deliverySuggestionFromConversationKey('telegram', key), target);
+  assert.equal(conversationKeyMatchesTarget('telegram', key, target), true);
+  assert.equal(conversationKeyMatchesTarget('telegram', key, {
+    kind: 'chat', route: { chatId: '123456789' },
+  }), false, 'the parent private chat is a different route');
+  assert.deepEqual(privateDeliverySuggestionFromConversationKey('telegram', key), target);
+  assert.equal(privateConversationKeyMatchesTarget('telegram', key, target), true);
+  assert.equal(resolveConversationKey('telegram', { [key]: 'session-private-topic' }, target), key);
+  assert.deepEqual(deliverySuggestionFromConversationKey('telegram', 'direct:123456789'), {
+    kind: 'chat', route: { chatId: '123456789' },
+  });
+});
+
 test('a Telegram forum topic key matches its own topic target only', () => {
   const key = 'group:-1001234567890:42';
   assert.deepEqual(deliverySuggestionFromConversationKey('telegram', key), TOPIC_TARGET);

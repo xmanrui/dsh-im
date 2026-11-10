@@ -62,12 +62,14 @@ function slackSuggestion(key) {
 
 // Telegram-only: numeric chat/topic keys can safely prefill Telegram target fields.
 // Other channels must use their native route fields; never turn their keys into Telegram links.
+// A private chat with Topics persists `direct:<chatId>:<threadId>` (the same
+// message_thread_id a forum topic uses). Route that as a topic. Treating it as
+// a plain chat, or as unroutable, either drops the thread or never delivers.
 function telegramSuggestion(key) {
   const match = /^(direct|group):(-?\d+)(?::([1-9]\d*))?$/.exec(key);
   if (!match) return null;
   const chatId = Number(match[2]);
   if (!Number.isSafeInteger(chatId)) return null;
-  if (match[1] === 'direct' && match[3] !== undefined) return null;
   if (match[3] === undefined) return { kind: 'chat', route: { chatId: match[2] } };
   const messageThreadId = Number(match[3]);
   if (!Number.isSafeInteger(messageThreadId) || messageThreadId <= 0) return null;
