@@ -161,12 +161,13 @@ export class DiscordApi {
     );
   }
 
-  createMessage({ channelId, content, replyToMessageId, signal }) {
+  createMessage({ channelId, content, components, replyToMessageId, signal }) {
     return this.#request(`channels/${snowflake(channelId, 'channel id')}/messages`, {
       method: 'POST',
       signal,
       body: {
         content,
+        ...(Array.isArray(components) && components.length > 0 ? { components } : {}),
         allowed_mentions: { parse: [], replied_user: false },
         ...(replyToMessageId ? {
           message_reference: {
@@ -227,15 +228,46 @@ export class DiscordApi {
     }
   }
 
-  editMessage({ channelId, messageId, content, signal }) {
+  editMessage({ channelId, messageId, content, components, signal }) {
     return this.#request(
       `channels/${snowflake(channelId, 'channel id')}/messages/${snowflake(messageId, 'message id')}`,
       {
         method: 'PATCH',
         signal,
-        body: { content, allowed_mentions: { parse: [], replied_user: false } },
+        // Omitted fields stay untouched on PATCH: a card edit can replace only
+        // its components without rewriting the body.
+        body: {
+          ...(content === undefined ? {} : { content }),
+          ...(components === undefined ? {} : { components }),
+          allowed_mentions: { parse: [], replied_user: false },
+        },
       },
     );
+  }
+
+  /**
+   * Answer one Gateway interaction. `type` 6 is the deferred message update a
+   * component press uses as its acknowledgement; type 4 posts an ephemeral
+   * notice. This endpoint authenticates with the interaction token itself, so
+   * the Bot header is deliberately absent.
+   */
+  createInteractionResponse({
+    interactionId,
+    interactionToken,
+    type,
+    data,
+    signal,
+  } = {}) {
+    const token = cleanString(interactionToken);
+    if (!token) throw new TypeError('Invalid Discord interaction token');
+    if (!Number.isInteger(type)) throw new TypeError('Invalid Discord interaction response type');
+    return this.#request(`interactions/${snowflake(interactionId, 'interaction id')}/${token}/callback`, {
+      method: 'POST',
+      signal,
+      body: { type, ...(data === undefined ? {} : { data }) },
+      expectBody: false,
+      authorized: false,
+    });
   }
 
   sendTyping({ channelId, signal }) {
@@ -283,13 +315,14 @@ export class DiscordApi {
     expectBody = true,
     retry = true,
     multipart = false,
+    authorized = true,
   }) {
     let response;
     try {
       response = await this.#fetch(new URL(path, this.#baseUrl), {
         method,
         headers: {
-          authorization: `Bot ${this.#token}`,
+          ...(authorized ? { authorization: `Bot ${this.#token}` } : {}),
           ...(multipart ? {} : { 'content-type': 'application/json' }),
           'user-agent': 'DeepSeek-Harness-dsh-im (https://github.com/xmanrui/dsh-im, 1.1.0)',
         },
@@ -318,7 +351,7 @@ export class DiscordApi {
       const retryAfterMs = Math.min(10_000, Math.max(50, Number(parsed?.retry_after) * 1_000 || 1_000));
       await delay(retryAfterMs, signal);
       return this.#request(path, {
-        method, body, signal, timeoutMs, expectBody, retry: false, multipart,
+        method, body, signal, timeoutMs, expectBody, retry: false, multipart, authorized,
       });
     }
     if (!response.ok) {

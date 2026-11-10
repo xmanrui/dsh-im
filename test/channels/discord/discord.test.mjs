@@ -17,6 +17,7 @@ import {
 import {
   DiscordBotClient,
   DiscordRuntime,
+  normalizeDiscordComponentInteraction,
   normalizeDiscordMessage,
   resolveDiscordMessageRoute,
 } from '../../../src/channels/discord/discord-runtime.mjs';
@@ -1964,4 +1965,136 @@ test('discord synced approval accepts the DM recipient, never the channel id as 
     await eventually(() => result);
     assert.equal(result.value.outcome, 'allowed-once');
   } finally { await runtime.stop(); }
+});
+
+test('Discord API answers an interaction with the interaction token, not the bot token', async () => {
+  const requests = [];
+  const api = new DiscordApi({
+    token: TOKEN,
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return new Response(null, { status: 204 });
+    },
+  });
+  await api.createInteractionResponse({
+    interactionId: '123456789012345678',
+    interactionToken: 'interaction-token',
+    type: 6,
+  });
+  assert.equal(
+    requests[0].url.pathname,
+    '/api/v10/interactions/123456789012345678/interaction-token/callback',
+  );
+  assert.equal(requests[0].options.headers.authorization, undefined);
+  assert.deepEqual(JSON.parse(requests[0].options.body), { type: 6 });
+
+  await api.createInteractionResponse({
+    interactionId: '123456789012345678',
+    interactionToken: 'interaction-token',
+    type: 4,
+    data: { content: 'only the owner can decide', flags: 64 },
+  });
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    type: 4,
+    data: { content: 'only the owner can decide', flags: 64 },
+  });
+});
+
+test('Discord API sends message components only when they are provided', async () => {
+  const bodies = [];
+  const api = new DiscordApi({
+    token: TOKEN,
+    fetchImpl: async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return jsonResponse({ id: '987654321012345678' });
+    },
+  });
+  const components = [{ type: 1, components: [{ type: 2, style: 3, label: 'ok', custom_id: 'a' }] }];
+  await api.createMessage({ channelId: '123456789012345678', content: 'card', components });
+  assert.deepEqual(bodies[0].components, components);
+  await api.createMessage({ channelId: '123456789012345678', content: 'plain' });
+  assert.equal('components' in bodies[1], false);
+});
+
+test('Discord normalizes a component press for the shared callback handler', () => {
+  const callback = normalizeDiscordComponentInteraction({
+    id: '999999999999999999',
+    token: 'interaction-token',
+    type: 3,
+    channel_id: '222222222222222222',
+    guild_id: '444444444444444444',
+    member: { user: { id: '333333333333333333', bot: false } },
+    data: { custom_id: 'ap1|abcdefgh|a' },
+    message: { id: '111111111111111111' },
+  });
+  assert.deepEqual(callback, {
+    callbackQueryId: '999999999999999999|interaction-token',
+    data: 'ap1|abcdefgh|a',
+    senderId: '333333333333333333',
+    senderIsBot: false,
+    messageId: '111111111111111111',
+    conversationId: '222222222222222222',
+    kind: 'group',
+    replyTarget: { channelId: '222222222222222222', messageId: '111111111111111111' },
+    providerMessageId: '111111111111111111',
+  });
+  // A DM press carries the user directly rather than on `member`.
+  assert.equal(normalizeDiscordComponentInteraction({
+    id: '1', token: 't', type: 3, channel_id: '2',
+    user: { id: '3' }, data: { custom_id: 'a' }, message: { id: '4' },
+  }).kind, 'direct');
+  assert.equal(normalizeDiscordComponentInteraction({ type: 5 }), null);
+  assert.equal(normalizeDiscordComponentInteraction({ type: 3, channel_id: '2' }), null);
+});
+
+test('Discord runtime routes a component press through the shared callback handler', async () => {
+  let socket;
+  const interactions = [];
+  const edits = [];
+  const errors = [];
+  const runtime = new DiscordRuntime({
+    config: { botId: 'discord_test', platformId: '1234567890123456789' },
+    token: TOKEN,
+    harness: { ensureRunning: async () => true },
+    state: { hasSeen: () => false, markSeen: async () => {}, sessionFor: () => null },
+    createApi: () => ({
+      getCurrentUser: async () => ({ id: '1234567890123456789', bot: true }),
+      getGatewayBot: async () => ({ url: 'wss://gateway.discord.gg' }),
+      async createInteractionResponse(options) { interactions.push(options); },
+      async editMessage(options) { edits.push(options); return { id: options.messageId }; },
+    }),
+    createWebSocket: () => {
+      socket = new FakeSocket();
+      queueMicrotask(() => socket.emit('message', {
+        data: JSON.stringify({ op: 10, d: { heartbeat_interval: 45_000 } }),
+      }));
+      return socket;
+    },
+    random: () => 0.5,
+    logger: { warn() {}, error(...args) { errors.push(args); } },
+  });
+  await runtime.start();
+  socket.emit('message', {
+    data: JSON.stringify({
+      op: 0,
+      t: 'INTERACTION_CREATE',
+      s: 2,
+      d: {
+        id: '999999999999999999',
+        token: 'interaction-token',
+        type: 3,
+        channel_id: '222222222222222222',
+        guild_id: '444444444444444444',
+        member: { user: { id: '333333333333333333', bot: false } },
+        data: { custom_id: 'ap1|abcdefgh|a' },
+        message: { id: '111111111111111111' },
+      },
+    }),
+  });
+  await eventually(() => interactions.length === 1 && edits.length === 1);
+  assert.equal(interactions[0].type, 4, 'a stale press gets an ephemeral notice');
+  assert.match(interactions[0].data.content, /该审批已处理或不存在/u);
+  assert.equal(edits.at(-1)?.components?.length, 0, 'the dead buttons are retired');
+  assert.equal(errors.length, 0);
+  await runtime.stop();
 });
