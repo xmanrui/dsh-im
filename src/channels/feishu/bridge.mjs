@@ -1738,6 +1738,7 @@ export class FeishuHarnessBridge {
       key,
       {
         signal: this.#signal,
+        inboundReference: this.#interactionAskOptions(event, key, [], []).inboundReference,
         isDirect: event.message.chat_type === 'p2p',
         hasImages: hasInboundImages(message),
         deferredDelivery: this.#deferred,
@@ -4894,6 +4895,12 @@ export class FeishuHarnessBridge {
 
   #interactionAskOptions(event, key, files, images) {
     return {
+      inboundReference: !event.batchSubmission ? {
+        channel: 'feishu', botId: this.#botId, chatId: event.message.chat_id,
+        messageId: event.message.message_id,
+        replyToMessageId: event.message.parent_id ?? (event.message.root_id !== event.message.message_id ? event.message.root_id : undefined),
+        relationKind: event.message.parent_id ? 'reply' : 'thread-root',
+      } : undefined,
       groupHistory: event.groupHistory,
       timeoutMs: this.#replyTimeoutMs,
       signal: this.#signal,

@@ -474,6 +474,7 @@ export function createQqBridgeStatus() {
 }
 
 export class QqHarnessBridge {
+  #botId;
   #bot;
   #ownerUserOpenid;
   #harness;
@@ -504,6 +505,7 @@ export class QqHarnessBridge {
   #menuTasks = new Map();
 
   constructor({
+    botId,
     bot,
     ownerUserOpenid,
     harness,
@@ -525,6 +527,7 @@ export class QqHarnessBridge {
     if (!Number.isInteger(fileUploadTimeoutMs) || fileUploadTimeoutMs < 1) {
       throw new TypeError('fileUploadTimeoutMs must be a positive integer');
     }
+    this.#botId = botId;
     this.#bot = bot;
     this.#ownerUserOpenid = ownerUserOpenid;
     this.#harness = harness;
@@ -1071,6 +1074,10 @@ export class QqHarnessBridge {
     this.#status.lastMessageAt = new Date().toISOString();
     const result = await runner(text, this.#harness, this.#state, key, {
       signal: this.#signal,
+      inboundReference: qqReplyReference(message) ? {
+        channel: 'qq', botId: this.#botId, chatId: key, messageId,
+        replyToMessageId: qqReplyReference(message)?.messageId, hasReference: true, relationKind: 'provider-reference',
+      } : undefined,
       isDirect: message.kind === 'c2c',
       hasImages: hasQqImageAttachments(message),
       hasFiles: hasQqFileAttachments(message),
@@ -1379,6 +1386,10 @@ export class QqHarnessBridge {
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },
           askOptions: {
+            inboundReference: !batchSubmission ? {
+              channel: 'qq', botId: this.#botId, chatId: key, messageId,
+              replyToMessageId: promptMessage.replyTo?.messageId, hasReference: Boolean(promptMessage.replyTo), relationKind: 'provider-reference',
+            } : undefined,
             groupHistory: message.groupHistory,
             timeoutMs: this.#replyTimeoutMs,
             signal: this.#signal,

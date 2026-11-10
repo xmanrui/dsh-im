@@ -20,6 +20,7 @@ import {
 import { imageInputLimits } from './image-input-policy.mjs';
 import { inboundImagesAsFiles, imageContentFromStaged, isImageAdmissionRejection, IMAGE_HOST_LIMIT_FALLBACK_PROMPT } from './image-input.mjs';
 import { imSourceGuidance } from './im-source-guidance.mjs';
+import { inboundReferenceRegistry } from './inbound-reference-registry.mjs';
 import { outboundArtifactRegistry } from './semantic/artifact.mjs';
 import { t } from './i18n.mjs';
 import { watchHarnessMux } from './harness-mux.mjs';
@@ -1838,6 +1839,7 @@ export class HarnessClient {
     if (!ownership || ownership.stopRequested) return false;
     if (this.#activeControlOwnership(sessionId, control) !== ownership) return false;
     const inputRpcId = `${this.#rpcIdPrefix}-steer-${randomUUID()}`;
+    inboundReferenceRegistry.record(sessionId, inputRpcId, options.inboundReference);
     const releaseInputOrigin = registerImInputOrigin(this.#interactionRegistry, inputRpcId);
     try {
       if (this.#controlExecutor) {
@@ -2019,6 +2021,7 @@ export class HarnessClient {
     );
     const baselineSeq = Math.max(-1, ...(before.events ?? []).map(({ event }) => event.seq ?? -1));
     const promptRpcId = transferredPromptRpcId ?? `${this.#rpcIdPrefix}-${randomUUID()}`;
+    if (!transferredPromptRpcId) inboundReferenceRegistry.record(sessionId, promptRpcId, options.inboundReference);
     diagnostic.promptRpcId = promptRpcId;
     const releasePromptInputOrigin = registerImInputOrigin(this.#interactionRegistry, promptRpcId);
     const tracker = new HarnessReplyTracker({

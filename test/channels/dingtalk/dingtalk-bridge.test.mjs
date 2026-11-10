@@ -96,14 +96,16 @@ test('DingTalk sends quote context to Harness but does not execute quoted comman
   fixture.sessions.set('p2p:staff-approved', 'session-quote');
   let clears = 0;
   let prompt;
+  let reference;
   fixture.state.clearSession = async () => { clears += 1; };
   const bridge = new DingtalkHarnessBridge({
+    botId: 'bot-dingtalk',
     api: { sendText: async () => ({ messageId: 'ding-quote-answer' }) },
     clientId: 'ding-client',
     clientSecret: 'host-secret',
     harness: {
       sessionExists: async () => true,
-      ask: async (_sessionId, content) => { prompt = content; return '已处理'; },
+      ask: async (_sessionId, content, options) => { prompt = content; reference = options.inboundReference; return '已处理'; },
     },
     state: fixture.state,
   });
@@ -117,10 +119,24 @@ test('DingTalk sends quote context to Harness but does not execute quoted comman
   }));
 
   assert.equal(clears, 0);
+  assert.equal(reference.replyToMessageId, 'quoted-command');
+  assert.equal(reference.botId, 'bot-dingtalk');
   assert.equal(Array.isArray(prompt), true);
   assert.match(prompt[0].text, /<dsh_im_reply_to>/);
   assert.match(prompt[0].text, /"content":"\/new"/);
   assert.deepEqual(prompt.at(-1), { type: 'text', text: '这条指令是什么意思？' });
+});
+
+test('DingTalk explicit steer carries its quoted reference', async () => {
+  const fixture = stateFixture(); fixture.sessions.set('p2p:staff-approved', 'session');
+  let options;
+  const bridge = new DingtalkHarnessBridge({ botId: 'bot', api: { sendText: async () => ({ messageId: 'sent' }) },
+    clientId: 'client', clientSecret: 'test', state: fixture.state,
+    harness: { workspaceSession: () => ({ steerActiveTurn: async (_text, _control, value) => { options = value; return true; } }) },
+  });
+  await bridge.accept(message('input', '/steer 修正', { text: { content: '/steer 修正', isReplyMsg: true,
+    repliedMsg: { msgType: 'text', msgId: 'quoted', content: { text: 'old' } } } }));
+  assert.equal(options.inboundReference.replyToMessageId, 'quoted');
 });
 
 test('DingTalk resolves an Interactive Card reply by originalProcessQueryKey', async () => {

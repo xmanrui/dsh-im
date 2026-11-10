@@ -36,6 +36,7 @@ import {
   runPresetCommand,
 } from './preset-command.mjs';
 import { askInWorkspaceSession } from './workspace-session.mjs';
+import { referenceFromSemanticMessage } from './inbound-reference-registry.mjs';
 import { HarnessApprovalQueue, harnessApprovalDecision } from './harness-approval.mjs';
 import {
   BatchInputManager,
@@ -104,6 +105,10 @@ const FILE_ONLY_COMPLETION_TEXT = '任务已完成。';
  * attempts the mark stays and the message is treated as handled.
  */
 const MAX_DELIVERY_ATTEMPTS = 3;
+function hasSemanticReference(message) {
+  return hasReplyReference(message) || Boolean(message.referenceTo || message.replyToEventId);
+}
+
 /** How many plain-text messages one coalescing window folds into one dispatch. */
 const MAX_COALESCE_MEMBERS = 8;
 
@@ -199,6 +204,7 @@ const TAIL_HIDE_CALLBACK_PREFIX = 'tailhide|';
 
 export class TextHarnessBridge {
   #descriptor;
+  #botId;
   #bot;
   #harness;
   #state;
@@ -250,6 +256,7 @@ export class TextHarnessBridge {
 
   constructor({
     descriptor,
+    botId,
     bot,
     harness,
     state,
@@ -274,6 +281,7 @@ export class TextHarnessBridge {
     if (!bot || typeof bot.sendText !== 'function') throw new TypeError('A bot client is required');
     if (!harness || !state) throw new TypeError('Harness client and state store are required');
     this.#descriptor = descriptor;
+    this.#botId = botId;
     this.#bot = bot;
     this.#harness = harness;
     this.#state = state;
@@ -443,7 +451,7 @@ export class TextHarnessBridge {
           && normalized.plainText !== false
           && !hasInboundImages(normalized)
           && !hasInboundFiles(normalized)
-          && !hasReplyReference(normalized),
+          && !hasSemanticReference(normalized),
       });
       if (batch.handled) {
         if (batch.kind === 'submit') {
@@ -453,6 +461,8 @@ export class TextHarnessBridge {
             // The submission is exactly the collected text; a quote or an
             // attachment on the command itself is not part of it.
             replyTo: null,
+            referenceTo: null,
+            replyToEventId: null,
             images: [],
             files: [],
             batchSubmission: { token: batch.token, title: batch.title },
@@ -467,7 +477,7 @@ export class TextHarnessBridge {
           && normalized.plainText !== false
           && !hasInboundImages(normalized)
           && !hasInboundFiles(normalized)
-          && !hasReplyReference(normalized),
+          && !hasSemanticReference(normalized),
       });
       if (batch.handled) {
         return this.#finishLocalMessage(normalized, messageId, batch.message);
@@ -649,7 +659,10 @@ export class TextHarnessBridge {
       const sessionId = this.#state.sessionFor?.(key) ?? null;
       if (text && sessionId !== null && typeof this.#harness.steerActiveTurn === 'function') {
         return this.#harness
-          .steerActiveTurn(sessionId, text, { owner: this, key }, this.#signal ? { signal: this.#signal } : undefined)
+          .steerActiveTurn(sessionId, text, { owner: this, key }, {
+            ...(this.#signal ? { signal: this.#signal } : {}),
+            inboundReference: { ...referenceFromSemanticMessage(this.#descriptor.key, message), botId: this.#botId },
+          })
           .then((steered) => (steered
             ? this.#settleSteeredTurn(author, messageId, key)
             : toQueue()))
@@ -659,7 +672,7 @@ export class TextHarnessBridge {
     if (!this.#queues.has(key) && !this.#pendingInteractions.has(key) && !this.#approvals.hasPending(key)) {
       const open = this.#coalescing.get(key);
       if (open !== undefined) {
-        if (open.senderId === senderId && plainText && open.members.length < MAX_COALESCE_MEMBERS) {
+        if (open.senderId === senderId && plainText && !hasSemanticReference(message) && open.members.length < MAX_COALESCE_MEMBERS) {
           open.members.push({ message, messageId });
           return Promise.resolve();
         }
@@ -667,7 +680,7 @@ export class TextHarnessBridge {
         // message dispatches on its own while the window keeps collecting.
         return toQueue();
       }
-      if (this.#coalesceWindowMs > 0 && plainText) {
+      if (this.#coalesceWindowMs > 0 && plainText && !hasSemanticReference(message)) {
         const opened = { senderId, members: [{ message, messageId }] };
         const timer = setTimeout(() => { void this.#flushCoalesced(key); }, this.#coalesceWindowMs);
         timer.unref?.();
@@ -1000,6 +1013,9 @@ export class TextHarnessBridge {
         key,
         {
           signal: this.#signal,
+          inboundReference: message.replyTo || message.replyToEventId || message.referenceTo
+            ? { ...referenceFromSemanticMessage(this.#descriptor.key, message), botId: this.#botId }
+            : undefined,
           isDirect: message.kind === 'direct',
           hasImages: hasInboundImages(message),
           hasFiles: hasInboundFiles(message),
@@ -1405,6 +1421,7 @@ export class TextHarnessBridge {
         createOptions: this.#signal ? { signal: this.#signal } : undefined,
         existsOptions: this.#signal ? { signal: this.#signal } : undefined,
         askOptions: {
+          inboundReference: !batchSubmission ? { ...referenceFromSemanticMessage(this.#descriptor.key, message), botId: this.#botId } : undefined,
           groupHistory: message.groupHistory,
           timeoutMs: this.#replyTimeoutMs,
           signal: this.#signal,

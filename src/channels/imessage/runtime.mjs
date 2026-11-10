@@ -75,7 +75,7 @@ export class IMessageRuntime {
         await this.#state.setCursor(await this.#api.getLatestMessageRowId());
       }
       const client = new IMessageBotClient(this.#api, this.#abortController.signal);
-      this.#bridge = new IMessageHarnessBridge({ bot: client, harness: this.#harness, state: this.#state,
+      this.#bridge = new IMessageHarnessBridge({ botId: this.#config.botId, bot: client, harness: this.#harness, state: this.#state,
         contextEnhancement: this.#contextEnhancement, accessPolicy: this.#accessPolicy, status: this.#status,
         logger: this.#logger, replyTimeoutMs: this.#replyTimeoutMs, signal: this.#abortController.signal });
       this.#status.ready = true; this.#status.connectionState = 'connected'; this.#status.lastConnectedAt = Date.now();

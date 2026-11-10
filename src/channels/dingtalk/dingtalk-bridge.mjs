@@ -536,6 +536,7 @@ export function createDingtalkBridgeStatus({ pendingSenders = [] } = {}) {
 }
 
 export class DingtalkHarnessBridge {
+  #botId;
   #api;
   #clientId;
   #clientSecret;
@@ -563,6 +564,7 @@ export class DingtalkHarnessBridge {
   #batchInputs = new BatchInputManager();
 
   constructor({
+    botId,
     api,
     clientId,
     clientSecret,
@@ -582,6 +584,7 @@ export class DingtalkHarnessBridge {
       throw new TypeError('DingTalk app credentials are required');
     }
     if (!harness || !state) throw new TypeError('Harness client and state store are required');
+    this.#botId = botId;
     this.#api = api;
     this.#clientId = clientId.trim();
     this.#clientSecret = clientSecret.trim();
@@ -1195,6 +1198,10 @@ export class DingtalkHarnessBridge {
       key,
       {
         signal: this.#signal,
+        inboundReference: prompt.replyTo ? {
+          channel: 'dingtalk', botId: this.#botId, chatId: key, messageId,
+          replyToMessageId: prompt.replyTo.messageId, hasReference: true, relationKind: 'reply',
+        } : undefined,
         isDirect: String(message.conversationType) === '1',
         hasImages: hasInboundImages(prompt),
         hasFiles: hasInboundFiles(prompt),
@@ -1446,6 +1453,10 @@ export class DingtalkHarnessBridge {
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: {
+          inboundReference: !batchSubmission ? {
+            channel: 'dingtalk', botId: this.#botId, chatId: key, messageId,
+            replyToMessageId: modelMessage.replyTo?.messageId, hasReference: Boolean(modelMessage.replyTo), relationKind: 'reply',
+          } : undefined,
           timeoutMs: this.#replyTimeoutMs,
           signal: this.#signal,
           control: { owner: this, key },

@@ -883,6 +883,7 @@ export class WhatsappRuntime {
       });
       this.#client = client;
       this.#bridge = new WhatsappHarnessBridge({
+        botId: this.#config.botId,
         bot: client,
         harness: this.#harness,
         state: this.#state,

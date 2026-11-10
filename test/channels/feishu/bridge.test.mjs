@@ -8345,6 +8345,39 @@ function activeTurnHarness({ stopped = true, steered = true } = {}) {
   };
 }
 
+test('Feishu passes provider reference evidence outside the model prompt', async () => {
+  const fixture = stateFixture([['p2p:ou_owner', 'session-active']]);
+  const { harness } = activeTurnHarness();
+  let received;
+  harness.ask = async (_sessionId, prompt, options) => {
+    received = { prompt, reference: options.inboundReference };
+    return 'ok';
+  };
+  const bridge = new FeishuHarnessBridge({
+    botId: 'bot-a', client: textClient(async () => {}), channel: {}, harness,
+    state: fixture.state, status: bridgeStatus(), allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await bridge.accept(event('reply-1', 'feedback', { senderOpenId: 'ou_owner', parent_id: 'original-1' }));
+  await bridge.waitForIdle();
+  assert.deepEqual(received.reference, {
+    channel: 'feishu', botId: 'bot-a', chatId: 'oc_chat', messageId: 'reply-1', replyToMessageId: 'original-1', relationKind: 'reply',
+  });
+  assert.doesNotMatch(JSON.stringify(received.prompt), /original-1/);
+});
+
+test('Feishu explicit steer preserves the quoted provider reference', async () => {
+  const fixture = stateFixture([['p2p:ou_owner', 'session-active']]);
+  const { calls, harness } = activeTurnHarness();
+  const bridge = new FeishuHarnessBridge({
+    botId: 'bot-a', client: textClient(async () => {}), channel: {}, harness,
+    state: fixture.state, status: bridgeStatus(), allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  await bridge.accept(event('steer-reply', '/steer 修正', { senderOpenId: 'ou_owner', parent_id: 'work-message' }));
+  await bridge.waitForIdle();
+  assert.equal(calls.steer.length, 1);
+  assert.equal(calls.steer[0].options.inboundReference.replyToMessageId, 'work-message');
+});
+
 function steerDropdownEvent(messageId, option, operatorOpenId) {
   return {
     operator: { open_id: operatorOpenId },

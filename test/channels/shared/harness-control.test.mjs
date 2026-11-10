@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { createBotWorkspaceScope } from '../../../src/channels/shared/bot-workspace-store.mjs';
+import { inboundReferenceRegistry } from '../../../src/channels/shared/inbound-reference-registry.mjs';
 import {
   HarnessClient,
   HarnessTurnError,
@@ -611,7 +612,9 @@ test('in-process control executor receives exact ownership and suppresses contro
     'the IM queue prompt must be registered before its user event',
   );
 
-  assert.equal(await turn.client.steerActiveTurn(turn.id, 'stay in this turn', control), true);
+  const reference = { channel: 'discord', chatId: 'chat', messageId: 'reply', replyToMessageId: 'original' };
+  assert.equal(await turn.client.steerActiveTurn(turn.id, 'stay in this turn', control, { inboundReference: reference }), true);
+  assert.deepEqual(inboundReferenceRegistry.get(turn.id, executions[0].inputRpcId), reference);
   assert.equal(await turn.client.stopActiveTurn(turn.id, control), true);
   assert.deepEqual(executions.map(({ sessionId, expectedTurn, action, text }) => ({
     sessionId, expectedTurn, action, text,
@@ -633,6 +636,20 @@ test('in-process control executor receives exact ownership and suppresses contro
 
   turn.finish();
   await assert.rejects(asking, (error) => error?.code === 'turn-stopped');
+});
+
+test('steering through session.prompt retains the exact reference RPC id', async () => {
+  const turn = controlledTurn();
+  const control = { owner: {}, key: 'direct:reference-http' };
+  const source = { channel: 'feishu', chatId: 'chat', messageId: 'incoming', replyToMessageId: 'parent', relationKind: 'reply' };
+  const asking = turn.client.ask(turn.id, 'work', { control, timeoutMs: 2_000 });
+  await turn.admitted;
+  assert.equal(await turn.client.steerActiveTurn(turn.id, 'correction', control, { inboundReference: source }), true);
+  const steer = turn.calls.find(({ method, payload }) => method === 'session.prompt' && payload.mode === 'steer');
+  assert.deepEqual(inboundReferenceRegistry.get(turn.id, steer.options.rpcId), source);
+  assert.equal(inboundReferenceRegistry.get(turn.id, turn.promptRpcId()), undefined);
+  turn.finish({ text: 'done', reason: 'completed' });
+  assert.equal(await asking, 'done');
 });
 
 test('a refused in-process control action never falls through to HTTP', async () => {

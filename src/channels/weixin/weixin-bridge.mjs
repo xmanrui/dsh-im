@@ -312,6 +312,7 @@ export function createWeixinBridgeStatus() {
 }
 
 export class WeixinHarnessBridge {
+  #botId;
   #api;
   #baseUrl;
   #token;
@@ -347,6 +348,7 @@ export class WeixinHarnessBridge {
   #typingTicketStale = false;
 
   constructor({
+    botId,
     api,
     baseUrl,
     token,
@@ -368,6 +370,7 @@ export class WeixinHarnessBridge {
     if (!Number.isFinite(typingKeepaliveMs) || typingKeepaliveMs <= 0) {
       throw new TypeError('typingKeepaliveMs must be a positive number');
     }
+    this.#botId = botId;
     this.#api = api;
     this.#baseUrl = baseUrl;
     this.#token = token;
@@ -752,6 +755,10 @@ export class WeixinHarnessBridge {
     this.#status.lastMessageAt = new Date().toISOString();
     const result = await runner(text, this.#harness, this.#state, key, {
       signal: this.#signal,
+      inboundReference: extractWeixinReplyReference(message) ? {
+        channel: 'weixin', botId: this.#botId, chatId: sender, messageId,
+        replyToMessageId: extractWeixinReplyReference(message)?.messageId, hasReference: true, relationKind: 'reply',
+      } : undefined,
       isDirect: true,
       hasImages: hasWeixinImageItems(message),
       hasFiles: hasWeixinFileItems(message),
@@ -949,6 +956,10 @@ export class WeixinHarnessBridge {
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },
           askOptions: {
+            inboundReference: !batchSubmission ? {
+              channel: 'weixin', botId: this.#botId, chatId: sender, messageId,
+              replyToMessageId: promptMessage.replyTo?.messageId, hasReference: Boolean(promptMessage.replyTo), relationKind: 'reply',
+            } : undefined,
             timeoutMs: this.#replyTimeoutMs,
             signal: this.#signal,
             control: { owner: this, key },

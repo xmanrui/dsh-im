@@ -145,13 +145,15 @@ test('QQ sends quote context to Harness but does not execute quoted commands', a
   const fixture = stateFixture([['c2c:owner-openid', 'session-quote']]);
   let clears = 0;
   let prompt;
+  let reference;
   fixture.state.clearSession = async () => { clears += 1; };
   const bridge = new QqHarnessBridge({
+    botId: 'bot-qq',
     bot: { sendText: async () => ({ id: 'qq-quote-answer' }) },
     ownerUserOpenid: 'owner-openid',
     harness: {
       sessionExists: async () => true,
-      ask: async (_sessionId, content) => { prompt = content; return '已处理'; },
+      ask: async (_sessionId, content, options) => { prompt = content; reference = options.inboundReference; return '已处理'; },
     },
     state: fixture.state,
   });
@@ -164,10 +166,24 @@ test('QQ sends quote context to Harness but does not execute quoted commands', a
   }));
 
   assert.equal(clears, 0);
+  assert.equal(reference.replyToMessageId, 'quoted-command');
+  assert.equal(reference.botId, 'bot-qq');
+  assert.equal(reference.relationKind, 'provider-reference');
   assert.equal(Array.isArray(prompt), true);
   assert.match(prompt[0].text, /<dsh_im_reply_to>/);
   assert.match(prompt[0].text, /"content":"\/new"/);
   assert.deepEqual(prompt.at(-1), { type: 'text', text: '这条指令是什么意思？' });
+});
+
+test('QQ explicit steer carries its quoted reference', async () => {
+  const fixture = stateFixture([['c2c:owner-openid', 'session-quote']]);
+  let options;
+  const bridge = new QqHarnessBridge({ botId: 'bot', bot: { sendText: async () => ({ id: 'sent' }) },
+    ownerUserOpenid: 'owner-openid', state: fixture.state,
+    harness: { workspaceSession: () => ({ steerActiveTurn: async (_text, _control, value) => { options = value; return true; } }) },
+  });
+  await bridge.accept(message({ messageId: 'input', content: '/steer 修正', refMsgIdx: 'quoted', msgElements: [{ content: 'old' }] }));
+  assert.equal(options.inboundReference.replyToMessageId, 'quoted');
 });
 
 test('QQ executes plain /clear through the fast command path and preserves its Session binding', async () => {

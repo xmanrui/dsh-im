@@ -423,6 +423,7 @@ export class MatrixRuntime {
     this.#clock = new ClockSkewGuard({});
     this.#ring.seed(this.#state.snapshot?.()?.seenMessageIds ?? []);
     this.#bridge = new MatrixHarnessBridge({
+      botId: this.#config.botId,
       descriptor: { ...MATRIX_DESCRIPTOR, reactions: this.#config.reactions ? MATRIX_DESCRIPTOR.reactions : {} },
       bot: this.#createBotClient(),
       harness: this.#harness,

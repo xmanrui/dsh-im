@@ -180,6 +180,7 @@ export function normalizeEmail(parsed, { address, state } = {}) {
   return {
     messageId,
     conversationId,
+    ...(inReplyTo.length ? { referenceTo: { ...(inReplyTo.length === 1 ? { messageId: inReplyTo[0] } : {}) } } : {}),
     kind: 'direct',
     senderId: from,
     addressed: true,
@@ -481,6 +482,7 @@ export class EmailRuntime {
       }
       const client = new EmailBotClient(api, this.#abortController.signal, this.#state);
       this.#bridge = new EmailHarnessBridge({
+        botId: this.#config.botId,
         bot: client,
         harness: this.#harness,
         state: this.#state,

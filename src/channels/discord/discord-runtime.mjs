@@ -687,6 +687,7 @@ export class DiscordRuntime {
       this.#gatewayUrl = gateway?.url;
       const client = new DiscordBotClient({ api, signal: controller.signal });
       this.#bridge = new DiscordHarnessBridge({
+        botId: this.#config.botId,
         bot: client,
         harness: this.#harness,
         state: this.#state,

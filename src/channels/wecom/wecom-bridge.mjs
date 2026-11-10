@@ -587,6 +587,7 @@ export function createWecomBridgeStatus() {
 }
 
 export class WecomHarnessBridge {
+  #botId;
   #client;
   #harness;
   #state;
@@ -617,6 +618,7 @@ export class WecomHarnessBridge {
   #cardFrames = new WeakSet();
 
   constructor({
+    botId,
     client,
     harness,
     state,
@@ -638,6 +640,7 @@ export class WecomHarnessBridge {
     if (!Number.isInteger(fileUploadTimeoutMs) || fileUploadTimeoutMs < 1) {
       throw new TypeError('fileUploadTimeoutMs must be a positive integer');
     }
+    this.#botId = botId;
     this.#client = client;
     this.#harness = harness;
     this.#state = state;
@@ -1252,6 +1255,10 @@ export class WecomHarnessBridge {
     this.#status.lastMessageAt = new Date().toISOString();
     const result = await runner(message.content, this.#harness, this.#state, key, {
       signal: this.#signal,
+      inboundReference: message.replyTo ? {
+        channel: 'wecom', botId: this.#botId, chatId, messageId,
+        replyToMessageId: message.replyTo.messageId, hasReference: true, relationKind: 'reply',
+      } : undefined,
       isDirect: bodyOf(frame).chattype === 'single',
       hasImages: hasInboundImages(message),
       hasFiles: hasInboundFiles(message),
@@ -1522,6 +1529,10 @@ export class WecomHarnessBridge {
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: {
+          inboundReference: !batchSubmission ? {
+            channel: 'wecom', botId: this.#botId, chatId, messageId,
+            replyToMessageId: message.replyTo?.messageId, hasReference: Boolean(message.replyTo), relationKind: 'reply',
+          } : undefined,
           timeoutMs: this.#replyTimeoutMs,
           signal: this.#signal,
           control: { owner: this, key },

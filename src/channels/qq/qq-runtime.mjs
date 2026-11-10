@@ -189,6 +189,7 @@ export class QqRuntime {
     this.#abortController = controller;
     this.#bot = bot;
     this.#bridge = new QqHarnessBridge({
+      botId: this.#config.botId,
       bot,
       ownerUserOpenid: this.#config.ownerUserOpenid,
       harness: this.#harness,

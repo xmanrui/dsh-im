@@ -622,6 +622,7 @@ export class SlackRuntime {
       }
       const client = new SlackBotClient({ api, signal: controller.signal, logger: this.#logger });
       this.#bridge = new SlackHarnessBridge({
+        botId: this.#config.botId,
         bot: client,
         harness: this.#harness,
         state: this.#state,
