@@ -106,6 +106,16 @@ test('normalizeEmail keeps a reply inside the existing conversation', () => {
   assert.equal(reply.conversationId, first.conversationId);
 });
 
+test('normalizeEmail retains explicit In-Reply-To without inventing a target', () => {
+  const state = new EmailStateStore(join(tmpdir(), 'unused-email-reference.json'));
+  const one = normalizeEmail(parsedMail({ inReplyTo: '<original@mail.example>' }), { address: BOT, state });
+  assert.deepEqual(one.referenceTo, { messageId: '<original@mail.example>' });
+  const ambiguous = normalizeEmail(parsedMail({ inReplyTo: '<first@mail.example> <second@mail.example>' }), { address: BOT, state });
+  assert.deepEqual(ambiguous.referenceTo, {});
+  const noExplicitReply = normalizeEmail(parsedMail({ references: '<root@mail.example>' }), { address: BOT, state });
+  assert.equal(noExplicitReply.referenceTo, undefined);
+});
+
 test('a mailbox may be its own sender, but never answers an automatic reply', () => {
   // Honouring RFC 3834 instead of rejecting the mailbox's own address lets a
   // user drive the Harness by writing to the bot mailbox from that same

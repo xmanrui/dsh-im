@@ -44,6 +44,7 @@ test('shared channels preserve provider identifier types and distinguish thread 
     ['slack', { messageId: 'event-id', reactionTarget: { messageTs: 'timestamp' }, replyTo: { messageId: 'root' } }, 'timestamp', 'root', 'thread-root'],
     ['matrix', { messageId: '$event', replyToEventId: '$parent' }, '$event', '$parent', 'reply'],
     ['discord', { messageId: 'inbound', replyTarget: { replyToMessageId: 'routed-message' }, replyTo: { messageId: 'parent' } }, 'inbound', 'parent', 'reply'],
+    ['email', { messageId: '<reply@mail>', referenceTo: { messageId: '<parent@mail>' } }, '<reply@mail>', '<parent@mail>', 'email-in-reply-to'],
   ];
   for (const [channel, message, current, target, relationKind] of cases) {
     registry.record('session', channel, referenceFromSemanticMessage(channel, { ...message, conversationId: 'chat' }));
