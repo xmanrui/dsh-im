@@ -24,6 +24,10 @@ export function createEditableMessageStream({
   edit,
   sendRemainder,
   messageIdForResult = () => null,
+  // Channels whose markdown needs structure-aware cutting (fenced code and
+  // tables) pass a chunker such as `chunkMarkdownText`; plain channels keep the
+  // newline/space splitter.
+  split = splitMessageText,
   logger = console,
 }) {
   let messageId;
@@ -40,7 +44,7 @@ export function createEditableMessageStream({
       timer = null;
       const text = pending;
       pending = null;
-      const next = splitMessageText(text, limit)[0] ?? initialText;
+      const next = split(text, limit)[0] ?? initialText;
       inFlight = Promise.resolve(next === lastSent ? undefined : edit(messageId, next))
         .then(() => { lastSent = next; })
         .catch((error) => logger.warn?.('[dsh-im] streamed message update failed:', error))
@@ -78,7 +82,7 @@ export function createEditableMessageStream({
       timer = null;
       pending = null;
       await inFlight?.catch(() => undefined);
-      const chunks = splitMessageText(text, limit);
+      const chunks = split(text, limit);
       const first = chunks[0] ?? t('处理完成。');
       if (first !== lastSent) await edit(messageId, first);
       lastSent = first;
