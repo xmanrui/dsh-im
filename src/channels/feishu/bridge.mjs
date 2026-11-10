@@ -4896,7 +4896,9 @@ export class FeishuHarnessBridge {
     return {
       inboundReference: !event.batchSubmission ? {
         channel: 'feishu', botId: this.#botId, chatId: event.message.chat_id,
-        messageId: event.message.message_id, replyToMessageId: event.message.parent_id, relationKind: 'reply',
+        messageId: event.message.message_id,
+        replyToMessageId: event.message.parent_id ?? (event.message.root_id !== event.message.message_id ? event.message.root_id : undefined),
+        relationKind: event.message.parent_id ? 'reply' : 'thread-root',
       } : undefined,
       groupHistory: event.groupHistory,
       timeoutMs: this.#replyTimeoutMs,

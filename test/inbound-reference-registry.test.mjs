@@ -52,9 +52,19 @@ test('shared channels preserve provider identifier types and distinguish thread 
   registry.record('session', 'cross-chat', referenceFromSemanticMessage('discord', {
     conversationId: 'chat', messageId: 'reply', replyTo: { messageId: 'other', unavailableReason: 'not-found' },
   }));
-  assert.equal(registry.get('session', 'cross-chat'), undefined);
+  assert.deepEqual(registry.get('session', 'cross-chat'), {
+    channel: 'discord', chatId: 'chat', messageId: 'reply', relationKind: 'reply', referenceStatus: 'unknown',
+  });
   registry.record('session', 'telegram-update', referenceFromSemanticMessage('telegram', {
     conversationId: 'chat', messageId: 'update-id', replyTo: { messageId: 'parent' },
   }));
   assert.equal(registry.get('session', 'telegram-update'), undefined, 'an update id is not a message id');
+});
+
+test('records a known quote with an unknown provider target separately from no quote', () => {
+  const registry = createInboundReferenceRegistry();
+  registry.record('session', 'quote', { channel: 'wecom', chatId: 'chat', messageId: 'm1', hasReference: true });
+  registry.record('session', 'plain', { channel: 'wecom', chatId: 'chat', messageId: 'm2' });
+  assert.deepEqual(registry.get('session', 'quote'), { channel: 'wecom', chatId: 'chat', messageId: 'm1', referenceStatus: 'unknown' });
+  assert.equal(registry.get('session', 'plain'), undefined);
 });

@@ -129,6 +129,7 @@ export class WecomRuntime {
     }
     this.#client = client;
     this.#bridge = this.#createBridge({
+      botId: this.#config.botId,
       client,
       harness: this.#harness,
       state: this.#state,

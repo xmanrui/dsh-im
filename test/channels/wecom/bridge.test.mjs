@@ -307,6 +307,7 @@ test('Enterprise WeChat sends quote context to Harness but does not execute quot
   const transport = testClient();
   const fixture = state();
   let prompt;
+  let reference;
   let clears = 0;
   fixture.clearSession = async () => { clears += 1; };
   const bridge = new WecomHarnessBridge({
@@ -314,7 +315,7 @@ test('Enterprise WeChat sends quote context to Harness but does not execute quot
     generateStreamId: () => 'stream-quote',
     harness: {
       sessionExists: async () => true,
-      ask: async (_sessionId, content) => { prompt = content; return '已处理'; },
+      ask: async (_sessionId, content, options) => { prompt = content; reference = options.inboundReference; return '已处理'; },
     },
     state: fixture,
   });
@@ -326,6 +327,8 @@ test('Enterprise WeChat sends quote context to Harness but does not execute quot
   }));
 
   assert.equal(clears, 0);
+  assert.equal(reference.hasReference, true);
+  assert.equal(reference.replyToMessageId, undefined);
   assert.equal(Array.isArray(prompt), true);
   assert.match(prompt[0].text, /<dsh_im_reply_to>/);
   assert.match(prompt[0].text, /"content":"\/new"/);

@@ -1384,7 +1384,7 @@ export class QqHarnessBridge {
           askOptions: {
             inboundReference: !batchSubmission ? {
               channel: 'qq', botId: this.#botId, chatId: key, messageId,
-              replyToMessageId: promptMessage.replyTo?.messageId, relationKind: 'provider-reference',
+              replyToMessageId: promptMessage.replyTo?.messageId, hasReference: Boolean(promptMessage.replyTo), relationKind: 'provider-reference',
             } : undefined,
             groupHistory: message.groupHistory,
             timeoutMs: this.#replyTimeoutMs,

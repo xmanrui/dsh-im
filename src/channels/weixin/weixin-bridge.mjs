@@ -954,7 +954,7 @@ export class WeixinHarnessBridge {
           askOptions: {
             inboundReference: !batchSubmission ? {
               channel: 'weixin', botId: this.#botId, chatId: sender, messageId,
-              replyToMessageId: promptMessage.replyTo?.messageId, relationKind: 'reply',
+              replyToMessageId: promptMessage.replyTo?.messageId, hasReference: Boolean(promptMessage.replyTo), relationKind: 'reply',
             } : undefined,
             timeoutMs: this.#replyTimeoutMs,
             signal: this.#signal,

@@ -1451,7 +1451,7 @@ export class DingtalkHarnessBridge {
         askOptions: {
           inboundReference: !batchSubmission ? {
             channel: 'dingtalk', botId: this.#botId, chatId: key, messageId,
-            replyToMessageId: modelMessage.replyTo?.messageId, relationKind: 'reply',
+            replyToMessageId: modelMessage.replyTo?.messageId, hasReference: Boolean(modelMessage.replyTo), relationKind: 'reply',
           } : undefined,
           timeoutMs: this.#replyTimeoutMs,
           signal: this.#signal,
