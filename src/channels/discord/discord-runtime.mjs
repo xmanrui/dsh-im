@@ -342,6 +342,41 @@ export function normalizeDiscordMessage(message, botId, {
   };
 }
 
+/**
+ * Normalize one component press (`INTERACTION_CREATE`, type 3) into the shape
+ * the shared bridge's `acceptCallback` already understands. Returns null for
+ * interaction kinds this channel does not answer (modals, autocomplete), so an
+ * unrelated interaction can never reach the question/approval bookkeeping.
+ */
+export function normalizeDiscordComponentInteraction(interaction) {
+  if (Number(interaction?.type) !== 3) return null;
+  const channelId = String(interaction?.channel_id ?? '');
+  const messageId = String(interaction?.message?.id ?? '');
+  const data = typeof interaction?.data?.custom_id === 'string'
+    ? interaction.data.custom_id : '';
+  // Guild presses carry the user on `member`; a DM press carries it directly.
+  const sender = interaction?.member?.user ?? interaction?.user;
+  const senderId = String(sender?.id ?? '');
+  const interactionId = String(interaction?.id ?? '');
+  const interactionToken = String(interaction?.token ?? '');
+  if (!channelId || !messageId || !data || !senderId || !interactionId || !interactionToken) {
+    return null;
+  }
+  return {
+    // The callback endpoint authenticates with the interaction token, so both
+    // halves travel together to the acknowledgement call.
+    callbackQueryId: `${interactionId}|${interactionToken}`,
+    data,
+    senderId,
+    senderIsBot: sender?.bot === true,
+    messageId,
+    conversationId: channelId,
+    kind: interaction.guild_id ? 'group' : 'direct',
+    replyTarget: { channelId, messageId },
+    providerMessageId: messageId,
+  };
+}
+
 export async function resolveDiscordMessageRoute(message, botId, {
   api,
   channel,
@@ -519,6 +554,70 @@ export class DiscordBotClient {
       messageIdForResult: (message) => message?.id,
     });
     return stream.start();
+  }
+
+  /**
+   * Deliver a card whose components carry the interaction payloads. Kept
+   * separate from sendText so a component failure can be caught and degraded to
+   * the plain-text approval by the caller without losing the text itself.
+   */
+  async sendInteractionCard(target, { text, components, replyToMessageId } = {}) {
+    const result = await this.#api.createMessage({
+      channelId: target.channelId,
+      content: text,
+      components,
+      replyToMessageId: replyToMessageId ?? target.replyToMessageId,
+      signal: this.#signal,
+    });
+    return {
+      providerMessageIds: typeof result?.id === 'string' && result.id ? [result.id] : [],
+    };
+  }
+
+  /** Rewrite a card's text and components in one message edit. */
+  async editInteractionCard(target, providerMessageId, { text, components } = {}) {
+    return this.#api.editMessage({
+      channelId: target.channelId,
+      messageId: providerMessageId,
+      content: text,
+      components,
+      signal: this.#signal,
+    });
+  }
+
+  /**
+   * Update only what the caller names; anything else stays as delivered. The
+   * shared bridge also calls this with a Telegram-shaped `markup` to retire a
+   * keyboard, which Discord represents by clearing its components.
+   */
+  async updateInteractionCard(target, providerMessageId, { text, components } = {}) {
+    const body = {
+      channelId: target.channelId,
+      messageId: providerMessageId,
+      components: Array.isArray(components) ? components : [],
+      signal: this.#signal,
+    };
+    if (typeof text === 'string') body.content = text;
+    await this.#api.editMessage(body);
+  }
+
+  /**
+   * Stop the interaction a press created. Discord requires the acknowledgement
+   * within three seconds: a deferral (type 6) keeps the message open for the
+   * follow-up edit, while a notice becomes an ephemeral message the channel
+   * never has to clean up.
+   */
+  async answerInteractionCallback(callbackQueryId, notice) {
+    const [interactionId, interactionToken] = String(callbackQueryId ?? '').split('|');
+    if (!interactionId || !interactionToken) return;
+    const text = typeof notice === 'string' ? notice.trim() : '';
+    await this.#api.createInteractionResponse({
+      interactionId,
+      interactionToken,
+      type: text ? 4 : 6,
+      ...(text ? { data: { content: text, flags: 64 } } : {}),
+      signal: this.#signal,
+    });
   }
 
   #operationSignal(signal) {
@@ -821,6 +920,18 @@ export class DiscordRuntime {
               if (generation !== this.#generation || this.#stopped) return;
               this.#logger.error?.(
                 `[dsh-im:discord] bot ${this.#config.botId} message handling failed:`,
+                extractConnectionEvidence(error).details,
+              );
+            });
+          }
+        } else if (packet.t === 'INTERACTION_CREATE') {
+          const callback = normalizeDiscordComponentInteraction(packet.d);
+          const bridge = this.#bridge;
+          if (callback && bridge && typeof bridge.acceptCallback === 'function') {
+            void bridge.acceptCallback(callback).catch((error) => {
+              if (generation !== this.#generation || this.#stopped) return;
+              this.#logger.error?.(
+                `[dsh-im:discord] bot ${this.#config.botId} interaction handling failed:`,
                 extractConnectionEvidence(error).details,
               );
             });
