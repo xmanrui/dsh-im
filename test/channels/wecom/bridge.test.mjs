@@ -1133,6 +1133,96 @@ test('Enterprise WeChat exposes native file callbacks through the SDK downloader
   }]);
 });
 
+test('Enterprise WeChat exposes a file that a reply quotes as a downloadable attachment', async () => {
+  const calls = [];
+  const bytes = Buffer.from('quoted-wecom-document');
+  const message = wecomInboundMessage(frame({
+    msgid: 'wecom-quoted-file',
+    text: { content: '按这份文档继续' },
+    quote: {
+      msgtype: 'file',
+      file: { url: 'https://wecom.example/quoted-file', aeskey: 'quoted-file-key' },
+    },
+  }), {
+    downloadFile: async (url, aeskey) => {
+      calls.push({ url, aeskey });
+      return { buffer: bytes, filename: '引用文档.pdf' };
+    },
+  });
+
+  assert.equal(message.content, '按这份文档继续');
+  assert.deepEqual(message.files, []);
+  assert.deepEqual(message.replyTo.attachments, [{ kind: 'file' }]);
+  assert.equal(message.replyTo.files.length, 1);
+  assert.equal(calls.length, 0, 'quoted file download stays lazy at normalization time');
+  assert.deepEqual(await message.replyTo.files[0].load({}), {
+    data: bytes,
+    name: '引用文档.pdf',
+  });
+  assert.deepEqual(calls, [{
+    url: 'https://wecom.example/quoted-file',
+    aeskey: 'quoted-file-key',
+  }]);
+});
+
+test('Enterprise WeChat leaves text quotes without quoted-file sources', () => {
+  const message = wecomInboundMessage(frame({
+    msgid: 'wecom-quoted-text',
+    text: { content: '继续' },
+    quote: { msgtype: 'text', text: { content: '上一句' } },
+  }), {});
+
+  assert.equal(message.replyTo.files, undefined);
+  assert.deepEqual(message.replyTo, { content: '上一句' });
+});
+
+test('Enterprise WeChat bridge stages a quoted file for the current Harness turn', async () => {
+  const transport = testClient();
+  const bytes = Buffer.from('wecom-quoted-turn-file');
+  const downloads = [];
+  const turns = [];
+  transport.client.downloadFile = async (url, aeskey) => {
+    downloads.push({ url, aeskey });
+    return { buffer: bytes, filename: '引用报告.pdf' };
+  };
+  const bridge = new WecomHarnessBridge({
+    client: transport.client,
+    generateStreamId: () => 'quoted-file-stream',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (sessionId, prompt, options) => {
+        const downloadsAtAsk = downloads.length;
+        const loaded = await options.files[0].load({ signal: options.signal });
+        turns.push({ sessionId, prompt, downloadsAtAsk, files: options.files, loaded });
+        return '文档已收到';
+      },
+    },
+    state: state(),
+  });
+
+  await bridge.accept(frame({
+    msgid: 'wecom-quoted-file-turn',
+    text: { content: '总结这份文档' },
+    quote: {
+      msgtype: 'file',
+      file: { url: 'https://wecom.example/quoted-turn', aeskey: 'quoted-turn-key' },
+    },
+  }));
+
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].downloadsAtAsk, 1, 'quoted file starts downloading when the message is accepted');
+  assert.equal(turns[0].files.length, 1);
+  assert.deepEqual(turns[0].loaded, { data: bytes, name: '引用报告.pdf' });
+  assert.match(turns[0].prompt[0].text, /<dsh_im_reply_to>/);
+  assert.doesNotMatch(turns[0].prompt[0].text, /quoted-turn/);
+  assert.deepEqual(turns[0].prompt.at(-1), { type: 'text', text: '总结这份文档' });
+  assert.deepEqual(downloads, [{
+    url: 'https://wecom.example/quoted-turn',
+    aeskey: 'quoted-turn-key',
+  }]);
+  assert.equal(transport.streamed.at(-1).content, '文档已收到');
+});
+
 test('Enterprise WeChat applies the unified access policy before attachments or Harness work', async () => {
   const transport = testClient();
   let downloads = 0;
