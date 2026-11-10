@@ -198,15 +198,28 @@ function quoteAttachments(quote) {
     .map(() => ({ kind: 'image' }));
 }
 
-function replyReferenceForBody(body) {
+// A quoted file arrives with its own download url and aeskey (see
+// QuoteContent.file in @wecom/aibot-node-sdk), so it can be read exactly like a
+// file attached to the current message.
+function quotedFileSources(client, quote) {
+  if (quote?.msgtype !== 'file') return [];
+  const file = quote.file;
+  if (!file || typeof file !== 'object') return [];
+  const source = fileSource(client, file);
+  return source ? [source] : [];
+}
+
+function replyReferenceForBody(body, client) {
   const quote = body?.quote;
   if (!quote || typeof quote !== 'object') return null;
   const content = messageContentText(quote);
   const attachments = quoteAttachments(quote);
+  const files = quotedFileSources(client, quote);
   const supported = ['text', 'image', 'mixed', 'voice', 'file'].includes(quote.msgtype);
   return {
     ...(content ? { content } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(files.length > 0 ? { files } : {}),
     ...(!content && attachments.length === 0
       ? { unavailableReason: supported ? 'not-delivered' : 'unsupported' }
       : {}),
@@ -269,7 +282,7 @@ function fileSource(client, file) {
 
 export function wecomInboundMessage(frame, client) {
   const body = bodyOf(frame);
-  const replyTo = replyReferenceForBody(body);
+  const replyTo = replyReferenceForBody(body, client);
   return {
     content: messageText(frame),
     images: imageContents(body).map((image) => imageSource(client, image)).filter(Boolean),
@@ -295,6 +308,15 @@ function prefetchInboundFiles(message, signal) {
         },
       };
     }),
+  };
+}
+
+function prefetchQuotedFiles(message, signal) {
+  const files = message?.replyTo?.files;
+  if (!Array.isArray(files) || files.length === 0) return message;
+  return {
+    ...message,
+    replyTo: { ...message.replyTo, files: prefetchInboundFiles({ files }, signal).files },
   };
 }
 
@@ -1125,7 +1147,7 @@ export class WecomHarnessBridge {
     // WeCom image URLs expire after five minutes, while a conversation turn
     // may legally stay queued longer. Start the authenticated SDK download as
     // soon as the validated callback is accepted, then consume it in order.
-    const inboundMessage = wecomInboundMessage(frame, this.#client);
+    const inboundMessage = prefetchQuotedFiles(wecomInboundMessage(frame, this.#client), this.#signal);
     const directCount = inboundMessage.images.length;
     const quoteContents = isSharedLocalCommand(inboundMessage.content, {
       hasImages: hasInboundImages(inboundMessage),
