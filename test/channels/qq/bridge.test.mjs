@@ -145,13 +145,14 @@ test('QQ sends quote context to Harness but does not execute quoted commands', a
   const fixture = stateFixture([['c2c:owner-openid', 'session-quote']]);
   let clears = 0;
   let prompt;
+  let reference;
   fixture.state.clearSession = async () => { clears += 1; };
   const bridge = new QqHarnessBridge({
     bot: { sendText: async () => ({ id: 'qq-quote-answer' }) },
     ownerUserOpenid: 'owner-openid',
     harness: {
       sessionExists: async () => true,
-      ask: async (_sessionId, content) => { prompt = content; return '已处理'; },
+      ask: async (_sessionId, content, options) => { prompt = content; reference = options.inboundReference; return '已处理'; },
     },
     state: fixture.state,
   });
@@ -164,6 +165,8 @@ test('QQ sends quote context to Harness but does not execute quoted commands', a
   }));
 
   assert.equal(clears, 0);
+  assert.equal(reference.replyToMessageId, 'quoted-command');
+  assert.equal(reference.relationKind, 'provider-reference');
   assert.equal(Array.isArray(prompt), true);
   assert.match(prompt[0].text, /<dsh_im_reply_to>/);
   assert.match(prompt[0].text, /"content":"\/new"/);

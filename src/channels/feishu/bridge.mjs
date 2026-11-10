@@ -4894,10 +4894,10 @@ export class FeishuHarnessBridge {
 
   #interactionAskOptions(event, key, files, images) {
     return {
-      inboundReference: {
+      inboundReference: !event.batchSubmission ? {
         channel: 'feishu', botId: this.#botId, chatId: event.message.chat_id,
-        messageId: event.message.message_id, replyToMessageId: event.message.parent_id,
-      },
+        messageId: event.message.message_id, replyToMessageId: event.message.parent_id, relationKind: 'reply',
+      } : undefined,
       groupHistory: event.groupHistory,
       timeoutMs: this.#replyTimeoutMs,
       signal: this.#signal,

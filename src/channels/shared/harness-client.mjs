@@ -1839,6 +1839,7 @@ export class HarnessClient {
     if (!ownership || ownership.stopRequested) return false;
     if (this.#activeControlOwnership(sessionId, control) !== ownership) return false;
     const inputRpcId = `${this.#rpcIdPrefix}-steer-${randomUUID()}`;
+    inboundReferenceRegistry.record(sessionId, inputRpcId, options.inboundReference);
     const releaseInputOrigin = registerImInputOrigin(this.#interactionRegistry, inputRpcId);
     try {
       if (this.#controlExecutor) {

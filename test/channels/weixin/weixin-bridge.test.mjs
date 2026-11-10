@@ -73,6 +73,7 @@ test('Weixin bridge sends ref_msg context to Harness but does not execute quoted
   fixture.sessions.set('p2p:owner-user', 'session-quote');
   let clears = 0;
   let prompt;
+  let reference;
   fixture.state.clearSession = async () => { clears += 1; };
   const bridge = new WeixinHarnessBridge({
     api: { sendText: async () => ({ messageId: 'weixin-quote-answer' }) },
@@ -81,7 +82,7 @@ test('Weixin bridge sends ref_msg context to Harness but does not execute quoted
     ownerUserId: 'owner-user',
     harness: {
       sessionExists: async () => true,
-      ask: async (_sessionId, content) => { prompt = content; return '已处理'; },
+      ask: async (_sessionId, content, options) => { prompt = content; reference = options.inboundReference; return '已处理'; },
     },
     state: fixture.state,
   });
@@ -101,6 +102,7 @@ test('Weixin bridge sends ref_msg context to Harness but does not execute quoted
   }));
 
   assert.equal(clears, 0);
+  assert.equal(reference.replyToMessageId, 'quoted-command');
   assert.equal(Array.isArray(prompt), true);
   assert.match(prompt[0].text, /<dsh_im_reply_to>/);
   assert.match(prompt[0].text, /"content":"\/new"/);

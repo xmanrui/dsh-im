@@ -1379,6 +1379,10 @@ export class QqHarnessBridge {
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },
           askOptions: {
+            inboundReference: !batchSubmission ? {
+              channel: 'qq', chatId: key, messageId,
+              replyToMessageId: promptMessage.replyTo?.messageId, relationKind: 'provider-reference',
+            } : undefined,
             groupHistory: message.groupHistory,
             timeoutMs: this.#replyTimeoutMs,
             signal: this.#signal,

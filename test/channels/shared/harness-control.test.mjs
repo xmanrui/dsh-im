@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { createBotWorkspaceScope } from '../../../src/channels/shared/bot-workspace-store.mjs';
+import { inboundReferenceRegistry } from '../../../src/channels/shared/inbound-reference-registry.mjs';
 import {
   HarnessClient,
   HarnessTurnError,
@@ -611,7 +612,9 @@ test('in-process control executor receives exact ownership and suppresses contro
     'the IM queue prompt must be registered before its user event',
   );
 
-  assert.equal(await turn.client.steerActiveTurn(turn.id, 'stay in this turn', control), true);
+  const reference = { channel: 'discord', chatId: 'chat', messageId: 'reply', replyToMessageId: 'original' };
+  assert.equal(await turn.client.steerActiveTurn(turn.id, 'stay in this turn', control, { inboundReference: reference }), true);
+  assert.deepEqual(inboundReferenceRegistry.get(turn.id, executions[0].inputRpcId), reference);
   assert.equal(await turn.client.stopActiveTurn(turn.id, control), true);
   assert.deepEqual(executions.map(({ sessionId, expectedTurn, action, text }) => ({
     sessionId, expectedTurn, action, text,

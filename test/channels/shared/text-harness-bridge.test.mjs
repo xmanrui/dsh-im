@@ -393,6 +393,7 @@ test('all four shared text channels resolve replies only after trigger and comma
     const fixture = stateFixture();
     const sent = [];
     const asks = [];
+    const references = [];
     let replyLoads = 0;
     const replyTo = () => ({
       messageId: `quoted-${name}`,
@@ -412,8 +413,9 @@ test('all four shared text channels resolve replies only after trigger and comma
       harness: {
         createSession: async () => `session-reply-${name}`,
         sessionExists: async () => true,
-        ask: async (_sessionId, content) => {
+        ask: async (_sessionId, content, options) => {
           asks.push(content);
+          references.push(options.inboundReference);
           return `${name} reply`;
         },
       },
@@ -436,6 +438,9 @@ test('all four shared text channels resolve replies only after trigger and comma
     assert.match(asks[0][0].text, /^<dsh_im_reply_to>/, name);
     assert.match(asks[0][0].text, /\/new 只是被引用的原文/, name);
     assert.deepEqual(asks[0][1], { type: 'text', text: '当前问题' }, name);
+    assert.equal(references[0].channel, name);
+    assert.equal(references[0].replyToMessageId, `quoted-${name}`);
+    assert.equal(references[0].relationKind, name === 'slack' ? 'thread-root' : 'reply');
   }
 });
 
@@ -3520,6 +3525,7 @@ test('a mid-turn follow-up from the same sender steers the in-flight turn instea
   const prompts = [];
   const sent = [];
   const steers = [];
+  const steerOptions = [];
   const gate = deferred();
   let askEntered = () => {};
   const entered = new Promise((resolve) => { askEntered = resolve; });
@@ -3536,8 +3542,9 @@ test('a mid-turn follow-up from the same sender steers the in-flight turn instea
         await gate.promise;
         return '首轮答案';
       },
-      steerActiveTurn: async (_sessionId, text) => {
+      steerActiveTurn: async (_sessionId, text, _control, options) => {
         steers.push(text);
+        steerOptions.push(options);
         return true;
       },
     },
@@ -3553,12 +3560,13 @@ test('a mid-turn follow-up from the same sender steers the in-flight turn instea
   });
   const first = bridge.accept(room('steer-first', '原问题'));
   await within(entered, 1_000, 'the first turn never reached the harness');
-  const followUp = bridge.accept(room('steer-follow', '补充一句约束'));
+  const followUp = bridge.accept({ ...room('steer-follow', '补充一句约束'), replyTo: { messageId: 'prior-message', content: 'prior' } });
   await eventually(() => steers.length === 1);
   gate.resolve();
   await Promise.all([first, followUp, bridge.waitForIdle()]);
   assert.match(steers[0], /补充一句约束/);
   assert.match(steers[0], /rjd/, 'a steered follow-up carries its speaker label');
+  assert.equal(steerOptions[0].inboundReference.replyToMessageId, 'prior-message');
   assert.equal(prompts.length, 1, 'the steered follow-up opens no second turn');
   assert.equal(fixture.seen.has('steer-follow'), true);
   assert.deepEqual(sent, ['首轮答案'], 'the steered follow-up does not consume an extra answer');

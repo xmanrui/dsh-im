@@ -36,6 +36,7 @@ import {
   runPresetCommand,
 } from './preset-command.mjs';
 import { askInWorkspaceSession } from './workspace-session.mjs';
+import { referenceFromSemanticMessage } from './inbound-reference-registry.mjs';
 import { HarnessApprovalQueue, harnessApprovalDecision } from './harness-approval.mjs';
 import {
   BatchInputManager,
@@ -649,7 +650,10 @@ export class TextHarnessBridge {
       const sessionId = this.#state.sessionFor?.(key) ?? null;
       if (text && sessionId !== null && typeof this.#harness.steerActiveTurn === 'function') {
         return this.#harness
-          .steerActiveTurn(sessionId, text, { owner: this, key }, this.#signal ? { signal: this.#signal } : undefined)
+          .steerActiveTurn(sessionId, text, { owner: this, key }, {
+            ...(this.#signal ? { signal: this.#signal } : {}),
+            inboundReference: referenceFromSemanticMessage(this.#descriptor.key, message),
+          })
           .then((steered) => (steered
             ? this.#settleSteeredTurn(author, messageId, key)
             : toQueue()))
@@ -1405,6 +1409,7 @@ export class TextHarnessBridge {
         createOptions: this.#signal ? { signal: this.#signal } : undefined,
         existsOptions: this.#signal ? { signal: this.#signal } : undefined,
         askOptions: {
+          inboundReference: !batchSubmission ? referenceFromSemanticMessage(this.#descriptor.key, message) : undefined,
           groupHistory: message.groupHistory,
           timeoutMs: this.#replyTimeoutMs,
           signal: this.#signal,

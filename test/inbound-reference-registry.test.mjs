@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInboundReferenceRegistry } from '../src/channels/shared/inbound-reference-registry.mjs';
+import { createInboundReferenceRegistry, referenceFromSemanticMessage } from '../src/channels/shared/inbound-reference-registry.mjs';
 
 test('correlates provider references with the exact session and prompt', () => {
   const registry = createInboundReferenceRegistry();
@@ -34,4 +34,22 @@ test('interleaved prompts never overwrite or claim each other; storage is bounde
   registry.record('other', 'three', base);
   assert.equal(registry.get('session', 'one'), undefined);
   assert.equal(registry.get('session', 'two').replyToMessageId, 'second');
+});
+
+test('shared channels preserve provider identifier types and distinguish thread roots', () => {
+  const registry = createInboundReferenceRegistry();
+  const cases = [
+    ['telegram', { messageId: 'update-id', replyTarget: { replyToMessageId: 43 }, replyTo: { messageId: '42' } }, '43', '42', 'reply'],
+    ['whatsapp', { messageId: 'composite', providerMessageId: 'provider', replyTo: { messageId: 'parent' } }, 'provider', 'parent', 'reply'],
+    ['slack', { messageId: 'event-id', reactionTarget: { messageTs: 'timestamp' }, replyTo: { messageId: 'root' } }, 'timestamp', 'root', 'thread-root'],
+    ['matrix', { messageId: '$event', replyToEventId: '$parent' }, '$event', '$parent', 'reply'],
+  ];
+  for (const [channel, message, current, target, relationKind] of cases) {
+    registry.record('session', channel, referenceFromSemanticMessage(channel, { ...message, conversationId: 'chat' }));
+    assert.deepEqual(registry.get('session', channel), { channel, chatId: 'chat', messageId: current, replyToMessageId: target, relationKind });
+  }
+  registry.record('session', 'cross-chat', referenceFromSemanticMessage('discord', {
+    conversationId: 'chat', messageId: 'reply', replyTo: { messageId: 'other', unavailableReason: 'not-found' },
+  }));
+  assert.equal(registry.get('session', 'cross-chat'), undefined);
 });

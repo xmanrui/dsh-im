@@ -1446,6 +1446,10 @@ export class DingtalkHarnessBridge {
         createOptions: { signal: this.#signal },
         existsOptions: { signal: this.#signal },
         askOptions: {
+          inboundReference: !batchSubmission ? {
+            channel: 'dingtalk', botId: this.#clientId, chatId: key, messageId,
+            replyToMessageId: modelMessage.replyTo?.messageId, relationKind: 'reply',
+          } : undefined,
           timeoutMs: this.#replyTimeoutMs,
           signal: this.#signal,
           control: { owner: this, key },

@@ -949,6 +949,10 @@ export class WeixinHarnessBridge {
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },
           askOptions: {
+            inboundReference: !batchSubmission ? {
+              channel: 'weixin', chatId: sender, messageId,
+              replyToMessageId: promptMessage.replyTo?.messageId, relationKind: 'reply',
+            } : undefined,
             timeoutMs: this.#replyTimeoutMs,
             signal: this.#signal,
             control: { owner: this, key },

@@ -8360,7 +8360,7 @@ test('Feishu passes provider reference evidence outside the model prompt', async
   await bridge.accept(event('reply-1', 'feedback', { senderOpenId: 'ou_owner', parent_id: 'original-1' }));
   await bridge.waitForIdle();
   assert.deepEqual(received.reference, {
-    channel: 'feishu', botId: 'bot-a', chatId: 'oc_chat', messageId: 'reply-1', replyToMessageId: 'original-1',
+    channel: 'feishu', botId: 'bot-a', chatId: 'oc_chat', messageId: 'reply-1', replyToMessageId: 'original-1', relationKind: 'reply',
   });
   assert.doesNotMatch(JSON.stringify(received.prompt), /original-1/);
 });

@@ -96,6 +96,7 @@ test('DingTalk sends quote context to Harness but does not execute quoted comman
   fixture.sessions.set('p2p:staff-approved', 'session-quote');
   let clears = 0;
   let prompt;
+  let reference;
   fixture.state.clearSession = async () => { clears += 1; };
   const bridge = new DingtalkHarnessBridge({
     api: { sendText: async () => ({ messageId: 'ding-quote-answer' }) },
@@ -103,7 +104,7 @@ test('DingTalk sends quote context to Harness but does not execute quoted comman
     clientSecret: 'host-secret',
     harness: {
       sessionExists: async () => true,
-      ask: async (_sessionId, content) => { prompt = content; return '已处理'; },
+      ask: async (_sessionId, content, options) => { prompt = content; reference = options.inboundReference; return '已处理'; },
     },
     state: fixture.state,
   });
@@ -117,6 +118,7 @@ test('DingTalk sends quote context to Harness but does not execute quoted comman
   }));
 
   assert.equal(clears, 0);
+  assert.equal(reference.replyToMessageId, 'quoted-command');
   assert.equal(Array.isArray(prompt), true);
   assert.match(prompt[0].text, /<dsh_im_reply_to>/);
   assert.match(prompt[0].text, /"content":"\/new"/);
