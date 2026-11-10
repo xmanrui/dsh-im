@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 
 export const OUTBOUND_ARTIFACT_TOOL = 'dsh_im_return_file';
+const HOST_PRESENT_TOOL = 'present';
 
 const ARTIFACT_KIND = 'dsh-im-outbound-artifact';
 const ARTIFACT_READ_CHUNK_BYTES = 64 * 1024;
@@ -281,6 +282,7 @@ export class OutboundArtifactRegistry {
   #consumersByPrompt = new Map();
   #consumersByTurn = new Map();
   #openTurns = new Map();
+  #adoptions = new Map();
   #uuid;
 
   constructor({ uuid = randomUUID } = {}) {
@@ -375,6 +377,118 @@ export class OutboundArtifactRegistry {
     }
   }
 
+  /**
+   * Adopt the files the host `present` tool recorded for this Turn.
+   *
+   * `present` appends `deliverables/presented` to the durable Session and
+   * reports success, but the IM delivery path only claims artifacts registered
+   * through `dsh_im_return_file`. A file presented in an IM conversation was
+   * therefore dropped without an error: the answer stayed intact and the user
+   * received nothing. Snapshot the recorded paths into the same pipeline so the
+   * channel delivers them when the Turn ends.
+   */
+  adoptPresented(session, event, { logger } = {}) {
+    const sessionId = sessionIdOf(session);
+    const turn = event?.data?.turn;
+    const files = event?.data?.files;
+    if (!sessionId || !Number.isInteger(turn) || turn < 0) return null;
+    if (!Array.isArray(files) || files.length === 0) return null;
+    if (!this.#consumerForTurn(sessionId, turn)) {
+      logger?.warn?.('[dsh-im] files presented by the host tool were not delivered: no IM delivery consumer owns this turn', {
+        sessionId, turn, fileCount: files.length,
+      });
+      return null;
+    }
+    const workspace = session?.header?.cwd;
+    const keyForTurn = turnKey(sessionId, turn);
+    // Snapshot in parallel, commit in the order the answer presented them so
+    // the channel sends the files in a predictable sequence.
+    const adoption = Promise.all(files.map((file) => this.#snapshotPresentedFile({
+      sessionId, turn, workspace, file, logger,
+    }))).then((artifacts) => {
+      for (const artifact of artifacts) {
+        if (artifact) this.#commitArtifact(artifact);
+      }
+    });
+    const pending = this.#adoptions.get(keyForTurn) ?? [];
+    pending.push(adoption);
+    this.#adoptions.set(keyForTurn, pending);
+    return adoption;
+  }
+
+  /** Let a Turn end wait for in-flight present() adoption instead of outrunning it. */
+  async adoptionsSettled(sessionId, turn) {
+    if (typeof sessionId !== 'string' || !Number.isInteger(turn)) return;
+    const keyForTurn = turnKey(sessionId, turn);
+    const pending = this.#adoptions.get(keyForTurn);
+    if (!pending) return;
+    await Promise.allSettled(pending);
+    if (this.#adoptions.get(keyForTurn) === pending) this.#adoptions.delete(keyForTurn);
+  }
+
+  async #snapshotPresentedFile({ sessionId, turn, workspace, file, logger }) {
+    const requestedPath = typeof file?.path === 'string' ? file.path.trim() : '';
+    if (!requestedPath) return null;
+    try {
+      const snapshot = await snapshotFile(workspace, requestedPath);
+      return this.#buildArtifact(sessionId, turn, snapshot, {
+        callId: typeof file?.callId === 'string' ? file.callId : null,
+        kind: 'session-event',
+        toolName: HOST_PRESENT_TOOL,
+      });
+    } catch (error) {
+      logger?.warn?.('[dsh-im] could not adopt a file presented by the host tool:', {
+        sessionId, turn, path: requestedPath, reason: error?.code ?? error?.message,
+      });
+      return null;
+    }
+  }
+
+  #buildArtifact(sessionId, turn, snapshot, { callId, kind, toolName }) {
+    const artifact = Object.freeze({
+      kind: ARTIFACT_KIND,
+      schemaVersion: 1,
+      artifactId: this.#uuid(),
+      deliveryKey: this.#uuid(),
+      fileName: snapshot.fileName,
+      mediaType: snapshot.mediaType,
+      size: snapshot.size,
+      digest: snapshot.digest,
+      source: 'managed-temp',
+      registeredBy: Object.freeze({
+        kind,
+        eventId: typeof callId === 'string' ? callId : 'unknown',
+        toolName,
+      }),
+      origin: Object.freeze({
+        sessionId,
+        turn,
+        callId: typeof callId === 'string' ? callId : null,
+      }),
+      createdAt: Date.now(),
+    });
+    artifactStorage.set(artifact, {
+      path: snapshot.storagePath,
+      materializing: 0,
+      materialized: false,
+      releaseRequested: false,
+      cleanupRequested: false,
+      cleanupDeferred: false,
+      onCleanup: () => this.#forgetArtifact(artifact),
+    });
+    return artifact;
+  }
+
+  #commitArtifact(artifact) {
+    const keyForTurn = turnKey(artifact.origin.sessionId, artifact.origin.turn);
+    let committed = this.#turns.get(keyForTurn);
+    if (!committed) {
+      committed = new Map();
+      this.#turns.set(keyForTurn, committed);
+    }
+    committed.set(artifactKey(artifact), artifact);
+  }
+
   #currentTurn(session) {
     const sessionId = sessionIdOf(session);
     return this.#openTurns.has(sessionId)
@@ -418,6 +532,9 @@ export class OutboundArtifactRegistry {
       if (key.startsWith(prefix)) this.#consumersByTurn.delete(key);
     }
     this.#openTurns.delete(sessionId);
+    for (const key of [...this.#adoptions.keys()]) {
+      if (key.startsWith(prefix)) this.#adoptions.delete(key);
+    }
     for (const artifact of artifacts) cleanupArtifactStorage(artifact);
   }
 
@@ -446,7 +563,7 @@ export class OutboundArtifactRegistry {
     if (!consumer) throw unavailable();
 
     const snapshot = await snapshotFile(workspace, requestedPath, exec?.signal);
-    const { storagePath, ...snapshotMetadata } = snapshot;
+    const { storagePath } = snapshot;
     // Copying and hashing yield to cancellation, disposal and Turn completion.
     // Never leave a late snapshot behind after its delivery owner has gone.
     try {
@@ -457,33 +574,10 @@ export class OutboundArtifactRegistry {
       await unlink(storagePath).catch(() => undefined);
       throw error;
     }
-    const artifact = Object.freeze({
-      kind: ARTIFACT_KIND,
-      schemaVersion: 1,
-      artifactId: this.#uuid(),
-      deliveryKey: this.#uuid(),
-      ...snapshotMetadata,
-      source: 'managed-temp',
-      registeredBy: Object.freeze({
-        kind: 'tool-result',
-        eventId: typeof exec?.callId === 'string' ? exec.callId : 'unknown',
-        toolName: OUTBOUND_ARTIFACT_TOOL,
-      }),
-      origin: Object.freeze({
-        sessionId,
-        turn,
-        callId: typeof exec?.callId === 'string' ? exec.callId : null,
-      }),
-      createdAt: Date.now(),
-    });
-    artifactStorage.set(artifact, {
-      path: storagePath,
-      materializing: 0,
-      materialized: false,
-      releaseRequested: false,
-      cleanupRequested: false,
-      cleanupDeferred: false,
-      onCleanup: () => this.#forgetArtifact(artifact),
+    const artifact = this.#buildArtifact(sessionId, turn, snapshot, {
+      callId: exec?.callId,
+      kind: 'tool-result',
+      toolName: OUTBOUND_ARTIFACT_TOOL,
     });
     const keyForTurn = turnKey(sessionId, turn);
     let staged = this.#stagedTurns.get(keyForTurn);
@@ -526,6 +620,7 @@ export class OutboundArtifactRegistry {
     const keyForTurn = turnKey(sessionId, turn);
     const committed = this.#turns.get(keyForTurn);
     this.#turns.delete(keyForTurn);
+    this.#adoptions.delete(keyForTurn);
     if (!committed) return [];
     if (signal?.aborted) {
       for (const artifact of committed.values()) cleanupArtifactStorage(artifact);
@@ -553,6 +648,7 @@ export class OutboundArtifactRegistry {
     ]);
     this.#turns.delete(keyForTurn);
     this.#stagedTurns.delete(keyForTurn);
+    this.#adoptions.delete(keyForTurn);
     for (const artifact of artifacts) cleanupArtifactStorage(artifact);
   }
 
@@ -576,6 +672,7 @@ export class OutboundArtifactRegistry {
     this.#consumersByPrompt.clear();
     this.#consumersByTurn.clear();
     this.#openTurns.clear();
+    this.#adoptions.clear();
   }
 
   #bindClaimSignal(turnKey, signal) {
@@ -732,7 +829,14 @@ export function installOutboundArtifactTool(ctx, { registry = outboundArtifactRe
   ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
     registry.observeClaimedMessage(agent?.session, message, turn);
   }, { global: true });
-  ctx.on('session/event', (session, event) => registry.observeSessionEvent(session, event, { logger }));
+  ctx.on('session/event', (session, event) => {
+    registry.observeSessionEvent(session, event, { logger });
+    if (event?.type === 'deliverables/presented') {
+      registry.adoptPresented(session, event, { logger })?.catch?.((error) => {
+        logger?.warn?.('[dsh-im] present adoption failed:', error?.message);
+      });
+    }
+  });
   ctx.on('session/disposed', (session) => registry.disposeSession(session));
   ctx.systemPrompt.context({
     name: 'dsh-im:return-file',
