@@ -43,6 +43,7 @@ test('shared channels preserve provider identifier types and distinguish thread 
     ['whatsapp', { messageId: 'composite', providerMessageId: 'provider', replyTo: { messageId: 'parent' } }, 'provider', 'parent', 'reply'],
     ['slack', { messageId: 'event-id', reactionTarget: { messageTs: 'timestamp' }, replyTo: { messageId: 'root' } }, 'timestamp', 'root', 'thread-root'],
     ['matrix', { messageId: '$event', replyToEventId: '$parent' }, '$event', '$parent', 'reply'],
+    ['discord', { messageId: 'inbound', replyTarget: { replyToMessageId: 'routed-message' }, replyTo: { messageId: 'parent' } }, 'inbound', 'parent', 'reply'],
   ];
   for (const [channel, message, current, target, relationKind] of cases) {
     registry.record('session', channel, referenceFromSemanticMessage(channel, { ...message, conversationId: 'chat' }));
@@ -52,4 +53,8 @@ test('shared channels preserve provider identifier types and distinguish thread 
     conversationId: 'chat', messageId: 'reply', replyTo: { messageId: 'other', unavailableReason: 'not-found' },
   }));
   assert.equal(registry.get('session', 'cross-chat'), undefined);
+  registry.record('session', 'telegram-update', referenceFromSemanticMessage('telegram', {
+    conversationId: 'chat', messageId: 'update-id', replyTo: { messageId: 'parent' },
+  }));
+  assert.equal(registry.get('session', 'telegram-update'), undefined, 'an update id is not a message id');
 });

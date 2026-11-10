@@ -7,10 +7,16 @@ const identifier = value => typeof value === 'string' && value.length > 0 && val
 
 export function referenceFromSemanticMessage(channel, message) {
   if (!message || typeof message !== 'object') return undefined;
+  // The generic messageId may be an update/event id. Use the provider's actual
+  // message id where an adapter explicitly normalizes one; replyTarget itself
+  // is not generally the inbound message (e.g. Discord may route into a thread).
+  const currentId = channel === 'telegram' ? message.replyTarget?.replyToMessageId
+    : channel === 'slack' ? message.reactionTarget?.messageTs
+      : channel === 'whatsapp' ? message.providerMessageId : message.messageId;
   return {
     channel,
     chatId: message.conversationId,
-    messageId: String(message.providerMessageId ?? message.reactionTarget?.messageTs ?? message.replyTarget?.replyToMessageId ?? message.messageId ?? ''),
+    messageId: currentId === undefined || currentId === null ? '' : String(currentId),
     replyToMessageId: message.replyTo?.unavailableReason === 'not-found'
       ? undefined : message.replyTo?.messageId ?? message.replyToEventId,
     relationKind: channel === 'slack' ? 'thread-root' : 'reply',
