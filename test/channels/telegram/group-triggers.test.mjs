@@ -190,3 +190,28 @@ test('settings projection hides removed chats and lists seen groups', () => {
     lastSenderName: 'Ann',
   }]);
 });
+
+test('a command in a group is addressed even under the mention-only rule', () => {
+  const rules = normalizeGroupTriggers({ version: 1, defaults: { mode: 'mention' } });
+  // The command menu is published to groups, so tapping an entry has to work:
+  // a local command addresses the bot without an @mention or a reply.
+  for (const text of ['/status', '/menu', '/display', '/display 极简', '/models', '/help']) {
+    const message = normalizeTelegramUpdate(update({ text }), {
+      botId: '999', username: 'harness_bot', groupTriggers: rules,
+    });
+    assert.equal(message.addressed, true, text);
+  }
+});
+
+test('ordinary group text still needs a mention under the same rule', () => {
+  const rules = normalizeGroupTriggers({ version: 1, defaults: { mode: 'mention' } });
+  const plain = normalizeTelegramUpdate(update({ text: 'hello team' }), {
+    botId: '999', username: 'harness_bot', groupTriggers: rules,
+  });
+  assert.equal(plain.addressed, false);
+  // Unknown slash text is a prompt, not a command, so it is not addressed either.
+  const unknown = normalizeTelegramUpdate(update({ text: '/shrug' }), {
+    botId: '999', username: 'harness_bot', groupTriggers: rules,
+  });
+  assert.equal(unknown.addressed, false);
+});

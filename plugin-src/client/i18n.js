@@ -909,6 +909,12 @@ const EN = Object.freeze({
   '先通过 @BotFather 获取 Bot Token，再在这里完成接入。': 'Get a Bot Token from @BotFather, then connect it here.',
   '填写 @BotFather 生成的 Bot Token': 'Enter the Bot Token from @BotFather',
   '会话行为': 'Conversation behavior',
+  // 过程展示三挡位（5.10.1-wings.2）
+  '过程展示挡位': 'Display detail',
+  '极简只看答案；标准用一条进度消息，结束时收成一行；全面逐条显示思考与工具调用': 'Minimal: answer only. Standard: one progress message, collapsed to one line. Full: every thought and tool call on its own message.',
+  '极简': 'Minimal',
+  '标准': 'Standard',
+  '全面': 'Full',
   '思考过程留痕': 'Thinking traces',
   '实时显示思考步骤与工具调用，最终答案单独成条': 'Show thinking steps and tool calls as they happen; the final answer arrives as its own message',
   '请提交有效的思考过程留痕设置。': 'Submit a valid thinking-traces setting.',

@@ -2,11 +2,13 @@ import { t } from './i18n.mjs';
 
 const TEXT_CHANNELS = Object.freeze(['telegram', 'slack', 'discord', 'whatsapp', 'matrix']);
 
-function defineCatalogCommand(name, description, help, { aliases = [], ...options } = {}) {
+function defineCatalogCommand(name, description, help, { aliases = [], channels = TEXT_CHANNELS, ...options } = {}) {
   return Object.freeze({
     name,
     description,
-    channels: TEXT_CHANNELS,
+    // Frozen like the shared default: every consumer may hold this list, none
+    // may edit it in place.
+    channels: channels === TEXT_CHANNELS ? channels : Object.freeze([...channels]),
     menuVisible: true,
     ...options,
     aliases: Object.freeze(aliases.map((alias) => Object.freeze({
@@ -17,12 +19,69 @@ function defineCatalogCommand(name, description, help, { aliases = [], ...option
   });
 }
 
+/**
+ * Which section of the `/help` card each command belongs to.
+ *
+ * Kept as a separate map on purpose: the catalog entries above pin the exact help
+ * lines a cross-channel regression compares byte for byte, so grouping lives
+ * beside them instead of inside them. A command with no entry falls into
+ * `other`, which means a newly added command can never disappear from the card.
+ */
+export const COMMAND_HELP_GROUPS = Object.freeze({
+  session: 'session',
+  workspace: 'workspace',
+  model: 'model',
+  task: 'task',
+});
+
+const GROUP_BY_COMMAND = Object.freeze({
+  new: COMMAND_HELP_GROUPS.session,
+  fork: COMMAND_HELP_GROUPS.session,
+  reset: COMMAND_HELP_GROUPS.session,
+  clear: COMMAND_HELP_GROUPS.session,
+  compact: COMMAND_HELP_GROUPS.session,
+  history: COMMAND_HELP_GROUPS.session,
+  sessionlist: COMMAND_HELP_GROUPS.session,
+  session: COMMAND_HELP_GROUPS.session,
+  conv: COMMAND_HELP_GROUPS.workspace,
+  workspace: COMMAND_HELP_GROUPS.workspace,
+  workspacelist: COMMAND_HELP_GROUPS.workspace,
+  models: COMMAND_HELP_GROUPS.model,
+  model: COMMAND_HELP_GROUPS.model,
+  reasoninglist: COMMAND_HELP_GROUPS.model,
+  reasoning: COMMAND_HELP_GROUPS.model,
+  presetlist: COMMAND_HELP_GROUPS.model,
+  preset: COMMAND_HELP_GROUPS.model,
+  stop: COMMAND_HELP_GROUPS.task,
+  steer: COMMAND_HELP_GROUPS.task,
+  batch: COMMAND_HELP_GROUPS.task,
+  send: COMMAND_HELP_GROUPS.task,
+  cancel: COMMAND_HELP_GROUPS.task,
+  status: COMMAND_HELP_GROUPS.task,
+  display: COMMAND_HELP_GROUPS.task,
+});
+
+/** The section a command belongs to; `other` for anything unmapped. */
+export function commandHelpGroup(name) {
+  return GROUP_BY_COMMAND[name] ?? 'other';
+}
+
 // Presentation metadata for TextHarnessBridge commands, in help order.
 // Keep each command's aliases, short description and full usage together here.
 // Handlers still own parsing and authorization; privateOnly is descriptive.
 // enabled: false removes a definition from both consumers; menuVisible: false
 // hides a command (or alias) only from the native menu, leaving help available.
 export const SHARED_COMMAND_CATALOG = Object.freeze([
+  // The hub comes first in the native menu and in `/help`: it is the shortest
+  // path to every picker this channel has.
+  defineCatalogCommand('menu', '打开控制台菜单', [
+    '/menu  打开控制台菜单（会话 / 工作区 / 模型 / 状态，一步直达）',
+  ], {
+    // The hub itself is a Telegram card (menu-card.mjs). Other channels keep the
+    // plain text answer the command has always had, so the entry stays where the
+    // card exists.
+    channels: ['telegram'],
+  }),
   defineCatalogCommand('new', '开启一个全新会话（可带标题）', [
     '/new [标题]  开启一个全新会话（可指定标题）',
   ]),
@@ -148,6 +207,16 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   defineCatalogCommand('status', '检查连接状态', [
     '/status  检查连接状态',
   ]),
+  // Display rungs: the one setting a reader changes from the chat itself. The
+  // name is short because it is also typed on a phone keyboard.
+  defineCatalogCommand('display', '设置过程展示挡位（极简/标准/全面）', [
+    '/display  查看并切换过程展示挡位（极简 / 标准 / 全面）',
+    '/display 极简|标准|全面  直接切换，仅影响这个机器人',
+  ], {
+    // Only Telegram renders a turn through a placeholder it can collapse, so the
+    // command is advertised where it actually changes something.
+    channels: ['telegram'],
+  }),
   defineCatalogCommand('version', '查看插件版本', [
     '/version  查看插件版本',
   ]),
@@ -187,6 +256,24 @@ export const SESSION_NAV_HELP_LINES = Object.freeze([
   '/reset  重置当前会话上下文（保留会话编号，旧会话可 /session 找回）',
   '/tail 或 /peek [编号] [条数]  预览最近消息（默认 5 条，仅提问与回答）',
 ]);
+
+export function commandHelpSections(channel, catalog = SHARED_COMMAND_CATALOG) {
+  const sections = new Map();
+  for (const item of commandsForChannel(channel, catalog)) {
+    if (item.helpVisible === false) continue;
+    const group = commandHelpGroup(item.name);
+    if (!sections.has(group)) sections.set(group, []);
+    sections.get(group).push({
+      name: item.name,
+      description: item.description,
+      lines: item.help,
+    });
+  }
+  const order = ['session', 'workspace', 'model', 'task', 'other'];
+  return order
+    .filter((group) => (sections.get(group)?.length ?? 0) > 0)
+    .map((group) => ({ group, items: sections.get(group) }));
+}
 
 export function commandHelpLines(channel, catalog = SHARED_COMMAND_CATALOG) {
   return commandsForChannel(channel, catalog).flatMap((item) => item.help.map((line) => t(line)));

@@ -3,21 +3,34 @@ import { randomBytes, randomUUID } from 'node:crypto';
 
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from './deferred-delivery-coordinator.mjs';
 import { t } from './i18n.mjs';
-import { availableCommandCatalog, commandHelpLines, SHARED_COMMAND_CATALOG } from './command-catalog.mjs';
+import { availableCommandCatalog, commandHelpLines, commandHelpSections, commandsForChannel, SHARED_COMMAND_CATALOG } from './command-catalog.mjs';
+import {
+  DEFAULT_PRESENTATION_LEVEL,
+  createTurnProgress,
+  normalizePresentationLevel,
+  parsePresentationLevelInput,
+  presentationLevelLabel,
+} from './presentation-level.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
 } from './inbound-access.mjs';
+import { isStartCommand } from './command-permission.mjs';
 import {
   captureContextEnhancement,
   captureContextEnhancementSource,
   enhanceContextContent,
 } from './context-enhancement.mjs';
-import { runWorkspaceCommand, workspaceSwitchFailureText } from './workspace-command.mjs';
+import {
+  isWorkspaceCommand,
+  runWorkspaceCommand,
+  workspaceSwitchFailureText,
+} from './workspace-command.mjs';
 import { runStatusCommand } from './status-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
 import { isClearCommand, runClearCommand } from './clear-command.mjs';
 import { isResetCommand, runResetCommand } from './reset-command.mjs';
+import { isMenuCommand, runMenuCommand } from './menu-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from './history-command.mjs';
 import {
   isControlCommand,
@@ -106,6 +119,13 @@ const FILE_ONLY_COMPLETION_TEXT = '任务已完成。';
 const MAX_DELIVERY_ATTEMPTS = 3;
 /** How many plain-text messages one coalescing window folds into one dispatch. */
 const MAX_COALESCE_MEMBERS = 8;
+/**
+ * `standard` mode rewrites one placeholder: edits are cheaper than messages but
+ * still hit a rate limit, so a burst of tool events collapses into the newest
+ * line. The tick keeps the elapsed counter honest during a silent tool run.
+ */
+const PROGRESS_EDIT_INTERVAL_MS = 1_200;
+const PROGRESS_TICK_MS = 10_000;
 
 function cleanText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -197,6 +217,20 @@ const PENDING_RESTART_NOTICE = '排队中的消息在服务重启时被中断。
 // nonce of the preview message the bot must delete when pressed.
 const TAIL_HIDE_CALLBACK_PREFIX = 'tailhide|';
 
+/**
+ * True when `command` is exactly this slash command, optionally followed by
+ * whitespace. Used by commands that take no arguments, so a stray word is
+ * reported instead of being sent to the model as a question.
+ */
+function isBareCommand(command, name) {
+  return command === name || command.startsWith(`${name} `) || command.startsWith(`${name}\t`);
+}
+
+/** True when a bare command carries words after it. */
+function hasExtraArguments(command, name) {
+  return command.slice(name.length).trim().length > 0;
+}
+
 export class TextHarnessBridge {
   #descriptor;
   #bot;
@@ -205,7 +239,9 @@ export class TextHarnessBridge {
   #deferred;
   #contextEnhancement;
   #accessPolicy;
-  #thinkingTraces;
+  // How much of a turn reaches this chat: minimal | standard | full. One value
+  // decides both the stream a turn opens and the frames it may rewrite.
+  #presentationLevel;
   #status;
   #logger;
   #replyTimeoutMs;
@@ -235,6 +271,20 @@ export class TextHarnessBridge {
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
   // render hook). Null keeps every channel's existing plain-text approval flow.
   #approvalCard;
+  #modelCard;
+  #sessionCard;
+  #presetCard;
+  #clearCard;
+  #menuCard;
+  #helpCard;
+  #statusCard;
+  #convCard;
+  // Three-way display picker for `/display`; null keeps the text answer.
+  #displayCard;
+  // Telegram's `/start` greeting; null keeps the plain text answer.
+  #welcomeCard;
+  // Persists a new display level (a bot-config write owned by the channel).
+  #onPresentationLevelChange;
   #contextHooks = null;
   // Delivery attempts per message id. A failed turn releases its `markSeen` so
   // the next poll can retry, and this counter is what keeps that from becoming
@@ -243,6 +293,8 @@ export class TextHarnessBridge {
   // Who opened the in-flight turn per conversation key, for the same-sender
   // auto-steer lane; and the open coalescing windows awaiting their flush.
   #turnAuthors = new Map();
+  // One-shot stop tokens for the ⏹ button on a running turn's placeholder.
+  #stopTokens = new Map();
   #coalescing = new Map();
   #autoSteerSameSender = false;
   #autoSteerLimit = 0;
@@ -255,7 +307,11 @@ export class TextHarnessBridge {
     state,
     contextEnhancement,
     accessPolicy,
-    thinkingTraces = false,
+    // A channel that knows its display level passes it. Without one, the older
+    // boolean is honoured — `thinkingTraces: true` is the `full` rung — and a
+    // channel that passes neither keeps the compact default.
+    presentationLevel = null,
+    thinkingTraces = null,
     status = createTextBridgeStatus(),
     logger = console,
     replyTimeoutMs = 600_000,
@@ -264,6 +320,17 @@ export class TextHarnessBridge {
     interactionCard = null,
     workspaceCard = null,
     approvalCard = null,
+    modelCard = null,
+    sessionCard = null,
+    presetCard = null,
+    clearCard = null,
+    menuCard = null,
+    helpCard = null,
+    statusCard = null,
+    convCard = null,
+    displayCard = null,
+    welcomeCard = null,
+    onPresentationLevelChange = null,
     approvalTimeoutMs,
     contextHooks = null,
     autoSteerSameSender = false,
@@ -279,7 +346,13 @@ export class TextHarnessBridge {
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
-    this.#thinkingTraces = thinkingTraces;
+    // null means "this channel never opted in": it keeps the pre-level
+    // behaviour exactly (tool lines as `正在使用…`, answer previews, no receipt).
+    // Only a channel that passes a level, or the legacy thinking-traces toggle,
+    // switches to one of the three rungs.
+    this.#presentationLevel = presentationLevel === null || presentationLevel === undefined
+      ? (thinkingTraces === true ? 'full' : thinkingTraces === false ? 'standard' : null)
+      : normalizePresentationLevel(presentationLevel);
     this.#status = status;
     this.#logger = logger;
     this.#replyTimeoutMs = replyTimeoutMs;
@@ -288,6 +361,19 @@ export class TextHarnessBridge {
     this.#interactionCard = interactionCard ?? null;
     this.#workspaceCard = workspaceCard ?? null;
     this.#approvalCard = approvalCard ?? null;
+    this.#modelCard = modelCard ?? null;
+    this.#sessionCard = sessionCard ?? null;
+    this.#presetCard = presetCard ?? null;
+    this.#clearCard = clearCard ?? null;
+    this.#menuCard = menuCard ?? null;
+    this.#helpCard = helpCard ?? null;
+    this.#statusCard = statusCard ?? null;
+    this.#convCard = convCard ?? null;
+    this.#displayCard = displayCard ?? null;
+    this.#welcomeCard = welcomeCard ?? null;
+    this.#onPresentationLevelChange = typeof onPresentationLevelChange === 'function'
+      ? onPresentationLevelChange
+      : null;
     // Opt-in follow-up lanes for channels whose groups run on rapid consecutive
     // posts: fold a same sender's burst into one dispatch, and steer that
     // sender's own mid-turn follow-ups into the in-flight turn instead of
@@ -398,7 +484,7 @@ export class TextHarnessBridge {
     return processing;
   }
 
-  #acceptAcceptedMessage(normalized, messageId, senderId, busyMessageMode) {
+  async #acceptAcceptedMessage(normalized, messageId, senderId, busyMessageMode) {
     if (normalized.kind === 'direct') {
       rememberConnectionTestTarget(
         this.#state,
@@ -475,7 +561,28 @@ export class TextHarnessBridge {
     }
     const collectingBatch = normalized.kind === 'direct'
       && this.#batches.status(key).phase === 'collecting';
-    const commandRunner = collectingBatch ? null : isClearCommand(text) ? runClearCommand
+    // `/menu` is a Telegram-only hub: a summary plus entries into the pickers
+    // this channel already has. An unrenderable or refused card falls through to
+    // the plain text menu, so the command is never a dead end.
+    if (!collectingBatch
+      && isMenuCommand(text)
+      && (normalized.kind !== 'group' || normalized.addressed === true)
+      && await this.#presentMenuHub(normalized, messageId, key)) {
+      return;
+    }
+    // `/clear` throws the conversation context away and cannot be undone, so a
+    // channel that can show a keyboard asks once first. A channel without one (or
+    // a refused card send) runs the command immediately, exactly as before.
+    if (isClearCommand(text)
+      && !collectingBatch
+      && (normalized.kind !== 'group' || normalized.addressed === true)
+      && await this.#presentClearConfirmation(normalized, messageId, key)) {
+      this.#acceptedMessageIds.delete(messageId);
+      return;
+    }
+    const commandRunner = collectingBatch ? null
+      : isMenuCommand(text) ? runMenuCommand
+      : isClearCommand(text) ? runClearCommand
       : isResetCommand(text) ? runResetCommand
       : isHistoryCommand(text) ? runHistoryCommand
       : hasInboundFiles(normalized) ? null : isControlCommand(text)
@@ -684,6 +791,84 @@ export class TextHarnessBridge {
    * is in the Session transcript already. Local notices, command output, and
    * interaction prompts send on unstamped targets and stay readable as room facts.
    */
+  /**
+   * Mint the token behind one turn's ⏹ button.
+   *
+   * Single use and conversation-scoped: a press that arrives after the turn is
+   * gone must not stop whatever runs next in the chat.
+   */
+  #issueStopToken(conversationKey, senderId) {
+    if (typeof conversationKey !== 'string' || !conversationKey) return null;
+    // `full` has no placeholder message to hang a button on.
+    if (!this.#presentationLevel || this.#presentationLevel === 'full') return null;
+    const token = randomBytes(9).toString('base64url');
+    this.#stopTokens.set(token, { conversationKey, senderId: String(senderId ?? '') });
+    while (this.#stopTokens.size > 64) {
+      this.#stopTokens.delete(this.#stopTokens.keys().next().value);
+    }
+    return token;
+  }
+
+  /** Drop a token even when its turn ended without a press. */
+  #retireStopToken(token) {
+    if (token) this.#stopTokens.delete(token);
+  }
+
+  /**
+   * Handle a ⏹ press. Returns false for payloads this bridge did not mint.
+   *
+   * Only the sender who opened the turn may stop it: in a group the button is
+   * visible to everyone.
+   */
+  async #handleStopPress(callback, key) {
+    const match = /^st\|([A-Za-z0-9_-]{8,16})$/u.exec(callback?.data ?? '');
+    if (!match) return false;
+    const token = match[1];
+    const entry = this.#stopTokens.get(token);
+    const allow = (text) => this.#answerInteractionCallback(callback, text);
+    if (!entry || entry.conversationKey !== key) {
+      await allow(t('这个停止按钮已失效，需要停止请发送 /stop。'));
+      return true;
+    }
+    if (entry.senderId && String(callback?.senderId ?? '') !== entry.senderId) {
+      await allow(t('只有发起这个任务的人可以停止它。'));
+      return true;
+    }
+    this.#stopTokens.delete(token);
+    // The toast has to go out immediately (Telegram wants the ack fast), but it
+    // must not claim more than we know yet: the chat gets the real outcome below.
+    await allow(t('已请求停止。'));
+    let result = null;
+    try {
+      // Same options the typed `/stop` uses: without `control` the harness cannot
+      // tell which turn to cancel, and the request silently does nothing.
+      result = await runControlCommand('/stop', this.#harness, this.#state, key, {
+        signal: this.#signal,
+        control: { owner: this, key },
+        deferredDelivery: this.#deferred,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] the ⏹ button could not stop the turn:`,
+        error?.message ?? error,
+      );
+      await this.#bot.sendText(callback?.replyTarget ?? {}, t('停止没有生效，请发送 /stop 重试。'));
+      return true;
+    }
+    // A stop that did not actually cancel anything ("当前聊天没有正在运行的任务。",
+    // "无法安全停止后台任务…") must land in the chat: the toast above already
+    // said "已请求停止", and only the message can correct it. When the turn really
+    // is cancelling, its own "已停止。" is the single notice the reader needs.
+    const stopped = result?.stopped === true;
+    const notice = typeof result?.message === 'string' ? result.message.trim() : '';
+    // The front turn reports its own ending ("已停止。"); a background stop has no
+    // such turn to do it, so its message is the only place that notice can land.
+    if (notice && (!stopped || result?.background === true)) {
+      await this.#bot.sendText(callback?.replyTarget ?? {}, notice);
+    }
+    return true;
+  }
+
   #turnDeliveryTarget(target, conversationKey) {
     if (!target || typeof target !== 'object'
       || typeof conversationKey !== 'string' || !conversationKey) return target;
@@ -1030,6 +1215,19 @@ export class TextHarnessBridge {
           this.#approvals.closeRoute(key),
         ]);
       }
+      // A read-only model/reasoning command may carry a machine-readable
+      // snapshot: present it as a picker card when this channel has one. A
+      // refused or impossible card falls through to the unchanged text path.
+      if (result?.card && await this.#presentModelCard(target, result, key)) {
+        this.#status.lastError = null;
+        return;
+      }
+      // /presetlist may carry the same catalog as a keyboard. A refused or
+      // unrenderable card falls through to the unchanged text listing.
+      if (result?.presetCatalog && await this.#presentPresetCard(target, result, key)) {
+        this.#status.lastError = null;
+        return;
+      }
       for (const reply of result?.messages ?? [result?.message]) {
         if (reply) await this.#bot.sendText(target, reply);
       }
@@ -1125,9 +1323,19 @@ export class TextHarnessBridge {
     // running tool call. Declared outside the try so every exit path (including
     // pre-prompt failures like image parsing) clears the timer.
     let keepaliveTimer = null;
+    // `standard` mode keeps its single placeholder moving during a long silent
+    // tool call; null on every other rung, so their timers are untouched.
+    let progressTimer = null;
+    // The ⏹ token of this turn, if one was minted; retired on every exit path.
+    let stopToken = null;
+    // The compact runner is created inside the try but read by the failure
+    // handler, which lives in the catch: the receipt must survive a throw.
+    let turnProgress = null;
     const stopKeepalive = () => {
       if (keepaliveTimer !== null) clearInterval(keepaliveTimer);
       keepaliveTimer = null;
+      if (progressTimer !== null) clearInterval(progressTimer);
+      progressTimer = null;
     };
     try {
       this.#signal?.throwIfAborted();
@@ -1144,7 +1352,14 @@ export class TextHarnessBridge {
         return;
       }
       const command = text.toLowerCase();
-      if (!hasImages && !hasFiles && command === '/help') {
+      if (!hasImages && !hasFiles && isBareCommand(command, '/help')) {
+        if (hasExtraArguments(command, '/help')) {
+          await this.#bot.sendText(target, t('用法：/help（不带参数）'));
+          return;
+        }
+        // A keyboard channel gets the sectioned card; the exact text below stays
+        // the answer everywhere else (and when the card cannot be delivered).
+        if (await this.#presentHelpCard(target, conversationKey)) return;
         await this.#bot.sendText(target, [
           t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
           '',
@@ -1155,7 +1370,11 @@ export class TextHarnessBridge {
         ].join('\n'));
         return;
       }
-      if (!hasImages && !hasFiles && command === '/status') {
+      if (!hasImages && !hasFiles && isBareCommand(command, '/status')) {
+        if (hasExtraArguments(command, '/status')) {
+          await this.#bot.sendText(target, t('用法：/status（不带参数）'));
+          return;
+        }
         const status = await runStatusCommand({
           descriptor: this.#descriptor,
           harness: this.#harness,
@@ -1163,13 +1382,60 @@ export class TextHarnessBridge {
           conversationKey,
           signal: this.#signal,
         });
+        // A keyboard channel gets the actionable card; the text below stays the
+        // answer everywhere else (and when the card cannot be delivered).
+        if (status.statusSnapshot
+          && await this.#presentStatusCard(
+            target, conversationKey, this.#withDisplayLevel(status.statusSnapshot),
+          )) return;
         await this.#bot.sendText(target, status.message);
         return;
+      }
+      // `/start` is the first thing Telegram sends a new reader; answer it with
+      // a greeting instead of forwarding the literal string to the model.
+      if (!hasImages && !hasFiles && isStartCommand(text)) {
+        if (await this.#presentWelcomeCard(target, conversationKey)) return;
+        await this.#bot.sendText(target, t('已连接 DeepSeek Harness。直接发消息即可，发送 /help 查看全部命令。'));
+        return;
+      }
+      // `/display` is the one place a reader tunes how much of a turn the chat
+      // shows. A keyboard channel gets three buttons; every other channel gets
+      // the same three names as text, so the setting exists everywhere.
+      if (!hasImages && !hasFiles && isBareCommand(command, '/display')
+        && this.#supportsDisplayCommand()) {
+        await this.#runDisplayCommand({ target, command, conversationKey });
+        return;
+      }
+      // Bare /session opens the same picker as /sessionlist when the channel can
+      // carry a keyboard. It goes through the list command so the picker and its
+      // text fallback share one enumeration; the historical usage text stays the
+      // answer for a channel without a card (the dispatch below is skipped).
+      if (!hasImages && !hasFiles && command === '/session'
+        && this.#sessionCard && typeof this.#bot.sendInteractionCard === 'function') {
+        const pickerCommand = await runWorkspaceCommand('/sessionlist', this.#harness, conversationKey);
+        if (pickerCommand && await this.#presentSessionCommand(
+          target, pickerCommand, conversationKey,
+        )) return;
+        if (pickerCommand) {
+          for (const reply of pickerCommand.messages ?? [pickerCommand.message]) {
+            await this.#bot.sendText(target, reply);
+          }
+          return;
+        }
       }
       const workspaceCommand = !hasImages && !hasFiles
         ? await runWorkspaceCommand(text, this.#harness, conversationKey)
         : null;
       if (workspaceCommand && await this.#presentWorkspaceCommand(
+        target, workspaceCommand, conversationKey,
+      )) return;
+      // `/conv` is the *conversation-scoped* workspace; its card is deliberately
+      // separate from `/ws` (which changes the bot default).
+      if (workspaceCommand?.conversationWorkspaceListing
+        && await this.#presentConvCard(
+          target, workspaceCommand.conversationWorkspaceListing, conversationKey,
+        )) return;
+      if (workspaceCommand && await this.#presentSessionCommand(
         target, workspaceCommand, conversationKey,
       )) return;
       if (workspaceCommand) {
@@ -1254,7 +1520,11 @@ export class TextHarnessBridge {
         this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] typing indicator failed:`, error);
       });
       let streamFinished = false;
-      if (this.#thinkingTraces && typeof this.#bot.openThinkingStream === 'function') {
+      const level = this.#presentationLevel;
+      // A running turn's placeholder carries a ⏹ button on channels that can
+      // render one; the token is single-use and bound to this turn's sender.
+      stopToken = this.#issueStopToken(conversationKey, senderId);
+      if (level === 'full' && typeof this.#bot.openThinkingStream === 'function') {
         try {
           stream = await this.#bot.openThinkingStream(this.#turnDeliveryTarget(target, conversationKey));
           thinkingStream = true;
@@ -1269,7 +1539,10 @@ export class TextHarnessBridge {
       if (!stream) {
         if (typeof this.#bot.openDeliveryStream === 'function') {
           try {
-            stream = await this.#bot.openDeliveryStream(this.#turnDeliveryTarget(target, conversationKey));
+            stream = await this.#bot.openDeliveryStream({
+              ...this.#turnDeliveryTarget(target, conversationKey),
+              ...(stopToken ? { stopToken } : {}),
+            });
             semanticStream = true;
           } catch (error) {
             this.#logger.warn?.(
@@ -1289,8 +1562,23 @@ export class TextHarnessBridge {
         }
       }
       const thinkingMode = Boolean(stream
-        && this.#thinkingTraces
+        && level === 'full'
         && typeof stream.sendToolTrace === 'function');
+      // The compact runner behind `standard`: it counts steps and composes the
+      // one line the placeholder is rewritten with. Null for the other rungs, so
+      // their update paths stay exactly as they were.
+      turnProgress = stream && level === 'standard' ? createTurnProgress() : null;
+      // Rewrite the placeholder, but not more than once per window: a burst of
+      // tool events looks the same as its last event, and every extra edit is
+      // rate the final answer may need.
+      let lastProgressPushAt = 0;
+      const pushProgress = async (line) => {
+        if (!stream || !line) return;
+        const now = Date.now();
+        if (now - lastProgressPushAt < PROGRESS_EDIT_INTERVAL_MS) return;
+        lastProgressPushAt = now;
+        await stream.update(semanticStream ? createTextDeliveryBlock(line, 'plain') : line);
+      };
       // What the model sees. A message may carry two texts: `controlText`, the
       // plain body the parsers read, and `content`, the same body decorated for
       // the model — the email channel prefixes the mail headers there, so a
@@ -1367,6 +1655,24 @@ export class TextHarnessBridge {
         }, this.#keepaliveIntervalMs);
         keepaliveTimer.unref?.();
       }
+      // Same reasoning for the compact line: a tool that runs for a minute would
+      // otherwise leave the placeholder frozen at "处理中 · 3 秒", which reads as
+      // a dead bot. The tick only touches the elapsed number.
+      if (turnProgress) {
+        let ticking = false;
+        progressTimer = setInterval(async () => {
+          if (ticking) return;
+          ticking = true;
+          try {
+            await pushProgress(turnProgress.runningText());
+          } catch {
+            // A rejected edit must never end the turn.
+          } finally {
+            ticking = false;
+          }
+        }, PROGRESS_TICK_MS);
+        progressTimer.unref?.();
+      }
       // From here the conversation has a turn in flight that this sender
       // opened: the auto-steer lane keys its authorship decision off this
       // record, and the finally below retires it when the turn settles.
@@ -1410,10 +1716,11 @@ export class TextHarnessBridge {
           signal: this.#signal,
           control: { owner: this, key: conversationKey },
           // Thinking mode needs every update (reasoning + tool calls) in
-          // order; latest mode filters as before. Only thinking mode subscribes
-          // to reasoning updates, so default-mode consumers on other channels
-          // never see them (their progress handlers would render update.text).
-          progressMode: thinkingMode ? 'all' : undefined,
+          // order, and `standard` needs every tool call to count its steps; the
+          // latest-only filter would let a burst collapse into one step. Only
+          // thinking mode subscribes to reasoning updates, so a compact consumer
+          // never sees (nor renders) the model's reasoning text.
+          progressMode: thinkingMode || turnProgress ? 'all' : undefined,
           reasoning: thinkingMode,
           onUpdate: stream ? async (update) => {
             if (thinkingMode) {
@@ -1422,11 +1729,65 @@ export class TextHarnessBridge {
               if (update.type === 'reasoning') {
                 await stream.sendThinking(update.text);
               } else if (update.type === 'tool') {
-                await stream.sendToolTrace(update.name, update.arguments);
+                await stream.sendToolTrace(update.name, update.arguments, update.callId);
+              } else if (update.type === 'tool-result') {
+                // The line stays; only its ending changes, so the reader keeps
+                // one message per call and still sees the outcome.
+                await stream.settleToolTrace?.({
+                  callId: update.callId,
+                  ok: update.errorCode === undefined && update.error === undefined,
+                });
+              } else if (update.type === 'status' && (update.toolName || update.callId)) {
+                // A batched turn (the host did not stream the result live) reports
+                // it as a status frame carrying the tool name and, when the tool
+                // failed, its error text. Same rule as the live branch: an absent
+                // error means success.
+                await stream.settleToolTrace?.({
+                  callId: update.callId,
+                  ok: update.error === undefined,
+                });
+              }
+              return;
+            }
+            if (turnProgress) {
+              // `standard`: one placeholder, rewritten with a two-line summary.
+              // The tool result is not echoed — its payload is the model's
+              // business — only the step's outcome is remembered. Other update
+              // types fall through, so a channel that can preview the answer
+              // keeps doing so while this one already shows the compact line.
+              if (update.type === 'tool') {
+                turnProgress.tool(update.name, update.arguments);
+                await pushProgress(turnProgress.runningText());
+                return;
+              }
+              if (update.type === 'tool-result') {
+                turnProgress.settle({
+                  ok: update.errorCode === undefined && update.error === undefined,
+                });
+                return;
+              }
+              // A batched result (the shape Telegram actually gets) marks the step
+              // failed, so the closing receipt cannot claim a clean run.
+              if (update.type === 'status' && (update.toolName || update.callId)) {
+                turnProgress.settle({ ok: update.error === undefined });
+                await pushProgress(turnProgress.runningText());
+                return;
+              }
+              // Every other update type stops here. `status` frames ("正在整理
+              // 结果…") and the canonical answer text would overwrite the step
+              // line — the reader would watch the summary vanish right before
+              // the receipt. Only the *arrival* of answer text is a signal: it
+              // means the tools are done, so the line switches to 「写回复」.
+              if (update.type === 'text') {
+                turnProgress.writing();
+                await pushProgress(turnProgress.runningText());
               }
               return;
             }
             if (update.type === 'reasoning') return;
+            // `minimal` shows nothing while the turn runs: the reader asked for
+            // the answer, not for the machinery.
+            if (level === 'minimal') return;
             // A carrier that delivers the answer as its own message must not
             // stream that answer into itself first: the reader would see the
             // reply twice, and every preview costs an edit.
@@ -1482,10 +1843,20 @@ export class TextHarnessBridge {
       // log together with the reference id the user is shown.
       let deliveryEvidence = null;
       if (stream) {
+        const answerBlock = semanticStream || thinkingStream
+          ? createTextDeliveryBlock(visibleAnswer, answerFormat)
+          : visibleAnswer;
+        // A stream that keeps a single placeholder can collapse it into a
+        // one-line receipt instead of deleting it, so the reader still sees how
+        // long the turn took and how many steps it cost. Channels that do not
+        // declare the capability keep receiving exactly what they did before.
+        const finalBlock = stream.supportsProgressSummary === true && turnProgress
+          ? { ...(answerBlock && typeof answerBlock === 'object'
+            ? answerBlock
+            : { text: String(answerBlock ?? ''), format: 'plain' }), progressSummary: turnProgress.doneText() }
+          : answerBlock;
         try {
-          const result = await stream.finish(semanticStream || thinkingStream
-            ? createTextDeliveryBlock(visibleAnswer, answerFormat)
-            : visibleAnswer);
+          const result = await stream.finish(finalBlock);
           streamFinished = true;
           deliveryEvidence = result?.deliveryEvidence ?? deliveryEvidence;
           textReceipt = createDeliveryReceipt({
@@ -1616,6 +1987,8 @@ export class TextHarnessBridge {
           ? 'fail'
           : (typeof stream?.finish === 'function' ? 'finish' : null);
         if (!method) return false;
+        // A failed turn leaves no receipt: the error message is its terminal
+        // state, and a stale "已中断" line above it is clutter, not evidence.
         try {
           const result = await stream[method](text);
           return method === 'fail'
@@ -1664,6 +2037,7 @@ export class TextHarnessBridge {
       return error.deliveryReceipt;
     } finally {
       stopKeepalive();
+      this.#retireStopToken(stopToken);
       const inFlight = this.#turnAuthors.get(conversationKey);
       if (inFlight?.turnMessageId === messageId) this.#turnAuthors.delete(conversationKey);
       await Promise.allSettled([
@@ -1967,6 +2341,195 @@ export class TextHarnessBridge {
       });
       if (handled) return;
     }
+    // Model/reasoning pickers own their namespaces too. A press replays the
+    // typed command and repaints the picker in place; anything this picker did
+    // not produce returns false and keeps the old callback paths untouched.
+    if (this.#modelCard && typeof this.#modelCard.handlePress === 'function') {
+      const handled = await this.#modelCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        harness: this.#harness,
+        state: this.#state,
+        signal: this.#signal,
+        accessPolicy: this.#accessPolicy,
+        pendingInteraction: this.#pendingInteractions.has(key)
+          || this.#approvals.hasPending(key),
+        control: { owner: this, key },
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a model picker press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /conv card pins this conversation's workspace. It replays `/conv <path>`
+    // and `/conv clear`, so the card can never change the bot-wide default (/ws).
+    if (this.#convCard && typeof this.#convCard.handlePress === 'function') {
+      const handled = await this.#convCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        switchTo: (command) => this.#runMenuEntry(command, key),
+        clear: () => this.#runMenuEntry('/conv clear', key),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /conv press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The ⏹ button on a running turn: checked first, because its payload carries
+    // no card registry entry to look up.
+    if (typeof callback?.data === 'string' && callback.data.startsWith('st|')) {
+      if (await this.#handleStopPress(callback, key)) return;
+    }
+    // The /start greeting is a launcher: a press replays the command it names and
+    // leaves the card in place.
+    if (this.#welcomeCard && typeof this.#welcomeCard.handlePress === 'function') {
+      const handled = await this.#welcomeCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        run: (command) => this.#runStatusCardEntry(command, key, callback),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /start press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /display picker owns its namespace: a press saves the level and
+    // repaints the three buttons in place. Saving restarts the bot runtime, so
+    // the card repaints before the write — a restart can never leave the reader
+    // looking at a button that contradicts the stored value.
+    if (this.#displayCard && typeof this.#displayCard.handlePress === 'function') {
+      const handled = await this.#displayCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        current: this.#presentationLevel,
+        apply: async (level) => {
+          await this.#applyPresentationLevel(level);
+          return this.#presentationLevel;
+        },
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /display press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /status card refreshes in place and opens the pickers on demand. Its
+    // entries replay typed commands, so nothing here can do more than a command.
+    if (this.#statusCard && typeof this.#statusCard.handlePress === 'function') {
+      const handled = await this.#statusCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        refresh: () => this.#readStatusSnapshot(key),
+        run: (command) => this.#runStatusCardEntry(command, key, callback),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /status press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The sectioned /help card navigates in place; its 「打开控制台」entry hands off
+    // to the /menu hub rather than repainting itself.
+    if (this.#helpCard && typeof this.#helpCard.handlePress === 'function') {
+      const handled = await this.#helpCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        openMenu: () => this.#presentMenuHub(
+          { replyTarget: callback?.replyTarget },
+          null,
+          key,
+        ),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /help press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /menu hub is a launcher: a press replays one command and leaves the hub
+    // in place, so this branch never settles the card.
+    if (this.#menuCard && typeof this.#menuCard.handlePress === 'function') {
+      const handled = await this.#menuCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        run: (command) => this.#runMenuEntry(command, key),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /menu press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /clear confirmation owns its own namespace: 清空 runs the real command,
+    // 取消 does nothing, and anything else keeps falling through to the paths below.
+    if (this.#clearCard && typeof this.#clearCard.handlePress === 'function') {
+      const handled = await this.#clearCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        run: () => runClearCommand('/clear', this.#harness, this.#state, key, {
+          signal: this.#signal,
+        }),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /clear confirmation press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // Agent Preset pickers replay the typed /preset command, so a press can never
+    // invent a switch the command itself would refuse.
+    if (this.#presetCard && typeof this.#presetCard.handlePress === 'function') {
+      const handled = await this.#presetCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        apply: (command, presetKey) => runPresetCommand(
+          command,
+          this.#harness,
+          this.#state,
+          presetKey,
+          { signal: this.#signal },
+        ),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle an Agent Preset card press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // Session pickers are the same kind of stateless command surface; their
+    // adapter owns the nonce registry and the bind-after-claim lifecycle.
+    const sessionPress = this.#sessionCard?.parse?.(callback.data) ?? null;
+    if (sessionPress) return this.#handleSessionCardPress(callback, key);
     const pending = this.#pendingInteractions.get(key);
     const notice = (text) => this.#answerInteractionCallback(callback, text);
     if (!pending) return notice(t('该问题已处理，无需再次选择。'));
@@ -2573,5 +3136,639 @@ export class TextHarnessBridge {
       }
     }
     await this.#approvals.rejectRoute(key).catch(() => 0);
+  }
+
+
+  /**
+   * Present a read-only model/reasoning command result as a picker card.
+   * Returns false so the caller sends the unchanged text listing: a channel
+   * without keyboard support, an unrenderable snapshot or a refused card send
+   * must never lose the command output.
+   */
+  async #presentModelCard(target, result, key) {
+    if (!this.#modelCard || typeof this.#modelCard.present !== 'function') return false;
+    try {
+      return await this.#modelCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey: key,
+        kind: result.card,
+        modelCatalog: result.modelCatalog,
+        reasoningCatalog: result.reasoningCatalog,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present a model picker; `
+        + 'falling back to the text listing:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
+
+  /**
+   * Send the bare /sessionlist (or bare /session) listing as a session picker.
+   * Returns false so the caller keeps the text list: a failed or impossible card
+   * must never lose the listing.
+   */
+  async #presentSessionCommand(target, command, conversationKey) {
+    const listing = command?.sessionListing;
+    if (!listing
+      || typeof this.#sessionCard?.present !== 'function'
+      || typeof this.#bot.sendInteractionCard !== 'function') return false;
+    let currentSessionId = null;
+    try {
+      currentSessionId = typeof this.#state.sessionFor === 'function'
+        ? this.#state.sessionFor(conversationKey)
+        : null;
+    } catch {
+      // A failed read only loses the initial ✓ marker; the card still binds.
+      currentSessionId = null;
+    }
+    try {
+      return await this.#sessionCard.present({
+        target,
+        conversationKey,
+        listing,
+        currentSessionId,
+        bot: this.#bot,
+      }) === true;
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] unable to present the session picker; `
+        + 'falling back to the text list:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
+
+  async #presentPresetCard(target, result, key) {
+    if (!this.#presetCard || typeof this.#presetCard.present !== 'function') return false;
+    try {
+      return await this.#presetCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey: key,
+        presetCatalog: result.presetCatalog,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present an Agent Preset picker; `
+        + 'falling back to the text listing:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
+
+  /**
+   * Ask before running `/clear`.
+   *
+   * Returns true when the confirmation was delivered, which means the caller
+   * must NOT run the command now: the card's 「清空」press runs it instead.
+   * Returns false for any channel that cannot show a keyboard and for a refused
+   * send, so `/clear` keeps its immediate behaviour everywhere else.
+   */
+  async #presentClearConfirmation(message, messageId, key) {
+    if (!this.#clearCard || typeof this.#clearCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    // Nothing bound yet: the command's own message explains that better.
+    let sessionId = null;
+    try {
+      sessionId = typeof this.#state?.sessionFor === 'function'
+        ? this.#state.sessionFor(key)
+        : null;
+    } catch {
+      sessionId = null;
+    }
+    if (typeof sessionId !== 'string' || !sessionId) return false;
+    let workspace = null;
+    try {
+      workspace = typeof this.#harness?.currentConversationWorkspace === 'function'
+        ? this.#harness.currentConversationWorkspace(key)
+        : null;
+      workspace = workspace || (typeof this.#harness?.currentWorkspace === 'function'
+        ? this.#harness.currentWorkspace()
+        : null);
+    } catch {
+      workspace = null;
+    }
+    let presented = false;
+    try {
+      presented = await this.#clearCard.present({
+        bot: this.#bot,
+        target: message.replyTarget,
+        conversationKey: key,
+        workspace: typeof workspace === 'string' ? workspace : null,
+        sessionId,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /clear confirmation; `
+        + 'running /clear immediately:',
+        error?.message ?? error,
+      );
+      presented = false;
+    }
+    if (presented) {
+      // Only now is this message really handled: a refused card leaves the
+      // typed command to run normally, so it must not be marked as consumed.
+      if (typeof this.#state?.markSeen === 'function') await this.#state.markSeen(messageId);
+      this.#status.messagesReceived += 1;
+      this.#status.lastMessageAt = new Date().toISOString();
+      this.#status.lastError = null;
+    }
+    return presented;
+  }
+
+
+  async #presentMenuHub(message, messageId, key) {
+    if (!this.#menuCard || typeof this.#menuCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    const snapshot = {};
+    try {
+      snapshot.workspace = typeof this.#harness?.currentConversationWorkspace === 'function'
+        ? this.#harness.currentConversationWorkspace(key)
+        : null;
+      snapshot.workspace = snapshot.workspace
+        || (typeof this.#harness?.currentWorkspace === 'function'
+          ? this.#harness.currentWorkspace()
+          : null);
+    } catch {
+      snapshot.workspace = null;
+    }
+    try {
+      snapshot.sessionId = typeof this.#state?.sessionFor === 'function'
+        ? this.#state.sessionFor(key)
+        : null;
+    } catch {
+      snapshot.sessionId = null;
+    }
+    let presented = false;
+    try {
+      presented = await this.#menuCard.present({
+        bot: this.#bot,
+        target: message.replyTarget,
+        conversationKey: key,
+        snapshot,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /menu hub; `
+        + 'falling back to the text menu:',
+        error?.message ?? error,
+      );
+      presented = false;
+    }
+    if (presented) {
+      if (typeof this.#state?.markSeen === 'function') await this.#state.markSeen(messageId);
+      this.#status.messagesReceived += 1;
+      this.#status.lastMessageAt = new Date().toISOString();
+      this.#status.lastError = null;
+    }
+    return presented;
+  }
+
+
+  /**
+   * Whether `/display` means anything here.
+   *
+   * The command is advertised only on channels whose catalog entry says so (see
+   * `command-catalog.mjs`): a channel that cannot collapse a turn would accept
+   * the word and then render exactly as before, which is worse than not
+   * offering it.
+   */
+  #supportsDisplayCommand() {
+    return commandsForChannel(this.#descriptor.key)
+      .some((item) => item.name === 'display');
+  }
+
+  /** The level this bridge currently renders turns at. */
+  get presentationLevel() {
+    return this.#presentationLevel;
+  }
+
+  /**
+   * Adopt a level another owner already persisted (the settings page). Rendering
+   * reads it per turn, so the next turn follows immediately.
+   */
+  setPresentationLevel(value) {
+    this.#presentationLevel = normalizePresentationLevel(value, this.#presentationLevel);
+  }
+
+  /**
+   * `/display` — read or change how much of a turn this chat shows.
+   *
+   * Bare: the picker card when the channel carries a keyboard, the same three
+   * options as text otherwise. With an argument: switch directly and confirm,
+   * so a phone user can type `/display 极简` without opening a card.
+   */
+  async #runDisplayCommand({ target, command, conversationKey }) {
+    const argument = command.slice('/display'.length).trim();
+    if (!argument) {
+      if (this.#displayCard
+        && typeof this.#bot?.sendInteractionCard === 'function'
+        && await this.#displayCard.present({
+          bot: this.#bot,
+          target,
+          conversationKey,
+          current: this.#presentationLevel ?? DEFAULT_PRESENTATION_LEVEL,
+        })) return;
+      await this.#bot.sendText(target, this.#displayText());
+      return;
+    }
+    const level = parsePresentationLevelInput(argument);
+    if (!level) {
+      await this.#bot.sendText(target, t('用法：/display 极简、/display 标准 或 /display 全面'));
+      return;
+    }
+    try {
+      await this.#applyPresentationLevel(level);
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not save the display level:`,
+        error?.message ?? error,
+      );
+      await this.#bot.sendText(target, t('显示挡位保存失败，请稍后重试。'));
+      return;
+    }
+    await this.#bot.sendText(target, t('显示挡位已设为「{level}」。', {
+      level: presentationLevelLabel(level),
+    }));
+  }
+
+  /**
+   * Persist a new level. The channel writes its own bot config and restarts the
+   * runtime, so the value is claimed locally first: the reply the caller sends
+   * after this returns already describes the new state.
+   */
+  async #applyPresentationLevel(level) {
+    const previous = this.#presentationLevel;
+    // A channel that never opted in still reads as the compact default, so
+    // choosing 「标准」 there must persist rather than look like a no-op.
+    const current = previous ?? DEFAULT_PRESENTATION_LEVEL;
+    const next = normalizePresentationLevel(level, current);
+    if (next === current) return;
+    this.#presentationLevel = next;
+    if (!this.#onPresentationLevelChange) return;
+    try {
+      await this.#onPresentationLevelChange(next);
+    } catch (error) {
+      this.#presentationLevel = previous;
+      throw error;
+    }
+  }
+
+  /** The text answer for `/display` on a channel without a card. */
+  #displayText() {
+    const current = presentationLevelLabel(this.#presentationLevel ?? DEFAULT_PRESENTATION_LEVEL);
+    return [
+      t('🎛 显示挡位：{level}', { level: current }),
+      '',
+      t('极简  只看最终答案'),
+      t('标准  一条进度消息，结束时收成一行'),
+      t('全面  思考与工具调用逐条显示'),
+      '',
+      t('发送 /display 极简、/display 标准 或 /display 全面 切换。'),
+    ].join('\n');
+  }
+
+  async #presentHelpCard(target, conversationKey) {
+    if (!this.#helpCard || typeof this.#helpCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    let sections = [];
+    try {
+      sections = commandHelpSections(this.#descriptor.key);
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not build the /help sections:`,
+        error?.message ?? error,
+      );
+      return false;
+    }
+    if (sections.length === 0) return false;
+    try {
+      return await this.#helpCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey,
+        sections,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /help card; `
+        + 'falling back to the text help:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
+
+  /**
+   * Send the `/status` card (Telegram only).
+   * Returns true when it was delivered; false keeps the text path in charge.
+   */
+  async #presentStatusCard(target, conversationKey, snapshot) {
+    if (!this.#statusCard || typeof this.#statusCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    try {
+      return await this.#statusCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey,
+        snapshot,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /status card; `
+        + 'falling back to the text status:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
+
+  /**
+   * Send the `/conv` card (Telegram only). Returns true when it was delivered.
+   * A channel without a keyboard, an unrenderable listing or a refused send keeps
+   * the caller's text output, so `/conv` is never a dead end.
+   */
+  async #presentConvCard(target, listing, conversationKey) {
+    if (!this.#convCard || typeof this.#convCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    try {
+      return await this.#convCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey,
+        listing,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /conv card; `
+        + 'falling back to the text output:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
+
+  /**
+   * Replay one `/menu` entry's command through the same runners the typed
+   * command uses, so the hub can never invent behaviour a command lacks.
+   */
+  async #runMenuEntry(command, key) {
+    const options = { signal: this.#signal };
+    // `/help` and `/status` are answered by the bridge itself, never a runner:
+    // resolve them first so a generic runner cannot claim them.
+    if (/^\/help$/iu.test(command)) {
+      return {
+        handled: true,
+        message: [
+          t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
+          '',
+          ...commandHelpLines(this.#descriptor.key),
+        ].join('\n'),
+      };
+    }
+    if (/^\/status$/iu.test(command)) {
+      const status = await runStatusCommand({
+        descriptor: this.#descriptor,
+        harness: this.#harness,
+        state: this.#state,
+        conversationKey: key,
+        signal: this.#signal,
+      });
+      return { handled: true, message: status.message };
+    }
+    let result = null;
+    if (isHistoryCommand(command)) {
+      result = await runHistoryCommand(command, this.#harness, this.#state, key, options);
+    } else if (isModelCommand(command)) {
+      result = await runModelCommand(command, this.#harness, this.#state, key, options);
+    } else if (isPresetCommand(command)) {
+      result = await runPresetCommand(command, this.#harness, this.#state, key, options);
+    } else if (isControlCommand(command)) {
+      result = await runControlCommand(command, this.#harness, this.#state, key, options);
+    } else if (isWorkspaceCommand(command)) {
+      result = await runWorkspaceCommand(command, this.#harness, key, options);
+    }
+    // `/help` and `/status` are answered by the bridge itself, not a runner.
+    if (!result?.handled) {
+      if (/^\/help$/iu.test(command)) {
+        return {
+          handled: true,
+          message: [
+            t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
+            '',
+            ...commandHelpLines(this.#descriptor.key),
+          ].join('\n'),
+        };
+      }
+      if (/^\/status$/iu.test(command)) {
+        const status = await runStatusCommand({
+          descriptor: this.#descriptor,
+          harness: this.#harness,
+          state: this.#state,
+          conversationKey: key,
+          signal: this.#signal,
+        });
+        return { handled: true, message: status.message };
+      }
+      return null;
+    }
+    return result;
+  }
+
+
+  /**
+   * Send the `/start` greeting. Returns false when the channel has no keyboard
+   * (the caller then answers with one sentence of text).
+   */
+  async #presentWelcomeCard(target, conversationKey) {
+    if (!this.#welcomeCard || typeof this.#welcomeCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    try {
+      return await this.#welcomeCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey,
+        levelLabel: this.#presentationLevel
+          ? presentationLevelLabel(this.#presentationLevel)
+          : null,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /start greeting:`,
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Replay one `/status` card entry.
+   *
+   * Almost every entry re-runs the typed command. `/display` is different: it is
+   * itself a card, so it opens the picker directly and reports success without a
+   * message — which is exactly what the status card expects from `run`.
+   */
+  async #runStatusCardEntry(command, key, callback) {
+    if (/^\/display$/iu.test(command)) {
+      if (!this.#supportsDisplayCommand()) return null;
+      await this.#runDisplayCommand({
+        target: callback?.replyTarget ?? {},
+        command: '/display',
+        conversationKey: key,
+      });
+      return { handled: true };
+    }
+    // `/menu` is a card too (and has no text runner), so a card entry that opens
+    // it has to present the hub instead of falling through to "cannot open".
+    if (/^\/menu$/iu.test(command) && this.#menuCard
+      && typeof this.#bot?.sendInteractionCard === 'function') {
+      const presented = await this.#presentMenuHub({ replyTarget: callback?.replyTarget ?? {} }, null, key);
+      if (presented) return { handled: true };
+    }
+    return this.#runMenuEntry(command, key);
+  }
+
+  /** Read the current /status snapshot without sending anything. */
+  /**
+   * Add this bridge's display level to a status snapshot.
+   *
+   * The status text is shared by every channel and pinned byte-for-byte, so the
+   * level rides only on the card snapshot (Telegram renders it; other channels
+   * never see this function).
+   */
+  #withDisplayLevel(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return snapshot;
+    return Object.freeze({
+      ...snapshot,
+      presentationLevel: this.#presentationLevel ?? DEFAULT_PRESENTATION_LEVEL,
+    });
+  }
+
+  async #readStatusSnapshot(conversationKey) {
+    try {
+      const status = await runStatusCommand({
+        descriptor: this.#descriptor,
+        harness: this.#harness,
+        state: this.#state,
+        conversationKey,
+        signal: this.#signal,
+      });
+      return this.#withDisplayLevel(status?.statusSnapshot ?? null);
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not read a /status refresh:`,
+        error?.message ?? error,
+      );
+      return null;
+    }
+  }
+
+
+  /**
+   * Drop this conversation's Session binding (the 解绑 row).
+   *
+   * Mirrors the typed `/new` minus the prompt: the binding is cleared and the
+   * context anchors are reset, because those describe the session being released.
+   * Returns the receipt the card shows in place of the list.
+   */
+  async #releaseSessionBinding(key) {
+    if (typeof this.#state?.clearSession !== 'function') {
+      return { notice: t('当前机器人没有可用的会话状态。') };
+    }
+    await this.#state.clearSession(key);
+    if (this.#contextHooks?.onSessionCleared) {
+      try {
+        await this.#contextHooks.onSessionCleared(key);
+      } catch (error) {
+        this.#logger.warn?.(
+          `[dsh-im:${this.#descriptor.key}] failed to reset context anchors after a card unbind:`,
+          error?.message ?? error,
+        );
+      }
+    }
+    return {
+      text: t('已解绑会话。下一条消息会自动开启新会话。'),
+      notice: t('已解绑。'),
+    };
+  }
+
+
+  /** Start a fresh Session here (the 新会话 row), exactly as `/new` does. */
+  async #startNewSession(key) {
+    if (typeof this.#state?.clearSession !== 'function') {
+      return { notice: t('当前机器人没有可用的会话状态。') };
+    }
+    await this.#state.clearSession(key);
+    if (this.#contextHooks?.onSessionCleared) {
+      try {
+        await this.#contextHooks.onSessionCleared(key);
+      } catch (error) {
+        this.#logger.warn?.(
+          `[dsh-im:${this.#descriptor.key}] failed to reset context anchors after a card /new:`,
+          error?.message ?? error,
+        );
+      }
+    }
+    return {
+      text: t('已开启新会话。请发送你的问题。'),
+      notice: t('已开启新会话。'),
+    };
+  }
+
+
+  async #handleSessionCardPress(callback, key) {
+    if (this.#signal?.aborted) return;
+    const notice = (text) => this.#answerInteractionCallback(callback, text);
+    const kind = callback.kind === 'group' ? 'group' : 'direct';
+    const decision = evaluateInboundAccess(this.#accessPolicy, {
+      conversationType: kind,
+      senderIds: [cleanText(callback.senderId)].filter(Boolean),
+      isCommand: true,
+    });
+    if (!decision.allowed) return notice(t(COMMAND_PERMISSION_DENIED_MESSAGE));
+    try {
+      await this.#sessionCard.handlePress(callback, {
+        key,
+        bot: this.#bot,
+        answer: notice,
+        currentSessionId: () => {
+          try {
+            return typeof this.#state.sessionFor === 'function'
+              ? this.#state.sessionFor(key)
+              : null;
+          } catch {
+            return null;
+          }
+        },
+        // Reuse the typed binding command so adoption, workspace validation and
+        // every failure wording come from one place.
+        bind: (sessionId) => runWorkspaceCommand(
+          `/session ${sessionId}`, this.#harness, key,
+        ),
+        // 解绑 drops the binding only; 新会话 runs the same path as the typed
+        // command, including the context-anchor reset, so the card never has its
+        // own half-version of either.
+        release: () => this.#releaseSessionBinding(key),
+        startNew: () => this.#startNewSession(key),
+      });
+    } catch (error) {
+      this.#logger.error?.(
+        `[dsh-im:${this.#descriptor.key}] failed to handle a session card press:`,
+        error,
+      );
+      await notice(t('这个会话列表已过期，请重新发送 /sessionlist 或 /session。'));
+    }
   }
 }

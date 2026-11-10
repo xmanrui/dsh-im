@@ -860,6 +860,9 @@ export class HarnessReplyTracker {
           pushUpdate({
             type: 'status',
             text: t('正在整理结果…'),
+            // The call id travels with the batched result as well: without it a
+            // consumer can only guess which trace line this result belongs to.
+            ...(callId ? { callId } : {}),
             ...(toolName ? { toolName } : {}),
             ...(error ? { error } : {}),
           });
