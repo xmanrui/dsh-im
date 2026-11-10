@@ -419,7 +419,11 @@ test('the combined settings card saves cadence and the send limit through their 
   });
   t.after(() => act(() => renderer.unmount()));
   await act(async () => {
-    renderer.root.findByType('select').props.onChange({ target: { value: '7' } });
+    // The card now leads with the display-level select, so the cadence select is
+    // the second one in document order.
+    const selects = renderer.root.findAllByType('select');
+    assert.equal(selects.length, 2);
+    selects[1].props.onChange({ target: { value: '7' } });
   });
   await act(async () => {
     renderer.root.findAllByProps({ type: 'checkbox' })[1].props.onChange({ target: { checked: false } });
@@ -605,7 +609,10 @@ test('cancel() drops the pending window timer instead of sending the held frame 
 
   stream.cancel();
   await advance(t, 30_000);
-  assert.deepEqual(events, ['edit 1. one'], 'a cancelled turn must not rewrite the placeholder later');
+  // The pending frame is dropped, and the placeholder (with any ⏹ keyboard) is
+  // deleted so a cancelled turn leaves nothing to click.
+  assert.deepEqual(events, ['edit 1. one', 'delete placeholder'],
+    'a cancelled turn drops its placeholder instead of rewriting it later');
 });
 
 test('a window that expired unseen is cleared, so its overdue timer cannot release the next frame', async (t) => {

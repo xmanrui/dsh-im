@@ -93,6 +93,21 @@ export function ThinkingTracesSettings({
       setSaving(false);
     }
   };
+  const levelEndpoint = endpoints?.setPresentationLevel;
+  const storedLevel = account.presentationLevel ?? 'standard';
+  const commitLevel = async (presentationLevel) => {
+    if (typeof rpcCall !== 'function' || !levelEndpoint) return;
+    setSaving(true);
+    try {
+      const response = await rpcCall(levelEndpoint, { botId: account.botId, presentationLevel });
+      if (response && response.ok === false) throw new Error(response.error?.message ?? '请求失败');
+      await onChanged?.({ silent: true });
+    } catch {
+      // The stored level stays authoritative; the next reload shows it again.
+    } finally {
+      setSaving(false);
+    }
+  };
   const sendLimitEndpoint = endpoints?.setSendLimit;
   const commitSendLimit = async (sendLimitPerMinute) => {
     if (typeof rpcCall !== 'function' || !sendLimitEndpoint) return;
@@ -109,6 +124,21 @@ export function ThinkingTracesSettings({
   };
   return h('div', { className: 'dim-accountSettings' },
     h('h4', { className: 'dim-accountSettingsTitle' }, '会话行为'),
+    h('label', { className: 'dim-accountSettingsRow' },
+      h('span', { className: 'dim-accountSettingsText' },
+        h('span', { className: 'dim-accountSettingsLabel' }, '过程展示挡位'),
+        h('span', { className: 'dim-accountSettingsHelp' },
+          '极简只看答案；标准用一条进度消息，结束时收成一行；全面逐条显示思考与工具调用')),
+      h('select', {
+        className: 'dim-accountSettingsSelect',
+        value: storedLevel,
+        disabled: Boolean(busy) || saving,
+        onChange: (event) => { void commitLevel(event.target.value); },
+      }, [
+        { value: 'minimal', label: '极简' },
+        { value: 'standard', label: '标准' },
+        { value: 'full', label: '全面' },
+      ].map((option) => h('option', { key: option.value, value: option.value }, option.label)))),
     h('label', { className: 'dim-accountSettingsRow' },
       h('span', { className: 'dim-accountSettingsText' },
         h('span', { className: 'dim-accountSettingsLabel' }, '思考过程留痕'),

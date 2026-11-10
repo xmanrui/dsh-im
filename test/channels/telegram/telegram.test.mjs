@@ -263,11 +263,12 @@ test('Telegram API registers the command menu and commands-type menu button', as
 });
 
 test('Telegram command menu follows the host language at runtime', () => {
-  assert.equal(TELEGRAM_COMMAND_MENU[0].description, '开启一个全新会话（可带标题）');
+  // `/menu` leads the native menu: it is the shortest path to every picker.
+  assert.deepEqual(TELEGRAM_COMMAND_MENU[0], { command: 'menu', description: '打开控制台菜单' });
   assert.equal(TELEGRAM_COMMAND_MENU.some(({ command }) => command === 'version'), true);
   setImHostLanguage('en');
   try {
-    assert.equal(telegramCommandMenu()[0].description, 'Start a brand-new session (with an optional title)');
+    assert.equal(telegramCommandMenu()[0].description, 'Open the console menu');
   } finally {
     setImHostLanguage('zh');
   }
@@ -1424,7 +1425,7 @@ test('Telegram bridge ignores unaddressed groups and streams direct replies', as
     },
   };
   const state = memoryState();
-  const bridge = new TelegramHarnessBridge({ bot, harness, state });
+  const bridge = new TelegramHarnessBridge({ bot, harness, state, presentationLevel: 'standard' });
   await bridge.accept({
     messageId: '1', senderId: 'u1', kind: 'group', conversationId: 'g1', content: 'ignored',
     addressed: false, replyTarget: {},
@@ -1437,7 +1438,11 @@ test('Telegram bridge ignores unaddressed groups and streams direct replies', as
     connectionTestTarget: { chatId: 88 },
   });
   assert.equal(askCount, 1);
-  assert.deepEqual(updates, ['正在使用搜索…', '处理中']);
+  // Behaviour change (5.10.1-wings.2): the default rung is `standard`, so the
+  // tool update paints the compact summary line. The status/text frame keeps
+  // flowing through the old path.
+  assert.equal(updates.length, 1, 'status frames do not overwrite the compact step line');
+  assert.match(updates[0], /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 搜索$/);
   assert.deepEqual(sent, ['完成']);
   await bridge.sendConnectionTest('card test');
   assert.equal(sent.at(-1), 'card test');
@@ -2225,7 +2230,9 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
       const messageId = nextOutboundMessageId;
       nextOutboundMessageId += 1;
       sent.push({ text, replyMarkup });
-      if (replyMarkup) {
+      // The placeholder now carries the ⏹ button; only the question card (its
+      // payloads start with `q|`) is the one to press here.
+      if (replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data?.startsWith('q|')) {
         cardMessageId = messageId;
         // Press the second option (生产环境) exactly as a client would.
         pressedData = replyMarkup.inline_keyboard[1][0].callback_data;
@@ -2270,7 +2277,10 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
   const runtime = new TelegramRuntime({
     config: {
       botId: 'telegram_card',
-      thinkingTraces: false,
+      // `minimal` keeps this test on the placeholder lifecycle it was written
+      // for (one message, dropped before the answer); the compact receipt is
+      // covered by presentation-levels.test.mjs L12.
+      presentationLevel: 'minimal',
       platformId: '123456789',
       username: 'HarnessBot',
     },
@@ -2298,7 +2308,9 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
 
     // The question ships as a keyboard card, one button per option, each carrying
     // the presentation nonce alongside its indexes.
-    const card = sent.find((entry) => entry.replyMarkup);
+    // The placeholder also carries a keyboard now (⏹), so pick the question card
+    // by its payload rather than by "has markup".
+    const card = sent.find((entry) => entry.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data?.startsWith('q|'));
     assert.ok(card, 'the question must be delivered with an inline keyboard');
     const rows = card.replyMarkup.inline_keyboard;
     assert.deepEqual(rows.map((row) => row[0].text), ['测试环境', '生产环境']);
@@ -2404,7 +2416,7 @@ test('Telegram private placeholder streams keep controls responsive and ordinary
         logger: { warn() {} },
       });
       const bridge = new TelegramHarnessBridge({
-        bot: client, state, thinkingTraces: false,
+        bot: client, state, presentationLevel: 'standard',
         harness: { workspaceSession: () => session },
         logger: { warn() {}, error() {} },
       });
@@ -2435,9 +2447,14 @@ test('Telegram private placeholder streams keep controls responsive and ordinary
           assert.deepEqual(sent.map((entry) => entry.text).filter((text) => !/已排队/.test(text)),
             ['正在处理…', 'final answer', '正在处理…', 'follow-up answer'],
             'every turn answers in its own message');
-          assert.deepEqual(edits.map((entry) => entry.messageId), [901],
-            'progress stays on the placeholder');
-          assert.deepEqual(deleted, [901, 904], 'every finished turn drops its placeholder');
+          // Default `standard`: progress and the closing receipt both stay on
+          // each turn's own placeholder, so no message is added per step.
+          assert.ok(edits.length >= 2, 'each turn writes its own placeholder');
+          assert.ok(edits.every((entry) => [901, 904].includes(entry.messageId)),
+            'progress stays on the turn’s own placeholder');
+          assert.ok(edits.some((entry) => /^✅ 完成 · /.test(entry.text)),
+            'a finished turn collapses its placeholder into a receipt');
+          assert.deepEqual(deleted, [], 'the placeholder becomes the receipt instead of being dropped');
         } else {
           await bounded(bridge.accept(incoming(101, action === 'stop' ? '/stop' : '/steer add ANDROID_OK')),
             'control command waited for the ordinary prompt queue');
@@ -2452,9 +2469,15 @@ test('Telegram private placeholder streams keep controls responsive and ordinary
           assert.ok(sent.some(({ text }) => text.includes(action === 'stop' ? '已请求停止当前任务' : '已提交补充指令')));
           assert.equal(sent.at(-1).text, action === 'stop' ? '已停止。' : 'final answer',
             'the terminal message is a new message, not a placeholder edit');
-          assert.deepEqual(edits.map((entry) => entry.messageId), [901],
+          assert.ok(edits.length >= 1, 'progress stays on the placeholder');
+          assert.ok(edits.every((entry) => entry.messageId === 901),
             'progress stays on the placeholder');
-          assert.deepEqual(deleted, [901], 'the finished turn drops its placeholder');
+          // A steered turn still finishes, so its placeholder becomes the
+          // receipt; a stopped one ends in the failure path, which drops it.
+          assert.deepEqual(deleted, action === 'stop' ? [901] : [],
+            action === 'stop'
+              ? 'the stopped turn drops its placeholder'
+              : 'the placeholder becomes the receipt instead of being dropped');
         }
         assert.equal(drafts.length, 0);
       } finally {
@@ -2477,7 +2500,7 @@ test('Telegram private placeholder creation failure still delivers the final ans
     },
   });
   const bridge = new TelegramHarnessBridge({
-    bot: client, state: memoryState(), thinkingTraces: false,
+    bot: client, state: memoryState(),
     harness: { createSession: async () => 'session-fallback', ask: async () => { asks += 1; return 'final'; } },
     logger: { warn() {}, error() {} },
   });

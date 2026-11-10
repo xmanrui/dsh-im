@@ -4,12 +4,23 @@ import { isClearCommand } from './clear-command.mjs';
 import { isControlCommand } from './control-command.mjs';
 import { isHistoryCommand } from './history-command.mjs';
 import { isModelCommand } from './model-command.mjs';
+import { isMenuCommand } from './menu-command.mjs';
 import { isPresetCommand } from './preset-command.mjs';
 import { isPlanCommand, isGoalCommand } from './plan-goal-command.mjs';
 import { isResetCommand } from './reset-command.mjs';
 import { isWorkspaceCommand } from './workspace-command.mjs';
 
 const SIMPLE_TEXT_COMMANDS = new Set(['/help', '/status', '/new']);
+// Only the bare command: the runtime strips this bot's own `@mention` before the
+// bridge sees the text, so accepting any suffix here would let `/start@other_bot`
+// wake this bot in a group.
+const START_COMMAND = /^\/start(?=$|\s)/iu;
+
+/** Telegram's first-contact command; answered locally by every channel. */
+export function isStartCommand(text) {
+  if (typeof text !== 'string') return false;
+  return START_COMMAND.test(text.trim());
+}
 
 /**
  * Match only commands that the shared bridges already execute locally.
@@ -28,8 +39,13 @@ export function isSharedLocalCommand(text, {
     isControlCommand(command)
     || isModelCommand(command)
     || isPresetCommand(command)
+    || isMenuCommand(command)
+    // `/display` is answered by the bridge from its own state, never forwarded
+    // to the model, so it belongs to the same family.
+    || /^\/display(?=$|\s)/iu.test(command)
   )) return true;
   if (hasImages || hasFiles) return false;
+  if (isStartCommand(command)) return true;
   return SIMPLE_TEXT_COMMANDS.has(command.toLowerCase())
     || isWorkspaceCommand(command)
     || isCompactCommand(command)
