@@ -2,6 +2,7 @@ import { captureGroupHistory, groupHistoryEntry } from '../shared/group-history.
 import { extractConnectionEvidence, createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
 import { createEditableMessageStream, splitMessageText } from '../shared/editable-message-stream.mjs';
 import { chunkMarkdownText } from '../shared/markdown-chunks.mjs';
+import { renderPipeTablesAsCode } from '../shared/markdown-tables.mjs';
 import { createTextDeliveryBlock } from '../shared/semantic/delivery.mjs';
 import { fetchFileStream } from '../shared/file-download.mjs';
 import { fetchImageBuffer } from '../shared/image-prompt.mjs';
@@ -443,7 +444,11 @@ export class DiscordBotClient {
   async #sendText(target, text, markdown) {
     const notice = !this.#deliveredNotices.has(target) && target?.notice
       ? String(target.notice) : null;
-    const chunks = (markdown ? chunkMarkdownText : splitMessageText)(notice ? `${notice}\n\n${text}` : text, 1_900);
+    // Discord has no table syntax; a pipe table would arrive as collapsed plain
+    // text. Render it as monospace rows before chunking so a table is never
+    // split between its header and its body.
+    const body = markdown ? renderPipeTablesAsCode(text) : text;
+    const chunks = (markdown ? chunkMarkdownText : splitMessageText)(notice ? `${notice}\n\n${body}` : body, 1_900);
     const providerMessageIds = [];
     for (const [index, chunk] of chunks.entries()) {
       const result = await this.#api.createMessage({
@@ -494,6 +499,10 @@ export class DiscordBotClient {
       ? String(target.notice) : null;
     const decorate = (content) => notice ? `${notice}\n\n${content}` : content;
     const stream = createEditableMessageStream({
+      // Discord markdown needs structure-aware cuts: chunkMarkdownText closes a
+      // fenced code block on every chunk, so a rendered table cannot leak an
+      // opening fence into the next message.
+      split: chunkMarkdownText,
       limit: notice ? 1_800 : 1_900,
       create: async (content) => {
         const message = await this.#api.createMessage({
@@ -518,7 +527,16 @@ export class DiscordBotClient {
       }),
       messageIdForResult: (message) => message?.id,
     });
-    return stream.start();
+    await stream.start();
+    // Convert on the full body the stream is about to cut, not on each chunk:
+    // a table split by the chunker would lose its alignment row.
+    return {
+      get messageId() { return stream.messageId; },
+      get providerMessageIds() { return stream.providerMessageIds; },
+      update: (text) => stream.update(renderPipeTablesAsCode(text)),
+      finish: (text) => stream.finish(renderPipeTablesAsCode(text)),
+      cancel: () => stream.cancel(),
+    };
   }
 
   #operationSignal(signal) {

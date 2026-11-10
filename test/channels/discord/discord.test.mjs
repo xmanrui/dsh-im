@@ -1965,3 +1965,48 @@ test('discord synced approval accepts the DM recipient, never the channel id as 
     assert.equal(result.value.outcome, 'allowed-once');
   } finally { await runtime.stop(); }
 });
+
+test('Discord bot client renders a pipe table as a fenced code block', async () => {
+  const creates = [];
+  const api = {
+    async createMessage(options) {
+      creates.push(options);
+      return { id: '888888888888888895' };
+    },
+  };
+  const client = new DiscordBotClient({ api });
+  await client.sendDelivery({ channelId: '222222222222222295' }, {
+    kind: 'text',
+    format: 'markdown',
+    text: 'Summary:\n\n| Name | Age |\n| --- | --- |\n| Ann | 4 |',
+  });
+  assert.equal(creates.length, 1);
+  assert.match(creates[0].content, /^Summary:\n\n```\n\| Name \| Age \|\n\| ---- \| --- \|\n\| Ann {2}\| 4 {3}\|\n```$/u);
+});
+
+test('Discord streaming keeps every rendered table fence closed across chunks', async () => {
+  const creates = [];
+  const edits = [];
+  const api = {
+    async createMessage(options) {
+      creates.push(options.content);
+      return { id: `88888888888888889${creates.length}` };
+    },
+    async editMessage(options) {
+      edits.push(options.content);
+      return { id: options.messageId };
+    },
+  };
+  const client = new DiscordBotClient({ api });
+  const rows = Array.from({ length: 120 }, (_, index) => `| row-${index} | value-${index} |`);
+  const table = ['| key | value |', '| --- | --- |', ...rows].join('\n');
+  const stream = await client.openStream({ channelId: '222222222222222296' });
+  await stream.finish(`${'intro line\n'.repeat(40)}${table}`);
+  const messages = [...creates.slice(1), ...edits].filter((content) => content.includes('```'));
+  assert.ok(messages.length >= 2, 'the long table must be split into multiple messages');
+  for (const content of messages) {
+    const fences = content.match(/```/gu) ?? [];
+    assert.equal(fences.length % 2, 0, `unbalanced fence in: ${content.slice(0, 80)}`);
+  }
+  assert.ok(messages.some((content) => content.includes('| key')) && messages.some((content) => content.includes('row-119')));
+});
