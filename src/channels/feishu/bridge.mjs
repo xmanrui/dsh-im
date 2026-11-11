@@ -199,11 +199,17 @@ const ARCHIVED_COMMAND = /^\/archived(?:\s+(on|off))?$/i;
 /** Matches fast card commands that should not be queued behind a running task. */
 const CARD_COMMAND = /^\/(?:m(?:enu)?|new|help|status|compact|clear|(?:sessionlist|sessions)(?:\s|$)|workspacelist|workspaces|wsl|watchlist|archived(?:\s+(on|off))?)$/i;
 
-/** Map a Feishu card action to the command it executes, or null for a reply. */
+/**
+ * Map a Feishu card action to the command it executes.
+ * `null` means a known non-command interaction (approval/question reply);
+ * `undefined` means an unrecognized action, which must stay command-gated and
+ * fail closed for command allowlists instead of becoming an ordinary reply.
+ */
 function commandIdForFeishuAction(action) {
-  if (typeof action !== 'string' || !action) return null;
+  if (typeof action !== 'string' || !action) return undefined;
   if (action.startsWith('approve:') || action.startsWith('reject:')
-    || action.startsWith('answer:') || action.startsWith('answerCustom:')) return null;
+    || action.startsWith('answer:') || action.startsWith('answerCustom:')
+    || action === 'repair_verify') return null;
   if (action === 'sessions' || /^sessions:\d+$/u.test(action)) return 'sessionlist';
   if (action === 'workspaces') return 'workspacelist';
   if (action === 'watchlist') return 'watchlist';
@@ -220,7 +226,8 @@ function commandIdForFeishuAction(action) {
   if (action === 'steer' || action.startsWith('steer:')) return 'steer';
   if (action === 'presets') return 'presetlist';
   if (action === 'models' || /^models:\d+$/u.test(action)) return 'models';
-  if (action === 'reasoning' || action === 'reasoninglist') return 'reasoning';
+  if (action === 'reasoning') return 'reasoning';
+  if (action === 'reasoninglist') return 'reasoninglist';
   if (action === 'status') return 'status';
   if (action === 'history') return 'history';
   if (action === 'help') return 'help';
@@ -232,7 +239,7 @@ function commandIdForFeishuAction(action) {
   if (action.startsWith('workspace:')) return 'workspace';
   if (action.startsWith('unwatch:')) return 'unwatch';
   if (action.startsWith('watch:')) return 'watch';
-  return null;
+  return undefined;
 }
 
 // ── Step push (分步直推) limits ──────────────────────────────────────────────

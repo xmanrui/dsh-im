@@ -13724,4 +13724,9 @@ test('Feishu card actions enforce per-command permissions instead of the coarse 
   await bridge.waitForIdle();
   assert.equal(fixture.sessions.size, 0, 'a card command outside the list is refused');
   assert.equal(JSON.parse(sent.at(-1).content).text, COMMAND_PERMISSION_DENIED_MESSAGE);
+
+  await bridge.onCardAction(cardActionEvent('om_card_1', 'unknown_future_button', 'ou_member'));
+  await bridge.waitForIdle();
+  assert.equal(JSON.parse(sent.at(-1).content).text, COMMAND_PERMISSION_DENIED_MESSAGE,
+    'an unmapped card action fails closed for a command allowlist');
 });

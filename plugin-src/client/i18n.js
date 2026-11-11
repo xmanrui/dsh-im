@@ -231,6 +231,7 @@ const EN = Object.freeze({
   '仅指定命令': 'Selected commands only',
   '禁止命令': 'No commands',
   '已选择 {count} 个命令': '{count} commands selected',
+'已选择 0 个命令（等于禁止全部命令）': '0 commands selected (equivalent to no commands)',
   '全选': 'Select all',
   '非白名单用户': 'Non-allowlisted users',
   '非白名单用户不能发送普通消息；只有勾选的命令可以被执行。': 'Non-allowlisted users cannot send regular messages; only the checked commands can be run.',

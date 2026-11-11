@@ -179,8 +179,3 @@ export function normalizeAllowedCommands(value) {
   }
   return Object.freeze(commands);
 }
-
-/** Whether an id is one of the catalog commands. */
-export function isCommandPermissionId(value) {
-  return typeof value === 'string' && COMMAND_PERMISSION_IDS.includes(value);
-}

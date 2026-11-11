@@ -4273,3 +4273,27 @@ test('/go N without text never enqueues a follow-up', async () => {
   assert.equal(asks.length, 0, 'no follow-up is enqueued for a plain switch');
   assert.equal(state.sessionFor('direct:chat-a'), 's1');
 });
+
+test('session navigation and titled /new cannot bypass command permission', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const settings = accessPolicy({ canExecuteCommands: false });
+  const bridge = new TextHarnessBridge({
+    descriptor: { key: 'telegram', label: 'Telegram' },
+    state: fixture.state,
+    logger: { warn() {}, error() {} },
+    accessPolicy: { getSettings: () => settings, isPrivileged: () => false },
+    bot: { sendText: async (_target, text) => sent.push(text) },
+    harness: { ask: async () => assert.fail('denied commands must not reach Harness') },
+  });
+  for (const [id, text] of [
+    ['nav-ls', '/ls'],
+    ['nav-drop', '/drop all'],
+    ['nav-tail', '/tail'],
+    ['nav-new-title', '/new 受限标题'],
+  ]) {
+    await bridge.accept(message(id, text));
+    assert.equal(sent.at(-1), COMMAND_PERMISSION_DENIED_MESSAGE, text);
+  }
+  assert.equal(fixture.sessions.has('direct:chat-a'), false);
+});

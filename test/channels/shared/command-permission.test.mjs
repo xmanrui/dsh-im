@@ -18,7 +18,7 @@ test('isSharedLocalCommand matches existing local command families', () => {
     '/workspacelist', '/sessionlist', '/sessions /tmp', '/session 2',
     '/compact', '/models', '/model 2', '/reasonings', '/reasoning high',
     '/presetlist', '/preset default',
-    '/clear',
+    '/clear', '/new title', '/ls', '/drop all', '/tail', '/fork new branch',
   ]) {
     assert.equal(isSharedLocalCommand(command), true, command);
   }
@@ -113,10 +113,12 @@ test('command permission catalog exposes unique ids and resolves every alias', (
     'callers only resolve after their own isCommand check');
 });
 
-test('every shared menu catalog command has a stable permission id', () => {
+test('every shared menu catalog command is recognized and has a stable permission id', () => {
   for (const command of SHARED_COMMAND_CATALOG) {
     assert.ok(COMMAND_PERMISSION_IDS.includes(command.name), command.name);
     assert.equal(resolveCommandPermissionId(`/${command.name}`), command.name);
+    assert.equal(isSharedLocalCommand(`/${command.name}`), true,
+      `${command.name} must pass the shared command gate`);
   }
 });
 

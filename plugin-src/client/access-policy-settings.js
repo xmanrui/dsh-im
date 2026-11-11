@@ -214,7 +214,9 @@ function CommandPicker({
   },
   h('div', { className: 'dim-accessCommandPickerHead' },
     h('span', { className: 'dim-accessCommandCount' },
-      localizeTemplate('已选择 {count} 个命令', { count: selectedSet.size })),
+      selectedSet.size === 0
+        ? localizeText('已选择 0 个命令（等于禁止全部命令）')
+        : localizeTemplate('已选择 {count} 个命令', { count: selectedSet.size })),
     h('div', { className: 'dim-accessCommandPickerActions' },
       h('button', {
         type: 'button',
@@ -517,6 +519,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
 
   const save = async (event) => {
     event.preventDefault();
+    if (!initialPolicy) return;
     setFeedback(null);
     setSaving(true);
     try {
