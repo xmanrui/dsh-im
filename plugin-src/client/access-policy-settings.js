@@ -5,7 +5,12 @@ import {
   normalizeAccessPolicy,
   validateAccessPolicy,
 } from '../../src/channels/shared/access-policy.mjs';
-import { h, localizeText } from './i18n.js';
+import {
+  COMMAND_PERMISSION_GROUPS,
+  COMMAND_PERMISSION_IDS,
+  commandsForPermissionChannel,
+} from '../../src/channels/shared/command-permission-catalog.mjs';
+import { h, localizeText, localizeTemplate } from './i18n.js';
 
 export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
 const CONFIRMED_OWNER_CHANNELS = new Set(['weixin', 'feishu', 'qq', 'whatsapp', 'discord']);
@@ -77,19 +82,35 @@ export const ACCESS_CHANNEL_DEFINITIONS = Object.freeze({
   }),
 });
 
+function copyCommands(commands) {
+  return Array.isArray(commands) ? [...commands] : undefined;
+}
+
 function clonePolicy(policy) {
-  const cloneScope = (scope) => ({
-    mode: scope.mode,
-    open: {
+  const cloneScope = (scope) => {
+    const open = {
       defaultCanExecuteCommands: scope.open.defaultCanExecuteCommands,
       commandPermissionOverrides: scope.open.commandPermissionOverrides.map((user) => ({
         ...user,
+        ...(Array.isArray(user.allowedCommands)
+          ? { allowedCommands: [...user.allowedCommands] } : {}),
       })),
-    },
-    allowlist: {
-      users: scope.allowlist.users.map((user) => ({ ...user })),
-    },
-  });
+    };
+    const defaultAllowedCommands = copyCommands(scope.open.defaultAllowedCommands);
+    if (defaultAllowedCommands) open.defaultAllowedCommands = defaultAllowedCommands;
+    const allowlist = {
+      users: scope.allowlist.users.map((user) => ({
+        ...user,
+        ...(Array.isArray(user.allowedCommands)
+          ? { allowedCommands: [...user.allowedCommands] } : {}),
+      })),
+    };
+    const nonAllowlistedAllowedCommands = copyCommands(scope.allowlist.nonAllowlistedAllowedCommands);
+    if (nonAllowlistedAllowedCommands) {
+      allowlist.nonAllowlistedAllowedCommands = nonAllowlistedAllowedCommands;
+    }
+    return { mode: scope.mode, open, allowlist };
+  };
   return {
     direct: cloneScope(policy.direct),
     group: cloneScope(policy.group),
@@ -114,8 +135,178 @@ function policyFromSnapshot(value, botId) {
   return normalizeAccessPolicy(bot?.accessPolicy ?? source?.accessPolicy ?? source?.policy);
 }
 
-function commandValue(value) {
-  return value === 'allow';
+function userPermissionValue(user) {
+  if (user?.canExecuteCommands === false) return 'deny';
+  return Array.isArray(user?.allowedCommands) ? 'custom' : 'allow';
+}
+
+function withUserPermissionValue(user, value) {
+  if (value === 'deny') {
+    const next = { ...user, canExecuteCommands: false };
+    delete next.allowedCommands;
+    return next;
+  }
+  if (value === 'custom') {
+    return {
+      ...user,
+      canExecuteCommands: true,
+      allowedCommands: Array.isArray(user.allowedCommands) ? [...user.allowedCommands] : [],
+    };
+  }
+  const next = { ...user, canExecuteCommands: true };
+  delete next.allowedCommands;
+  return next;
+}
+
+function defaultPermissionValue(policy) {
+  if (policy.open.defaultCanExecuteCommands === false) return 'deny';
+  return Array.isArray(policy.open.defaultAllowedCommands) ? 'custom' : 'allow';
+}
+
+function withDefaultPermissionValue(policy, value) {
+  const open = { ...policy.open };
+  if (value === 'deny') {
+    open.defaultCanExecuteCommands = false;
+    delete open.defaultAllowedCommands;
+  } else if (value === 'custom') {
+    open.defaultCanExecuteCommands = true;
+    open.defaultAllowedCommands = Array.isArray(policy.open.defaultAllowedCommands)
+      ? [...policy.open.defaultAllowedCommands] : [];
+  } else {
+    open.defaultCanExecuteCommands = true;
+    delete open.defaultAllowedCommands;
+  }
+  return { ...policy, open };
+}
+
+function otherUsersPermissionValue(policy) {
+  return Array.isArray(policy.allowlist.nonAllowlistedAllowedCommands) ? 'custom' : 'none';
+}
+
+function withOtherUsersPermissionValue(policy, value) {
+  const allowlist = { ...policy.allowlist };
+  if (value === 'custom') {
+    allowlist.nonAllowlistedAllowedCommands = Array.isArray(policy.allowlist.nonAllowlistedAllowedCommands)
+      ? [...policy.allowlist.nonAllowlistedAllowedCommands] : [];
+  } else {
+    delete allowlist.nonAllowlistedAllowedCommands;
+  }
+  return { ...policy, allowlist };
+}
+
+function CommandPicker({
+  selected,
+  onChange,
+  disabled = false,
+  label,
+  channel,
+}) {
+  const selectedSet = new Set(Array.isArray(selected) ? selected : []);
+  const order = COMMAND_PERMISSION_IDS;
+  const setCommands = (nextSet) => onChange(order.filter((id) => nextSet.has(id)));
+  const toggle = (id, checked) => {
+    const next = new Set(selectedSet);
+    if (checked) next.add(id); else next.delete(id);
+    setCommands(next);
+  };
+  return h('div', {
+    className: 'dim-accessCommandPicker',
+    'data-role': 'command-picker',
+    'aria-label': [label, localizeText('命令选择')].join(' '),
+  },
+  h('div', { className: 'dim-accessCommandPickerHead' },
+    h('span', { className: 'dim-accessCommandCount' },
+      selectedSet.size === 0
+        ? localizeText('已选择 0 个命令（等于禁止全部命令）')
+        : localizeTemplate('已选择 {count} 个命令', { count: selectedSet.size })),
+    h('div', { className: 'dim-accessCommandPickerActions' },
+      h('button', {
+        type: 'button',
+        className: 'dim-deliveryButton dim-accessCommandBulk',
+        disabled,
+        onClick: () => setCommands(new Set(COMMAND_PERMISSION_IDS)),
+      }, localizeText('全选')),
+      h('button', {
+        type: 'button',
+        className: 'dim-deliveryButton dim-accessCommandBulk',
+        disabled,
+        onClick: () => setCommands(new Set()),
+      }, localizeText('清空')))),
+  commandsForPermissionChannel(channel).map((group) => h('fieldset', {
+    key: group.id,
+    className: 'dim-accessCommandGroup',
+  },
+  h('legend', null, localizeText(group.label)),
+  h('div', { className: 'dim-accessCommandGroupGrid' }, group.commands.map((command) => h('label', {
+    key: command.id,
+    className: 'dim-accessCommandOption',
+  },
+  h('input', {
+    type: 'checkbox',
+    checked: selectedSet.has(command.id),
+    disabled,
+    'aria-label': `${label} /${command.id}`,
+    onChange: (event) => toggle(command.id, event.target.checked),
+  }),
+  h('span', null, `/${command.id}`)))))));
+}
+
+function CommandPermissionField({
+  value,
+  onChange,
+  disabled,
+  ariaLabel,
+  allowAll = true,
+}) {
+  return h('label', { className: 'dim-accessField dim-accessUserCommand' },
+    h('span', null, '命令权限'),
+    h('select', {
+      value,
+      disabled,
+      'aria-label': ariaLabel,
+      onChange: (event) => onChange(event.target.value),
+    },
+    allowAll ? h('option', { value: 'allow' }, localizeText('全部命令')) : null,
+    h('option', { value: 'custom' }, localizeText('仅指定命令')),
+    h('option', { value: 'deny' }, localizeText('禁止命令'))));
+}
+
+function OtherUsersCommandEditor({
+  title,
+  policy,
+  onChange,
+  disabled = false,
+  channel,
+}) {
+  const value = otherUsersPermissionValue(policy);
+  const modeLabel = [localizeText(title), localizeText('非白名单用户命令权限')].join(' ');
+  const pickerLabel = [localizeText(title), localizeText('非白名单用户命令')].join(' ');
+  return h('div', { className: 'dim-accessOtherUsers' },
+    h('div', { className: 'dim-accessOtherUsersHeading' },
+      h('strong', null, localizeText('非白名单用户')),
+      h('p', null, localizeText('非白名单用户不能发送普通消息；只有勾选的命令可以被执行。'))),
+    h('label', { className: 'dim-accessField dim-accessOtherUsersMode' },
+      h('span', null, localizeText('非白名单用户命令权限')),
+      h('select', {
+        value,
+        disabled,
+        'aria-label': modeLabel,
+        onChange: (event) => onChange(withOtherUsersPermissionValue(policy, event.target.value)),
+      },
+      h('option', { value: 'none' }, localizeText('禁止执行命令')),
+      h('option', { value: 'custom' }, localizeText('仅可执行指定命令')))),
+    value === 'custom'
+      ? h(CommandPicker, {
+          selected: policy.allowlist.nonAllowlistedAllowedCommands,
+          onChange: (commands) => onChange({
+            ...policy,
+            allowlist: { ...policy.allowlist, nonAllowlistedAllowedCommands: commands },
+          }),
+          disabled,
+          label: pickerLabel,
+          channel,
+        })
+      : null);
 }
 
 function ScenePolicyEditor({
@@ -129,6 +320,7 @@ function ScenePolicyEditor({
   ownerHelp,
   identityHelp,
   onChange,
+  channel,
 }) {
   const ownerHelpId = React.useId();
   const emptyAllowlistHelpId = React.useId();
@@ -137,6 +329,11 @@ function ScenePolicyEditor({
   const branchKey = allowlist ? 'allowlist' : 'open';
   const users = policy[branchKey][collectionKey];
   const emptyAllowlist = allowlist && users.length === 0;
+  const hasNonAllowlistedCommands = Array.isArray(policy.allowlist.nonAllowlistedAllowedCommands)
+    && policy.allowlist.nonAllowlistedAllowedCommands.length > 0;
+  const emptyAllowlistHelp = hasNonAllowlistedCommands
+    ? '当前没有白名单用户；非白名单用户只能执行已配置的命令。'
+    : '当前没有白名单用户，保存后普通用户将无法使用机器人。';
   const updateUsers = (nextUsers) => onChange({
     ...policy,
     [branchKey]: {
@@ -144,9 +341,11 @@ function ScenePolicyEditor({
       [collectionKey]: nextUsers,
     },
   });
-  const updateUser = (index, patch) => updateUsers(users.map((user, userIndex) => (
-      userIndex === index ? { ...user, ...patch } : user
-    )));
+  const updateUser = (index, nextUser) => updateUsers(users.map((user, userIndex) => (
+    userIndex === index ? nextUser : user
+  )));
+  const defaultMode = defaultPermissionValue(policy);
+  const sceneDisabled = disabled;
 
   return h('fieldset', {
     className: 'dim-accessScene',
@@ -184,21 +383,27 @@ function ScenePolicyEditor({
             },
             h('option', { value: 'open' }, '允许所有用户'),
             h('option', { value: 'allowlist' }, '仅白名单用户'))),
-          allowlist ? null : h('label', { className: 'dim-accessField' },
-              h('span', null, '默认命令权限'),
-              h('select', {
-                value: policy.open.defaultCanExecuteCommands ? 'allow' : 'deny',
-                'aria-label': [localizeText(title), localizeText('默认命令权限')].join(' '),
-                onChange: (event) => onChange({
+          allowlist ? null : h(CommandPermissionField, {
+            value: defaultMode,
+            onChange: (value) => onChange(withDefaultPermissionValue(policy, value)),
+            disabled: sceneDisabled,
+            ariaLabel: [localizeText(title), localizeText('默认命令权限')].join(' '),
+          })),
+        !allowlist && defaultMode === 'custom'
+          ? h('div', { className: 'dim-accessDefaultCommands' },
+              h('p', { className: 'dim-accessDefaultHint' },
+                localizeText('默认命令权限作用于未单独列出的用户（非白名单用户）。')),
+              h(CommandPicker, {
+                selected: policy.open.defaultAllowedCommands,
+                onChange: (commands) => onChange({
                   ...policy,
-                  open: {
-                    ...policy.open,
-                    defaultCanExecuteCommands: commandValue(event.target.value),
-                  },
+                  open: { ...policy.open, defaultAllowedCommands: commands },
                 }),
-              },
-              h('option', { value: 'allow' }, '可以执行命令'),
-              h('option', { value: 'deny' }, '不可以执行命令')))),
+                disabled: sceneDisabled,
+                label: [localizeText(title), localizeText('默认命令权限')].join(' '),
+                channel,
+              }))
+          : null,
         h('div', { className: 'dim-accessUsers' },
           h('div', { className: 'dim-accessUsersHeading' },
             h('div', { className: 'dim-accessUsersTitle' },
@@ -215,7 +420,7 @@ function ScenePolicyEditor({
                       id: emptyAllowlistHelpId,
                       className: 'dim-channelTooltip dim-accessEmptyAllowlistTooltip',
                       role: 'tooltip',
-                    }, '当前没有白名单用户，保存后普通用户将无法使用机器人。'))
+                    }, emptyAllowlistHelp))
                 : null),
             h('button', {
               type: 'button',
@@ -231,8 +436,9 @@ function ScenePolicyEditor({
             }, h('span', { 'aria-hidden': true }, '+'))),
           users.length === 0
             ? h('div', { className: 'dim-accessUsersEmpty' }, '尚未添加用户')
-            : h('ul', { className: 'dim-accessUserList' }, users.map((user, index) =>
-                h('li', { key: `${scene}-${policy.mode}-${index}`, className: 'dim-accessUserRow' },
+            : h('ul', { className: 'dim-accessUserList' }, users.map((user, index) => {
+                const value = userPermissionValue(user);
+                return h('li', { key: `${scene}-${policy.mode}-${index}`, className: 'dim-accessUserRow' },
                   h('label', { className: 'dim-accessField dim-accessUserId' },
                     h('span', null, userLabel),
                     h('input', {
@@ -244,22 +450,17 @@ function ScenePolicyEditor({
                       spellCheck: false,
                       placeholder,
                       'aria-label': [localizeText(title), localizeText(userLabel), index + 1].join(' '),
-                      onChange: (event) => updateUser(index, { id: event.target.value }),
+                      onChange: (event) => updateUser(index, { ...user, id: event.target.value }),
                     })),
-                  h('label', { className: 'dim-accessField dim-accessUserCommand' },
-                    h('span', null, '命令权限'),
-                    h('select', {
-                      value: user.canExecuteCommands ? 'allow' : 'deny',
-                      'aria-label': [
-                        localizeText(title), localizeText('用户'), index + 1,
-                        localizeText('命令权限'),
-                      ].join(' '),
-                      onChange: (event) => updateUser(index, {
-                        canExecuteCommands: commandValue(event.target.value),
-                      }),
-                    },
-                    h('option', { value: 'allow' }, '可以执行命令'),
-                    h('option', { value: 'deny' }, '不可以执行命令'))),
+                  h(CommandPermissionField, {
+                    value,
+                    disabled: sceneDisabled,
+                    ariaLabel: [
+                      localizeText(title), localizeText('用户'), index + 1,
+                      localizeText('命令权限'),
+                    ].join(' '),
+                    onChange: (nextValue) => updateUser(index, withUserPermissionValue(user, nextValue)),
+                  }),
                   h('button', {
                     type: 'button',
                     className: 'dim-deliveryButton dim-accessDeleteUser',
@@ -269,7 +470,34 @@ function ScenePolicyEditor({
                       localizeText('用户'), index + 1,
                     ].join(' '),
                     onClick: () => updateUsers(users.filter((_, userIndex) => userIndex !== index)),
-                  }, '删除')))))));
+                  }, '删除'),
+                  value === 'custom'
+                    ? h('div', { className: 'dim-accessUserCommandPicker' },
+                        h(CommandPicker, {
+                          selected: user.allowedCommands,
+                          onChange: (commands) => updateUser(index, {
+                            ...user,
+                            canExecuteCommands: true,
+                            allowedCommands: commands,
+                          }),
+                          disabled: sceneDisabled,
+                          label: [
+                            localizeText(title), localizeText('用户'), index + 1,
+                            localizeText('命令权限'),
+                          ].join(' '),
+                          channel,
+                        }))
+                    : null);
+              })),
+          allowlist && !unsupported
+            ? h(OtherUsersCommandEditor, {
+                title,
+                policy,
+                onChange,
+                disabled: sceneDisabled,
+                channel,
+              })
+            : null)));
 }
 
 export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved }) {
@@ -280,6 +508,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   const identityHelp = channel === 'feishu'
     ? '白名单请填写使用者的 Open ID，不是机器人的 Open ID。仅保存通配符的接入配置不包含所有者身份。'
     : null;
+  const commandChannel = channel === 'wecomApp' ? 'wecom-app' : channel;
   const initialPolicy = normalizeAccessPolicy(account?.accessPolicy);
   const initialKey = JSON.stringify(initialPolicy);
   const [draft, setDraft] = React.useState(() => clonePolicy(
@@ -287,10 +516,13 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   ));
   const [saving, setSaving] = React.useState(false);
   const [feedback, setFeedback] = React.useState(null);
+  const [recoverInvalidPolicy, setRecoverInvalidPolicy] = React.useState(false);
+  const canSave = Boolean(initialPolicy) || recoverInvalidPolicy;
 
   React.useEffect(() => {
     const next = normalizeAccessPolicy(account?.accessPolicy);
     setDraft(clonePolicy(next ?? DEFAULT_ACCESS_POLICY));
+    setRecoverInvalidPolicy(false);
   }, [account?.botId, initialKey]);
 
   React.useEffect(() => {
@@ -304,6 +536,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
 
   const save = async (event) => {
     event.preventDefault();
+    if (!canSave) return;
     setFeedback(null);
     setSaving(true);
     try {
@@ -332,10 +565,18 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     className: 'dim-accessPage',
     onSubmit: (event) => void save(event),
   },
-  initialPolicy
+  initialPolicy || recoverInvalidPolicy
     ? null
     : h('div', { className: 'dim-accessState', role: 'alert' },
-        '访问策略尚未就绪，请返回机器人列表刷新后重试。'),
+        h('span', null, '访问策略尚未就绪，请返回机器人列表刷新后重试。'),
+        h('button', {
+          type: 'button',
+          className: 'dim-deliveryButton dim-accessRecoverPolicy',
+          onClick: () => {
+            setDraft(clonePolicy(DEFAULT_ACCESS_POLICY));
+            setRecoverInvalidPolicy(true);
+          },
+        }, localizeText('使用默认访问策略'))),
   h(ScenePolicyEditor, {
     scene: 'direct',
     title: '私聊',
@@ -345,6 +586,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     ownerHelp,
     identityHelp,
     disabled: saving,
+    channel: commandChannel,
     onChange: (direct) => { setDraft((current) => ({ ...current, direct })); setFeedback(null); },
   }),
   h(ScenePolicyEditor, {
@@ -359,6 +601,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       : identityHelp,
     disabled: saving || definition.groupSupported === false,
     unsupported: definition.groupSupported === false,
+    channel: commandChannel,
     onChange: (group) => { setDraft((current) => ({ ...current, group })); setFeedback(null); },
   }),
   feedback ? h('p', {
@@ -372,6 +615,6 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       type: 'submit',
       className: 'dim-deliveryButton',
       'data-kind': 'primary',
-      disabled: saving || !initialPolicy,
+      disabled: saving || !canSave,
     }, saving ? '正在保存…' : '保存访问设置')));
 }

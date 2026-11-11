@@ -80,6 +80,7 @@ import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
 } from '../shared/inbound-access.mjs';
+import { resolveCommandPermissionId } from '../shared/command-permission-catalog.mjs';
 import { t } from '../shared/i18n.mjs';
 import { createWecomStreamSupervisor } from './stream-supervisor.mjs';
 
@@ -779,15 +780,6 @@ export class WecomHarnessBridge {
     if (!['single', 'group'].includes(chattype) || (chattype === 'group' && !body.chatid)) return;
     const normalized = { ...frame, body: { ...body, chattype } };
     const chatId = chattype === 'group' ? body.chatid : senderId;
-    const access = evaluateInboundAccess(this.#accessPolicy, {
-      conversationType: chattype === 'single' ? 'direct' : 'group', senderIds: senderId, isCommand: true,
-    });
-    if (!access.allowed) {
-      if (access.reason === 'command-not-allowed') {
-        await this.#sendActive(chatId, t(COMMAND_PERMISSION_DENIED_MESSAGE));
-      }
-      return;
-    }
     await this.#state.markSeen(body.msgid);
     const key = conversationKey(normalized);
     // Live callbacks nest these fields; older SDK examples show them flat.
@@ -800,15 +792,6 @@ export class WecomHarnessBridge {
       await this.#sendActive(chatId, t('这个菜单已过期，请回复 /m 重新打开。'));
       return;
     }
-    this.#menus.delete(callback.task_id);
-    // Acknowledge before Host RPC. Keep a valid button card: text_notice requires a URL.
-    const acknowledgedMenu = { title: choice[0], description: t('已收到操作，请查看下方结果。'),
-      entries: [[t('重新打开菜单'), '/menu']] };
-    await this.#client.updateTemplateCard(frame, wecomTemplateCard(acknowledgedMenu, callback.task_id), [senderId]).then(() => {
-      this.#menus.set(callback.task_id, { ...entry, menu: acknowledgedMenu });
-    }).catch((error) => {
-      this.#logger.warn?.('[dsh-im:wecom] menu acknowledgement failed:', error);
-    });
     let commands = [choice[1]];
     if (choice[1] === 'apply' || choice[1].startsWith('select:')) {
       const selectors = (entry.menu.selectors ?? []).filter((item) => choice[1] === 'apply' || item.key === choice[1].slice(7));
@@ -830,6 +813,33 @@ export class WecomHarnessBridge {
         if (command) commands.push(command);
       }
     }
+    // A template-card action is a command surface: every command it will run
+    // must clear the same per-command gate as a typed command. Otherwise a
+    // menu button could bypass a restricted command list. Do this before the
+    // acknowledgement so a denied operator cannot even mutate the card.
+    for (const command of commands) {
+      const commandAccess = evaluateInboundAccess(this.#accessPolicy, {
+        conversationType: chattype === 'single' ? 'direct' : 'group',
+        senderIds: senderId,
+        isCommand: true,
+        commandId: resolveCommandPermissionId(command),
+      });
+      if (!commandAccess.allowed) {
+        if (commandAccess.reason === 'command-not-allowed') {
+          await this.#sendActive(chatId, t(COMMAND_PERMISSION_DENIED_MESSAGE));
+        }
+        return;
+      }
+    }
+    this.#menus.delete(callback.task_id);
+    // Acknowledge before Host RPC. Keep a valid button card: text_notice requires a URL.
+    const acknowledgedMenu = { title: choice[0], description: t('已收到操作，请查看下方结果。'),
+      entries: [[t('重新打开菜单'), '/menu']] };
+    await this.#client.updateTemplateCard(frame, wecomTemplateCard(acknowledgedMenu, callback.task_id), [senderId]).then(() => {
+      this.#menus.set(callback.task_id, { ...entry, menu: acknowledgedMenu });
+    }).catch((error) => {
+      this.#logger.warn?.('[dsh-im:wecom] menu acknowledgement failed:', error);
+    });
     const navigation = commands.find((command) => parseWecomMenu(command));
     if (navigation) commands = [navigation];
     if (!navigation && entry.workspace !== this.#harness.currentWorkspace?.()) {
@@ -944,8 +954,10 @@ export class WecomHarnessBridge {
       hasImages: hasInboundImages(commandMessage),
       hasFiles: hasInboundFiles(commandMessage),
       ...(isPermissionCommand(commandText)
-        || (parseWecomMenu(commandText) && !hasInboundImages(commandMessage) && !hasInboundFiles(commandMessage))
-        ? { isCommand: true } : {}),
+        ? { isCommand: true, commandId: resolveCommandPermissionId(commandText) }
+        : (parseWecomMenu(commandText) && !hasInboundImages(commandMessage) && !hasInboundFiles(commandMessage))
+          ? { isCommand: true, commandId: 'menu' }
+          : {}),
     });
     if (!access.allowed) {
       this.#acceptedMessageIds.set(messageId, null);

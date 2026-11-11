@@ -34,36 +34,44 @@ function scope({
   defaultCanExecuteCommands = true,
   commandPermissionOverrides = [],
   users = [],
+  defaultAllowedCommands,
+  nonAllowlistedAllowedCommands,
 } = {}) {
-  return {
-    mode,
-    open: { defaultCanExecuteCommands, commandPermissionOverrides },
-    allowlist: { users },
-  };
+  const open = { defaultCanExecuteCommands, commandPermissionOverrides };
+  if (defaultAllowedCommands !== undefined) open.defaultAllowedCommands = defaultAllowedCommands;
+  const allowlist = { users };
+  if (nonAllowlistedAllowedCommands !== undefined) {
+    allowlist.nonAllowlistedAllowedCommands = nonAllowlistedAllowedCommands;
+  }
+  return { mode, open, allowlist };
 }
 
 function openScope({
   defaultCanExecuteCommands = true,
   commandPermissionOverrides = [],
   allowlistUsers = [],
+  defaultAllowedCommands,
 } = {}) {
   return scope({
     mode: 'open',
     defaultCanExecuteCommands,
     commandPermissionOverrides,
     users: allowlistUsers,
+    defaultAllowedCommands,
   });
 }
 
 function allowlistScope(users = [], {
   defaultCanExecuteCommands = false,
   commandPermissionOverrides = [],
+  nonAllowlistedAllowedCommands,
 } = {}) {
   return scope({
     mode: 'allowlist',
     defaultCanExecuteCommands,
     commandPermissionOverrides,
     users,
+    nonAllowlistedAllowedCommands,
   });
 }
 
@@ -613,4 +621,113 @@ test('channel policy validation completes before projection and commit, and erro
   await update();
   assert.equal(projectCalls, 1);
   assert.equal(store.accessPolicyFor('bot_one').direct.mode, 'allowlist');
+});
+
+test('access policy preserves optional per-command lists and rejects contradictions', () => {
+  const normalized = validateAccessPolicy(policy({
+    direct: openScope({
+      defaultCanExecuteCommands: true,
+      defaultAllowedCommands: ['status', 'help'],
+      commandPermissionOverrides: [
+        { id: 'admin', canExecuteCommands: true, allowedCommands: ['new'] },
+      ],
+      allowlistUsers: [
+        { id: 'member', canExecuteCommands: false },
+        { id: 'operator', canExecuteCommands: true, allowedCommands: ['help', 'status'] },
+      ],
+    }),
+    group: allowlistScope([{ id: 'member', canExecuteCommands: true, allowedCommands: [] }], {
+      commandPermissionOverrides: [],
+    }),
+  }));
+
+  assert.deepEqual(normalized.direct.open.defaultAllowedCommands, ['status', 'help']);
+  assert.deepEqual(normalized.direct.open.commandPermissionOverrides[0].allowedCommands, ['new']);
+  assert.deepEqual(normalized.direct.allowlist.users[1].allowedCommands, ['help', 'status']);
+  assert.deepEqual(normalized.group.allowlist.users[0].allowedCommands, []);
+
+  const invalid = [
+    policy({ direct: openScope({ defaultAllowedCommands: 'help' }) }),
+    policy({ direct: openScope({ defaultAllowedCommands: ['unknown'] }) }),
+    policy({ direct: openScope({
+      commandPermissionOverrides: [{ id: 'a', canExecuteCommands: false, allowedCommands: ['help'] }],
+    }) }),
+    policy({ direct: openScope({
+      defaultCanExecuteCommands: false,
+      defaultAllowedCommands: ['help'],
+    }) }),
+  ];
+  for (const input of invalid) {
+    assert.throws(() => validateAccessPolicy(input), { code: 'access-policy-invalid' });
+  }
+});
+
+test('per-command permissions apply to open defaults, overrides and allowlist rows', () => {
+  const settings = policy({
+    direct: openScope({
+      defaultCanExecuteCommands: true,
+      defaultAllowedCommands: ['status', 'help'],
+      commandPermissionOverrides: [
+        { id: 'admin', canExecuteCommands: true, allowedCommands: ['new'] },
+      ],
+    }),
+    group: allowlistScope([
+      { id: 'member', canExecuteCommands: true, allowedCommands: ['help'] },
+    ], { nonAllowlistedAllowedCommands: ['status'] }),
+  });
+
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'direct', senderIds: 'guest', isCommand: true, commandId: 'status',
+  }), { allowed: true, reason: 'allowed' });
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'direct', senderIds: 'guest', isCommand: true, commandId: 'new',
+  }), { allowed: false, reason: 'command-not-allowed' });
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'direct', senderIds: 'admin', isCommand: true, commandId: 'new',
+  }), { allowed: true, reason: 'allowed' });
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'direct', senderIds: 'admin', isCommand: true, commandId: 'status',
+  }), { allowed: false, reason: 'command-not-allowed' });
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'group', senderIds: 'member', isCommand: true, commandId: 'help',
+  }), { allowed: true, reason: 'allowed' });
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'group', senderIds: 'member', isCommand: true, commandId: 'status',
+  }), { allowed: false, reason: 'command-not-allowed' });
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'group', senderIds: 'outsider', isCommand: true, commandId: 'status',
+  }), { allowed: true, reason: 'command-only-allowed' });
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'group', senderIds: 'outsider', isCommand: true, commandId: 'help',
+  }), { allowed: false, reason: 'sender-not-allowed' });
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'group', senderIds: 'outsider',
+  }), { allowed: false, reason: 'sender-not-allowed' });
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'direct', senderIds: 'guest', isCommand: true,
+  }), { allowed: false, reason: 'command-not-allowed' },
+  'a custom list cannot be bypassed without a resolved command id');
+});
+
+test('per-command lists compose with every matching sender alias row', () => {
+  const settings = policy({
+    direct: openScope({
+      defaultCanExecuteCommands: true,
+      defaultAllowedCommands: ['help'],
+      commandPermissionOverrides: [
+        { id: 'alias-a', canExecuteCommands: true, allowedCommands: ['help', 'status'] },
+        { id: 'alias-b', canExecuteCommands: true },
+      ],
+    }),
+  });
+  const equals = (left, right) => ['alias-a', 'alias-b', 'sender'].includes(left)
+    && ['alias-a', 'alias-b'].includes(right);
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'direct', senderIds: 'sender', isCommand: true,
+    commandId: 'status', equals,
+  }), { allowed: true, reason: 'allowed' });
+  assert.deepEqual(evaluateAccessPolicy(settings, {
+    conversationType: 'direct', senderIds: 'sender', isCommand: true,
+    commandId: 'new', equals,
+  }), { allowed: false, reason: 'command-not-allowed' });
 });

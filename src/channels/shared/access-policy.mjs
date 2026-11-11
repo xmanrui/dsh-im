@@ -1,4 +1,6 @@
 // Shared by the Host and settings UI; keep this module browser-compatible.
+import { normalizeAllowedCommands } from './command-permission-catalog.mjs';
+
 export const ACCESS_POLICY_MODES = Object.freeze(['open', 'allowlist']);
 export const ACCESS_POLICY_CONVERSATION_TYPES = Object.freeze(['direct', 'group']);
 export const ACCESS_POLICY_USER_ID_MAX_LENGTH = 256;
@@ -6,8 +8,11 @@ export const ACCESS_POLICY_USER_ID_MAX_LENGTH = 256;
 const POLICY_KEYS = ['direct', 'group'];
 const SCOPE_KEYS = ['mode', 'open', 'allowlist'];
 const OPEN_KEYS = ['defaultCanExecuteCommands', 'commandPermissionOverrides'];
+const OPEN_OPTIONAL_KEYS = ['defaultAllowedCommands'];
 const ALLOWLIST_KEYS = ['users'];
+const ALLOWLIST_OPTIONAL_KEYS = ['nonAllowlistedAllowedCommands'];
 const USER_KEYS = ['id', 'canExecuteCommands'];
+const USER_OPTIONAL_KEYS = ['allowedCommands'];
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
 
 function invalidAccessPolicy(message) {
@@ -21,6 +26,22 @@ function hasExactKeys(input, keys) {
     && [Object.prototype, null].includes(Object.getPrototypeOf(input))
     && Reflect.ownKeys(input).length === keys.length
     && keys.every((key) => Object.hasOwn(input, key));
+}
+
+function hasAllowedKeys(input, requiredKeys, optionalKeys = []) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) return false;
+  const allowed = new Set([...requiredKeys, ...optionalKeys]);
+  return requiredKeys.every((key) => Object.hasOwn(input, key))
+    && Reflect.ownKeys(input).every((key) => allowed.has(key));
+}
+
+function commandAllowedBy(lists, commandId) {
+  return lists.every((list) => {
+    if (list === undefined) return true;
+    if (typeof commandId !== 'string') return false;
+    return list.includes(commandId);
+  });
 }
 
 /** Normalize one opaque channel identity without interpreting its contents. */
@@ -40,16 +61,24 @@ export function normalizeAccessPolicyUserId(value) {
 }
 
 function validateAccessPolicyUser(input) {
-  if (!hasExactKeys(input, USER_KEYS)) {
+  if (!hasAllowedKeys(input, USER_KEYS, USER_OPTIONAL_KEYS)) {
     throw invalidAccessPolicy('用户条目必须包含用户标识和命令权限。');
   }
   if (typeof input.canExecuteCommands !== 'boolean') {
     throw invalidAccessPolicy('命令权限必须是布尔值。');
   }
-  return Object.freeze({
+  const user = {
     id: normalizeAccessPolicyUserId(input.id),
     canExecuteCommands: input.canExecuteCommands,
-  });
+  };
+  if (Object.hasOwn(input, 'allowedCommands')) {
+    const allowedCommands = normalizeAllowedCommands(input.allowedCommands);
+    if (input.canExecuteCommands === false && allowedCommands.length > 0) {
+      throw invalidAccessPolicy('禁止执行命令的用户不能同时配置可执行命令。');
+    }
+    user.allowedCommands = allowedCommands;
+  }
+  return Object.freeze(user);
 }
 
 function validateUsers(input, { listMessage, duplicateMessage }) {
@@ -62,31 +91,45 @@ function validateUsers(input, { listMessage, duplicateMessage }) {
 }
 
 function validateOpenSettings(input) {
-  if (!hasExactKeys(input, OPEN_KEYS)) {
+  if (!hasAllowedKeys(input, OPEN_KEYS, OPEN_OPTIONAL_KEYS)) {
     throw invalidAccessPolicy('开放模式设置必须完整。');
   }
   if (typeof input.defaultCanExecuteCommands !== 'boolean') {
     throw invalidAccessPolicy('开放模式默认命令权限必须是布尔值。');
   }
-  return Object.freeze({
+  const open = {
     defaultCanExecuteCommands: input.defaultCanExecuteCommands,
     commandPermissionOverrides: validateUsers(input.commandPermissionOverrides, {
       listMessage: '开放模式命令权限覆盖用户必须是数组。',
       duplicateMessage: '开放模式命令权限覆盖用户不能包含重复的用户标识。',
     }),
-  });
+  };
+  if (Object.hasOwn(input, 'defaultAllowedCommands')) {
+    const defaultAllowedCommands = normalizeAllowedCommands(input.defaultAllowedCommands);
+    if (input.defaultCanExecuteCommands === false && defaultAllowedCommands.length > 0) {
+      throw invalidAccessPolicy('开放模式默认禁止命令时不能同时配置默认可执行命令。');
+    }
+    open.defaultAllowedCommands = defaultAllowedCommands;
+  }
+  return Object.freeze(open);
 }
 
 function validateAllowlistSettings(input) {
-  if (!hasExactKeys(input, ALLOWLIST_KEYS)) {
+  if (!hasAllowedKeys(input, ALLOWLIST_KEYS, ALLOWLIST_OPTIONAL_KEYS)) {
     throw invalidAccessPolicy('白名单模式设置必须完整。');
   }
-  return Object.freeze({
+  const allowlist = {
     users: validateUsers(input.users, {
       listMessage: '白名单模式用户必须是数组。',
       duplicateMessage: '白名单模式用户不能包含重复的用户标识。',
     }),
-  });
+  };
+  if (Object.hasOwn(input, 'nonAllowlistedAllowedCommands')) {
+    allowlist.nonAllowlistedAllowedCommands = normalizeAllowedCommands(
+      input.nonAllowlistedAllowedCommands,
+    );
+  }
+  return Object.freeze(allowlist);
 }
 
 function validateAccessPolicyScope(input) {
@@ -157,6 +200,7 @@ const INVALID_CONTEXT = Object.freeze({ allowed: false, reason: 'invalid-context
 const SENDER_UNAVAILABLE = Object.freeze({ allowed: false, reason: 'sender-unavailable' });
 const SENDER_NOT_ALLOWED = Object.freeze({ allowed: false, reason: 'sender-not-allowed' });
 const COMMAND_NOT_ALLOWED = Object.freeze({ allowed: false, reason: 'command-not-allowed' });
+const COMMAND_ONLY_ALLOWED = Object.freeze({ allowed: true, reason: 'command-only-allowed' });
 
 /**
  * Decide access for one ordinary message or one already-recognized command.
@@ -167,12 +211,15 @@ export function evaluateAccessPolicy(policy, {
   conversationType,
   senderIds,
   isCommand = false,
+  commandId = null,
   equals = (left, right) => left === right,
 } = {}) {
   const normalizedPolicy = normalizeAccessPolicy(policy);
   if (!normalizedPolicy) return POLICY_UNAVAILABLE;
   if (!ACCESS_POLICY_CONVERSATION_TYPES.includes(conversationType)
-    || typeof isCommand !== 'boolean' || typeof equals !== 'function') {
+    || typeof isCommand !== 'boolean'
+    || (commandId !== null && typeof commandId !== 'string')
+    || typeof equals !== 'function') {
     return INVALID_CONTEXT;
   }
   const candidates = (Array.isArray(senderIds) ? senderIds : [senderIds])
@@ -197,7 +244,14 @@ export function evaluateAccessPolicy(policy, {
   } catch {
     return INVALID_CONTEXT;
   }
-  if (scope.mode === 'allowlist' && matchedUsers.length === 0) return SENDER_NOT_ALLOWED;
+  if (scope.mode === 'allowlist' && matchedUsers.length === 0) {
+    if (isCommand && typeof commandId === 'string'
+      && Array.isArray(scope.allowlist.nonAllowlistedAllowedCommands)
+      && scope.allowlist.nonAllowlistedAllowedCommands.includes(commandId)) {
+      return COMMAND_ONLY_ALLOWED;
+    }
+    return SENDER_NOT_ALLOWED;
+  }
   if (isCommand) {
     const canExecuteCommands = scope.mode === 'open'
       ? (matchedUsers.length > 0
@@ -205,6 +259,12 @@ export function evaluateAccessPolicy(policy, {
         : scope.open.defaultCanExecuteCommands)
       : matchedUsers.every((user) => user.canExecuteCommands);
     if (!canExecuteCommands) return COMMAND_NOT_ALLOWED;
+    const commandLists = scope.mode === 'open'
+      ? (matchedUsers.length > 0
+        ? matchedUsers.map((user) => user.allowedCommands)
+        : [scope.open.defaultAllowedCommands])
+      : matchedUsers.map((user) => user.allowedCommands);
+    if (!commandAllowedBy(commandLists, commandId)) return COMMAND_NOT_ALLOWED;
   }
   return ALLOWED;
 }

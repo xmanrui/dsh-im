@@ -83,7 +83,7 @@ for (const channel of ['feishu', 'qq']) {
     const f = fixture(channel, false);
     for (const [index, text] of ['/permissionlist', '/permission', '/permission danger-full-access'].entries()) {
       await f.bridge.accept(f.event(`denied-${index}`, text));
-      assert.match(f.replies.at(-1), /没有执行命令的权限/);
+      assert.match(f.replies.at(-1), /没有执行该命令的权限/);
     }
     assert.deepEqual(f.commands, []);
   });

@@ -2216,6 +2216,7 @@ export class TextHarnessBridge {
       conversationType: kind,
       senderIds: [cleanText(callback.senderId)].filter(Boolean),
       isCommand: true,
+      commandId: 'workspace',
     });
     if (!decision.allowed) return notice(t(COMMAND_PERMISSION_DENIED_MESSAGE));
     const path = entry.listing?.paths?.[press.index];

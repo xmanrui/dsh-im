@@ -3186,3 +3186,43 @@ test('native menu selects exact session without a second message and updates the
   assert.equal(fixture.state.sessionFor('p2p:staff-approved'), 'session-changed-elsewhere');
   assert.deepEqual(updates.at(-1).data, { notice: COMMAND_PERMISSION_DENIED_MESSAGE });
 });
+
+test('DingTalk menu actions enforce per-command permissions', async () => {
+  const fixture = stateFixture();
+  const cards = [];
+  const updates = [];
+  const sent = [];
+  const accessPolicy = directAccessPolicy({
+    users: [{ id: 'staff-approved', canExecuteCommands: true, allowedCommands: ['menu', 'status'] }],
+  });
+  const bridge = new DingtalkHarnessBridge({
+    api: {
+      sendText: async ({ text }) => sent.push(text),
+      createMenuCard: async (args) => { cards.push(args); return { cardInstanceId: 'menu-one' }; },
+      updateMenuCard: async (args) => updates.push(args),
+    },
+    clientId: 'client', clientSecret: 'secret',
+    harness: {
+      currentWorkspace: () => process.cwd(),
+      listWorkspaces: async () => [process.cwd()],
+      listWorkspaceSessions: async () => ({ sessions: [] }),
+      agentPresetSettings: async () => ({ agentPresetCatalog: { items: [] } }),
+      listModels: async () => ({ groups: [], current: null }),
+    },
+    state: fixture.state,
+    accessPolicy,
+    logger: { warn() {}, info() {} },
+  });
+  await bridge.accept(message('open-menu', '/m'));
+  assert.equal(cards.length, 1, 'opening the menu is allowed');
+  const callback = {
+    outTrackId: 'menu-one',
+    userId: 'staff-approved',
+    content: JSON.stringify({ cardPrivateData: {
+      actionIds: ['new'], params: { revision: cards[0].data.revision },
+    } }),
+  };
+  await bridge.acceptCard(callback, 'new-denied');
+  assert.deepEqual(updates.at(-1).data, { notice: COMMAND_PERMISSION_DENIED_MESSAGE });
+  assert.equal(fixture.sessions.size, 0);
+});

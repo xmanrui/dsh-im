@@ -728,7 +728,7 @@ for (const recovery of ['unarchive', 'grant-command-permission']) {
     assert.equal(fixture.state.sessionFor(key), 'archived-session');
 
     await send('denied-new', '/new');
-    assert.match(sent.at(-1), /没有执行命令的权限.*访问设置.*私聊或群聊.*命令权限/);
+    assert.match(sent.at(-1), /没有执行该命令的权限.*访问设置.*开启该命令/);
     assert.equal(fixture.state.sessionFor(key), 'archived-session');
     assert.equal(creates, 0);
     assert.deepEqual(prompts, [['archived-session', 'hello']]);

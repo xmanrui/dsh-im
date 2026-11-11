@@ -13699,3 +13699,56 @@ for (const mode of ['text', 'stream', 'fallback']) {
     assert.equal(status.lastError, null);
   });
 }
+
+test('Feishu card actions enforce per-command permissions instead of the coarse flag', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const bridge = new FeishuHarnessBridge({
+    client: cardClient(async ({ chatId, msgType, content }) => {
+      sent.push({ chatId, msgType, content });
+    }),
+    channel: {},
+    harness: sessionsHarness(3),
+    state: fixture.state,
+    status: bridgeStatus(),
+    accessPolicy: directAccessPolicy({
+      users: [{ id: 'ou_member', canExecuteCommands: true, allowedCommands: ['menu', 'help'] }],
+    }),
+  });
+
+  await bridge.accept(event('per-command-menu', '/m', { senderOpenId: 'ou_member' }));
+  await bridge.waitForIdle();
+  assert.equal(sent[0]?.msgType, 'interactive', 'the menu command is allowed');
+
+  await bridge.onCardAction(cardActionEvent('om_card_1', 'new', 'ou_member'));
+  await bridge.waitForIdle();
+  assert.equal(fixture.sessions.size, 0, 'a card command outside the list is refused');
+  assert.equal(JSON.parse(sent.at(-1).content).text, COMMAND_PERMISSION_DENIED_MESSAGE);
+
+  await bridge.onCardAction(cardActionEvent('om_card_1', 'unknown_future_button', 'ou_member'));
+  await bridge.waitForIdle();
+  assert.equal(JSON.parse(sent.at(-1).content).text, COMMAND_PERMISSION_DENIED_MESSAGE,
+    'an unmapped card action fails closed for a command allowlist');
+});
+
+test('Feishu numeric menu selections check the actual command permission', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const bridge = new FeishuHarnessBridge({
+    client: cardClient(async (outgoing) => sent.push(outgoing)),
+    channel: {},
+    harness: sessionsHarness(1),
+    state: fixture.state,
+    status: bridgeStatus(),
+    accessPolicy: directAccessPolicy({
+      users: [{ id: 'ou_member', canExecuteCommands: true, allowedCommands: ['menu'] }],
+    }),
+  });
+  await bridge.accept(event('numeric-menu-open', '/m', { senderOpenId: 'ou_member' }));
+  await bridge.waitForIdle();
+  assert.ok(sent.some((entry) => entry.msgType === 'interactive'));
+  await bridge.accept(event('numeric-menu-pick', '1', { senderOpenId: 'ou_member' }));
+  await bridge.waitForIdle();
+  const last = sent.at(-1);
+  assert.equal(JSON.parse(last.content).text, COMMAND_PERMISSION_DENIED_MESSAGE);
+});

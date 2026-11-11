@@ -232,7 +232,7 @@ test('QQ menu selections enforce command permission again after it changes', asy
   policy.getSettings().direct.allowlist.users[0].canExecuteCommands = false;
   for (const text of ['/m', '5', menu.keyboard.content.rows[1].buttons[1].action.data]) {
     await f.send(text);
-    assert.match(f.sent.at(-1).text, /没有执行命令的权限/);
+    assert.match(f.sent.at(-1).text, /没有执行该命令的权限/);
   }
   assert.equal(f.state.sessionFor(key), 'session-original');
   assert.equal(f.calls.length, 0);
@@ -343,4 +343,36 @@ test('QQ status, help and partial catalogs retain usable navigation and escape M
   assert.ok(qqMenuText(view).includes('[标题]'));
   await sendQqMenu(f.bot, {}, view, 'token');
   assert.ok(f.sent.at(-1).text.includes('\\[标题\\]'));
+});
+
+test('QQ menu selections enforce per-command permissions, not just the menu command', async (t) => {
+  const policy = directAccessPolicy({
+    users: [{ id: 'owner', canExecuteCommands: true, allowedCommands: ['menu'] }],
+  });
+  const f = await fixture(t, { policy });
+  await f.send('/m');
+  const menu = f.latestMenu();
+  assert.ok(menu, 'opening the menu is allowed');
+
+  await f.pick(5, menu);
+  assert.match(f.sent.at(-1).text, /没有执行该命令的权限/);
+  assert.equal(f.state.sessionFor(key), 'session-original');
+  assert.equal(f.calls.length, 0, 'a menu button cannot bypass a restricted command');
+});
+
+test('QQ archive visibility toggle requires the archived permission', async (t) => {
+  const policy = directAccessPolicy({
+    users: [{ id: 'owner', canExecuteCommands: true, allowedCommands: ['menu'] }],
+  });
+  const f = await fixture(t, { policy });
+  const archivedBefore = f.state.includesArchivedSessions?.();
+  await f.send('/m');
+  const menu = f.latestMenu();
+  const button = menu.keyboard.content.rows
+    .flatMap((row) => row.buttons)
+    .find((entry) => JSON.stringify(entry).includes('归档显示'));
+  assert.ok(button, 'archive toggle entry exists');
+  await f.send(button.action.data);
+  assert.match(f.sent.at(-1).text, /没有执行该命令的权限/);
+  assert.equal(f.state.includesArchivedSessions?.(), archivedBefore);
 });

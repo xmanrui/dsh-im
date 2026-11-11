@@ -282,3 +282,38 @@ test('all nine Host RPCs accept only the unified bot.access-policy.set contract'
     assert.equal(calls.length, 1, channel);
   }
 });
+
+test('access-policy RPC accepts optional per-command lists and rejects unknown ids', () => {
+  const value = {
+    direct: {
+      mode: 'open',
+      open: {
+        defaultCanExecuteCommands: true,
+        defaultAllowedCommands: ['help', 'status'],
+        commandPermissionOverrides: [{
+          id: 'ou_admin', canExecuteCommands: true, allowedCommands: ['new'],
+        }],
+      },
+      allowlist: { users: [], nonAllowlistedAllowedCommands: ['help'] },
+    },
+    group: {
+      mode: 'allowlist',
+      open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
+      allowlist: {
+        users: [{ id: 'ou_member', canExecuteCommands: true, allowedCommands: ['status'] }],
+        nonAllowlistedAllowedCommands: [],
+      },
+    },
+  };
+  assert.equal(validAccessPolicyPayload({ botId: 'bot_one', policy: value }), true);
+  assert.equal(validAccessPolicyPayload({
+    botId: 'bot_one',
+    policy: {
+      ...value,
+      direct: {
+        ...value.direct,
+        open: { ...value.direct.open, defaultAllowedCommands: ['unknown-command'] },
+      },
+    },
+  }), false);
+});

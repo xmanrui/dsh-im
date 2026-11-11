@@ -92,12 +92,22 @@ function message(messageId, content, overrides = {}) {
   };
 }
 
-function accessPolicy({ canExecuteCommands = false } = {}) {
+function accessPolicy({
+  canExecuteCommands = false,
+  allowedCommands,
+  nonAllowlistedAllowedCommands,
+} = {}) {
+  const user = { id: 'actor-a', canExecuteCommands };
+  if (allowedCommands !== undefined) user.allowedCommands = allowedCommands;
+  const allowlist = { users: [user] };
+  if (Array.isArray(nonAllowlistedAllowedCommands)) {
+    allowlist.nonAllowlistedAllowedCommands = nonAllowlistedAllowedCommands;
+  }
   return {
     direct: {
       mode: 'allowlist',
       open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
-      allowlist: { users: [{ id: 'actor-a', canExecuteCommands }] },
+      allowlist,
     },
     group: {
       mode: 'allowlist',
@@ -3344,6 +3354,72 @@ test('a decorated body still has its command gated by canExecuteCommands', async
   assert.equal(sessionCreates, 2, 'a permitted sender may still run the command');
 });
 
+test('text bridge enforces a per-command allowlist instead of the coarse boolean', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  let sessionClears = 0;
+  const originalClearSession = fixture.state.clearSession.bind(fixture.state);
+  fixture.state.clearSession = async (...args) => {
+    sessionClears += 1;
+    return originalClearSession(...args);
+  };
+  const settings = accessPolicy({
+    canExecuteCommands: true,
+    allowedCommands: ['help', 'status'],
+  });
+  const bridge = new TextHarnessBridge({
+    descriptor: { key: 'telegram', label: 'Telegram' },
+    state: fixture.state,
+    logger: { warn() {}, error() {} },
+    accessPolicy: {
+      getSettings: () => settings,
+      isPrivileged: () => false,
+    },
+    bot: { sendText: async (_target, text) => sent.push(text) },
+    harness: {
+      createSession: async () => 'session-per-command',
+      ask: async () => 'ok',
+    },
+  });
+
+  await bridge.accept(message('per-command-help', '/help'));
+  assert.ok(sent.at(-1).includes('/help'), 'a permitted command still runs');
+
+  await bridge.accept(message('per-command-new', '/new'));
+  assert.equal(sent.at(-1), COMMAND_PERMISSION_DENIED_MESSAGE,
+    'a command outside the allowlist is refused');
+  assert.equal(sessionClears, 0, 'the refused command never mutates the session');
+  await bridge.waitForIdle?.();
+});
+
+test('non-allowlisted users can run only explicitly granted commands', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const settings = accessPolicy({ nonAllowlistedAllowedCommands: ['help'] });
+  const bridge = new TextHarnessBridge({
+    descriptor: { key: 'telegram', label: 'Telegram' },
+    state: fixture.state,
+    logger: { warn() {}, error() {} },
+    accessPolicy: {
+      getSettings: () => settings,
+      isPrivileged: () => false,
+    },
+    bot: { sendText: async (_target, text) => sent.push(text) },
+    harness: { ask: async () => assert.fail('an ordinary message must not reach Harness') },
+  });
+
+  await bridge.accept(message('command-only-help', '/help', { senderId: 'outsider' }));
+  assert.ok(sent.at(-1).includes('/help'), 'the granted command runs');
+
+  const repliesBefore = sent.length;
+  await bridge.accept(message('command-only-new', '/new', { senderId: 'outsider' }));
+  assert.equal(sent.length, repliesBefore, 'an ungranted command is silently rejected');
+
+  await bridge.accept(message('command-only-text', 'hello', { senderId: 'outsider' }));
+  assert.equal(sent.length, repliesBefore, 'ordinary messages stay rejected');
+  assert.equal(fixture.sessions.has('direct:chat-a'), false);
+});
+
 test('an approval reply in a decorated body claims the pending request', async () => {
   const fixture = stateFixture();
   const sent = [];
@@ -4196,4 +4272,28 @@ test('/go N without text never enqueues a follow-up', async () => {
   await bridge.waitForIdle();
   assert.equal(asks.length, 0, 'no follow-up is enqueued for a plain switch');
   assert.equal(state.sessionFor('direct:chat-a'), 's1');
+});
+
+test('session navigation and titled /new cannot bypass command permission', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const settings = accessPolicy({ canExecuteCommands: false });
+  const bridge = new TextHarnessBridge({
+    descriptor: { key: 'telegram', label: 'Telegram' },
+    state: fixture.state,
+    logger: { warn() {}, error() {} },
+    accessPolicy: { getSettings: () => settings, isPrivileged: () => false },
+    bot: { sendText: async (_target, text) => sent.push(text) },
+    harness: { ask: async () => assert.fail('denied commands must not reach Harness') },
+  });
+  for (const [id, text] of [
+    ['nav-ls', '/ls'],
+    ['nav-drop', '/drop all'],
+    ['nav-tail', '/tail'],
+    ['nav-new-title', '/new 受限标题'],
+  ]) {
+    await bridge.accept(message(id, text));
+    assert.equal(sent.at(-1), COMMAND_PERMISSION_DENIED_MESSAGE, text);
+  }
+  assert.equal(fixture.sessions.has('direct:chat-a'), false);
 });

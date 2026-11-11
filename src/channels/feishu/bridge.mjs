@@ -100,6 +100,7 @@ import {
   evaluateInboundAccess,
 } from '../shared/inbound-access.mjs';
 import { isSharedLocalCommand } from '../shared/command-permission.mjs';
+import { resolveCommandPermissionId } from '../shared/command-permission-catalog.mjs';
 import {
   MENU_PAGE_SIZE,
   PRESET_FOLLOW_DEFAULT_SENTINEL,
@@ -197,6 +198,48 @@ const REPAIR_URL_HOSTS = new Set([
 const ARCHIVED_COMMAND = /^\/archived(?:\s+(on|off))?$/i;
 /** Matches fast card commands that should not be queued behind a running task. */
 const CARD_COMMAND = /^\/(?:m(?:enu)?|new|help|status|compact|clear|(?:sessionlist|sessions)(?:\s|$)|workspacelist|workspaces|wsl|watchlist|archived(?:\s+(on|off))?)$/i;
+
+/**
+ * Map a Feishu card action to the command it executes.
+ * `null` means a known non-command interaction (approval/question reply);
+ * `undefined` means an unrecognized action, which must stay command-gated and
+ * fail closed for command allowlists instead of becoming an ordinary reply.
+ */
+function commandIdForFeishuAction(action) {
+  if (typeof action !== 'string' || !action) return undefined;
+  if (action.startsWith('approve:') || action.startsWith('reject:')
+    || action.startsWith('answer:') || action.startsWith('answerCustom:')
+    || action === 'repair_verify') return null;
+  if (action === 'sessions' || /^sessions:\d+$/u.test(action)) return 'sessionlist';
+  if (action === 'workspaces') return 'workspacelist';
+  if (action === 'watchlist') return 'watchlist';
+  if (action === 'watch_add') return 'watch';
+  if (action === 'watch_remove') return 'unwatch';
+  if (action === 'new') return 'new';
+  if (action === 'use:current') return 'session';
+  if (action === 'archive_toggle' || action === 'archive:on' || action === 'archive:off') return 'archived';
+  if (action.startsWith('archive:')) return 'sessionarchive';
+  if (action === 'repair') return 'repair';
+  if (action === 'compact') return 'compact';
+  if (action === 'clear') return 'clear';
+  if (action === 'stop') return 'stop';
+  if (action === 'steer' || action.startsWith('steer:')) return 'steer';
+  if (action === 'presets') return 'presetlist';
+  if (action === 'models' || /^models:\d+$/u.test(action)) return 'models';
+  if (action === 'reasoning') return 'reasoning';
+  if (action === 'reasoninglist') return 'reasoninglist';
+  if (action === 'status') return 'status';
+  if (action === 'help') return 'help';
+  if (action === 'back_to_menu') return 'menu';
+  if (action === 'preset_default' || action.startsWith('preset:select:')) return 'preset';
+  if (action.startsWith('model:select:')) return 'model';
+  if (action.startsWith('reasoning:select:')) return 'reasoning';
+  if (action.startsWith('use:')) return 'session';
+  if (action.startsWith('workspace:')) return 'workspace';
+  if (action.startsWith('unwatch:')) return 'unwatch';
+  if (action.startsWith('watch:')) return 'watch';
+  return undefined;
+}
 
 // ── Step push (分步直推) limits ──────────────────────────────────────────────
 /** Feishu allows 5 msg/s per chat; step push stays well below that. */
@@ -1247,6 +1290,16 @@ export class FeishuHarnessBridge {
     const hasFiles = hasInboundFiles(commandMessage);
     const conversationType = event.message.chat_type === 'p2p' ? 'direct'
       : event.message.chat_type === 'group' ? 'group' : null;
+    const numericMenu = !hasImages && !hasFiles
+      && NUMBER_REPLY.test(commandText) && this.#menus.has(key);
+    const bareMentionMenu = isBareMentionMenuRequest(event, commandText, {
+      hasImages,
+      hasFiles,
+      hasReply: hasReplyReference(commandMessage),
+    });
+    const commandId = numericMenu || bareMentionMenu
+      ? 'menu'
+      : resolveCommandPermissionId(commandText);
     const access = evaluateInboundAccess(this.#accessPolicy, {
       conversationType,
       senderIds: senderOpenId(event),
@@ -1257,16 +1310,12 @@ export class FeishuHarnessBridge {
         hasImages,
         hasFiles,
       }) || isFeishuLocalCommand(commandText, { hasImages, hasFiles })
-        || (!hasImages && !hasFiles && NUMBER_REPLY.test(commandText) && this.#menus.has(key))
         // Opening the menu on a bare mention is the `/m` command by another
         // route, so it must clear the same command gate. Treating it as plain
         // chat let a sender without `canExecuteCommands` receive a menu that
         // carries workspace paths and other session titles.
-        || isBareMentionMenuRequest(event, commandText, {
-          hasImages,
-          hasFiles,
-          hasReply: hasReplyReference(commandMessage),
-        }),
+        || numericMenu || bareMentionMenu,
+      commandId,
     });
     if (!access.allowed) {
       this.#acceptedMessageIds.set(messageId, null);
@@ -1806,6 +1855,8 @@ export class FeishuHarnessBridge {
     // 的用户经语音入口绕过 canExecuteCommands——文字与语音入口行为一致。
     // 仅"命令不允许"给用户提示(与文字路径同文案),其余拒绝原因静默丢弃。
     if (voiceTurnReplyTo) {
+      const numericMenu = !hasImages && !hasFiles
+        && NUMBER_REPLY.test(text) && this.#menus.has(key);
       const transcribedAccess = evaluateInboundAccess(this.#accessPolicy, {
         conversationType: event.message.chat_type === 'p2p' ? 'direct'
           : event.message.chat_type === 'group' ? 'group' : null,
@@ -1815,7 +1866,8 @@ export class FeishuHarnessBridge {
         hasFiles,
         isCommand: isSharedLocalCommand(text, { hasImages, hasFiles })
           || isFeishuLocalCommand(text, { hasImages, hasFiles })
-          || (!hasImages && !hasFiles && NUMBER_REPLY.test(text) && this.#menus.has(key)),
+          || numericMenu,
+        commandId: numericMenu ? 'menu' : resolveCommandPermissionId(text),
       });
       if (!transcribedAccess.allowed) {
         this.#logAccessDenied(event.message.chat_type === 'p2p' ? 'direct' : 'group', transcribedAccess.reason);
@@ -2537,15 +2589,15 @@ export class FeishuHarnessBridge {
     }
     const conversationType = route.key.startsWith('p2p:') ? 'direct'
       : route.key.startsWith('group:') ? 'group' : null;
-    const isInteractionResponse = resolvedAction.startsWith('approve:')
-      || resolvedAction.startsWith('reject:')
-      || resolvedAction.startsWith('answer:');
+    // Approval/question buttons are ordinary replies and stay outside the
+    // command gate; every other card action is checked against the exact
+    // command it executes, not merely against "some command".
+    const actionCommandId = commandIdForFeishuAction(resolvedAction);
     const access = evaluateInboundAccess(this.#accessPolicy, {
       conversationType,
       senderIds: operatorOpenId,
-      // These buttons are the card equivalent of an ordinary approval or
-      // question reply. Every other card action remains command-gated.
-      isCommand: !isInteractionResponse,
+      isCommand: actionCommandId !== null,
+      commandId: actionCommandId,
     });
     if (!access.allowed) {
       this.#logAccessDenied(conversationType, access.reason);
@@ -3147,9 +3199,43 @@ export class FeishuHarnessBridge {
     return menu;
   }
 
+  #cardActionAccess(action, key, actor) {
+    const commandId = commandIdForFeishuAction(action);
+    if (commandId === null) return null;
+    const conversationType = key?.startsWith('p2p:') ? 'direct'
+      : key?.startsWith('group:') ? 'group' : null;
+    return evaluateInboundAccess(this.#accessPolicy, {
+      conversationType,
+      senderIds: [actor].filter(Boolean),
+      isCommand: true,
+      commandId,
+    });
+  }
+
   async #handleMenuPick(menu, number, { chatId, key, event }) {
     const replyTo = event?.message?.message_id ?? null;
     const reply = (text) => this.#send(chatId, text, { replyTo });
+    const actor = senderOpenId(event);
+    // A numeric reply is navigation, but the action it selects is a real
+    // command and must clear the same per-command gate as a typed command or
+    // a card button.
+    const run = async (action, options = {}) => {
+      const decision = this.#cardActionAccess(action, key, actor);
+      if (decision && !decision.allowed) {
+        if (decision.reason === 'command-not-allowed') {
+          await reply(t(COMMAND_PERMISSION_DENIED_MESSAGE)).catch(() => undefined);
+        }
+        return false;
+      }
+      if (action === 'repair') {
+        await this.#handleRepairCommand(event, '/repair');
+        return true;
+      }
+      await this.#handleCardAction(action, {
+        chatId, key, messageId: replyTo, actor, ...options,
+      });
+      return true;
+    };
     if (menu.kind === 'menu') {
       // Number fallback for the total menu:
       // 1=工作区列表 2=新会话 3=会话列表 4=状态 5=修复 6=帮助
@@ -3159,13 +3245,7 @@ export class FeishuHarnessBridge {
         await reply(t('菜单没有这个编号，回复 /m 重新打开。'));
         return;
       }
-      if (action === 'repair') {
-        await this.#handleRepairCommand(event, '/repair');
-        return;
-      }
-      await this.#handleCardAction(action, {
-        chatId, key, messageId: replyTo, fromMessageQueue: action === 'new',
-      });
+      await run(action, { fromMessageQueue: action === 'new' });
       return;
     }
     if (menu.kind === 'sessions') {
@@ -3175,8 +3255,8 @@ export class FeishuHarnessBridge {
         return;
       }
       // The number label sits on the session (bind) button of the row.
-      await this.#handleCardAction(`use:${session.sessionId}`, {
-        chatId, key, messageId: replyTo, conversationWorkspace: menu.conversationWorkspace,
+      await run(`use:${session.sessionId}`, {
+        conversationWorkspace: menu.conversationWorkspace,
       });
       return;
     }
@@ -3186,7 +3266,7 @@ export class FeishuHarnessBridge {
         await reply(t('只有 {count} 个工作区，回复 /workspacelist 重新查看。', { count: menu.paths.length }));
         return;
       }
-      await this.#handleCardAction(`workspace:${workspace}`, { chatId, key, messageId: replyTo });
+      await run(`workspace:${workspace}`);
       return;
     }
     if (menu.kind === 'watches') {
@@ -3195,7 +3275,7 @@ export class FeishuHarnessBridge {
         await reply(t('关注列表只有 {count} 个会话。', { count: menu.entries.length }));
         return;
       }
-      await this.#handleCardAction(`unwatch:${entry.sessionId}`, { chatId, key, messageId: replyTo });
+      await run(`unwatch:${entry.sessionId}`);
     }
   }
 
