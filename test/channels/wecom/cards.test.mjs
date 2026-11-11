@@ -464,3 +464,37 @@ test('WeCom template cards enforce per-command permissions, not just menu access
   assert.equal(f.state.sessionFor(), 'session-old');
   assert.equal(f.sent.at(-1).content, COMMAND_PERMISSION_DENIED_MESSAGE);
 });
+
+test('WeCom selector apply checks every generated command permission before acknowledgement', async () => {
+  const applied = [];
+  const f = setup({
+    accessPolicy: {
+      getSettings: () => directAccessPolicy({ users: [
+        { id: 'member-1', canExecuteCommands: true, allowedCommands: ['menu'] },
+      ] }).getSettings(),
+    },
+    harness: {
+      listWorkspaceSessions: async () => ({ sessions: [
+        { sessionId: 'session-old', title: 'Old session' },
+        { sessionId: 'session-new', title: 'New session' },
+      ] }),
+      bindWorkspaceSession: async (key, id) => {
+        applied.push(['session', id]);
+        await f.state.setSession(key, id);
+        return { workspace: process.cwd(), sessionId: id, title: id };
+      },
+      workspaceSession: () => ({
+        models: async () => ({ current: null, failures: [], groups: [] }),
+        selectModel: async () => { applied.push(['model']); },
+      }),
+      agentPresetSettings: async () => ({ agentPresetCatalog: { items: [] } }),
+    },
+  });
+  await f.bridge.accept(f.frame('/m'));
+  const card = f.sent[0].card;
+  await f.bridge.acceptEvent(f.clickFrame('应用设置', {}, { session: 1 }, card));
+  assert.deepEqual(applied, []);
+  assert.equal(f.sent.at(-1).content, COMMAND_PERMISSION_DENIED_MESSAGE);
+  assert.equal(f.sent.filter((item) => item.type === 'update').length, 0,
+    'a denied apply must not acknowledge or mutate the card');
+});

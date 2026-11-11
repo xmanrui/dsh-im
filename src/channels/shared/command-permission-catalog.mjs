@@ -54,8 +54,8 @@ const COMMAND_PERMISSION_GROUPS_INPUT = [
     commands: [
       { id: 'presetlist', aliases: ['presetlist', 'presets'] },
       { id: 'preset', aliases: ['preset'] },
-      { id: 'permissionlist', aliases: ['permissionlist'] },
-      { id: 'permission', aliases: ['permission'] },
+      { id: 'permissionlist', aliases: ['permissionlist'], channels: ['feishu', 'qq', 'wecom'] },
+      { id: 'permission', aliases: ['permission'], channels: ['feishu', 'qq', 'wecom'] },
     ],
   },
   {
@@ -64,8 +64,8 @@ const COMMAND_PERMISSION_GROUPS_INPUT = [
     commands: [
       { id: 'stop', aliases: ['stop'] },
       { id: 'steer', aliases: ['steer'] },
-      { id: 'plan', aliases: ['plan'] },
-      { id: 'goal', aliases: ['goal'] },
+      { id: 'plan', aliases: ['plan'], channels: ['weixin'] },
+      { id: 'goal', aliases: ['goal'], channels: ['weixin'] },
     ],
   },
   {
@@ -90,12 +90,12 @@ const COMMAND_PERMISSION_GROUPS_INPUT = [
     id: 'channel',
     label: '渠道命令',
     commands: [
-      { id: 'menu', aliases: ['menu', 'm'] },
-      { id: 'repair', aliases: ['repair'] },
-      { id: 'watch', aliases: ['watch'] },
-      { id: 'unwatch', aliases: ['unwatch'] },
-      { id: 'watchlist', aliases: ['watchlist'] },
-      { id: 'archived', aliases: ['archived'] },
+      { id: 'menu', aliases: ['menu', 'm'], channels: ['feishu', 'qq', 'wecom', 'dingtalk'] },
+      { id: 'repair', aliases: ['repair'], channels: ['feishu'] },
+      { id: 'watch', aliases: ['watch'], channels: ['feishu'] },
+      { id: 'unwatch', aliases: ['unwatch'], channels: ['feishu'] },
+      { id: 'watchlist', aliases: ['watchlist'], channels: ['feishu'] },
+      { id: 'archived', aliases: ['archived'], channels: ['feishu'] },
     ],
   },
 ];
@@ -107,6 +107,7 @@ export const COMMAND_PERMISSION_GROUPS = Object.freeze(
     commands: Object.freeze(group.commands.map((command) => Object.freeze({
       id: command.id,
       aliases: Object.freeze([...command.aliases]),
+      channels: command.channels ? Object.freeze([...command.channels]) : null,
     }))),
   })),
 );
@@ -114,6 +115,16 @@ export const COMMAND_PERMISSION_GROUPS = Object.freeze(
 export const COMMAND_PERMISSION_IDS = Object.freeze(
   COMMAND_PERMISSION_GROUPS.flatMap((group) => group.commands.map((command) => command.id)),
 );
+
+/** Commands the settings UI should offer for one channel. */
+export function commandsForPermissionChannel(channel, groups = COMMAND_PERMISSION_GROUPS) {
+  return groups.map((group) => ({
+    ...group,
+    commands: group.commands.filter((command) => (
+      !command.channels || command.channels.includes(channel)
+    )),
+  })).filter((group) => group.commands.length > 0);
+}
 
 export const COMMAND_PERMISSION_MAX_LIST = 128;
 export const COMMAND_PERMISSION_ID_MAX_LENGTH = 64;

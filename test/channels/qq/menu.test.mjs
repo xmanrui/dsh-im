@@ -359,3 +359,20 @@ test('QQ menu selections enforce per-command permissions, not just the menu comm
   assert.equal(f.state.sessionFor(key), 'session-original');
   assert.equal(f.calls.length, 0, 'a menu button cannot bypass a restricted command');
 });
+
+test('QQ archive visibility toggle requires the archived permission', async (t) => {
+  const policy = directAccessPolicy({
+    users: [{ id: 'owner', canExecuteCommands: true, allowedCommands: ['menu'] }],
+  });
+  const f = await fixture(t, { policy });
+  const archivedBefore = f.state.includesArchivedSessions?.();
+  await f.send('/m');
+  const menu = f.latestMenu();
+  const button = menu.keyboard.content.rows
+    .flatMap((row) => row.buttons)
+    .find((entry) => JSON.stringify(entry).includes('归档显示'));
+  assert.ok(button, 'archive toggle entry exists');
+  await f.send(button.action.data);
+  assert.match(f.sent.at(-1).text, /没有执行该命令的权限/);
+  assert.equal(f.state.includesArchivedSessions?.(), archivedBefore);
+});

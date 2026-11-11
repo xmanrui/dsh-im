@@ -229,9 +229,8 @@ function commandIdForFeishuAction(action) {
   if (action === 'reasoning') return 'reasoning';
   if (action === 'reasoninglist') return 'reasoninglist';
   if (action === 'status') return 'status';
-  if (action === 'history') return 'history';
   if (action === 'help') return 'help';
-  if (action === 'back_to_menu' || action === 'menu') return 'menu';
+  if (action === 'back_to_menu') return 'menu';
   if (action === 'preset_default' || action.startsWith('preset:select:')) return 'preset';
   if (action.startsWith('model:select:')) return 'model';
   if (action.startsWith('reasoning:select:')) return 'reasoning';

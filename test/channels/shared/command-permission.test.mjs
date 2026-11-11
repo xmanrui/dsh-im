@@ -6,6 +6,7 @@ import { evaluateInboundAccess } from '../../../src/channels/shared/inbound-acce
 import {
   COMMAND_PERMISSION_GROUPS,
   COMMAND_PERMISSION_IDS,
+  commandsForPermissionChannel,
   normalizeAllowedCommands,
   resolveCommandPermissionId,
 } from '../../../src/channels/shared/command-permission-catalog.mjs';
@@ -120,6 +121,18 @@ test('every shared menu catalog command is recognized and has a stable permissio
     assert.equal(isSharedLocalCommand(`/${command.name}`), true,
       `${command.name} must pass the shared command gate`);
   }
+});
+
+test('channel-specific command groups are filtered for the settings picker', () => {
+  const ids = (channel) => commandsForPermissionChannel(channel)
+    .flatMap((group) => group.commands.map((command) => command.id));
+  assert.ok(ids('telegram').includes('help'));
+  assert.ok(!ids('telegram').includes('repair'));
+  assert.ok(ids('feishu').includes('repair'));
+  assert.ok(ids('feishu').includes('watch'));
+  assert.ok(ids('qq').includes('menu'));
+  assert.ok(!ids('weixin').includes('permission'));
+  assert.ok(ids('weixin').includes('plan'));
 });
 
 test('normalizeAllowedCommands rejects malformed lists and accepts catalog order', () => {

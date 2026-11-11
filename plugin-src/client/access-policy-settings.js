@@ -8,6 +8,7 @@ import {
 import {
   COMMAND_PERMISSION_GROUPS,
   COMMAND_PERMISSION_IDS,
+  commandsForPermissionChannel,
 } from '../../src/channels/shared/command-permission-catalog.mjs';
 import { h, localizeText, localizeTemplate } from './i18n.js';
 
@@ -198,6 +199,7 @@ function CommandPicker({
   onChange,
   disabled = false,
   label,
+  channel,
 }) {
   const selectedSet = new Set(Array.isArray(selected) ? selected : []);
   const order = COMMAND_PERMISSION_IDS;
@@ -210,7 +212,7 @@ function CommandPicker({
   return h('div', {
     className: 'dim-accessCommandPicker',
     'data-role': 'command-picker',
-    'aria-label': label,
+    'aria-label': [label, localizeText('命令选择')].join(' '),
   },
   h('div', { className: 'dim-accessCommandPickerHead' },
     h('span', { className: 'dim-accessCommandCount' },
@@ -230,7 +232,7 @@ function CommandPicker({
         disabled,
         onClick: () => setCommands(new Set()),
       }, localizeText('清空')))),
-  COMMAND_PERMISSION_GROUPS.map((group) => h('fieldset', {
+  commandsForPermissionChannel(channel).map((group) => h('fieldset', {
     key: group.id,
     className: 'dim-accessCommandGroup',
   },
@@ -274,6 +276,7 @@ function OtherUsersCommandEditor({
   policy,
   onChange,
   disabled = false,
+  channel,
 }) {
   const value = otherUsersPermissionValue(policy);
   const modeLabel = [localizeText(title), localizeText('非白名单用户命令权限')].join(' ');
@@ -301,6 +304,7 @@ function OtherUsersCommandEditor({
           }),
           disabled,
           label: pickerLabel,
+          channel,
         })
       : null);
 }
@@ -316,6 +320,7 @@ function ScenePolicyEditor({
   ownerHelp,
   identityHelp,
   onChange,
+  channel,
 }) {
   const ownerHelpId = React.useId();
   const emptyAllowlistHelpId = React.useId();
@@ -324,6 +329,11 @@ function ScenePolicyEditor({
   const branchKey = allowlist ? 'allowlist' : 'open';
   const users = policy[branchKey][collectionKey];
   const emptyAllowlist = allowlist && users.length === 0;
+  const hasNonAllowlistedCommands = Array.isArray(policy.allowlist.nonAllowlistedAllowedCommands)
+    && policy.allowlist.nonAllowlistedAllowedCommands.length > 0;
+  const emptyAllowlistHelp = hasNonAllowlistedCommands
+    ? '当前没有白名单用户；非白名单用户只能执行已配置的命令。'
+    : '当前没有白名单用户，保存后普通用户将无法使用机器人。';
   const updateUsers = (nextUsers) => onChange({
     ...policy,
     [branchKey]: {
@@ -391,6 +401,7 @@ function ScenePolicyEditor({
                 }),
                 disabled: sceneDisabled,
                 label: [localizeText(title), localizeText('默认命令权限')].join(' '),
+                channel,
               }))
           : null,
         h('div', { className: 'dim-accessUsers' },
@@ -409,7 +420,7 @@ function ScenePolicyEditor({
                       id: emptyAllowlistHelpId,
                       className: 'dim-channelTooltip dim-accessEmptyAllowlistTooltip',
                       role: 'tooltip',
-                    }, '当前没有白名单用户，保存后普通用户将无法使用机器人。'))
+                    }, emptyAllowlistHelp))
                 : null),
             h('button', {
               type: 'button',
@@ -474,6 +485,7 @@ function ScenePolicyEditor({
                             localizeText(title), localizeText('用户'), index + 1,
                             localizeText('命令权限'),
                           ].join(' '),
+                          channel,
                         }))
                     : null);
               })),
@@ -483,6 +495,7 @@ function ScenePolicyEditor({
                 policy,
                 onChange,
                 disabled: sceneDisabled,
+                channel,
               })
             : null)));
 }
@@ -495,6 +508,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   const identityHelp = channel === 'feishu'
     ? '白名单请填写使用者的 Open ID，不是机器人的 Open ID。仅保存通配符的接入配置不包含所有者身份。'
     : null;
+  const commandChannel = channel === 'wecomApp' ? 'wecom-app' : channel;
   const initialPolicy = normalizeAccessPolicy(account?.accessPolicy);
   const initialKey = JSON.stringify(initialPolicy);
   const [draft, setDraft] = React.useState(() => clonePolicy(
@@ -502,10 +516,13 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   ));
   const [saving, setSaving] = React.useState(false);
   const [feedback, setFeedback] = React.useState(null);
+  const [recoverInvalidPolicy, setRecoverInvalidPolicy] = React.useState(false);
+  const canSave = Boolean(initialPolicy) || recoverInvalidPolicy;
 
   React.useEffect(() => {
     const next = normalizeAccessPolicy(account?.accessPolicy);
     setDraft(clonePolicy(next ?? DEFAULT_ACCESS_POLICY));
+    setRecoverInvalidPolicy(false);
   }, [account?.botId, initialKey]);
 
   React.useEffect(() => {
@@ -519,7 +536,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
 
   const save = async (event) => {
     event.preventDefault();
-    if (!initialPolicy) return;
+    if (!canSave) return;
     setFeedback(null);
     setSaving(true);
     try {
@@ -548,10 +565,18 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     className: 'dim-accessPage',
     onSubmit: (event) => void save(event),
   },
-  initialPolicy
+  initialPolicy || recoverInvalidPolicy
     ? null
     : h('div', { className: 'dim-accessState', role: 'alert' },
-        '访问策略尚未就绪，请返回机器人列表刷新后重试。'),
+        h('span', null, '访问策略尚未就绪，请返回机器人列表刷新后重试。'),
+        h('button', {
+          type: 'button',
+          className: 'dim-deliveryButton dim-accessRecoverPolicy',
+          onClick: () => {
+            setDraft(clonePolicy(DEFAULT_ACCESS_POLICY));
+            setRecoverInvalidPolicy(true);
+          },
+        }, localizeText('使用默认访问策略'))),
   h(ScenePolicyEditor, {
     scene: 'direct',
     title: '私聊',
@@ -561,6 +586,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     ownerHelp,
     identityHelp,
     disabled: saving,
+    channel: commandChannel,
     onChange: (direct) => { setDraft((current) => ({ ...current, direct })); setFeedback(null); },
   }),
   h(ScenePolicyEditor, {
@@ -575,6 +601,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       : identityHelp,
     disabled: saving || definition.groupSupported === false,
     unsupported: definition.groupSupported === false,
+    channel: commandChannel,
     onChange: (group) => { setDraft((current) => ({ ...current, group })); setFeedback(null); },
   }),
   feedback ? h('p', {
@@ -588,6 +615,6 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       type: 'submit',
       className: 'dim-deliveryButton',
       'data-kind': 'primary',
-      disabled: saving || !initialPolicy,
+      disabled: saving || !canSave,
     }, saving ? '正在保存…' : '保存访问设置')));
 }

@@ -13730,3 +13730,25 @@ test('Feishu card actions enforce per-command permissions instead of the coarse 
   assert.equal(JSON.parse(sent.at(-1).content).text, COMMAND_PERMISSION_DENIED_MESSAGE,
     'an unmapped card action fails closed for a command allowlist');
 });
+
+test('Feishu numeric menu selections check the actual command permission', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const bridge = new FeishuHarnessBridge({
+    client: cardClient(async (outgoing) => sent.push(outgoing)),
+    channel: {},
+    harness: sessionsHarness(1),
+    state: fixture.state,
+    status: bridgeStatus(),
+    accessPolicy: directAccessPolicy({
+      users: [{ id: 'ou_member', canExecuteCommands: true, allowedCommands: ['menu'] }],
+    }),
+  });
+  await bridge.accept(event('numeric-menu-open', '/m', { senderOpenId: 'ou_member' }));
+  await bridge.waitForIdle();
+  assert.ok(sent.some((entry) => entry.msgType === 'interactive'));
+  await bridge.accept(event('numeric-menu-pick', '1', { senderOpenId: 'ou_member' }));
+  await bridge.waitForIdle();
+  const last = sent.at(-1);
+  assert.equal(JSON.parse(last.content).text, COMMAND_PERMISSION_DENIED_MESSAGE);
+});

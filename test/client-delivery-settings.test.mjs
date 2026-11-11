@@ -1946,3 +1946,101 @@ test('access settings support custom per-command permissions and non-allowlisted
   assert.deepEqual(sent.group.allowlist.nonAllowlistedAllowedCommands, ['status']);
   assert.equal(sent.group.mode, 'allowlist');
 });
+
+test('access settings round-trip an existing per-command policy without losing fields', async (t) => {
+  const calls = [];
+  const account = {
+    ...connectedAccount,
+    accessPolicy: {
+      direct: {
+        mode: 'open',
+        open: {
+          defaultCanExecuteCommands: true,
+          defaultAllowedCommands: ['help'],
+          commandPermissionOverrides: [{
+            id: 'ou_custom', canExecuteCommands: true, allowedCommands: ['status'],
+          }],
+        },
+        allowlist: { users: [] },
+      },
+      group: {
+        mode: 'allowlist',
+        open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
+        allowlist: { users: [], nonAllowlistedAllowedCommands: ['help'] },
+      },
+    },
+  };
+  const renderer = await mount(t, {
+    channel: 'feishu',
+    account,
+    rpcCall: async (endpoint) => {
+      assert.equal(endpoint, DELIVERY_ENDPOINTS.list);
+      return { ok: true, value: { targets: [] } };
+    },
+    accessRpcCall: async (endpoint, payload) => {
+      if (endpoint === FEISHU_ENDPOINTS.status) {
+        return { ok: true, value: { bots: [account] } };
+      }
+      calls.push({ endpoint, payload });
+      return { ok: true, value: { bots: [{ botId: account.botId, accessPolicy: payload.policy }] } };
+    },
+    onBack() {},
+  });
+  await act(async () => {
+    button(renderer.root, '访问设置').props.onClick();
+    await flush();
+  });
+  assert.equal(renderer.root.findByProps({ 'aria-label': '私聊 默认命令权限' }).props.value, 'custom');
+  assert.equal(renderer.root.findByProps({ 'aria-label': '私聊 用户 1 命令权限' }).props.value, 'custom');
+  assert.equal(renderer.root.findByProps({ 'aria-label': '群聊 非白名单用户命令权限' }).props.value, 'custom');
+  await act(async () => {
+    renderer.root.findByProps({ className: 'dim-accessPage' }).props.onSubmit({
+      preventDefault() {},
+    });
+    await flush();
+  });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].payload.policy, account.accessPolicy);
+});
+
+test('access settings can recover an unreadable policy with the default policy', async (t) => {
+  const calls = [];
+  const account = {
+    ...connectedAccount,
+    accessPolicy: { direct: { mode: 'open' } },
+  };
+  const renderer = await mount(t, {
+    channel: 'feishu',
+    account,
+    rpcCall: async (endpoint) => {
+      assert.equal(endpoint, DELIVERY_ENDPOINTS.list);
+      return { ok: true, value: { targets: [] } };
+    },
+    accessRpcCall: async (endpoint, payload) => {
+      if (endpoint === FEISHU_ENDPOINTS.status) {
+        return { ok: true, value: { bots: [account] } };
+      }
+      calls.push({ endpoint, payload });
+      return { ok: true, value: { bots: [{ botId: account.botId, accessPolicy: payload.policy }] } };
+    },
+    onBack() {},
+  });
+  await act(async () => {
+    button(renderer.root, '访问设置').props.onClick();
+    await flush();
+  });
+  assert.match(textOf(renderer.root.findByProps({ className: 'dim-accessState' })), /访问策略尚未就绪/);
+  await act(async () => {
+    button(renderer.root, '使用默认访问策略').props.onClick();
+    await flush();
+  });
+  await act(async () => {
+    renderer.root.findByProps({ className: 'dim-accessPage' }).props.onSubmit({
+      preventDefault() {},
+    });
+    await flush();
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].payload.policy.direct.mode, 'allowlist');
+  assert.deepEqual(calls[0].payload.policy.direct.allowlist.users, []);
+});
