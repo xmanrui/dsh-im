@@ -243,8 +243,8 @@ test('archive notices and blocked notices translate and retain references withou
     }
     const denied = translate(COMMAND_PERMISSION_DENIED_MESSAGE);
     assert.match(denied, language === 'en'
-      ? /administrator.*command permission.*direct or group chat.*Access Settings/u
-      : /管理员.*访问设置.*私聊或群聊.*命令权限/u);
+      ? /administrator.*grant this command.*Access Settings/u
+      : /管理员.*访问设置.*开启该命令/u);
     if (language === 'en') assert.doesNotMatch(denied, /[\u4e00-\u9fff]/u);
   }
 });

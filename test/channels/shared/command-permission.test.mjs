@@ -3,6 +3,13 @@ import test from 'node:test';
 
 import { isSharedLocalCommand } from '../../../src/channels/shared/command-permission.mjs';
 import { evaluateInboundAccess } from '../../../src/channels/shared/inbound-access.mjs';
+import {
+  COMMAND_PERMISSION_GROUPS,
+  COMMAND_PERMISSION_IDS,
+  normalizeAllowedCommands,
+  resolveCommandPermissionId,
+} from '../../../src/channels/shared/command-permission-catalog.mjs';
+import { SHARED_COMMAND_CATALOG } from '../../../src/channels/shared/command-catalog.mjs';
 
 test('isSharedLocalCommand matches existing local command families', () => {
   for (const command of [
@@ -66,14 +73,6 @@ test('evaluateInboundAccess always preserves an original owner privilege', () =>
   }).allowed, false);
 });
 
-import {
-  COMMAND_PERMISSION_GROUPS,
-  COMMAND_PERMISSION_IDS,
-  normalizeAllowedCommands,
-  resolveCommandPermissionId,
-} from '../../../src/channels/shared/command-permission-catalog.mjs';
-import { SHARED_COMMAND_CATALOG } from '../../../src/channels/shared/command-catalog.mjs';
-
 test('command permission catalog exposes unique ids and resolves every alias', () => {
   assert.equal(new Set(COMMAND_PERMISSION_IDS).size, COMMAND_PERMISSION_IDS.length);
   const aliases = new Map();
@@ -127,4 +126,26 @@ test('normalizeAllowedCommands rejects malformed lists and accepts catalog order
   for (const value of [undefined, 'help', [null], [''], ['help', 'help'], ['unknown']]) {
     assert.throws(() => normalizeAllowedCommands(value), { code: 'access-policy-invalid' });
   }
+});
+
+test('an explicit command id gates card actions even without command text', () => {
+  const settings = {
+    direct: {
+      mode: 'allowlist',
+      open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
+      allowlist: { users: [{ id: 'user', canExecuteCommands: true, allowedCommands: ['help'] }] },
+    },
+    group: {
+      mode: 'allowlist',
+      open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
+      allowlist: { users: [] },
+    },
+  };
+  const accessPolicy = { getSettings: () => settings };
+  assert.deepEqual(evaluateInboundAccess(accessPolicy, {
+    conversationType: 'direct', senderIds: 'user', commandId: 'help',
+  }), { allowed: true, reason: 'allowed' });
+  assert.deepEqual(evaluateInboundAccess(accessPolicy, {
+    conversationType: 'direct', senderIds: 'user', commandId: 'new',
+  }), { allowed: false, reason: 'command-not-allowed' });
 });

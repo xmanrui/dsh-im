@@ -92,14 +92,22 @@ function message(messageId, content, overrides = {}) {
   };
 }
 
-function accessPolicy({ canExecuteCommands = false, allowedCommands } = {}) {
+function accessPolicy({
+  canExecuteCommands = false,
+  allowedCommands,
+  nonAllowlistedAllowedCommands,
+} = {}) {
   const user = { id: 'actor-a', canExecuteCommands };
   if (allowedCommands !== undefined) user.allowedCommands = allowedCommands;
+  const allowlist = { users: [user] };
+  if (Array.isArray(nonAllowlistedAllowedCommands)) {
+    allowlist.nonAllowlistedAllowedCommands = nonAllowlistedAllowedCommands;
+  }
   return {
     direct: {
       mode: 'allowlist',
       open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
-      allowlist: { users: [user] },
+      allowlist,
     },
     group: {
       mode: 'allowlist',
@@ -3382,6 +3390,34 @@ test('text bridge enforces a per-command allowlist instead of the coarse boolean
     'a command outside the allowlist is refused');
   assert.equal(sessionClears, 0, 'the refused command never mutates the session');
   await bridge.waitForIdle?.();
+});
+
+test('non-allowlisted users can run only explicitly granted commands', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const settings = accessPolicy({ nonAllowlistedAllowedCommands: ['help'] });
+  const bridge = new TextHarnessBridge({
+    descriptor: { key: 'telegram', label: 'Telegram' },
+    state: fixture.state,
+    logger: { warn() {}, error() {} },
+    accessPolicy: {
+      getSettings: () => settings,
+      isPrivileged: () => false,
+    },
+    bot: { sendText: async (_target, text) => sent.push(text) },
+    harness: { ask: async () => assert.fail('an ordinary message must not reach Harness') },
+  });
+
+  await bridge.accept(message('command-only-help', '/help', { senderId: 'outsider' }));
+  assert.ok(sent.at(-1).includes('/help'), 'the granted command runs');
+
+  const repliesBefore = sent.length;
+  await bridge.accept(message('command-only-new', '/new', { senderId: 'outsider' }));
+  assert.equal(sent.length, repliesBefore, 'an ungranted command is silently rejected');
+
+  await bridge.accept(message('command-only-text', 'hello', { senderId: 'outsider' }));
+  assert.equal(sent.length, repliesBefore, 'ordinary messages stay rejected');
+  assert.equal(fixture.sessions.has('direct:chat-a'), false);
 });
 
 test('an approval reply in a decorated body claims the pending request', async () => {

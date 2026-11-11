@@ -232,7 +232,7 @@ test('QQ menu selections enforce command permission again after it changes', asy
   policy.getSettings().direct.allowlist.users[0].canExecuteCommands = false;
   for (const text of ['/m', '5', menu.keyboard.content.rows[1].buttons[1].action.data]) {
     await f.send(text);
-    assert.match(f.sent.at(-1).text, /没有执行命令的权限/);
+    assert.match(f.sent.at(-1).text, /没有执行该命令的权限/);
   }
   assert.equal(f.state.sessionFor(key), 'session-original');
   assert.equal(f.calls.length, 0);
@@ -355,7 +355,7 @@ test('QQ menu selections enforce per-command permissions, not just the menu comm
   assert.ok(menu, 'opening the menu is allowed');
 
   await f.pick(5, menu);
-  assert.match(f.sent.at(-1).text, /没有执行命令的权限/);
+  assert.match(f.sent.at(-1).text, /没有执行该命令的权限/);
   assert.equal(f.state.sessionFor(key), 'session-original');
   assert.equal(f.calls.length, 0, 'a menu button cannot bypass a restricted command');
 });

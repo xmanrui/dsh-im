@@ -356,7 +356,7 @@ test('a transcribed command is denied for a sender without command permission, l
   assert.deepEqual(archivedCalls, []);
   assert.equal(textRun.replies.length, 1);
   assert.equal(textRun.replies[0].data.msg_type, 'text');
-  assert.match(JSON.parse(textRun.replies[0].data.content).text, /没有执行命令的权限/);
+  assert.match(JSON.parse(textRun.replies[0].data.content).text, /没有执行该命令的权限/);
 
   // 语音入口必须同样被拒绝,而不是转写后直接进入命令分支。
   const voiceRun = runBridge({ voice: fakeVoice('/archived on'), accessPolicy, state });
@@ -367,7 +367,7 @@ test('a transcribed command is denied for a sender without command permission, l
   assert.equal(voiceRun.uploads.length, 0);
   assert.equal(voiceRun.replies.length, 1);
   assert.equal(voiceRun.replies[0].data.msg_type, 'text');
-  assert.match(JSON.parse(voiceRun.replies[0].data.content).text, /没有执行命令的权限/);
+  assert.match(JSON.parse(voiceRun.replies[0].data.content).text, /没有执行该命令的权限/);
 });
 
 test('a transcribed command executes for a sender with command permission', async () => {

@@ -995,6 +995,17 @@ export class QqHarnessBridge {
     if (action.kind === 'section') return this.#showMenu(message, key, action.name);
     if (action.kind === 'page') return this.#showMenu(message, key, '', qqMenuPage(action.list, action.page));
     if (action.kind === 'archive') {
+      if (this.#accessPolicy) {
+        const archivedAccess = evaluateInboundAccess(this.#accessPolicy, {
+          conversationType: message.kind === 'c2c' ? 'direct' : 'group',
+          senderIds: message.senderId,
+          isCommand: true,
+          commandId: 'archived',
+        });
+        if (!archivedAccess.allowed) {
+          return { message: t(COMMAND_PERMISSION_DENIED_MESSAGE) };
+        }
+      }
       await this.#state.setIncludeArchivedSessions(action.include);
       return this.#showMenu(message, key, 'main');
     }
