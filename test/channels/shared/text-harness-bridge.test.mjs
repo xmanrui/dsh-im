@@ -92,12 +92,14 @@ function message(messageId, content, overrides = {}) {
   };
 }
 
-function accessPolicy({ canExecuteCommands = false } = {}) {
+function accessPolicy({ canExecuteCommands = false, allowedCommands } = {}) {
+  const user = { id: 'actor-a', canExecuteCommands };
+  if (allowedCommands !== undefined) user.allowedCommands = allowedCommands;
   return {
     direct: {
       mode: 'allowlist',
       open: { defaultCanExecuteCommands: false, commandPermissionOverrides: [] },
-      allowlist: { users: [{ id: 'actor-a', canExecuteCommands }] },
+      allowlist: { users: [user] },
     },
     group: {
       mode: 'allowlist',
@@ -3342,6 +3344,44 @@ test('a decorated body still has its command gated by canExecuteCommands', async
   settings = accessPolicy({ canExecuteCommands: true });
   await bridge.accept(emailMessage('header-command-allowed', '/new'));
   assert.equal(sessionCreates, 2, 'a permitted sender may still run the command');
+});
+
+test('text bridge enforces a per-command allowlist instead of the coarse boolean', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  let sessionClears = 0;
+  const originalClearSession = fixture.state.clearSession.bind(fixture.state);
+  fixture.state.clearSession = async (...args) => {
+    sessionClears += 1;
+    return originalClearSession(...args);
+  };
+  const settings = accessPolicy({
+    canExecuteCommands: true,
+    allowedCommands: ['help', 'status'],
+  });
+  const bridge = new TextHarnessBridge({
+    descriptor: { key: 'telegram', label: 'Telegram' },
+    state: fixture.state,
+    logger: { warn() {}, error() {} },
+    accessPolicy: {
+      getSettings: () => settings,
+      isPrivileged: () => false,
+    },
+    bot: { sendText: async (_target, text) => sent.push(text) },
+    harness: {
+      createSession: async () => 'session-per-command',
+      ask: async () => 'ok',
+    },
+  });
+
+  await bridge.accept(message('per-command-help', '/help'));
+  assert.ok(sent.at(-1).includes('/help'), 'a permitted command still runs');
+
+  await bridge.accept(message('per-command-new', '/new'));
+  assert.equal(sent.at(-1), COMMAND_PERMISSION_DENIED_MESSAGE,
+    'a command outside the allowlist is refused');
+  assert.equal(sessionClears, 0, 'the refused command never mutates the session');
+  await bridge.waitForIdle?.();
 });
 
 test('an approval reply in a decorated body claims the pending request', async () => {

@@ -450,3 +450,17 @@ test('runtime stays silent on entry and restart, while both menu commands and ca
     await runtime.stop();
   }
 });
+
+test('WeCom template cards enforce per-command permissions, not just menu access', async () => {
+  const f = setup({ accessPolicy: {
+    getSettings: () => directAccessPolicy({ users: [
+      { id: 'member-1', canExecuteCommands: true, allowedCommands: ['menu'] },
+    ] }).getSettings(),
+  } });
+  await f.bridge.accept(f.frame('/m'));
+  assert.ok(f.latest(), 'opening the menu is allowed');
+
+  await f.click('新会话');
+  assert.equal(f.state.sessionFor(), 'session-old');
+  assert.equal(f.sent.at(-1).content, COMMAND_PERMISSION_DENIED_MESSAGE);
+});

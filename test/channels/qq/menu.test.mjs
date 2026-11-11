@@ -344,3 +344,18 @@ test('QQ status, help and partial catalogs retain usable navigation and escape M
   await sendQqMenu(f.bot, {}, view, 'token');
   assert.ok(f.sent.at(-1).text.includes('\\[标题\\]'));
 });
+
+test('QQ menu selections enforce per-command permissions, not just the menu command', async (t) => {
+  const policy = directAccessPolicy({
+    users: [{ id: 'owner', canExecuteCommands: true, allowedCommands: ['menu'] }],
+  });
+  const f = await fixture(t, { policy });
+  await f.send('/m');
+  const menu = f.latestMenu();
+  assert.ok(menu, 'opening the menu is allowed');
+
+  await f.pick(5, menu);
+  assert.match(f.sent.at(-1).text, /没有执行命令的权限/);
+  assert.equal(f.state.sessionFor(key), 'session-original');
+  assert.equal(f.calls.length, 0, 'a menu button cannot bypass a restricted command');
+});

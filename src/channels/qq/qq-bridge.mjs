@@ -78,6 +78,7 @@ import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
 } from '../shared/inbound-access.mjs';
+import { resolveCommandPermissionId } from '../shared/command-permission-catalog.mjs';
 import { ApiError } from '@tencent-connect/qqbot-nodejs';
 import { sendMarkdownReply } from './markdown-reply.mjs';
 import {
@@ -596,7 +597,14 @@ export class QqHarnessBridge {
             text: commandText,
             hasImages: hasQqImageAttachments(message),
             hasFiles: hasQqFileAttachments(message),
-            ...(explicitMenu || numericMenu || isPermissionCommand(commandText) ? { isCommand: true } : {}),
+            ...(explicitMenu || numericMenu || isPermissionCommand(commandText)
+              ? {
+                  isCommand: true,
+                  commandId: explicitMenu || numericMenu
+                    ? 'menu'
+                    : resolveCommandPermissionId(commandText),
+                }
+              : {}),
           })
         : senderAllowed(message, this.#ownerUserOpenid)
           ? { allowed: true, reason: 'legacy-owner' }
@@ -991,6 +999,17 @@ export class QqHarnessBridge {
       return this.#showMenu(message, key, 'main');
     }
     const command = action.text;
+    if (this.#accessPolicy) {
+      const commandAccess = evaluateInboundAccess(this.#accessPolicy, {
+        conversationType: message.kind === 'c2c' ? 'direct' : 'group',
+        senderIds: message.senderId,
+        isCommand: true,
+        commandId: resolveCommandPermissionId(command),
+      });
+      if (!commandAccess.allowed) {
+        return { message: t(COMMAND_PERMISSION_DENIED_MESSAGE) };
+      }
+    }
     const pendingInteraction = this.#pendingInteractions.has(key) || this.#approvals.hasPending(key);
     const isBusy = () => this.#queues.has(key) || this.#pendingInteractions.has(key)
       || this.#approvals.hasPending(key) || this.#batchInputs.status(key).phase !== 'idle';

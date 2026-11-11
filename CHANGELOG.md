@@ -8,6 +8,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Added / 新增
 
+- 访问设置支持命令级权限：每个白名单用户、开放模式默认用户和非白名单用户都可选择「全部命令 / 仅指定命令 / 禁止命令」。在白名单模式下可以只允许非白名单用户执行指定命令，同时仍拒绝其普通消息；飞书卡片、QQ/企业微信/钉钉菜单和工作区卡片等入口统一按实际命令校验，不能通过菜单按钮绕过。原有不配置命令列表的策略保持原行为，`workspaces.json` 仍为 v2，无新增依赖。
+  Access settings now support per-command permissions: each allowlisted user, open-mode default user, and non-allowlisted user can choose All commands / Selected commands only / No commands. Allowlist mode can grant non-allowlisted users selected commands while still rejecting their ordinary messages; Feishu cards, QQ/WeCom/DingTalk menus and workspace cards all check the actual command, so a menu button cannot bypass the restriction. Policies without command lists keep their previous behaviour, the `workspaces.json` format stays v2, and no dependency is added.
 - 新增 `/sessionarchive <Session ID>`（别名 `/sessarchive`）：通过 Discord 等渠道触发 DSH 的会话归档（`workspace.archiveSession`）。传序号只做预览（标题、工作区、ID），不会执行归档——会话列表随新会话出现而位移，按序号直接归档会归档到错误会话；破坏性操作必须点名完整 ID。机器人只负责解析目标并转达 Host 结果，拒绝归档本对话当前绑定的会话与已归档会话；`--stop` 让 Host 先停止该会话正在运行的任务。归档后的会话不再出现在默认的 `/sessionlist`。
   Added `/sessionarchive <Session ID>` (alias `/sessarchive`) to trigger DSH Session archiving; a numerical argument only previews the Session behind that index (title, workspace, ID) and never archives, because the list shifts and archiving by index would hit the wrong Session — destructive actions must name the full ID (`workspace.archiveSession`) from the chat. The bot only resolves the target and relays the Host result; it refuses the Session this chat is bound to and one that is already archived, and `--stop` lets the Host stop that Session's running work. Archived Sessions leave the default `/sessionlist`.
 

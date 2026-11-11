@@ -660,6 +660,23 @@ const CSS = String.raw`
 .dim-accessFeedback[data-tone="success"] { color: var(--dsw-alias-state-success-primary, #20a162); }
 .dim-accessFeedback[data-tone="error"] { color: var(--dsw-alias-state-error-primary, #d54941); }
 .dim-accessActions { display: flex; justify-content: flex-end; }
+.dim-accessDefaultCommands { margin-top: 12px; }
+.dim-accessDefaultHint { margin: 0 0 8px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 17px; }
+.dim-accessCommandPicker { min-width: 0; margin-top: 10px; padding: 10px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.dim-accessCommandPickerHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.dim-accessCommandCount { color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
+.dim-accessCommandPickerActions { display: flex; gap: 8px; }
+.dim-accessCommandBulk { min-height: 28px; padding: 0 10px; font-size: 11px; }
+.dim-accessCommandGroup { min-width: 0; margin: 10px 0 0; padding: 0; border: 0; }
+.dim-accessCommandGroup legend { padding: 0; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; line-height: 18px; font-weight: 600; }
+.dim-accessCommandGroupGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 4px 10px; margin-top: 5px; }
+.dim-accessCommandOption { min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
+.dim-accessCommandOption input { margin: 0; }
+.dim-accessUserCommandPicker { grid-column: 1 / -1; min-width: 0; }
+.dim-accessOtherUsers { min-width: 0; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.dim-accessOtherUsersHeading strong { color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; line-height: 20px; font-weight: 620; }
+.dim-accessOtherUsersHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 17px; }
+.dim-accessOtherUsersMode { margin-top: 10px; max-width: 260px; }
 .dim-botGeneralSettings { min-width: 0; }
 .dim-botGeneralList { min-width: 0; display: grid; }
 .dim-botGeneralRow { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: 24px; padding: 16px 0; border-bottom: 1px solid var(--dsw-alias-border-l2, #dfe1e5); }

@@ -1834,3 +1834,115 @@ test('the Feishu command panel page reports a single-bot channel instead of copy
     0,
   );
 });
+
+test('access settings support custom per-command permissions and non-allowlisted commands', async (t) => {
+  const calls = [];
+  const renderer = await mount(t, {
+    channel: 'feishu',
+    account: connectedAccount,
+    rpcCall: async (endpoint) => {
+      assert.equal(endpoint, DELIVERY_ENDPOINTS.list);
+      return { ok: true, value: { targets: [] } };
+    },
+    accessRpcCall: async (endpoint, payload) => {
+      if (endpoint === FEISHU_ENDPOINTS.status) {
+        return { ok: true, value: { bots: [connectedAccount] } };
+      }
+      calls.push({ endpoint, payload });
+      return {
+        ok: true,
+        value: { bots: [{ botId: connectedAccount.botId, accessPolicy: payload.policy }] },
+      };
+    },
+    onBack() {},
+  });
+
+  await act(async () => {
+    button(renderer.root, '访问设置').props.onClick();
+    await flush();
+  });
+
+  // Open mode: default permissions for non-allowlisted users become a list.
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '私聊 默认命令权限' }).props.onChange({
+      target: { value: 'custom' },
+    });
+    await flush();
+  });
+  assert.equal(renderer.root.findAllByProps({ 'data-role': 'command-picker' }).length, 1);
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '私聊 默认命令权限 /help' }).props.onChange({
+      target: { checked: true },
+    });
+    await flush();
+  });
+
+  // A listed override user gets its own list.
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '私聊 新增用户' }).props.onClick();
+    await flush();
+  });
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '私聊 飞书 Open ID 1' }).props.onChange({
+      target: { value: 'ou_limited' },
+    });
+    await flush();
+  });
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '私聊 用户 1 命令权限' }).props.onChange({
+      target: { value: 'custom' },
+    });
+    await flush();
+  });
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '私聊 用户 1 命令权限 /help' }).props.onChange({
+      target: { checked: true },
+    });
+    await flush();
+  });
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '私聊 用户 1 命令权限 /status' }).props.onChange({
+      target: { checked: true },
+    });
+    await flush();
+  });
+
+  // Allowlist mode on the group scene: non-allowlisted users may run only /status.
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '群聊 访问模式' }).props.onChange({
+      target: { value: 'allowlist' },
+    });
+    await flush();
+  });
+  assert.ok(renderer.root.findByProps({ 'aria-label': '群聊 非白名单用户命令权限' }));
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '群聊 非白名单用户命令权限' }).props.onChange({
+      target: { value: 'custom' },
+    });
+    await flush();
+  });
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '群聊 非白名单用户命令 /status' }).props.onChange({
+      target: { checked: true },
+    });
+    await flush();
+  });
+
+  await act(async () => {
+    renderer.root.findByProps({ className: 'dim-accessPage' }).props.onSubmit({
+      preventDefault() {},
+    });
+    await flush();
+  });
+
+  assert.equal(calls.length, 1);
+  const sent = calls[0].payload.policy;
+  assert.deepEqual(sent.direct.open.defaultAllowedCommands, ['help']);
+  assert.deepEqual(sent.direct.open.commandPermissionOverrides, [{
+    id: 'ou_limited',
+    canExecuteCommands: true,
+    allowedCommands: ['help', 'status'],
+  }]);
+  assert.deepEqual(sent.group.allowlist.nonAllowlistedAllowedCommands, ['status']);
+  assert.equal(sent.group.mode, 'allowlist');
+});

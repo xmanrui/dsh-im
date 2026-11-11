@@ -1,29 +1,35 @@
 export { COMMAND_PERMISSION_DENIED_MESSAGE } from '../../src/channels/shared/inbound-access.mjs';
 import { accessPolicyProvider } from '../../plugin-src/host/channels/shared/access-policy-production.mjs';
 
-function scope(users = []) {
+function scope(users = [], { nonAllowlistedAllowedCommands } = {}) {
+  const allowlist = {
+    users: users.map(({ id, canExecuteCommands = false, allowedCommands }) => ({
+      id,
+      canExecuteCommands,
+      ...(Array.isArray(allowedCommands) ? { allowedCommands: [...allowedCommands] } : {}),
+    })),
+  };
+  if (Array.isArray(nonAllowlistedAllowedCommands)) {
+    allowlist.nonAllowlistedAllowedCommands = [...nonAllowlistedAllowedCommands];
+  }
   return {
     mode: 'allowlist',
     open: {
       defaultCanExecuteCommands: false,
       commandPermissionOverrides: [],
     },
-    allowlist: {
-      users: users.map(({ id, canExecuteCommands = false }) => ({
-        id,
-        canExecuteCommands,
-      })),
-    },
+    allowlist,
   };
 }
 
 export function directAccessPolicy({
   users = [],
   privilegedIds = [],
+  nonAllowlistedAllowedCommands,
 } = {}) {
   const privileged = new Set(privilegedIds);
   const settings = {
-    direct: scope(users),
+    direct: scope(users, { nonAllowlistedAllowedCommands }),
     group: scope(),
   };
   return {

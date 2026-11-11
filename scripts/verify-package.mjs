@@ -168,6 +168,10 @@ const deliverySyncSettingsSource = await readFile(
   resolve(root, 'plugin-src/client/delivery-sync-settings.js'),
   'utf8',
 );
+const accessPolicySettingsSource = await readFile(
+  resolve(root, 'plugin-src/client/access-policy-settings.js'),
+  'utf8',
+);
 const otherClientSources = clientSources
   .replace(contextEditorSource, '')
   .replace(deliverySettingsSource, '')
@@ -175,7 +179,8 @@ const otherClientSources = clientSources
   .replace(thinkingTracesSource, '')
   .replace(botGeneralSettingsSource, '')
   .replace(conversationDirectorySettingsSource, '')
-  .replace(deliverySyncSettingsSource, '');
+  .replace(deliverySyncSettingsSource, '')
+  .replace(accessPolicySettingsSource, '');
 if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || (deliverySettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySettingsSource)
@@ -188,7 +193,7 @@ if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || (deliverySyncSettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySyncSettingsSource)
   || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 3
-  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 8) {
+  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 9) {
   throw new Error('checkable inputs must be limited to context enhancement, Session sync, email settings, Telegram thinking traces, Feishu panel settings, conversation-directory settings, and the Delivery tab');
 }
 for (const marker of ['bot.conversation-directory.set', 'bot.conversation-directory.default.set']) {

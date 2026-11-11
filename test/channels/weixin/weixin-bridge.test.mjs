@@ -2862,3 +2862,30 @@ for (const line of ['/plan', '/goal pause']) {
     assert.deepEqual(sent, [COMMAND_PERMISSION_DENIED_MESSAGE]);
   });
 }
+
+test('Weixin applies per-command permissions to allowlisted users', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const accessPolicy = configuredAccessPolicy({
+    channel: 'weixin',
+    config: { ownerUserId: 'owner-user' },
+    users: [{ id: 'member-user', canExecuteCommands: true, allowedCommands: ['help', 'status'] }],
+  });
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async (request) => { sent.push(request.text); return { messageId: 'reply' }; } },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    accessPolicy,
+    harness: { ask: async () => 'unexpected' },
+    state: fixture.state,
+    logger: { warn() {}, error() {} },
+  });
+
+  await bridge.accept(message('per-command-help', '/help', { from_user_id: 'member-user' }));
+  assert.match(sent.at(-1), /\/help/);
+
+  await bridge.accept(message('per-command-new', '/new', { from_user_id: 'member-user' }));
+  assert.deepEqual(sent.at(-1), COMMAND_PERMISSION_DENIED_MESSAGE);
+  assert.equal(fixture.sessions.has('p2p:member-user'), false);
+});
