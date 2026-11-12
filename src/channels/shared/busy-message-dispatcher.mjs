@@ -2,7 +2,6 @@ import { steerMessage } from './control-command.mjs';
 import { isSharedLocalCommand } from './command-permission.mjs';
 import { evaluateInboundAccess } from './inbound-access.mjs';
 import { normalizeBusyMessageMode } from './message-mode.mjs';
-import { t } from './i18n.mjs';
 import {
   messageFailureDiagnostic, messageFailureText, setLastMessageFailure,
 } from './message-failure.mjs';
@@ -39,14 +38,14 @@ export class BusyMessageDispatcher {
     };
     const queue = (alreadyRecorded = false) => {
       const waiting = isQueued();
-      // Reserve FIFO position before sending the optional receipt.
+      // Reserve FIFO position before logging that the message is waiting.
       const completion = enqueue({ alreadyRecorded });
-      const receipt = waiting
-        ? Promise.resolve().then(() => send(t('已排队，等待前序消息处理。'))).catch((error) => {
-            logger.warn?.('[dsh-im] failed to send queue receipt:', error);
+      const logged = waiting
+        ? Promise.resolve().then(() => logger.info?.('[dsh-im] 消息已排队，等待前序消息处理')).catch((error) => {
+            logger.warn?.('[dsh-im] failed to log queued message:', error);
           })
         : Promise.resolve();
-      return { completion: Promise.all([completion, receipt]).then(([result]) => result) };
+      return { completion: Promise.all([completion, logged]).then(([result]) => result) };
     };
     const route = async () => {
       signal?.throwIfAborted();
@@ -60,8 +59,7 @@ export class BusyMessageDispatcher {
         signal, control, enhancement, pendingInteraction: pendingInteraction(),
       });
       if (!submitted) return queue(true);
-      // Submission is final even if its receipt fails.
-      if (steerReceipt) await send(t('已提交补充指令，Agent 会在下一步读取。'));
+      logger.info?.('[dsh-im] 已提交补充指令，Agent 会在下一步读取');
       await onSteered?.();
       status.lastError = null;
       return {};

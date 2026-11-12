@@ -238,8 +238,8 @@ Logos are a dsh-im browser enhancement and require no changes to DSH. The adapte
 
 Open a bot's **More settings → General**, choose **New messages while a task is running**, and save. Each bot has its own setting, across all 13 chat channels.
 
-- **Queue (default)**: process new messages after the current task finishes, with a queue receipt when they need to wait.
-- **Steer**: add ordinary plain text to the current task for the Agent to read at its next step, with a submission receipt. There is no need to type `/steer` each time.
+- **Queue (default)**: process new messages after the current task finishes; when they need to wait, queue information is logged to the backend instead of being sent as a chat message.
+- **Steer**: add ordinary plain text to the current task for the Agent to read at its next step; successful automatic steering is logged to the backend instead of being sent as a chat message. There is no need to type `/steer` each time.
 
 When idle, messages start a task normally. Images, files, voice messages, and quoted replies keep their existing handling. Group mention rules and permissions still apply; automatic steering requires `/steer` permission. Both modes retain `/steer <additional instruction>` for manual steering.
 

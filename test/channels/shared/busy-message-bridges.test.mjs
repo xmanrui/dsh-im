@@ -13,7 +13,6 @@ const shared = Object.fromEntries(await Promise.all([
 ].map(async ([channel, name]) => [channel,
   (await import(`../../../src/channels/${channel}/${channel}-bridge.mjs`))[`${name}HarnessBridge`]])));
 const channels = [...Object.keys(shared), 'qq', 'feishu', 'weixin', 'wecom', 'wecom-app', 'dingtalk'];
-const logger = { info() {}, warn() {}, error() {} };
 const deferred = () => {
   let resolve;
   const promise = new Promise((done) => { resolve = done; });
@@ -32,12 +31,13 @@ function fixture(channel, { mode = 'queue', canCommand = true } = {}) {
   const asks = [];
   const steers = [];
   const replies = [];
+  const logs = [];
+  const logger = { info: (...args) => { logs.push(args); }, warn() {}, error() {} };
   const active = new Map();
   const status = { messagesReceived: 0, messagesReplied: 0, messagesRejected: 0 };
   const first = deferred();
   let failSteer = false;
   let refuseSteer = false;
-  let failReceipt = false;
   const state = {
     sessionFor: (key) => sessions.get(key),
     setSession: async (key, id) => { sessions.set(key, id); },
@@ -73,7 +73,6 @@ function fixture(channel, { mode = 'queue', canCommand = true } = {}) {
   };
   const sendText = async (...args) => {
     const serialized = JSON.stringify(args);
-    if (failReceipt && serialized.includes('已提交补充指令')) throw new Error('receipt failed');
     replies.push(serialized);
     return { messageId: 'reply', message_id: 'reply', id: 'reply' };
   };
@@ -119,9 +118,9 @@ function fixture(channel, { mode = 'queue', canCommand = true } = {}) {
       content: JSON.stringify({ text }), mentions: group ? [{ key: '@bot', id: { open_id: 'bot' } }] : [],
     } };
   }
-  return { bridge, harness, state, sessions, asks, steers, replies, status, first, message,
+  return { bridge, harness, state, sessions, asks, steers, replies, logs, status, first, message,
     mode: (value) => { mode = value; }, failSteer: () => { failSteer = true; },
-    refuseSteer: () => { refuseSteer = true; }, failReceipt: () => { failReceipt = true; } };
+    refuseSteer: () => { refuseSteer = true; } };
 }
 
 for (const channel of channels) {
@@ -138,10 +137,8 @@ for (const channel of channels) {
     assert.equal(f.steers.length, 1);
     assert.match(f.steers[0].text, /correct the task/);
     assert.match(f.steers[0].text, new RegExp(`"senderId":"${group ? 'second-actor' : 'actor'}"`));
-    assert.equal(
-      f.replies.some((text) => text.includes('已提交补充指令')),
-      channel !== 'weixin',
-    );
+    assert.equal(f.replies.some((text) => text.includes('已提交补充指令')), false);
+    assert.equal(f.logs.some((args) => args.some((value) => String(value).includes('已提交补充指令'))), true);
     await f.bridge.accept(f.message('version', '/version', { group }));
     assert.equal(f.steers.length, 1);
     await f.bridge.accept(f.message('clear', '/clear', { group }));
@@ -162,7 +159,8 @@ for (const channel of channels) {
     const first = f.bridge.accept(f.message('one', 'long task'));
     await eventually(() => f.asks.length === 1);
     const queued = f.bridge.accept(f.message('two', 'next task'));
-    await eventually(() => f.replies.some((text) => text.includes('已排队')));
+    await eventually(() => f.logs.some((args) => args.some((value) => String(value).includes('消息已排队'))));
+    assert.equal(f.replies.some((text) => text.includes('已排队')), false);
     assert.equal(f.asks.length, 1);
     assert.equal(f.steers.length, 0);
     await f.bridge.accept(f.message('manual', '/steer correction'));
@@ -181,13 +179,14 @@ for (const channel of channels) {
     const first = f.bridge.accept(f.message('one', 'long task'));
     await eventually(() => f.asks.length === 1);
     const next = f.bridge.accept(f.message('two', 'ordinary followup'));
-    await eventually(() => f.replies.some((text) => text.includes('已排队')));
+    await eventually(() => f.logs.some((args) => args.some((value) => String(value).includes('消息已排队'))));
+    assert.equal(f.replies.some((text) => text.includes('已排队')), false);
     assert.equal(f.steers.length, 0);
     f.first.resolve();
     await Promise.all([first, next]);
     assert.equal(f.asks.length, 2);
   });
-  for (const outcome of ['refuseSteer', 'failSteer', 'failReceipt']) {
+  for (const outcome of ['refuseSteer', 'failSteer']) {
     test(`${channel}: ${outcome} preserves exactly one message path`, async (t) => {
       const f = fixture(channel, { mode: 'steer' });
       t.after(() => f.first.resolve());
@@ -195,8 +194,10 @@ for (const channel of channels) {
       await eventually(() => f.asks.length === 1);
       f[outcome]();
       const next = f.bridge.accept(f.message('two', 'followup'));
-      if (outcome === 'refuseSteer') await eventually(() => f.replies.some((text) => text.includes('已排队')));
-      else await next;
+      if (outcome === 'refuseSteer') {
+        await eventually(() => f.logs.some((args) => args.some((value) => String(value).includes('消息已排队'))));
+        assert.equal(f.replies.some((text) => text.includes('已排队')), false);
+      } else await next;
       assert.equal(f.asks.length, 1);
       f.first.resolve();
       await Promise.all([first, next]);

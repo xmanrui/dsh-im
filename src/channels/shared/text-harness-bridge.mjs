@@ -589,7 +589,7 @@ export class TextHarnessBridge {
     }
     return this.#dispatchTrigger(normalized, messageId, senderId, key, {
       // Ordinary destinations of the lanes fall through to the busy-mode dispatcher,
-      // keeping its steering, receipts, and routing serialization for what the lanes decline.
+      // keeping its steering, receipt logging, and routing serialization for what the lanes decline.
       exit: (exitOptions) => this.#busyMessages.dispatch({
         key, messageId, text: normalized.content,
         commandText: text, mode: busyMessageMode,
@@ -632,7 +632,7 @@ export class TextHarnessBridge {
    * time.
    * An `exit` hook, when provided, receives every ordinary queue destination of
    * the lanes, so a channel can fall through to richer routing (busy-mode steering
-   * and queue receipts) for what these lanes decline.
+   * and receipt logging) for what these lanes decline.
    */
   #dispatchTrigger(message, messageId, senderId, key, { exit } = {}) {
     const toQueue = (options) => (exit

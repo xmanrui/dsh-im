@@ -21,7 +21,8 @@ function fixture() {
     }) },
     acceptedMessageIds, pendingInteraction: () => pending, isQueued: () => true,
     enqueue: ({ alreadyRecorded }) => { calls.push(['queue', alreadyRecorded]); return turn.promise; },
-    send: async (text) => { calls.push(['reply', text]); }, logger: { error() {}, warn() {} },
+    send: async (text) => { calls.push(['reply', text]); },
+    logger: { info: (...args) => { calls.push(['log', ...args]); }, error() {}, warn() {} },
   };
   const dispatch = (id, extra = {}) => {
     acceptedMessageIds.set(id, null);
@@ -41,7 +42,7 @@ test('routing is FIFO across a delayed false submission and a mode change; it ne
   const third = f.dispatch('three', { text: 'three' });
   f.submission.resolve(false);
   await tick();
-  assert.deepEqual(f.calls.filter(([op]) => op !== 'reply'), [
+  assert.deepEqual(f.calls.filter(([op]) => !['reply', 'log'].includes(op)), [
     ['steer', 'one'], ['queue', true], ['queue', false], ['steer', 'three'], ['queue', true],
   ]);
   assert.equal(f.acceptedMessageIds.size, 3, 'inputs remain reserved until their ordinary task completes');
@@ -58,7 +59,7 @@ test('ineligible attachment reserves its place after a pending steering decision
   assert.equal(f.calls.filter(([op]) => op === 'queue').length, 0);
   f.submission.resolve(true);
   await tick();
-  assert.deepEqual(f.calls.filter(([op]) => op !== 'reply'), [['steer', 'message'], ['queue', false]]);
+  assert.deepEqual(f.calls.filter(([op]) => !['reply', 'log'].includes(op)), [['steer', 'message'], ['queue', false]]);
   f.turn.resolve();
   await Promise.all([first, second]);
 });
@@ -77,30 +78,33 @@ test('new pending interaction takes priority over a message awaiting its routing
   await Promise.all([first, second]);
 });
 
-test('successful steering receipts remain enabled by default and can be suppressed per channel', async () => {
-  const withReceipt = fixture();
-  const visible = withReceipt.dispatch('visible');
+test('successful steering is logged without sending a receipt regardless of steerReceipt', async () => {
+  const defaults = fixture();
+  const visible = defaults.dispatch('visible');
   await tick();
-  withReceipt.submission.resolve(true);
+  defaults.submission.resolve(true);
   await visible;
-  assert.equal(withReceipt.calls.filter(([op]) => op === 'reply').length, 1);
+  assert.equal(defaults.calls.filter(([op]) => op === 'reply').length, 0);
+  assert.equal(defaults.calls.filter(([op, text]) => op === 'log' && text.includes('已提交补充指令')).length, 1);
 
-  const silent = fixture();
-  const quiet = silent.dispatch('quiet', { steerReceipt: false });
+  const disabled = fixture();
+  const quiet = disabled.dispatch('quiet', { steerReceipt: false });
   await tick();
-  silent.submission.resolve(true);
+  disabled.submission.resolve(true);
   await quiet;
-  assert.equal(silent.calls.filter(([op]) => op === 'reply').length, 0);
-  assert.deepEqual(silent.calls.filter(([op]) => op === 'steer'), [['steer', 'message']]);
+  assert.equal(disabled.calls.filter(([op]) => op === 'reply').length, 0);
+  assert.equal(disabled.calls.filter(([op, text]) => op === 'log' && text.includes('已提交补充指令')).length, 1);
+  assert.deepEqual(disabled.calls.filter(([op]) => op === 'steer'), [['steer', 'message']]);
 });
 
-test('suppressing the success receipt keeps the queued fallback receipt', async () => {
+test('queued fallback is logged without sending a receipt', async () => {
   const f = fixture();
   const routed = f.dispatch('fallback', { steerReceipt: false });
   await tick();
   f.submission.resolve(false);
   await tick();
-  assert.equal(f.calls.filter(([op]) => op === 'reply').length, 1);
+  assert.equal(f.calls.filter(([op]) => op === 'reply').length, 0);
+  assert.equal(f.calls.filter(([op, text]) => op === 'log' && text.includes('消息已排队')).length, 1);
   assert.deepEqual(f.calls.filter(([op]) => op === 'queue'), [['queue', true]]);
   f.turn.resolve();
   await routed;

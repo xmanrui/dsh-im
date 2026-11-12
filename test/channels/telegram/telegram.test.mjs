@@ -2353,6 +2353,7 @@ test('Telegram private placeholder streams keep controls responsive and ordinary
       const asked = [];
       const controls = [];
       const sent = [];
+      const logs = [];
       const edits = [];
       const deleted = [];
       const drafts = [];
@@ -2406,7 +2407,7 @@ test('Telegram private placeholder streams keep controls responsive and ordinary
       const bridge = new TelegramHarnessBridge({
         bot: client, state, thinkingTraces: false,
         harness: { workspaceSession: () => session },
-        logger: { warn() {}, error() {} },
+        logger: { info: (...args) => { logs.push(args); }, warn() {}, error() {} },
       });
       const incoming = (id, text) => normalizeTelegramUpdate({
         update_id: id,
@@ -2430,14 +2431,15 @@ test('Telegram private placeholder streams keep controls responsive and ordinary
           await bounded(Promise.all([prompt, followUp]), 'queued follow-up did not complete');
           assert.deepEqual(asked, ['long task', 'ordinary follow-up']);
           assert.equal(controls.length, 0);
-          assert.equal(sent.length, 5, 'one placeholder and one answer per prompt, plus the queue receipt');
-          assert.match(sent[1].text, /已排队/);
-          assert.deepEqual(sent.map((entry) => entry.text).filter((text) => !/已排队/.test(text)),
+          assert.equal(sent.length, 4, 'each prompt has one placeholder and one answer without a queue receipt');
+          assert.equal(sent.some(({ text }) => /已排队/.test(text)), false);
+          assert.equal(logs.some((args) => args.some((value) => String(value).includes('消息已排队'))), true);
+          assert.deepEqual(sent.map((entry) => entry.text),
             ['正在处理…', 'final answer', '正在处理…', 'follow-up answer'],
             'every turn answers in its own message');
           assert.deepEqual(edits.map((entry) => entry.messageId), [901],
             'progress stays on the placeholder');
-          assert.deepEqual(deleted, [901, 904], 'every finished turn drops its placeholder');
+          assert.deepEqual(deleted, [901, 903], 'every finished turn drops its placeholder');
         } else {
           await bounded(bridge.accept(incoming(101, action === 'stop' ? '/stop' : '/steer add ANDROID_OK')),
             'control command waited for the ordinary prompt queue');
