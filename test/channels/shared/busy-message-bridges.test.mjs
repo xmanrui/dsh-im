@@ -138,7 +138,10 @@ for (const channel of channels) {
     assert.equal(f.steers.length, 1);
     assert.match(f.steers[0].text, /correct the task/);
     assert.match(f.steers[0].text, new RegExp(`"senderId":"${group ? 'second-actor' : 'actor'}"`));
-    assert.ok(f.replies.some((text) => text.includes('已提交补充指令')));
+    assert.equal(
+      f.replies.some((text) => text.includes('已提交补充指令')),
+      channel !== 'weixin',
+    );
     await f.bridge.accept(f.message('version', '/version', { group }));
     assert.equal(f.steers.length, 1);
     await f.bridge.accept(f.message('clear', '/clear', { group }));

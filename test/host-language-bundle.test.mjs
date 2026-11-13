@@ -28,7 +28,7 @@ async function startHost(t, language) {
   internals.applyTelegram = async () => { languageAtChannelStart = controller.language(); };
   const errors = [];
   await createImHostPlugin(internals).apply({
-    connection: { fetch: {} },
+    connection: { fetch: { register: () => () => {} } },
     logger: { error: (...args) => errors.push(args) },
   }, { dshHome, language });
   assert.deepEqual(errors, []);

@@ -77,6 +77,35 @@ test('new pending interaction takes priority over a message awaiting its routing
   await Promise.all([first, second]);
 });
 
+test('successful steering receipts remain enabled by default and can be suppressed per channel', async () => {
+  const withReceipt = fixture();
+  const visible = withReceipt.dispatch('visible');
+  await tick();
+  withReceipt.submission.resolve(true);
+  await visible;
+  assert.equal(withReceipt.calls.filter(([op]) => op === 'reply').length, 1);
+
+  const silent = fixture();
+  const quiet = silent.dispatch('quiet', { steerReceipt: false });
+  await tick();
+  silent.submission.resolve(true);
+  await quiet;
+  assert.equal(silent.calls.filter(([op]) => op === 'reply').length, 0);
+  assert.deepEqual(silent.calls.filter(([op]) => op === 'steer'), [['steer', 'message']]);
+});
+
+test('suppressing the success receipt keeps the queued fallback receipt', async () => {
+  const f = fixture();
+  const routed = f.dispatch('fallback', { steerReceipt: false });
+  await tick();
+  f.submission.resolve(false);
+  await tick();
+  assert.equal(f.calls.filter(([op]) => op === 'reply').length, 1);
+  assert.deepEqual(f.calls.filter(([op]) => op === 'queue'), [['queue', true]]);
+  f.turn.resolve();
+  await routed;
+});
+
 test('shutdown releases accepted messages without submitting or enqueueing pending routing work', async () => {
   const f = fixture();
   const controller = new AbortController();

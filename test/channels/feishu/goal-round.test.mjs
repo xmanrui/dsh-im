@@ -41,6 +41,7 @@ const end = (turn = 4, seq = 104, kind = 'completed') => ({
 async function fixture(t, {
   resolver = async () => [],
   keys = [[TOPIC, 'chat-1', 'om-topic-1']],
+  failPatchWhen = null,
 } = {}) {
   let listener;
   const controller = new AbortController();
@@ -90,6 +91,9 @@ async function fixture(t, {
               return { code: 0, data: { message_id: id } };
             },
             patch: async request => {
+              if (failPatchWhen && String(request.data.content).includes(failPatchWhen)) {
+                throw new Error('230099 invalid image keys (simulated)');
+              }
               patches.push(structuredClone(request));
               visible.set(request.path.message_id, request.data.content);
               return { code: 0 };
@@ -324,4 +328,64 @@ test('a goal in a session with no Feishu conversation leaves bound cards alone',
   assert.match(f.cardFor('reply-1'), /bash/);
   assert.match(f.cardFor('reply-1'), /飞书会话的结果/);
   assert.match(f.cardFor('reply-1'), /已完成/);
+});
+
+test('a local image in the round answer is rendered as text so the seal completes', async t => {
+  const f = await fixture(t);
+
+  f.emit(start(4, 99));
+  f.emit(goal(1, 100));
+  await f.drain();
+
+  f.emit(answer('结果如下：\n![标题画面](/tmp/host_13.png)\n已推送 commit。'));
+  await f.drain();
+  f.emit(end());
+  await f.drain();
+
+  const card = f.cardFor('reply-1');
+  assert.match(card, /标题画面/, 'the caption survives');
+  assert.doesNotMatch(card, /!\[/, 'the image syntax never reaches the card');
+  assert.match(card, /已完成/);
+  assert.equal(f.replies.filter(reply => reply.data.msg_type !== 'interactive').length, 0,
+    'the answer is delivered in the card, not as a second message');
+});
+
+test('a bare relative image path is degraded too, so the round card still seals', async t => {
+  const f = await fixture(t);
+
+  f.emit(start(4, 99));
+  f.emit(goal(1, 100));
+  await f.drain();
+
+  // Agents usually write screenshots relative to the project root; Feishu
+  // rejects those as invalid image keys and used to break the whole card.
+  f.emit(answer('面板截图如下：\n![挑战任务面板](06-log/challenge_click_r108.png)\n结束时间 12:26。'));
+  await f.drain();
+  f.emit(end());
+  await f.drain();
+
+  const card = f.cardFor('reply-1');
+  assert.match(card, /挑战任务面板/);
+  assert.doesNotMatch(card, /06-log\//, 'the relative path never reaches the card');
+  assert.match(card, /已完成/);
+  assert.equal(f.replies.filter(reply => reply.data.msg_type !== 'interactive').length, 0,
+    'the answer is delivered in the card, not as a second message');
+});
+
+test('a card that fails to seal still delivers the round result as a reply', async t => {
+  const f = await fixture(t, { failPatchWhen: 'SEALFAIL' });
+
+  f.emit(start(4, 99));
+  f.emit(goal(1, 100));
+  await f.drain();
+
+  f.emit(answer('SEALFAIL 本轮结果正文'));
+  await f.drain();
+  f.emit(end());
+  await f.drain();
+
+  const textReplies = f.replies.filter(reply => reply.data.msg_type !== 'interactive');
+  assert.equal(textReplies.length, 1, 'the result is posted once');
+  assert.match(textReplies[0].data.content, /SEALFAIL 本轮结果正文/);
+  assert.equal(textReplies[0].path?.message_id, 'om-topic-1', 'the reply anchors to the conversation');
 });

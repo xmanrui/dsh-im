@@ -90,7 +90,7 @@ for (const [change, newModel] of [
   assert.equal(timeline.filter(([kind]) => kind === 'select').length, 1);
 
   await bridge.accept(message('message-new', '/new'));
-  assert.equal(state.sessionFor(conversationKey), null);
+  assert.equal(state.sessionFor(conversationKey), 'session-b', '/new eagerly creates the next session');
   await bridge.accept(message('message-three', 'first prompt after new'));
   assert.equal(state.sessionFor(conversationKey), 'session-b');
   assert.deepEqual(timeline.slice(-3), [
@@ -216,7 +216,7 @@ for (const savedModel of [
   assert.deepEqual(calls.at(-1), ['ask', 'session-one', 'hello']);
   assert.ok(replies.includes('recovered'));
   await bridge.accept(message('new-after-recovery', '/new'));
-  assert.equal(state.sessionFor(key), null);
+  assert.equal(state.sessionFor(key), 'session-one', 'a failed eager /new keeps the recovered binding');
   await assert.rejects(harness.createSession(), { code: 'model-unavailable' });
   assert.deepEqual(calls.at(-1), ['select', 'session-one', savedModel, {}]);
 });

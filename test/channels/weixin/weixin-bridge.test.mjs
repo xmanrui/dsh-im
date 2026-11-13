@@ -2816,3 +2816,49 @@ test('Weixin keeps delivering a message whose send time cannot be read', async (
     `only the unreadable field is dropped: ${text}`);
   assert.ok(text.endsWith('时间读不到也要送达'));
 });
+
+for (const line of ['/plan', '/plan off', '/plan investigate the bug', '/goal', '/goal deliver the feature', '/goal pause', '/goal resume', '/goal clear']) {
+  test(`Weixin delegates ${line} without prompting the model`, async () => {
+    const fixture = stateFixture();
+    fixture.sessions.set('p2p:owner-user', 'session-review');
+    const calls = [];
+    const sent = [];
+    let asks = 0;
+    const bridge = new WeixinHarnessBridge({
+      api: { sendText: async request => { sent.push(request.text); return { messageId: 'reply' }; } },
+      baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'test-token', ownerUserId: 'owner-user', state: fixture.state,
+      harness: {
+        workspaceSession: (id, key) => {
+          assert.equal(id, 'session-review'); assert.equal(key, 'p2p:owner-user');
+          return { executeCommand: async command => { calls.push(command); return { result: { kind: 'success', text: 'host-confirmation' } }; } };
+        },
+        ask: async () => { asks++; return 'unexpected'; },
+      },
+      logger: { warn() {}, error() {} },
+    });
+    await bridge.accept(message('delegate', line));
+    assert.deepEqual(calls, [line]);
+    assert.deepEqual(sent, ['host-confirmation']);
+    assert.equal(asks, 0);
+  });
+}
+
+for (const line of ['/plan', '/goal pause']) {
+  test(`Weixin denies ${line} for a sender without command permission`, async () => {
+    const fixture = stateFixture();
+    fixture.sessions.set('p2p:owner-user', 'session-review');
+    const { directAccessPolicy } = await import('../access-policy-fixture.mjs');
+    const sent = [];
+    let calls = 0;
+    const bridge = new WeixinHarnessBridge({
+      api: { sendText: async request => { sent.push(request.text); return { messageId: 'reply' }; } },
+      baseUrl: 'https://ilinkai.weixin.qq.com/', token: 'test-token', ownerUserId: 'different-owner', state: fixture.state,
+      accessPolicy: directAccessPolicy({ users: [{ id: 'owner-user', canExecuteCommands: false }] }),
+      harness: { executeCommand: async () => { calls++; }, ask: async () => { calls++; return 'unexpected'; } },
+      logger: { warn() {}, error() {} },
+    });
+    await bridge.accept(message('denied', line));
+    assert.equal(calls, 0);
+    assert.deepEqual(sent, [COMMAND_PERMISSION_DENIED_MESSAGE]);
+  });
+}
