@@ -3,6 +3,7 @@ import { downloadFeishuResourceRanges } from './resource-download.mjs';
 import { imageDownloadLimitMessage } from '../shared/image-prompt.mjs';
 import { ImagePromptError } from '../shared/image-prompt.mjs';
 import { t } from '../shared/i18n.mjs';
+import { formatFeishuMergeForward } from './merge-forward.mjs';
 
 const FEISHU_MISSING_MESSAGE_SCOPE_CODE = 99991672;
 const FEISHU_RESOURCE_SIZE_LIMIT_CODE = 234037;
@@ -342,7 +343,7 @@ async function readFeishuErrorBody(stream, signal) {
   }
 }
 
-async function feishuProviderCode(error, signal) {
+async function feishuProviderCode(error, signal, recognizedCodes = [FEISHU_MISSING_MESSAGE_SCOPE_CODE, FEISHU_RESOURCE_SIZE_LIMIT_CODE]) {
   const pending = [error];
   const seen = new Set();
   while (pending.length > 0 && seen.size < 8) {
@@ -353,7 +354,7 @@ async function feishuProviderCode(error, signal) {
     seen.add(value);
     const directCode = providerCode(value);
     const data = value.response?.data ?? value.data;
-    if (directCode === FEISHU_MISSING_MESSAGE_SCOPE_CODE || directCode === FEISHU_RESOURCE_SIZE_LIMIT_CODE) {
+    if (recognizedCodes.includes(directCode)) {
       data?.destroy?.();
       return directCode;
     }
@@ -361,13 +362,13 @@ async function feishuProviderCode(error, signal) {
       const body = await readFeishuErrorBody(data, signal);
       try {
         const parsedCode = providerCode(JSON.parse(body));
-        if (parsedCode === FEISHU_MISSING_MESSAGE_SCOPE_CODE || parsedCode === FEISHU_RESOURCE_SIZE_LIMIT_CODE) return parsedCode;
+        if (recognizedCodes.includes(parsedCode)) return parsedCode;
       } catch {
         // Non-JSON provider failures keep the generic image download message.
       }
     } else {
       const dataCode = providerCode(data);
-      if (dataCode === FEISHU_MISSING_MESSAGE_SCOPE_CODE || dataCode === FEISHU_RESOURCE_SIZE_LIMIT_CODE) return dataCode;
+      if (recognizedCodes.includes(dataCode)) return dataCode;
     }
     pending.push(value.cause);
   }
@@ -484,8 +485,8 @@ function feishuReplyAttachments(messageType, parsed, post) {
   return [];
 }
 
-function feishuReplyReference(event, client) {
-  const messageId = feishuReplyTargetId(event);
+function feishuReplyReference(event, client, targetId = feishuReplyTargetId(event)) {
+  const messageId = targetId;
   if (!messageId) return null;
   const chatId = nonEmptyString(event?.message?.chat_id);
   return {
@@ -503,15 +504,21 @@ function feishuReplyReference(event, client) {
         });
       } catch (error) {
         signal?.throwIfAborted();
-        if (await feishuProviderCode(error, signal) === FEISHU_MISSING_MESSAGE_SCOPE_CODE) {
+        const code = await feishuProviderCode(error, signal, [
+          FEISHU_MISSING_MESSAGE_SCOPE_CODE, 230027, 230050, 230110,
+        ]);
+        if (code === FEISHU_MISSING_MESSAGE_SCOPE_CODE || code === 230027 || code === 230050) {
           return { messageId, unavailableReason: 'permission-denied' };
         }
+        if (code === 230110) return { messageId, unavailableReason: 'deleted' };
         throw error;
       }
       signal?.throwIfAborted();
-      if (providerCode(response) === FEISHU_MISSING_MESSAGE_SCOPE_CODE) {
+      const code = providerCode(response);
+      if (code === FEISHU_MISSING_MESSAGE_SCOPE_CODE || code === 230027 || code === 230050) {
         return { messageId, unavailableReason: 'permission-denied' };
       }
+      if (code === 230110) return { messageId, unavailableReason: 'deleted' };
       if (providerCode(response) !== null && providerCode(response) !== 0) {
         return { messageId, unavailableReason: 'not-delivered' };
       }
@@ -537,9 +544,11 @@ function feishuReplyReference(event, client) {
       const parsed = parsedMessageContent(quotedEvent);
       const post = postContent(quotedEvent, parsed);
       const quoted = extractInboundMessage(quotedEvent, client);
-      const content = messageType === 'interactive'
-        ? interactiveCardText(parsed)
-        : quoted.content;
+      const content = messageType === 'merge_forward'
+        ? formatFeishuMergeForward(response.data.items, messageId)
+        : messageType === 'interactive'
+          ? interactiveCardText(parsed)
+          : quoted.content;
       const attachments = feishuReplyAttachments(messageType, parsed, post);
       return {
         messageId,
@@ -567,7 +576,12 @@ export function extractInboundMessage(event, client) {
     : null;
   const imageKeys = standaloneImageKey ? [standaloneImageKey] : post?.imageKeys ?? [];
   const file = messageType === 'file' ? feishuFileSource(event, client, parsed) : null;
-  const replyTo = feishuReplyReference(event, client);
+  // A merged record is reference material, not command text. Resolve it lazily
+  // through the same permission-checked message lookup as a quoted record;
+  // never download its child resources (Feishu rejects those with 234043).
+  const replyTo = messageType === 'merge_forward'
+    ? feishuReplyReference(event, client, nonEmptyString(event?.message?.message_id))
+    : feishuReplyReference(event, client);
   // A forwarded card arrives as `interactive`. Without this branch its text was
   // dropped entirely, so the message looked empty and the reader got the
   // "text, image and file only" notice — even though the same extraction is

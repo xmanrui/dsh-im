@@ -784,3 +784,47 @@ test('a card with no readable text still reports nothing', async () => {
   assert.equal(message.content, '');
   assert.equal(message.images.length, 0);
 });
+
+
+test('merged records resolve lazily as reference data, with no child resource downloads', async () => {
+  let calls = 0;
+  const client = { im: { v1: { message: { get: async () => {
+    calls++;
+    return { code: 0, data: { items: [
+      { message_id: 'om_merge', chat_id: 'oc_chat', msg_type: 'merge_forward' },
+      { message_id: 'om_text', upper_message_id: 'om_merge', msg_type: 'text',
+        body: { content: JSON.stringify({ text: '/stop and inspect' }) } },
+      { message_id: 'om_file', upper_message_id: 'om_merge', msg_type: 'file',
+        body: { content: JSON.stringify({ file_key: 'file_key', file_name: 'report.txt' }) } },
+    ] } };
+  } }, messageResource: { get: () => { throw new Error('must not download merged attachments'); } } } } };
+  const message = extractInboundMessage({ message: {
+    message_id: 'om_merge', message_type: 'merge_forward', chat_id: 'oc_chat', content: '{}',
+  } }, client);
+  assert.equal(calls, 0);
+  assert.equal(message.content, '', 'forwarded text must not become a local command');
+  assert.deepEqual(message.images, []);
+  assert.deepEqual(message.files, []);
+  assert.equal(message.replyTo.messageId, 'om_merge');
+  const loaded = await message.replyTo.load();
+  assert.equal(calls, 1);
+  assert.match(loaded.content, /stop and inspect/u);
+  assert.match(loaded.content, /report.txt/u);
+  assert.deepEqual(loaded.attachments, []);
+  assert.equal(loaded.files, undefined);
+});
+
+for (const [code, unavailableReason] of [[230027, 'permission-denied'], [230050, 'permission-denied'], [230110, 'deleted']]) {
+  for (const thrown of [false, true]) {
+    test(`merged lookup explicitly marks provider code ${code}, thrown=${thrown}`, async () => {
+      const client = { im: { v1: { message: { get: async () => {
+        if (thrown) throw { response: { data: { code } } };
+        return { code };
+      } } } } };
+      const message = extractInboundMessage({ message: {
+        message_id: 'om_merge', message_type: 'merge_forward', chat_id: 'oc_chat', content: '{}',
+      } }, client);
+      assert.deepEqual(await message.replyTo.load(), { messageId: 'om_merge', unavailableReason });
+    });
+  }
+}
