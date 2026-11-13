@@ -5902,7 +5902,10 @@ export class FeishuHarnessBridge {
           { kind: 'message', text: t('📎 已注入会话上下文') },
           { billable: false },
         );
-      } else {
+      } else if (!liveCot) {
+        // 实时直播模式下过程由飞书原生思考面板承载,而该面板要等本轮第一个
+        // 进度事件才创建,此刻还没有可写入的容器;单独发一条 post 会落在
+        // 直播面板之外,用户看到孤零零一句「已注入会话上下文」。
         await this.#sendStepMessage(
           chatId, key,
           [[{ tag: 'text', text: t('📎 已注入会话上下文') }]],
