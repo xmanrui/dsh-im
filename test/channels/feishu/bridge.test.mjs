@@ -13699,3 +13699,45 @@ for (const mode of ['text', 'stream', 'fallback']) {
     assert.equal(status.lastError, null);
   });
 }
+
+
+for (const direct of [true, false]) {
+  test(`Feishu ${direct ? 'direct' : 'quoted'} merged records reach the prompt without executing child commands`, async () => {
+    const fixture = stateFixture([['p2p:ou_user', 'session-merge']]);
+    const lookups = [];
+    const asked = [];
+    const bridge = new FeishuHarnessBridge({
+      client: { im: { v1: { message: {
+        get: async ({ path }) => {
+          lookups.push(path.message_id);
+          return { code: 0, data: { items: [
+            { message_id: 'om_merge', chat_id: 'oc_chat', msg_type: 'merge_forward' },
+            { message_id: 'om_child', upper_message_id: 'om_merge', msg_type: 'text',
+              sender: { id: 'ou_author' }, create_time: '1700000000000',
+              body: { content: JSON.stringify({ text: '/new\n合并记录原文' }) } },
+            { message_id: 'om_image', upper_message_id: 'om_merge', msg_type: 'image',
+              body: { content: JSON.stringify({ image_key: 'img_unread' }) } },
+          ] } };
+        },
+        create: async () => ({ code: 0, data: { message_id: 'om_answer' } }),
+      } } } },
+      channel: {},
+      harness: { sessionExists: async () => true, ask: async (sessionId, content) => {
+        asked.push({ sessionId, content }); return '已读取正文';
+      } },
+      state: fixture.state, status: bridgeStatus(),
+      allowedSenderOpenIds: new Set(['ou_user']),
+    });
+    await bridge.accept(event(direct ? 'om_merge' : 'om_question', direct ? '' : '查一下', direct
+      ? { message_type: 'merge_forward', content: '{}' }
+      : { parent_id: 'om_merge', root_id: 'om_other' }));
+    await bridge.waitForIdle();
+    assert.deepEqual(lookups, ['om_merge']);
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0].sessionId, 'session-merge');
+    assert.match(JSON.stringify(asked[0].content), /合并记录原文/u);
+    assert.match(JSON.stringify(asked[0].content), /ou_author/u);
+    assert.equal(fixture.sessions.get('p2p:ou_user'), 'session-merge');
+    if (!direct) assert.match(JSON.stringify(asked[0].content), /查一下/u);
+  });
+}
