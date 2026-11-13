@@ -394,6 +394,193 @@ export async function fillVoiceContent({
   }
 }
 
+// Service messages are chat-level events, not somebody talking: a pin, a forum
+// topic being created/renamed/closed, a chat title change. They carry no text,
+// no attachment, and only sometimes a reply reference — which used to end in one
+// of two wrong places: the bridge's "only text, images and files are supported"
+// notice, or an agent turn that arrived empty. Neither is honest, the event did
+// happen. So the event is rendered as text, its raw fields ride along, and the
+// answer is asked to stay short while leaving the agent free to act on it (name
+// a new topic, follow a topic rename in the Session title).
+const TELEGRAM_CONTENT_FIELDS = Object.freeze([
+  'text', 'caption', 'photo', 'document', 'video', 'audio', 'voice', 'video_note',
+  'animation', 'sticker', 'location', 'contact', 'poll', 'dice', 'venue',
+  'paid_media', 'invoice', 'successful_payment', 'story', 'giveaway',
+  'users_shared', 'chat_shared',
+]);
+
+// Keys that describe the envelope rather than the event; they are noise in the
+// payload the agent reads.
+const TELEGRAM_ENVELOPE_FIELDS = Object.freeze([
+  'chat', 'from', 'message_id', 'date', 'message_thread_id', 'is_topic_message',
+  // Chats, not people: keeping them would render a chat id as a sender
+  // identity in the fallback payload.
+  'sender_chat', 'forward_from_chat',
+]);
+
+function telegramServiceText(value, limit = 200) {
+  const parts = [];
+  const walk = (node, key) => {
+    if (typeof node === 'string') {
+      if (key === 'text') parts.push(node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, key);
+      return;
+    }
+    if (node && typeof node === 'object') {
+      for (const [childKey, child] of Object.entries(node)) walk(child, childKey);
+    }
+  };
+  walk(value, undefined);
+  const text = parts.join(' ').replace(/\s+/gu, ' ').trim();
+  return text ? text.slice(0, limit) : undefined;
+}
+
+function telegramSenderIdentity(from) {
+  if (!from || typeof from !== 'object') return undefined;
+  const name = [from.first_name, from.last_name]
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => value.trim()).join(' ');
+  return {
+    ...(Number.isSafeInteger(from.id) ? { id: from.id } : {}),
+    ...(name ? { name } : {}),
+    ...(typeof from.username === 'string' && from.username ? { username: from.username } : {}),
+    ...(from.is_bot === true ? { is_bot: true } : {}),
+  };
+}
+
+function telegramEventFields(message) {
+  return Object.keys(message ?? {})
+    .filter((key) => !TELEGRAM_ENVELOPE_FIELDS.includes(key));
+}
+
+// An unrecognized service field is reported with its values, not just its name:
+// "members_joined" style events are useless when all the agent learns is
+// `["new_chat_members"]`. Every value is squeezed into the same small shape —
+// people become identity objects, scalars are truncated, anything deeper keeps
+// only the names of its own fields.
+function telegramEventPayload(message) {
+  const payload = {};
+  for (const field of telegramEventFields(message)) {
+    const value = message[field];
+    if (Array.isArray(value) && value.length > 0
+      && value.every((item) => telegramSenderIdentity(item)?.id !== undefined)) {
+      payload[field] = value.slice(0, 10).map((item) => telegramSenderIdentity(item));
+      continue;
+    }
+    const identity = value && typeof value === 'object' ? telegramSenderIdentity(value) : undefined;
+    if (identity?.id !== undefined) {
+      payload[field] = identity;
+      continue;
+    }
+    if (typeof value === 'string') {
+      payload[field] = value.slice(0, 120);
+      continue;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      payload[field] = value;
+      continue;
+    }
+    payload[field] = { fields: Object.keys(value ?? {}) };
+  }
+  return payload;
+}
+
+function telegramPinnedSummary(pinned) {
+  const text = typeof pinned?.text === 'string'
+    ? pinned.text
+    : typeof pinned?.caption === 'string' ? pinned.caption : telegramServiceText(pinned?.rich_message);
+  return {
+    ...(Number.isSafeInteger(pinned?.message_id) ? { message_id: pinned.message_id } : {}),
+    ...(Number.isSafeInteger(pinned?.message_thread_id)
+      ? { thread_id: pinned.message_thread_id } : {}),
+    ...(telegramSenderIdentity(pinned?.from) ? { author: telegramSenderIdentity(pinned?.from) } : {}),
+    fields: telegramEventFields(pinned),
+    ...(text ? { text } : {}),
+  };
+}
+
+/**
+ * What kind of chat-level event a Telegram message is, with the fields the agent
+ * needs to make sense of it, or `undefined` for an ordinary message.
+ */
+export function telegramServiceEvent(message) {
+  if (!message || typeof message !== 'object') return undefined;
+  const threadId = Number.isSafeInteger(message.message_thread_id)
+    ? message.message_thread_id : undefined;
+  if (message.pinned_message) {
+    return { kind: 'message_pinned', payload: telegramPinnedSummary(message.pinned_message) };
+  }
+  if (message.forum_topic_created) {
+    const name = typeof message.forum_topic_created.name === 'string'
+      ? message.forum_topic_created.name : undefined;
+    return {
+      kind: 'forum_topic_created',
+      payload: { ...(name ? { name } : {}), thread_id: threadId },
+    };
+  }
+  if (message.forum_topic_edited) {
+    const name = typeof message.forum_topic_edited.name === 'string'
+      ? message.forum_topic_edited.name : undefined;
+    return {
+      kind: 'forum_topic_edited',
+      payload: { ...(name ? { name } : {}), ...(threadId === undefined ? {} : { thread_id: threadId }) },
+    };
+  }
+  if (message.forum_topic_closed) {
+    return { kind: 'forum_topic_closed', payload: { thread_id: threadId } };
+  }
+  if (message.forum_topic_reopened) {
+    return { kind: 'forum_topic_reopened', payload: { thread_id: threadId } };
+  }
+  if (message.message_auto_delete_timer_changed) {
+    const seconds = Number(message.message_auto_delete_timer_changed.message_auto_delete_time);
+    return {
+      kind: 'message_auto_delete_timer_changed',
+      payload: {
+        ...(Number.isFinite(seconds) ? { seconds } : {}),
+        ...(threadId === undefined ? {} : { thread_id: threadId }),
+      },
+    };
+  }
+  if (typeof message.new_chat_title === 'string') {
+    return { kind: 'chat_title_changed', payload: { title: message.new_chat_title } };
+  }
+  if (message.new_chat_photo) return { kind: 'chat_photo_changed', payload: {} };
+  if (message.delete_chat_photo) return { kind: 'chat_photo_deleted', payload: {} };
+  if (message.group_chat_created || message.supergroup_chat_created || message.channel_chat_created) {
+    return { kind: 'chat_created', payload: {} };
+  }
+  if (Array.isArray(message.new_chat_members) && message.new_chat_members.length > 0) {
+    return {
+      kind: 'members_joined',
+      payload: {
+        members: message.new_chat_members.slice(0, 10)
+          .map((member) => telegramSenderIdentity(member)).filter(Boolean),
+      },
+    };
+  }
+  if (message.left_chat_member) {
+    return { kind: 'member_left', payload: { member: telegramSenderIdentity(message.left_chat_member) } };
+  }
+  // No content and no known service field: still an event worth reporting, so
+  // its fields and their values become the payload instead of a silent empty
+  // turn.
+  if (!TELEGRAM_CONTENT_FIELDS.some((field) => message[field] !== undefined)) {
+    return { kind: 'unknown_service_message', payload: telegramEventPayload(message) };
+  }
+  return undefined;
+}
+
+function telegramServicePrompt(event) {
+  return t('收到 Telegram 服务消息（{kind}）：{payload}。请尽量简短地回答；必要时可据此行动，例如为新话题命名，或按话题改名调整当前会话名。', {
+    kind: event.kind,
+    payload: JSON.stringify(event.payload),
+  });
+}
+
 export function normalizeTelegramUpdate(update, {
   botId,
   username,
@@ -414,10 +601,15 @@ export function normalizeTelegramUpdate(update, {
   // the per-group rule decides whether it is enough (or unnecessary).
   const tagged = String(message.reply_to_message?.from?.id ?? '') === String(botId)
     || mentionedUsername(message, username);
+  const service = telegramServiceEvent(message);
+  // A service message is a chat-level event, so it needs no mention to be
+  // addressed; the group trigger rules still decide whether this chat and this
+  // sender may wake the bot at all.
   const addressed = direct || groupTriggerAddressed(groupTriggers, {
     chatId: String(chatId),
     senderId: String(senderId),
     tagged,
+    service: Boolean(service),
   });
   const messageThreadId = Number.isSafeInteger(message.message_thread_id)
     ? message.message_thread_id : undefined;
@@ -455,8 +647,10 @@ export function normalizeTelegramUpdate(update, {
     senderIsBot: message.from?.is_bot === true,
     kind: direct ? 'direct' : 'group',
     conversationId,
-    content: withoutBotMention(message.text ?? message.caption ?? '', username),
-    plainText: typeof message.text === 'string',
+    content: service
+      ? telegramServicePrompt(service)
+      : withoutBotMention(message.text ?? message.caption ?? '', username),
+    plainText: Boolean(service) || typeof message.text === 'string',
     images: image ? [image] : [],
     files: file ? [file] : [],
     ...(voice ? { voice } : {}),

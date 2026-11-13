@@ -44,4 +44,6 @@ export default {
     'This approval was superseded by a newer prompt; use the latest one.',
   '该审批已失效，请等待新的审批提示。':
     'This approval is no longer valid; wait for a new approval prompt.',
+  '收到 Telegram 服务消息（{kind}）：{payload}。请尽量简短地回答；必要时可据此行动，例如为新话题命名，或按话题改名调整当前会话名。':
+    'Telegram service message received: {kind}. Raw payload: {payload}. Answer as briefly as possible; when it makes sense, act on it — for example name a new topic, or follow a topic rename in the current Session title.',
 };
