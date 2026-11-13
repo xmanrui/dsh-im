@@ -10257,6 +10257,70 @@ test('step push live_cot mode uses Feishu native process and sends the final ans
   assert.ok(!sent.at(-1).includes('PROCESS_MARKER_9f3a'));
 });
 
+test('step push live_cot mode keeps consecutive final assistant messages in the answer', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const writes = [];
+  const channel = {
+    ...stepPushChannel(),
+    createCot: async () => ({ cotId: 'cot-live', messageId: 'om-cot-live' }),
+    writeCotEvents: async (_handle, events) => writes.push(...events),
+    completeCot: async () => {},
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient((text) => sent.push(text)),
+    channel,
+    harness: stepPushHarness(async (_sessionId, _text, options) => {
+      assert.equal(options.finalAnswerOnly, true);
+      await options.onUpdate({ type: 'turn-start', turn: 5 });
+      await options.onUpdate({
+        type: 'assistant-message',
+        turn: 5,
+        step: 0,
+        text: 'PROCESS_MARKER_e91f checking first',
+      });
+      await options.onUpdate({
+        type: 'tool',
+        turn: 5,
+        name: 'bash',
+        callId: 'call-live',
+        arguments: '{"command":"check"}',
+      });
+      await options.onUpdate({ type: 'tool-result', turn: 5, callId: 'call-live', text: 'ok' });
+      await options.onUpdate({
+        type: 'assistant-message',
+        turn: 5,
+        step: 1,
+        text: 'MAIN_ANSWER_e91f detailed conclusion',
+      });
+      await options.onUpdate({
+        type: 'assistant-message',
+        turn: 5,
+        step: 2,
+        text: 'SUPPLEMENT_e91f extra note',
+      });
+      await options.onUpdate({ type: 'turn-end', turn: 5, reason: { kind: 'completed' } });
+      return 'PROCESS_MARKER_e91f checking first\n\nMAIN_ANSWER_e91f detailed conclusion\n\nSUPPLEMENT_e91f extra note';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushMode: 'live_cot',
+  });
+
+  await bridge.accept(event('om_live_cot_final_segments', '执行任务'));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(sent, ['MAIN_ANSWER_e91f detailed conclusion\n\nSUPPLEMENT_e91f extra note']);
+  const cotText = writes
+    .filter(({ event_type }) => event_type === 'TEXT_MESSAGE_CONTENT')
+    .map(({ content }) => JSON.parse(content).delta)
+    .join('\n');
+  assert.match(cotText, /PROCESS_MARKER_e91f/);
+  assert.doesNotMatch(cotText, /MAIN_ANSWER_e91f|SUPPLEMENT_e91f/);
+});
+
 test('step push live_cot mode keeps a topic turn inside the topic with the native process', async () => {
   const fixture = stateFixture();
   const cotCreates = [];

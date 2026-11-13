@@ -5862,6 +5862,7 @@ export class FeishuHarnessBridge {
     // 证明它是过程说明时才 flush 为 💬 消息。turn 结束时缓冲内剩余的即最终步
     // ——不直推，改为最终答案的富文本 post 内容，避免同一句话重复出现。
     let pendingStep = null;
+    const liveFinalAnswer = liveCot ? new AssistantTextAccumulator() : null;
     const flushPendingStep = async () => {
       if (!pendingStep) return;
       const note = pendingStep;
@@ -5900,6 +5901,7 @@ export class FeishuHarnessBridge {
       askOptions: {
         ...baseAskOptions,
         progressMode: liveCot ? 'live' : 'all',
+        ...(liveCot ? { finalAnswerOnly: true } : {}),
         // 提问/审批卡弹出前先定格当前过程卡，答案随之流到交互消息之后
         // 的新卡上（与主流式路径的 rotate 语义一致）。
         ...(streamingCard ? {
@@ -5915,8 +5917,10 @@ export class FeishuHarnessBridge {
             await cot.handle(update);
             if (update.type === 'assistant-message') {
               pendingStep = update;
+              liveFinalAnswer.setCanonical(update.step, update.text);
             } else if (update.type === 'tool') {
               pendingStep = null;
+              liveFinalAnswer.clear();
             }
             return;
           }
@@ -5977,7 +5981,7 @@ export class FeishuHarnessBridge {
     // stop 后 ask 仍可能带着部分答案正常返回：过程按中断收口，而非已完成。
     await cot?.finish(stepStopFlag?.requested === true ? { kind: 'interrupted' } : undefined);
     if (liveCot) this.#stepStopFlags.delete(key);
-    const finalStepText = pendingStep ? pendingStep.text : null;
+    const finalStepText = liveCot ? liveFinalAnswer.text : pendingStep ? pendingStep.text : null;
     pendingStep = null;
     const finalText = (typeof finalStepText === 'string' && finalStepText.trim())
       ? finalStepText

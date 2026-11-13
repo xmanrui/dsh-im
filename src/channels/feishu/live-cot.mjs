@@ -113,7 +113,7 @@ export class FeishuLiveCot {
   // mid-update, and nothing may follow RUN_FINISHED/RUN_ERROR.
   #sealed = false;
   #reasoningOpen = false;
-  #heldAssistant = null;
+  #heldAssistant = [];
   #finished = false;
   #broken = false;
   #messageIndex = 0;
@@ -226,14 +226,26 @@ export class FeishuLiveCot {
 
   async #flushHeldAssistant() {
     const held = this.#heldAssistant;
-    this.#heldAssistant = null;
-    if (!held?.text) return;
-    const messageId = `text-${this.#turn}-${this.#messageIndex++}`;
-    await this.#write([
-      cotEvent('TEXT_MESSAGE_START', { messageId, role: 'assistant' }),
-      cotEvent('TEXT_MESSAGE_CONTENT', { messageId, delta: held.text }),
-      cotEvent('TEXT_MESSAGE_END', { messageId }),
-    ]);
+    this.#heldAssistant = [];
+    for (const assistant of held) {
+      if (!assistant?.text) continue;
+      const messageId = `text-${this.#turn}-${this.#messageIndex++}`;
+      await this.#write([
+        cotEvent('TEXT_MESSAGE_START', { messageId, role: 'assistant' }),
+        cotEvent('TEXT_MESSAGE_CONTENT', { messageId, delta: assistant.text }),
+        cotEvent('TEXT_MESSAGE_END', { messageId }),
+      ]);
+    }
+  }
+
+  #holdAssistant(update) {
+    if (!update?.text) return;
+    const step = Number.isSafeInteger(update.step) ? update.step : null;
+    const index = step === null
+      ? -1
+      : this.#heldAssistant.findIndex((assistant) => assistant.step === step);
+    if (index >= 0) this.#heldAssistant[index] = update;
+    else this.#heldAssistant.push(update);
   }
 
   async handle(update) {
@@ -258,8 +270,7 @@ export class FeishuLiveCot {
       return;
     }
     if (update.type === 'assistant-message') {
-      if (this.#heldAssistant) await this.#flushHeldAssistant();
-      this.#heldAssistant = update;
+      this.#holdAssistant(update);
       return;
     }
     if (update.type === 'tool') {
@@ -311,7 +322,7 @@ export class FeishuLiveCot {
 
   async #close(reason) {
     this.#finished = true;
-    this.#heldAssistant = null;
+    this.#heldAssistant = [];
     if (this.#turn === null) {
       await this.#chain;
       return;
