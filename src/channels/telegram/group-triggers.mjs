@@ -113,14 +113,20 @@ export function groupTriggerModeFor(config, chatId) {
  * Whether a group message should wake the model.
  *
  * `tagged` is the legacy signal: an @username mention or a reply to the bot.
+ * `service` marks a chat-level event (a pin, a topic being renamed) that nobody
+ * aimed at a particular member, so the mention requirement does not apply to it.
+ * It is not a free pass: "off" stays silent, and the sender lists keep deciding
+ * who is allowed to wake the bot.
  * Direct chats never reach this function — they are always addressed.
  */
-export function groupTriggerAddressed(config, { chatId, senderId, tagged = false } = {}) {
+export function groupTriggerAddressed(config, {
+  chatId, senderId, tagged = false, service = false,
+} = {}) {
   const scope = groupTriggerScopeFor(config, chatId);
   const member = scope.senders.includes(typeof senderId === 'string' ? senderId : String(senderId ?? ''));
-  if (scope.mode === 'mention') return tagged === true;
+  if (scope.mode === 'mention') return service === true || tagged === true;
   if (scope.mode === 'all') return true;
-  if (scope.mode === 'mention-list') return tagged === true && member;
+  if (scope.mode === 'mention-list') return (service === true || tagged === true) && member;
   if (scope.mode === 'all-list') return member;
   return false;
 }

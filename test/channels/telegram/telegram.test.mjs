@@ -36,6 +36,7 @@ import {
   telegramCommandMenuScopes,
   telegramInboundAllowed,
 } from '../../../src/channels/telegram/telegram-runtime.mjs';
+import { normalizeGroupTriggers } from '../../../src/channels/telegram/group-triggers.mjs';
 import { TelegramStateStore } from '../../../src/channels/telegram/state-store.mjs';
 import {
   TELEGRAM_ENDPOINTS,
@@ -1158,6 +1159,142 @@ for (const field of ['text', 'caption']) {
     }
   });
 }
+
+test('Telegram reports service messages as text instead of an empty turn', () => {
+  const pinned = normalizeTelegramUpdate({
+    update_id: 20,
+    message: {
+      message_id: 500,
+      message_thread_id: 200,
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 43, is_bot: false, username: 'unera' },
+      pinned_message: {
+        message_id: 480,
+        message_thread_id: 200,
+        from: { id: 99, is_bot: true, first_name: 'Kesha' },
+        rich_message: { blocks: [{ type: 'paragraph', text: 'archived answer' }] },
+      },
+    },
+  }, { botId: '123456789', username: 'HarnessBot' });
+  // No mention and no reply-to-bot: a chat-level event is still addressed to the
+  // bot, otherwise the group trigger rules would drop it.
+  assert.equal(pinned.addressed, true);
+  assert.equal(pinned.plainText, true);
+  assert.match(pinned.content, /message_pinned/u);
+  assert.match(pinned.content, /archived answer/u);
+  assert.match(pinned.content, /480/u);
+  assert.doesNotMatch(pinned.content, /"chat"/u);
+
+  const topic = normalizeTelegramUpdate({
+    update_id: 21,
+    message: {
+      message_id: 501,
+      message_thread_id: 501,
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 43, is_bot: false, username: 'unera' },
+      forum_topic_created: { name: 'release notes', icon_color: 1 },
+    },
+  }, { botId: '123456789', username: 'HarnessBot' });
+  assert.equal(topic.addressed, true);
+  assert.match(topic.content, /forum_topic_created/u);
+  assert.match(topic.content, /release notes/u);
+  assert.equal(topic.replyTarget.messageThreadId, 501);
+
+  // A service event still obeys the group trigger rules: "off" means silence,
+  // and the sender lists keep deciding who may wake the bot.
+  const offGroups = normalizeGroupTriggers({ groups: { '-1001': { mode: 'off' } } });
+  const offPin = normalizeTelegramUpdate({
+    update_id: 23,
+    message: {
+      message_id: 503,
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 43, is_bot: false },
+      pinned_message: { message_id: 480 },
+    },
+  }, { botId: '123456789', username: 'HarnessBot', groupTriggers: offGroups });
+  assert.equal(offPin.addressed, false);
+
+  const listedGroups = normalizeGroupTriggers({
+    groups: { '-1001': { mode: 'mention-list', senders: ['43'] } },
+  });
+  const unlistedPin = normalizeTelegramUpdate({
+    update_id: 24,
+    message: {
+      message_id: 504,
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 44, is_bot: false },
+      pinned_message: { message_id: 480 },
+    },
+  }, { botId: '123456789', username: 'HarnessBot', groupTriggers: listedGroups });
+  assert.equal(unlistedPin.addressed, false);
+  const listedPin = normalizeTelegramUpdate({
+    update_id: 25,
+    message: {
+      message_id: 505,
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 43, is_bot: false },
+      pinned_message: { message_id: 480 },
+    },
+  }, { botId: '123456789', username: 'HarnessBot', groupTriggers: listedGroups });
+  assert.equal(listedPin.addressed, true);
+
+  // Content kinds Telegram already handled keep going down the ordinary path.
+  for (const content of [
+    { sticker: { file_id: 'sticker-1' } },
+    { location: { latitude: 1, longitude: 2 } },
+    { poll: { id: 'poll-1', question: 'q' } },
+    { video_note: { file_id: 'note-1' } },
+  ]) {
+    const ordinary = normalizeTelegramUpdate({
+      update_id: 26,
+      message: {
+        message_id: 506,
+        chat: { id: -1001, type: 'supergroup' },
+        from: { id: 43, is_bot: false },
+        ...content,
+      },
+    }, { botId: '123456789', username: 'HarnessBot' });
+    assert.equal(ordinary.content, '', `${Object.keys(content)[0]} stays ordinary`);
+  }
+
+  // An unknown service field is still reported, with its values, not just names.
+  const joined = normalizeTelegramUpdate({
+    update_id: 27,
+    message: {
+      message_id: 507,
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 43, is_bot: false },
+      new_chat_members: [{ id: 77, is_bot: false, first_name: 'Newbie', username: 'newbie' }],
+    },
+  }, { botId: '123456789', username: 'HarnessBot' });
+  assert.match(joined.content, /members_joined/u);
+  assert.match(joined.content, /Newbie/u);
+
+  const unknown = normalizeTelegramUpdate({
+    update_id: 28,
+    message: {
+      message_id: 508,
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 43, is_bot: false },
+      some_new_service_field: { value: 1 },
+    },
+  }, { botId: '123456789', username: 'HarnessBot' });
+  assert.match(unknown.content, /unknown_service_message/u);
+  assert.match(unknown.content, /some_new_service_field/u);
+
+  // Ordinary text keeps its shape: the service path must not leak into it.
+  const text = normalizeTelegramUpdate({
+    update_id: 22,
+    message: {
+      message_id: 502,
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 43, is_bot: false },
+      text: 'plain words',
+    },
+  }, { botId: '123456789', username: 'HarnessBot' });
+  assert.equal(text.content, 'plain words');
+  assert.equal(text.addressed, false);
+});
 
 test('Telegram maps one reply_to_message snapshot without expanding nested replies', () => {
   const replied = normalizeTelegramUpdate({
