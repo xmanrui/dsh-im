@@ -10255,6 +10255,42 @@ test('step push live_cot mode uses Feishu native process and sends the final ans
   assert.ok(!sent.at(-1).includes('PROCESS_MARKER_9f3a'));
 });
 
+test('step push live_cot mode does not leak the injection step as a standalone message', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const channel = {
+    ...stepPushChannel(),
+    createCot: async () => ({ cotId: 'cot-live', messageId: 'om-cot-live' }),
+    writeCotEvents: async () => {},
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient((text) => sent.push(text)),
+    channel,
+    harness: stepPushHarness(async (_sessionId, content, options) => {
+      assert.ok(
+        Array.isArray(content),
+        'the reply reference must reach the harness as rich prompt content',
+      );
+      await options.onUpdate({ type: 'turn-start', turn: 1 });
+      return '引用回答。';
+    }),
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushMode: 'live_cot',
+  });
+
+  await bridge.accept(event('om_live_cot_reply', '基于引用回答', { parent_id: 'om_quoted' }));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(
+    sent,
+    ['引用回答。'],
+    'the native live process carries the turn; the injection note must not post on its own',
+  );
+});
+
 test('step push live_cot mode keeps a topic turn inside the topic with the process card', async () => {
   const fixture = stateFixture();
   const cotCreates = [];
