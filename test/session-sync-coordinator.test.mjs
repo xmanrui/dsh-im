@@ -18,6 +18,116 @@ const WEB_SOURCE = Object.freeze({ kind: 'user', rpcId: 'web-rpc' });
 const CONTEXT_SOURCE = Object.freeze({ kind: 'runtime-context' });
 const IM_SCOPE = 'http://127.0.0.1:3983';
 
+test('IM subagent continuations retain reply delivery without enabling external mirroring', async (t) => {
+  const cases = [
+    { name: 'agent relay', kind: 'agent-message', expected: 1 },
+    { name: 'reused agent after restart', reuse: true, kind: 'agent-message', expected: 1 },
+    { name: 'reused agent settlement', reuse: true, kind: 'subagent-settled', expected: 1 },
+    { name: 'failed dispatch cannot claim agent', reuse: true, sendError: true, kind: 'agent-message', expected: 0 },
+    { name: 'Web dispatch remains opt-in', reuse: true, owner: 'other', kind: 'agent-message', expected: 0 },
+    { name: 'reused agent from another parent stays silent', reuse: true, sessionId: 'other-parent', kind: 'agent-message', expected: 0 },
+    { name: 'reused unknown agent stays silent', reuse: true, sender: 'unknown', kind: 'agent-message', expected: 0 },
+    { name: 'settlement notice', kind: 'subagent-settled', expected: 1 },
+    { name: 'sync enabled delivers once', kind: 'agent-message', enabled: true, expected: 1 },
+    { name: 'Web child remains opt-in', kind: 'agent-message', owner: 'other', expected: 0 },
+    { name: 'unknown child stays silent', kind: 'agent-message', sender: 'unknown', expected: 0 },
+    { name: 'another parent stays silent', kind: 'agent-message', sessionId: 'other-parent', expected: 0 },
+    { name: 'missing sender stays silent', kind: 'agent-message', sender: null, expected: 0 },
+    { name: 'unrelated service notice stays opt-in', kind: 'schedule', expected: 0 },
+    { name: 'Web input takes ownership', kind: 'agent-message', nextOwner: 'other', expected: 0 },
+    { name: 'IM input owns its own reply', kind: 'agent-message', nextOwner: 'im', expected: 0 },
+    { name: 'aborted continuation stays silent', kind: 'agent-message', reason: 'aborted', expected: 0 },
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario.name, async () => {
+      const sends = [];
+      const coordinator = createSessionSyncCoordinator({
+        deliveryService: deliveryService(sends),
+        loadSettings: settings({ deliverModelAnswers: scenario.enabled === true, modelIcon: '🤖' }),
+      });
+      t.after(() => coordinator.close());
+      await coordinator.enqueue('parent', turnStart());
+      await coordinator.enqueue('parent', userMessage('request'), scenario.owner ?? 'im');
+      if (scenario.reuse) {
+        // A fresh coordinator has no old catalog or in-memory child ownership.
+        await coordinator.enqueue('parent', { type: 'tool/call', data: {
+          turn: 1, name: 'send_message', callId: 'send', arguments: { agent_id: 'child' },
+        } });
+        await coordinator.enqueue('parent', { type: 'tool/result', data: {
+          turn: 1, message: { toolCallId: 'send', isError: scenario.sendError ?? false },
+        } });
+      } else {
+        await coordinator.enqueue('parent', {
+          type: 'subagent/catalog', data: { childId: 'child' },
+        });
+      }
+      await coordinator.enqueue('parent', turnEnd());
+
+      const sessionId = scenario.sessionId ?? 'parent';
+      await coordinator.enqueue(sessionId, turnStart(2));
+      await coordinator.enqueue(sessionId, userMessage('private child result', {
+        kind: scenario.kind,
+        form: scenario.kind === 'agent-message' ? 'relay' : 'notice',
+        senderSessionId: Object.hasOwn(scenario, 'sender') ? scenario.sender : 'child',
+      }));
+      if (scenario.nextOwner) {
+        await coordinator.enqueue(sessionId, userMessage('new reader input'), scenario.nextOwner);
+      }
+      await coordinator.enqueue(sessionId, assistantMessage(0, 'progress', 2));
+      await coordinator.enqueue(sessionId, toolCall('read', 2));
+      await coordinator.enqueue(sessionId, assistantMessage(1, 'final result', 2));
+      await coordinator.enqueue(sessionId, turnEnd({ kind: scenario.reason ?? 'completed' }, 2));
+      await coordinator.enqueue(sessionId, turnEnd({ kind: 'completed' }, 2));
+      await coordinator.whenIdle();
+      assert.equal(sends.length, scenario.expected);
+      if (scenario.expected) {
+        assert.equal(sends[0].sessionId, 'parent');
+        assert.equal(sends[0].text, scenario.enabled ? '🤖\n\nfinal result' : 'final result');
+        assert.equal(sends[0].options.format, 'markdown');
+      }
+    });
+  }
+});
+
+test('an IM continuation can spawn another child and still reply through its current binding', async () => {
+  const sends = [];
+  const service = deliveryService(sends);
+  // Saved targets being disabled must not silence the reply to the initiating chat.
+  service.listSessionSyncTargets = async () => [];
+  service.describeConversation = async () => ({ botId: 'bot' });
+  service.listTargets = async () => ({ targets: [{ id: 'disabled-target' }] });
+  const coordinator = createSessionSyncCoordinator({
+    deliveryService: service,
+    loadSettings: settings({ deliverModelAnswers: false }),
+  });
+  try {
+    await coordinator.enqueue('parent', turnStart());
+    await coordinator.enqueue('parent', userMessage('request'), 'im');
+    await coordinator.enqueue('parent', { type: 'subagent/catalog', data: { childId: 'child-1' } });
+    // A result spliced into the original IM turn is already covered by its ask.
+    await coordinator.enqueue('parent', userMessage('early relay', {
+      kind: 'agent-message', senderSessionId: 'child-1',
+    }));
+    await coordinator.enqueue('parent', assistantMessage(0, 'initial answer'));
+    await coordinator.enqueue('parent', turnEnd());
+    assert.equal(sends.length, 0);
+    for (const turn of [2, 3]) {
+      await coordinator.enqueue('parent', turnStart(turn));
+      await coordinator.enqueue('parent', userMessage('relay', {
+        kind: 'agent-message', senderSessionId: `child-${turn - 1}`,
+      }));
+      await coordinator.enqueue('parent', {
+        type: 'subagent/catalog', data: { childId: `child-${turn}` },
+      });
+      await coordinator.enqueue('parent', assistantMessage(0, `answer-${turn}`, turn));
+      await coordinator.enqueue('parent', turnEnd({ kind: 'completed' }, turn));
+    }
+    assert.deepEqual(sends.map(({ text }) => text), ['answer-2', 'answer-3']);
+  } finally {
+    coordinator.close();
+  }
+});
+
 function turnStart(turn = 1) {
   return { type: 'turn/start', data: { turn } };
 }

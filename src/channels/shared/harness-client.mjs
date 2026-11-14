@@ -26,6 +26,7 @@ import { watchHarnessMux } from './harness-mux.mjs';
 import { extractConnectionEvidence, messageDiagnosticError } from './connection-error.mjs';
 import { PromptFailureTracker } from './prompt-failure-tracker.mjs';
 import { isSessionLogCorrupt, isSessionNotFound } from './session-error.mjs';
+import { SubagentDispatchTracker } from './subagent-task.mjs';
 
 // Every channel plugin runs in the same Host process. Sharing ownership by
 // Host identity (or an explicitly configured HTTP origin) prevents clients
@@ -617,6 +618,8 @@ export class HarnessReplyTracker {
   #pendingReasoning = new Map();
   #pendingReasoningChars = 0;
   #reasoning = false;
+  #pendingSubagents = new Set();
+  #subagentDispatch = new SubagentDispatchTracker();
 
   constructor({ promptRpcId, afterSeq = -1, reasoning = false, finalAnswerOnly = false }) {
     this.#promptRpcId = promptRpcId;
@@ -648,6 +651,10 @@ export class HarnessReplyTracker {
 
   get reason() {
     return this.#reason;
+  }
+
+  get pendingSubagents() {
+    return [...this.#pendingSubagents];
   }
 
   get tracking() {
@@ -762,6 +769,15 @@ export class HarnessReplyTracker {
       }
       if (this.#targetTurn === null) continue;
 
+      if (this.#openTurn === this.#targetTurn) {
+        const childId = this.#subagentDispatch.consume(event);
+        if (childId) this.#pendingSubagents.add(childId);
+      }
+      if (event.type === 'user/message' && event.data?.source?.kind === 'subagent-settled'
+        && event.surfaceOp !== 'remove') {
+        this.#pendingSubagents.delete(event.data.source.senderSessionId);
+      }
+
       if (event.type === 'turn/end') {
         if (event.data?.turn !== this.#targetTurn) continue;
         this.#finished = true;
@@ -772,6 +788,7 @@ export class HarnessReplyTracker {
             type: 'turn-end',
             turn: this.#targetTurn,
             reason: this.#reason,
+            ...(this.#pendingSubagents.size > 0 ? { pendingSubagents: this.pendingSubagents } : {}),
           });
         }
         continue;
@@ -2298,6 +2315,13 @@ export class HarnessClient {
                 throw await this.#confirmedSessionError(sessionId, { signal }, failure) ?? failure;
               }
               throw failure;
+            }
+            if (!ownership?.stopRequested && tracker.pendingSubagents.length > 0
+              && typeof options.onPendingSubagents === 'function') {
+              options.onPendingSubagents({
+                sessionId, turn: tracker.turn, afterSeq: tracker.lastSeq,
+                childIds: tracker.pendingSubagents,
+              });
             }
             // An accepted /stop revokes attachment delivery even when Harness
             // preserved a useful partial text answer for the existing UX.

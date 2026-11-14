@@ -5,6 +5,40 @@ import { HarnessReplyTracker } from '../src/channels/shared/harness-client.mjs';
 
 const PROMPT_RPC_ID = 'reply-tracker-test';
 
+test('reply status tracks a previously settled agent restarted with send_message', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: PROMPT_RPC_ID });
+  const prefix = [
+    ...turnPrefix(),
+    { type: 'subagent/catalog', seq: 3, data: { childId: 'reused' } },
+    { type: 'user/message', seq: 4, data: { source: { kind: 'subagent-settled', senderSessionId: 'reused' } } },
+    { type: 'tool/call', seq: 5, data: { turn: 1, name: 'send_message', callId: 'send', arguments: { agent_id: 'reused' } } },
+  ];
+  tracker.consumeAll(prefix);
+  assert.deepEqual(tracker.pendingSubagents, []);
+  tracker.consumeAll([
+    { type: 'tool/result', seq: 6, data: { turn: 1, message: { toolCallId: 'send', isError: false } } },
+    { type: 'turn/end', seq: 7, data: { turn: 1, reason: 'completed' } },
+  ]);
+  assert.deepEqual(tracker.pendingSubagents, ['reused']);
+});
+
+test('reply completion exposes only its unresolved children without delaying its answer', () => {
+  const tracker = new HarnessReplyTracker({ promptRpcId: PROMPT_RPC_ID });
+  const updates = tracker.consumeAll([
+    { type: 'subagent/catalog', seq: 0, data: { childId: 'unrelated' } },
+    ...turnPrefix(),
+    { type: 'subagent/catalog', seq: 3, data: { childId: 'done' } },
+    { type: 'subagent/catalog', seq: 4, data: { childId: 'pending' } },
+    { type: 'user/message', seq: 5, data: { turn: 1, source: { kind: 'subagent-settled', senderSessionId: 'done' } } },
+    assistantMessage(6, { step: 0, text: 'Work started' }),
+    { type: 'turn/end', seq: 7, data: { turn: 1, reason: 'completed' } },
+  ], { live: true });
+  assert.equal(tracker.finished, true);
+  assert.equal(tracker.answer, 'Work started');
+  assert.deepEqual(tracker.pendingSubagents, ['pending']);
+  assert.deepEqual(updates.at(-1).pendingSubagents, ['pending']);
+});
+
 function turnPrefix(turn = 1) {
   return [
     { type: 'turn/start', seq: 1, data: { turn } },

@@ -1,6 +1,12 @@
 const MAX_EVENTS_PER_WRITE = 50;
 const MAX_EVENT_CONTENT_CHARS = 4096;
 const MAX_TOOL_RESULT_CHARS = 1500;
+// Feishu publishes no COT-specific rate limit; space requests conservatively.
+const MIN_COT_REQUEST_INTERVAL_MS = 65;
+
+// The user stopped the turn: close it as interrupted, not as a failed run.
+const INTERRUPTED_KINDS = new Set(['interrupted', 'stopped', 'cancelled', 'canceled']);
+const INTERRUPTED_ERROR_CODES = new Set(['turn-stopped', 'turn-interrupted']);
 
 const TOOL_ICONS = Object.freeze({
   read: 'read',
@@ -14,40 +20,61 @@ const TOOL_ICONS = Object.freeze({
 
 let lastTimestamp = 0;
 
-function boundedEventContent(content) {
-  const encoded = JSON.stringify(content);
-  if (encoded.length <= MAX_EVENT_CONTENT_CHARS) return encoded;
-  const field = typeof content?.delta === 'string'
-    ? 'delta'
-    : typeof content?.message === 'string' ? 'message' : null;
-  if (!field) return JSON.stringify({ ...content, truncated: true });
+// Measure the JSON string payload, including escapes, without splitting a code point.
+function jsonPrefix(text, budget) {
+  let length = 0;
+  for (const character of text) {
+    const cost = JSON.stringify(character).length - 2;
+    if (cost > budget) break;
+    budget -= cost;
+    length += character.length;
+  }
+  return text.slice(0, length);
+}
 
-  const truncated = { ...content, truncated: true, [field]: content[field] };
-  while (truncated[field].length > 0
-    && JSON.stringify(truncated).length > MAX_EVENT_CONTENT_CHARS) {
-    truncated[field] = truncated[field].slice(0, Math.max(0, truncated[field].length - 256));
+function* encodedEventContents(content) {
+  const encoded = JSON.stringify(content);
+  if (encoded.length <= MAX_EVENT_CONTENT_CHARS) {
+    yield encoded;
+    return;
   }
-  if (truncated[field].length === 0
-    && JSON.stringify(truncated).length > MAX_EVENT_CONTENT_CHARS) {
-    return JSON.stringify({ truncated: true });
+  if (typeof content.delta === 'string') {
+    const budget = MAX_EVENT_CONTENT_CHARS - JSON.stringify({ ...content, delta: '' }).length;
+    if (budget < 0) throw new Error('COT event metadata exceeds the content limit');
+    let remaining = content.delta;
+    while (remaining.length > 0) {
+      const delta = jsonPrefix(remaining, budget);
+      if (!delta) throw new Error('COT event metadata exceeds the content limit');
+      yield JSON.stringify({ ...content, delta });
+      remaining = remaining.slice(delta.length);
+    }
+    return;
   }
-  return JSON.stringify(truncated);
+  const toolResult = typeof content.content?.code === 'string';
+  const text = toolResult ? content.content.code : content.message;
+  const truncated = { ...content, truncated: true };
+  if (toolResult) truncated.content = { ...content.content, code: '' };
+  else if (typeof text === 'string') truncated.message = '';
+  const budget = MAX_EVENT_CONTENT_CHARS - JSON.stringify(truncated).length - 1;
+  // Keep IDs and schema intact; an unrepresentable event fails only the COT side path.
+  if (typeof text !== 'string' || budget < 0) {
+    throw new Error('COT event metadata exceeds the content limit');
+  }
+  const summary = `${jsonPrefix(text, budget)}…`;
+  if (toolResult) truncated.content.code = summary;
+  else truncated.message = summary;
+  yield JSON.stringify(truncated);
 }
 
 function cotEvent(eventType, content) {
-  lastTimestamp = Math.max(Date.now(), lastTimestamp + 1);
-  return {
-    event_type: eventType,
-    content: boundedEventContent(content),
-    timestamp: String(lastTimestamp),
-  };
+  return { event_type: eventType, content };
 }
 
 function boundedResult(value) {
   const text = String(value ?? '');
   return text.length <= MAX_TOOL_RESULT_CHARS
     ? text
-    : `${text.slice(0, MAX_TOOL_RESULT_CHARS - 1)}…`;
+    : `${text.slice(0, MAX_TOOL_RESULT_CHARS - 1).replace(/[\uD800-\uDBFF]$/, '')}…`;
 }
 
 function toolKind(name) {
@@ -62,15 +89,25 @@ function toolKind(name) {
   return '';
 }
 
-function turnFailure(reason) {
+function turnOutcome(reason) {
+  if (reason instanceof Error) {
+    return INTERRUPTED_ERROR_CODES.has(reason.code)
+      ? { status: 'interrupted' }
+      : { failure: reason.message || 'Turn failed' };
+  }
   const kind = typeof reason === 'string' ? reason : reason?.kind;
-  if (reason === null || reason === undefined || kind === 'completed') return null;
+  if (reason === null || reason === undefined || kind === 'completed') return { status: 'done' };
+  if (INTERRUPTED_KINDS.has(kind)) return { status: 'interrupted' };
   if (kind !== 'error') {
-    return kind ? `Turn ended: ${kind}` : 'Turn failed';
+    return { failure: kind ? `Turn ended: ${kind}` : 'Turn failed' };
   }
   const error = reason.error ?? reason.failure;
-  if (!error) return 'Turn failed';
-  return [error.code, error.message].filter(Boolean).join(': ') || 'Turn failed';
+  if (!error) return { failure: 'Turn failed' };
+  return { failure: [error.code, error.message].filter(Boolean).join(': ') || 'Turn failed' };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -81,28 +118,43 @@ export class FeishuLiveCot {
   #channel;
   #chatId;
   #replyTo;
+  #replyInThread;
+  #onReplyThreadId;
   #hidden;
   #onFailure;
+  #requestIntervalMs;
   #turn = null;
   #opening = null;
+  #handle = null;
+  #lastRequestAt = 0;
   #chain = Promise.resolve();
   #pending = [];
-  #reasoningOpen = false;
-  #heldAssistant = null;
+  #closing = null;
+  // Set once the terminal event is queued: a stop can land while handle() is
+  // mid-update, and nothing may follow RUN_FINISHED/RUN_ERROR.
+  #sealed = false;
+  #reasoningId = null;
+  #heldAssistant = [];
   #finished = false;
   #broken = false;
   #messageIndex = 0;
 
   constructor(channel, chatId, {
     replyTo,
+    replyInThread = false,
+    onReplyThreadId,
     hidden = false,
     onFailure = () => {},
+    requestIntervalMs = MIN_COT_REQUEST_INTERVAL_MS,
   } = {}) {
     this.#channel = channel;
     this.#chatId = chatId;
     this.#replyTo = replyTo;
+    this.#replyInThread = replyInThread === true && Boolean(replyTo);
+    this.#onReplyThreadId = onReplyThreadId;
     this.#hidden = hidden === true;
     this.#onFailure = onFailure;
+    this.#requestIntervalMs = requestIntervalMs;
   }
 
   async #start(turn) {
@@ -110,8 +162,21 @@ export class FeishuLiveCot {
     this.#turn = Number.isSafeInteger(turn) ? turn : 0;
     this.#opening = this.#channel.createCot(this.#chatId, {
       ...(this.#replyTo ? { replyTo: this.#replyTo } : {}),
+      // A topic turn keeps its process inside the topic (reply_in_thread).
+      ...(this.#replyInThread ? { replyInThread: true } : {}),
       hidden: this.#hidden,
-    }).catch((error) => {
+    }).then(async (handle) => {
+      this.#handle = handle;
+      this.#lastRequestAt = Date.now();
+      if (this.#replyInThread && typeof this.#onReplyThreadId === 'function') {
+        try {
+          await this.#onReplyThreadId(handle?.threadId ?? null);
+        } catch (error) {
+          this.#onFailure(error);
+        }
+      }
+      return handle;
+    }, (error) => {
       this.#broken = true;
       this.#onFailure(error);
       return null;
@@ -124,9 +189,28 @@ export class FeishuLiveCot {
     ]);
   }
 
+  /** Space requests on this process; deltas arriving meanwhile share a batch. */
+  async #throttle() {
+    const wait = this.#lastRequestAt + this.#requestIntervalMs - Date.now();
+    if (wait > 0) await delay(wait);
+    this.#lastRequestAt = Date.now();
+  }
+
   #write(events) {
-    if (this.#broken || events.length === 0) return;
-    this.#pending.push(...events);
+    if (this.#broken || this.#sealed || events.length === 0) return;
+    try {
+      for (const event of events) {
+        for (const content of encodedEventContents(event.content)) {
+          lastTimestamp = Math.max(Date.now(), lastTimestamp + 1);
+          this.#pending.push({ event_type: event.event_type, content, timestamp: String(lastTimestamp) });
+        }
+      }
+    } catch (error) {
+      this.#broken = true;
+      this.#pending.length = 0;
+      this.#onFailure(error);
+      return;
+    }
     this.#chain = this.#chain.then(async () => {
       const handle = await this.#opening;
       if (!handle || this.#broken) {
@@ -134,6 +218,7 @@ export class FeishuLiveCot {
         return;
       }
       while (this.#pending.length > 0) {
+        await this.#throttle();
         await this.#channel.writeCotEvents(
           handle,
           this.#pending.splice(0, MAX_EVENTS_PER_WRITE),
@@ -146,26 +231,53 @@ export class FeishuLiveCot {
     });
   }
 
+  /**
+   * Close the native process lifecycle. Terminal events alone leave the IM
+   * message spinning, so this runs even after an earlier write failed.
+   */
+  async #complete(reason) {
+    await this.#opening;
+    const handle = this.#handle;
+    if (!handle || typeof this.#channel.completeCot !== 'function') return;
+    try {
+      await this.#throttle();
+      await this.#channel.completeCot(handle, reason);
+    } catch (error) {
+      this.#onFailure(error);
+    }
+  }
+
   async #closeReasoning() {
-    if (!this.#reasoningOpen) return;
-    this.#reasoningOpen = false;
+    if (this.#reasoningId === null) return;
+    const messageId = this.#reasoningId;
+    this.#reasoningId = null;
     await this.#write([
-      cotEvent('REASONING_MESSAGE_END', {
-        messageId: `reasoning-${this.#turn}`,
-      }),
+      cotEvent('REASONING_MESSAGE_END', { messageId }),
     ]);
   }
 
   async #flushHeldAssistant() {
     const held = this.#heldAssistant;
-    this.#heldAssistant = null;
-    if (!held?.text) return;
-    const messageId = `text-${this.#turn}-${this.#messageIndex++}`;
-    await this.#write([
-      cotEvent('TEXT_MESSAGE_START', { messageId, role: 'assistant' }),
-      cotEvent('TEXT_MESSAGE_CONTENT', { messageId, delta: held.text }),
-      cotEvent('TEXT_MESSAGE_END', { messageId }),
-    ]);
+    this.#heldAssistant = [];
+    for (const assistant of held) {
+      if (!assistant?.text) continue;
+      const messageId = `text-${this.#turn}-${this.#messageIndex++}`;
+      await this.#write([
+        cotEvent('TEXT_MESSAGE_START', { messageId, role: 'assistant' }),
+        cotEvent('TEXT_MESSAGE_CONTENT', { messageId, delta: assistant.text }),
+        cotEvent('TEXT_MESSAGE_END', { messageId }),
+      ]);
+    }
+  }
+
+  #holdAssistant(update) {
+    if (!update?.text) return;
+    const step = Number.isSafeInteger(update.step) ? update.step : null;
+    const index = step === null
+      ? -1
+      : this.#heldAssistant.findIndex((assistant) => assistant.step === step);
+    if (index >= 0) this.#heldAssistant[index] = update;
+    else this.#heldAssistant.push(update);
   }
 
   async handle(update) {
@@ -177,21 +289,19 @@ export class FeishuLiveCot {
     await this.#start(update.turn);
     if (update.type === 'reasoning') {
       if (!update.text) return;
-      const messageId = `reasoning-${this.#turn}`;
-      if (!this.#reasoningOpen) {
-        this.#reasoningOpen = true;
+      if (this.#reasoningId === null) {
+        this.#reasoningId = `reasoning-${this.#turn}-${this.#messageIndex++}`;
         await this.#write([
-          cotEvent('REASONING_MESSAGE_START', { messageId, role: 'reasoning' }),
+          cotEvent('REASONING_MESSAGE_START', { messageId: this.#reasoningId, role: 'reasoning' }),
         ]);
       }
       await this.#write([
-        cotEvent('REASONING_MESSAGE_CONTENT', { messageId, delta: update.text }),
+        cotEvent('REASONING_MESSAGE_CONTENT', { messageId: this.#reasoningId, delta: update.text }),
       ]);
       return;
     }
     if (update.type === 'assistant-message') {
-      if (this.#heldAssistant) await this.#flushHeldAssistant();
-      this.#heldAssistant = update;
+      this.#holdAssistant(update);
       return;
     }
     if (update.type === 'tool') {
@@ -227,34 +337,47 @@ export class FeishuLiveCot {
       return;
     }
     if (update.type === 'turn-end') {
+      if (update.pendingSubagents?.length > 0
+        && (update.reason?.kind ?? update.reason) === 'completed') return;
       await this.finish(update.reason);
     }
   }
 
-  async finish(reason) {
-    if (this.#finished) {
-      await this.#chain;
-      return;
-    }
+  /**
+   * Write the terminal event, then CompleteCOT. A user stop writes
+   * RUN_FINISHED(interrupted) and completes with reason=error instead of
+   * reporting RUN_ERROR; repeated calls share one close and never reject.
+   */
+  finish(reason) {
+    this.#closing ??= this.#close(reason);
+    return this.#closing;
+  }
+
+  async #close(reason) {
     this.#finished = true;
-    this.#heldAssistant = null;
-    if (this.#turn === null || this.#broken) {
+    this.#heldAssistant = [];
+    if (this.#turn === null) {
       await this.#chain;
       return;
     }
-    await this.#closeReasoning();
-    const failure = reason instanceof Error
-      ? reason.message
-      : turnFailure(reason);
-    await this.#write([
-      failure
-        ? cotEvent('RUN_ERROR', { message: failure, code: 'TURN_FAILED' })
+    const outcome = turnOutcome(reason);
+    if (!this.#broken) {
+      const events = [];
+      if (this.#reasoningId !== null) {
+        events.push(cotEvent('REASONING_MESSAGE_END', { messageId: this.#reasoningId }));
+        this.#reasoningId = null;
+      }
+      events.push(outcome.failure
+        ? cotEvent('RUN_ERROR', { message: outcome.failure, code: 'TURN_FAILED' })
         : cotEvent('RUN_FINISHED', {
             threadId: this.#chatId,
             runId: `turn-${this.#turn}`,
-            status: 'done',
-          }),
-    ]);
+            status: outcome.status,
+          }));
+      this.#write(events);
+    }
+    this.#sealed = true;
     await this.#chain;
+    await this.#complete(outcome.status === 'done' ? 'done' : 'error');
   }
 }

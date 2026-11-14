@@ -95,6 +95,7 @@ import {
   setLastMessageFailure,
 } from '../shared/message-failure.mjs';
 import { beginStatusReaction } from '../shared/status-reaction.mjs';
+import { waitForSubagentTask } from '../shared/subagent-task.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
@@ -684,6 +685,7 @@ export class FeishuHarnessBridge {
    * concurrent topics of one group chat never share a voice slot.
    */
   #voiceTurns = new Map();
+  #pendingTaskReactions = new Map();
   #appId;
   #botOpenId;
   #groupResponseMode;
@@ -1758,6 +1760,8 @@ export class FeishuHarnessBridge {
       },
     );
     if (result?.stopped) {
+      // 文本 /stop（群聊 @bot /stop）与卡片停止按钮同一收口。
+      this.#markStepStopRequested(key);
       await Promise.allSettled([
         this.#cancelPendingInteraction(key),
         this.#approvals.closeRoute(key),
@@ -4894,6 +4898,7 @@ export class FeishuHarnessBridge {
 
   #interactionAskOptions(event, key, files, images) {
     return {
+      onPendingSubagents: (task) => this.#deferTaskReaction(event.message.message_id, key, task),
       groupHistory: event.groupHistory,
       timeoutMs: this.#replyTimeoutMs,
       signal: this.#signal,
@@ -5442,10 +5447,18 @@ export class FeishuHarnessBridge {
     return { kind: 'tools', lines: [`✅ ${name}${summary ? ` — ${summary}` : ''}`], omitted: 0 };
   }
 
-  /** Flag the in-flight streaming-card turn as user-stopped (seals 已停止). */
+  /**
+   * Flag the in-flight step-push turn as user-stopped: the streaming card
+   * seals 已停止 and a native live process closes as interrupted right away.
+   */
   #markStepStopRequested(key) {
+    for (const pending of this.#pendingTaskReactions.values()) {
+      if (pending.key === key) pending.controller.abort();
+    }
     const flag = this.#stepStopFlags.get(key);
-    if (flag) flag.requested = true;
+    if (!flag || flag.requested) return;
+    flag.requested = true;
+    void flag.onStop?.();
   }
 
   /**
@@ -5861,19 +5874,19 @@ export class FeishuHarnessBridge {
     });
     // 流式卡片模式：每轮一张过程卡（原地 patch），过程与最终答案都进卡；
     // post 模式维持逐条直推。先预建卡片状态，纯问答回合也能在收尾时开卡。
-    // 飞书原生思考过程按 chat_id 创建，不会落进话题（#244）；话题内的回合改用
-    // 实时过程卡（以 reply_in_thread 回复留在话题内），避免过程出现在话题外。
-    const liveCotInTopic = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.LIVE_COT
-      && this.#replyInThreadFor(messageId);
-    const streamingCard = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.STREAMING_CARD
-      || liveCotInTopic;
+    // 飞书原生思考过程：话题内的回合以 origin_message_id + reply_in_thread 创建，
+    // 过程留在话题内，不再回退到实时过程卡（#244）。
+    const streamingCard = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.STREAMING_CARD;
     const liveCot = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.LIVE_COT
-      && !liveCotInTopic
       && typeof this.#channel?.createCot === 'function'
       && typeof this.#channel?.writeCotEvents === 'function';
     const cot = liveCot
       ? new FeishuLiveCot(this.#channel, chatId, {
           replyTo: messageId,
+          ...(this.#replyInThreadFor(messageId) ? {
+            replyInThread: true,
+            onReplyThreadId: async (threadId) => this.#registerTopicReply(messageId, chatId, threadId),
+          } : {}),
           hidden: false,
           onFailure: (error) => this.#logger.warn?.(
             '[dsh-feishu] native live process failed; final answer will continue:',
@@ -5888,9 +5901,15 @@ export class FeishuHarnessBridge {
       }
       this.#ensureStepCard(key, chatId, messageId);
     }
-    // /stop 打标：回合进行中收到停止请求时，封存为「已停止」而非「已完成」。
-    const stepStopFlag = streamingCard ? { requested: false } : null;
-    if (streamingCard) this.#stepStopFlags.set(key, stepStopFlag);
+    // /stop 打标：回合进行中收到停止请求时，封存为「已停止」而非「已完成」；
+    // 原生思考过程立即写 RUN_FINISHED(interrupted) 并 CompleteCOT 收口。
+    const stepStopFlag = streamingCard || liveCot
+      ? {
+          requested: false,
+          ...(cot ? { onStop: () => cot.finish({ kind: 'interrupted' }) } : {}),
+        }
+      : null;
+    if (stepStopFlag) this.#stepStopFlags.set(key, stepStopFlag);
     const baseAskOptions = this.#interactionAskOptions(event, key, message.files, message.images);
 
     // 上下文注入动作在详细级别下也体现为一条步骤（注入细节可忽略）。
@@ -5917,6 +5936,7 @@ export class FeishuHarnessBridge {
     // 证明它是过程说明时才 flush 为 💬 消息。turn 结束时缓冲内剩余的即最终步
     // ——不直推，改为最终答案的富文本 post 内容，避免同一句话重复出现。
     let pendingStep = null;
+    const liveFinalAnswer = liveCot ? new AssistantTextAccumulator() : null;
     const flushPendingStep = async () => {
       if (!pendingStep) return;
       const note = pendingStep;
@@ -5955,6 +5975,14 @@ export class FeishuHarnessBridge {
       askOptions: {
         ...baseAskOptions,
         progressMode: liveCot ? 'live' : 'all',
+        ...(liveCot ? { finalAnswerOnly: true } : {}),
+        ...(liveCot ? {
+          onPendingSubagents: (task) => {
+            baseAskOptions.onPendingSubagents(task);
+            const pending = this.#pendingTaskReactions.get(messageId);
+            if (pending) pending.cot = cot;
+          },
+        } : {}),
         // 提问/审批卡弹出前先定格当前过程卡，答案随之流到交互消息之后
         // 的新卡上（与主流式路径的 rotate 语义一致）。
         ...(streamingCard ? {
@@ -5970,8 +5998,10 @@ export class FeishuHarnessBridge {
             await cot.handle(update);
             if (update.type === 'assistant-message') {
               pendingStep = update;
+              liveFinalAnswer.setCanonical(update.step, update.text);
             } else if (update.type === 'tool') {
               pendingStep = null;
+              liveFinalAnswer.clear();
             }
             return;
           }
@@ -6017,9 +6047,10 @@ export class FeishuHarnessBridge {
       },
       });
     } catch (error) {
+      // 已请求 /stop 时 onStop 已收口为 interrupted，这里复用同一次收口。
       await cot?.finish(error);
+      if (stepStopFlag) this.#stepStopFlags.delete(key);
       if (streamingCard) {
-        this.#stepStopFlags.delete(key);
         await this.#finishStepCard(key, { stopped: true });
       }
       throw error;
@@ -6028,8 +6059,12 @@ export class FeishuHarnessBridge {
       await watchdog?.stop();
     }
     markAskComplete(completed.sessionId);
-    await cot?.finish();
-    const finalStepText = pendingStep ? pendingStep.text : null;
+    // stop 后 ask 仍可能带着部分答案正常返回：过程按中断收口，而非已完成。
+    if (!this.#pendingTaskReactions.has(messageId) || stepStopFlag?.requested === true) {
+      await cot?.finish(stepStopFlag?.requested === true ? { kind: 'interrupted' } : undefined);
+    }
+    if (liveCot) this.#stepStopFlags.delete(key);
+    const finalStepText = liveCot ? liveFinalAnswer.text : pendingStep ? pendingStep.text : null;
     pendingStep = null;
     const finalText = (typeof finalStepText === 'string' && finalStepText.trim())
       ? finalStepText
@@ -6993,11 +7028,52 @@ export class FeishuHarnessBridge {
     });
   }
 
-  #removeProcessingReaction(_messageId, processingReaction) {
+  #deferTaskReaction(messageId, key, task) {
+    // Bound detached status observers; eviction clears the indicator, never says DONE.
+    if (this.#pendingTaskReactions.size >= MAX_CONVERSATION_ROUTES) {
+      this.#pendingTaskReactions.values().next().value.controller.abort();
+    }
+    const controller = new AbortController();
+    const pending = { key, controller, reaction: null, cot: null, result: undefined };
+    this.#pendingTaskReactions.set(messageId, pending);
+    const signal = AbortSignal.any([
+      controller.signal, AbortSignal.timeout(24 * 60 * 60_000),
+      ...(this.#signal ? [this.#signal] : []),
+    ]);
+    void waitForSubagentTask(this.#harness, task, { signal }).then((reason) => {
+      pending.result = reason === 'completed' ? 'DONE' : reason === 'interrupted' ? null : 'ERROR';
+      return pending.cot?.finish({ kind: reason });
+    }).catch((error) => {
+      pending.result = null;
+      if (!signal.aborted) this.#logger.warn?.('[dsh-feishu] task status observation failed:', error.message);
+      return pending.cot?.finish({ kind: 'interrupted' });
+    }).finally(() => {
+      if (pending.reaction) this.#settleTaskReaction(messageId, pending);
+    });
+  }
+
+  #settleTaskReaction(messageId, pending) {
+    this.#pendingTaskReactions.delete(messageId);
+    if (pending.result === 'DONE') pending.reaction.success();
+    else if (pending.result === 'ERROR') pending.reaction.error();
+    else pending.reaction.clear();
+  }
+
+  #removeProcessingReaction(messageId, processingReaction) {
+    this.#pendingTaskReactions.get(messageId)?.controller.abort();
+    this.#pendingTaskReactions.delete(messageId);
     processingReaction.clear();
   }
 
-  #finishReaction(_messageId, processingReaction, finalEmojiType) {
+  #finishReaction(messageId, processingReaction, finalEmojiType) {
+    const pending = this.#pendingTaskReactions.get(messageId);
+    if (pending && finalEmojiType !== 'ERROR') {
+      pending.reaction = processingReaction;
+      if (pending.result !== undefined) this.#settleTaskReaction(messageId, pending);
+      return;
+    }
+    pending?.controller.abort();
+    this.#pendingTaskReactions.delete(messageId);
     if (finalEmojiType === 'ERROR') processingReaction.error();
     else processingReaction.success();
   }

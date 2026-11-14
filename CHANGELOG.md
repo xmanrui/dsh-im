@@ -6,6 +6,17 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 飞书「实时直播」补齐思考过程生命周期：每个回合写完终态事件后调用 CompleteCOT 收口，思考过程不再一直显示为运行中；用户停止任务时写入 `RUN_FINISHED`（`status: interrupted`）并以 `error` 收口，不再作为 `RUN_ERROR` 报告运行失败。文本 `/stop`、群聊 `@机器人 /stop` 与卡片停止按钮都会立即结束思考过程，迟到的过程事件不会写在终态之后；思考过程已在客户端结束时，重复收口视为成功。
+  Feishu Live process now closes its thinking-process lifecycle: every turn calls CompleteCOT after its terminal event, so the thinking process no longer keeps showing as running, and a user stop writes `RUN_FINISHED` (`status: interrupted`) and completes with `error` instead of reporting `RUN_ERROR` as a failed run. Text `/stop`, group `@bot /stop` and the card stop button all close the process right away, and late progress events are never written after the terminal event. Completing a process the client already closed counts as success.
+
+- 飞书「实时直播」在最后一次工具调用后连续产出多段最终答复时，不再把前一段正文写进原生思考过程，也不会只发送最后一段短补充；这些最终答复会合并为普通答案消息发送（[#588](https://github.com/xmanrui/dsh-im/issues/588)）。
+  When Feishu Live process emits several final assistant messages after the last tool call, earlier answer text is no longer written into the native thinking process and the bot no longer sends only the last short supplement. The final answer segments are delivered together as the ordinary answer message ([#588](https://github.com/xmanrui/dsh-im/issues/588)).
+
+- 话题中的「实时直播」回合改用 `origin_message_id` + `reply_in_thread` 创建原生思考过程，过程留在话题内，不再回退到实时过程卡（[#244](https://github.com/xmanrui/dsh-im/issues/244)、[#265](https://github.com/xmanrui/dsh-im/pull/265)）。思考过程请求按机器人串行并保守间隔发送，降低触发频控的概率。
+  Live process turns in a topic now create the native thinking process with `origin_message_id` + `reply_in_thread`, keeping it inside the topic instead of falling back to the Live process card ([#244](https://github.com/xmanrui/dsh-im/issues/244), [#265](https://github.com/xmanrui/dsh-im/pull/265)). Thinking-process requests are serialized per bot and conservatively spaced to stay clear of rate limits.
+
 ### Added / 新增
 
 - 新增 `/sessionarchive <Session ID>`（别名 `/sessarchive`）：通过 Discord 等渠道触发 DSH 的会话归档（`workspace.archiveSession`）。传序号只做预览（标题、工作区、ID），不会执行归档——会话列表随新会话出现而位移，按序号直接归档会归档到错误会话；破坏性操作必须点名完整 ID。机器人只负责解析目标并转达 Host 结果，拒绝归档本对话当前绑定的会话与已归档会话；`--stop` 让 Host 先停止该会话正在运行的任务。归档后的会话不再出现在默认的 `/sessionlist`。
@@ -2328,4 +2339,3 @@ Thanks to [@Dong09](https://github.com/Dong09) for the Matrix conversation-conte
 [0.13.0]: https://github.com/xmanrui/dsh-im/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/xmanrui/dsh-im/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/xmanrui/dsh-im/releases/tag/v0.11.0
-
