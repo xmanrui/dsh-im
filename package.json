@@ -1,6 +1,6 @@
 {
   "name": "@xmanrui/dsh-im",
-  "version": "5.10.0",
+  "version": "5.10.1",
   "icon": "./assets/logo-plugin-message-link-gradient.webp",
   "description": "把微信、飞书、企微、钉钉、QQ、Telegram、WhatsApp、Slack、Discord、Matrix接入DSH。 Connect Telegram, WhatsApp, Slack, Discord, Matrix, WeChat, Feishu, WeCom, DingTalk, and QQ to DSH.",
   "keywords": [
@@ -81,18 +81,21 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-connection",
-        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-modules",
+        "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-slots",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-remotes"
       ],
       "platform": "web"
     },
     "compatibility": {
-      "dsh": "0.2.1-rc.2",
+      "dsh": "0.2.2-rc.3",
       "dshReleases": {
         "0.2.0-rc.2": "compatible",
-        "0.2.1-rc.2": "compatible"
+        "0.2.1-rc.2": "compatible",
+        "0.2.2-rc.3": "compatible"
       },
       "profiles": [
         "web"
@@ -105,7 +108,8 @@
     "check": "npm run build && npm test && node scripts/verify-package.mjs"
   },
   "engines": {
-    "node": ">=22.19"
+    "node": ">=22.19",
+    "dsh": ">=0.2.2-rc.3 <0.3.0"
   },
   "dependencies": {
     "@matrix-org/olm": "3.2.15",
