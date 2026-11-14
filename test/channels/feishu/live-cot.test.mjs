@@ -149,22 +149,102 @@ test('FeishuLiveCot bounds tool output and closes failed turns', async () => {
   assert.deepEqual(calls.completes.map(({ reason }) => reason), ['error']);
 });
 
-test('FeishuLiveCot keeps visible text when native event content is truncated', async () => {
+test('FeishuLiveCot preserves text and arguments across bounded native event batches', async (t) => {
+  for (const text of ['short', 'x'.repeat(4_096), 'x'.repeat(220_000), '中😀\0\n"\\'.repeat(2_000)]) {
+    await t.test(`input length ${text.length}`, async () => {
+      const { cot, calls } = fixture();
+      await cot.handle({ type: 'reasoning', turn: 9, text });
+      await cot.handle({ type: 'assistant-message', turn: 9, step: 0, text });
+      await cot.handle({ type: 'tool', turn: 9, callId: 'call', name: 'read', arguments: text });
+      await cot.finish();
+      const events = decoded(calls);
+      for (const type of ['REASONING_MESSAGE_CONTENT', 'TEXT_MESSAGE_CONTENT', 'TOOL_CALL_ARGS']) {
+        const chunks = events.filter((event) => event.type === type);
+        assert.equal(chunks.map(({ content }) => content.delta).join(''), text);
+        assert.ok(chunks.every(({ content }) => content.delta.isWellFormed()));
+        assert.ok(chunks.every(({ content }) => !content.truncated));
+      }
+      assert.ok(calls.writes.every(({ events: batch }) => batch.length <= 50));
+      assert.ok(calls.writes.flatMap(({ events: batch }) => batch)
+        .every((event) => event.content.length <= 4_096));
+      assert.ok(events.every((event, index) => index === 0 || event.timestamp > events[index - 1].timestamp));
+      assert.equal(events.at(-1).type, 'RUN_FINISHED');
+      assert.deepEqual(calls.failures, []);
+    });
+  }
+});
+
+test('FeishuLiveCot bounds escaped tool results and errors while retaining their schema', async () => {
   const { cot, calls } = fixture();
-  const longText = 'x'.repeat(8_000);
+  const text = '😀\0"\\\n'.repeat(500);
+  await cot.handle({ type: 'tool-result', turn: 1, callId: 'result', text, errorCode: 'FAILED' });
+  await cot.finish(new Error(text));
+  const events = decoded(calls);
+  const result = events.find(({ type }) => type === 'TOOL_CALL_RESULT').content;
+  assert.ok(calls.writes.flatMap(({ events: batch }) => batch)
+    .every((event) => event.content.length <= 4_096));
+  assert.equal(result.content.type, 'code');
+  assert.equal(result.toolCallId, 'result');
+  assert.equal(result.error, 'FAILED');
+  for (const value of [result.content.code, events.at(-1).content.message]) {
+    assert.ok(value.length > 0);
+    assert.ok(value.isWellFormed());
+    assert.ok(value.endsWith('…'));
+    assert.ok(text.startsWith(value.slice(0, -1)));
+  }
+  assert.equal(events.at(-1).type, 'RUN_ERROR');
+  assert.equal(events.at(-1).content.code, 'TURN_FAILED');
+});
 
-  await cot.handle({ type: 'turn-start', turn: 9 });
-  await cot.handle({ type: 'reasoning', turn: 9, text: longText });
+test('FeishuLiveCot handles exact JSON boundaries and Unicode summary boundaries', async (t) => {
+  const capacity = 4_096 - JSON.stringify({ messageId: 'reasoning-1-0', delta: '' }).length;
+  for (const size of [capacity - 1, capacity, capacity + 1]) {
+    await t.test(`delta length ${size}`, async () => {
+      const { cot, calls } = fixture();
+      await cot.handle({ type: 'reasoning', turn: 1, text: 'x'.repeat(size) });
+      await cot.finish();
+      const chunks = decoded(calls).filter(({ type }) => type === 'REASONING_MESSAGE_CONTENT');
+      assert.equal(chunks.length, size > capacity ? 2 : 1);
+      assert.equal(chunks.map(({ content }) => content.delta).join(''), 'x'.repeat(size));
+      assert.ok(chunks.every(({ content }) => JSON.stringify(content).length <= 4_096));
+    });
+  }
+  const { cot, calls } = fixture();
+  await cot.handle({ type: 'tool-result', turn: 1, callId: 'call', text: `${'x'.repeat(1498)}😀tail` });
   await cot.finish();
+  const result = decoded(calls).find(({ type }) => type === 'TOOL_CALL_RESULT').content;
+  assert.equal(result.content.code, `${'x'.repeat(1498)}…`);
+});
 
-  const content = decoded(calls)
-    .find(({ type }) => type === 'REASONING_MESSAGE_CONTENT')
-    .content;
-  assert.equal(content.truncated, true);
-  assert.equal(typeof content.delta, 'string');
-  assert.ok(content.delta.length > 0);
-  assert.ok(content.delta.length < longText.length);
-  assert.ok(JSON.stringify(content).length <= 4_096);
+test('FeishuLiveCot contains oversized metadata without emitting invalid events', async () => {
+  const { cot, calls } = fixture();
+  await cot.handle({ type: 'turn-start', turn: 1 });
+  await cot.handle({ type: 'tool', turn: 1, name: 'read', callId: 'x'.repeat(5_000) });
+  await cot.finish();
+  assert.equal(calls.failures.length, 1);
+  assert.match(calls.failures[0].message, /metadata exceeds/);
+  assert.ok(calls.writes.flatMap(({ events }) => events).every((event) => event.content.length <= 4_096));
+  assert.equal(calls.completes.length, 1);
+});
+
+test('FeishuLiveCot gives each reasoning segment a unique, consistently closed ID', async () => {
+  const { cot, calls } = fixture();
+  await cot.handle({ type: 'reasoning', turn: 3, text: 'first' });
+  await cot.handle({ type: 'reasoning', turn: 3, text: 'continued' });
+  await cot.handle({ type: 'tool', turn: 3, callId: 'call', name: 'read' });
+  await cot.handle({ type: 'reasoning', turn: 3, text: 'next' });
+  await cot.finish();
+  const events = decoded(calls).filter(({ type }) => type.startsWith('REASONING_MESSAGE_'));
+  const starts = events.filter(({ type }) => type === 'REASONING_MESSAGE_START');
+  assert.equal(starts.length, 2);
+  assert.notEqual(starts[0].content.messageId, starts[1].content.messageId);
+  for (const [index, start] of starts.entries()) {
+    const segment = events.filter(({ content }) => content.messageId === start.content.messageId);
+    assert.equal(segment[0].type, 'REASONING_MESSAGE_START');
+    assert.equal(segment.at(-1).type, 'REASONING_MESSAGE_END');
+    assert.equal(segment.filter(({ type }) => type === 'REASONING_MESSAGE_END').length, 1);
+    assert.equal(segment.map(({ content }) => content.delta ?? '').join(''), index ? 'next' : 'firstcontinued');
+  }
 });
 
 for (const reason of [

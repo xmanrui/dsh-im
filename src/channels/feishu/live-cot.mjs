@@ -20,40 +20,61 @@ const TOOL_ICONS = Object.freeze({
 
 let lastTimestamp = 0;
 
-function boundedEventContent(content) {
-  const encoded = JSON.stringify(content);
-  if (encoded.length <= MAX_EVENT_CONTENT_CHARS) return encoded;
-  const field = typeof content?.delta === 'string'
-    ? 'delta'
-    : typeof content?.message === 'string' ? 'message' : null;
-  if (!field) return JSON.stringify({ ...content, truncated: true });
+// Measure the JSON string payload, including escapes, without splitting a code point.
+function jsonPrefix(text, budget) {
+  let length = 0;
+  for (const character of text) {
+    const cost = JSON.stringify(character).length - 2;
+    if (cost > budget) break;
+    budget -= cost;
+    length += character.length;
+  }
+  return text.slice(0, length);
+}
 
-  const truncated = { ...content, truncated: true, [field]: content[field] };
-  while (truncated[field].length > 0
-    && JSON.stringify(truncated).length > MAX_EVENT_CONTENT_CHARS) {
-    truncated[field] = truncated[field].slice(0, Math.max(0, truncated[field].length - 256));
+function* encodedEventContents(content) {
+  const encoded = JSON.stringify(content);
+  if (encoded.length <= MAX_EVENT_CONTENT_CHARS) {
+    yield encoded;
+    return;
   }
-  if (truncated[field].length === 0
-    && JSON.stringify(truncated).length > MAX_EVENT_CONTENT_CHARS) {
-    return JSON.stringify({ truncated: true });
+  if (typeof content.delta === 'string') {
+    const budget = MAX_EVENT_CONTENT_CHARS - JSON.stringify({ ...content, delta: '' }).length;
+    if (budget < 0) throw new Error('COT event metadata exceeds the content limit');
+    let remaining = content.delta;
+    while (remaining.length > 0) {
+      const delta = jsonPrefix(remaining, budget);
+      if (!delta) throw new Error('COT event metadata exceeds the content limit');
+      yield JSON.stringify({ ...content, delta });
+      remaining = remaining.slice(delta.length);
+    }
+    return;
   }
-  return JSON.stringify(truncated);
+  const toolResult = typeof content.content?.code === 'string';
+  const text = toolResult ? content.content.code : content.message;
+  const truncated = { ...content, truncated: true };
+  if (toolResult) truncated.content = { ...content.content, code: '' };
+  else if (typeof text === 'string') truncated.message = '';
+  const budget = MAX_EVENT_CONTENT_CHARS - JSON.stringify(truncated).length - 1;
+  // Keep IDs and schema intact; an unrepresentable event fails only the COT side path.
+  if (typeof text !== 'string' || budget < 0) {
+    throw new Error('COT event metadata exceeds the content limit');
+  }
+  const summary = `${jsonPrefix(text, budget)}…`;
+  if (toolResult) truncated.content.code = summary;
+  else truncated.message = summary;
+  yield JSON.stringify(truncated);
 }
 
 function cotEvent(eventType, content) {
-  lastTimestamp = Math.max(Date.now(), lastTimestamp + 1);
-  return {
-    event_type: eventType,
-    content: boundedEventContent(content),
-    timestamp: String(lastTimestamp),
-  };
+  return { event_type: eventType, content };
 }
 
 function boundedResult(value) {
   const text = String(value ?? '');
   return text.length <= MAX_TOOL_RESULT_CHARS
     ? text
-    : `${text.slice(0, MAX_TOOL_RESULT_CHARS - 1)}…`;
+    : `${text.slice(0, MAX_TOOL_RESULT_CHARS - 1).replace(/[\uD800-\uDBFF]$/, '')}…`;
 }
 
 function toolKind(name) {
@@ -112,7 +133,7 @@ export class FeishuLiveCot {
   // Set once the terminal event is queued: a stop can land while handle() is
   // mid-update, and nothing may follow RUN_FINISHED/RUN_ERROR.
   #sealed = false;
-  #reasoningOpen = false;
+  #reasoningId = null;
   #heldAssistant = [];
   #finished = false;
   #broken = false;
@@ -177,7 +198,19 @@ export class FeishuLiveCot {
 
   #write(events) {
     if (this.#broken || this.#sealed || events.length === 0) return;
-    this.#pending.push(...events);
+    try {
+      for (const event of events) {
+        for (const content of encodedEventContents(event.content)) {
+          lastTimestamp = Math.max(Date.now(), lastTimestamp + 1);
+          this.#pending.push({ event_type: event.event_type, content, timestamp: String(lastTimestamp) });
+        }
+      }
+    } catch (error) {
+      this.#broken = true;
+      this.#pending.length = 0;
+      this.#onFailure(error);
+      return;
+    }
     this.#chain = this.#chain.then(async () => {
       const handle = await this.#opening;
       if (!handle || this.#broken) {
@@ -215,12 +248,11 @@ export class FeishuLiveCot {
   }
 
   async #closeReasoning() {
-    if (!this.#reasoningOpen) return;
-    this.#reasoningOpen = false;
+    if (this.#reasoningId === null) return;
+    const messageId = this.#reasoningId;
+    this.#reasoningId = null;
     await this.#write([
-      cotEvent('REASONING_MESSAGE_END', {
-        messageId: `reasoning-${this.#turn}`,
-      }),
+      cotEvent('REASONING_MESSAGE_END', { messageId }),
     ]);
   }
 
@@ -257,15 +289,14 @@ export class FeishuLiveCot {
     await this.#start(update.turn);
     if (update.type === 'reasoning') {
       if (!update.text) return;
-      const messageId = `reasoning-${this.#turn}`;
-      if (!this.#reasoningOpen) {
-        this.#reasoningOpen = true;
+      if (this.#reasoningId === null) {
+        this.#reasoningId = `reasoning-${this.#turn}-${this.#messageIndex++}`;
         await this.#write([
-          cotEvent('REASONING_MESSAGE_START', { messageId, role: 'reasoning' }),
+          cotEvent('REASONING_MESSAGE_START', { messageId: this.#reasoningId, role: 'reasoning' }),
         ]);
       }
       await this.#write([
-        cotEvent('REASONING_MESSAGE_CONTENT', { messageId, delta: update.text }),
+        cotEvent('REASONING_MESSAGE_CONTENT', { messageId: this.#reasoningId, delta: update.text }),
       ]);
       return;
     }
@@ -332,9 +363,9 @@ export class FeishuLiveCot {
     const outcome = turnOutcome(reason);
     if (!this.#broken) {
       const events = [];
-      if (this.#reasoningOpen) {
-        this.#reasoningOpen = false;
-        events.push(cotEvent('REASONING_MESSAGE_END', { messageId: `reasoning-${this.#turn}` }));
+      if (this.#reasoningId !== null) {
+        events.push(cotEvent('REASONING_MESSAGE_END', { messageId: this.#reasoningId }));
+        this.#reasoningId = null;
       }
       events.push(outcome.failure
         ? cotEvent('RUN_ERROR', { message: outcome.failure, code: 'TURN_FAILED' })
