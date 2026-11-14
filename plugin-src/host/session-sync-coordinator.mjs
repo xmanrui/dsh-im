@@ -11,6 +11,7 @@ import {
 } from '../../src/channels/shared/delivery-sync-settings.mjs';
 import { getDeliverySyncSettingsStore } from '../../src/channels/shared/delivery-sync-settings-store.mjs';
 import { deliverSessionSyncMirror } from '../../src/channels/shared/session-sync-registry.mjs';
+import { SubagentDispatchTracker } from '../../src/channels/shared/subagent-task.mjs';
 
 /**
  * Where the turn came from, as far as a chat mirror is concerned.
@@ -23,7 +24,8 @@ import { deliverSessionSyncMirror } from '../../src/channels/shared/session-sync
  *   question, a notice such as `subagent-settled`, or the context the Host
  *   injects into every turn. The framing is internal and is never echoed, and
  *   it never decides where the turn came from: only a turn that locked no
- *   meaningful origin at all is delivered as a service turn.
+ *   meaningful origin at all is delivered as a service turn. A registered
+ *   child of an IM turn can continue that chat's reply without Web mirroring.
  */
 export const TURN_INPUT_ORIGINS = Object.freeze({ im: 'im', web: 'web', internal: 'internal' });
 
@@ -32,6 +34,7 @@ const MEANINGFUL_ORIGINS = new Set([TURN_INPUT_ORIGINS.im, TURN_INPUT_ORIGINS.we
 
 /** Kinds whose turn is started by the Host rather than by a reader. */
 const INTERNAL_KINDS = new Set(['schedule', 'user-question-reply']);
+const MAX_IM_CHILDREN = 4096;
 
 function completedTurn(reason) {
   return (typeof reason === 'string' ? reason : reason?.kind) === 'completed';
@@ -90,6 +93,7 @@ export function createSessionSyncCoordinator({
 
   const turns = new Map();
   const tails = new Map();
+  const imChildren = new Set();
   let closed = false;
 
   const logFailure = (phase, error) => {
@@ -234,6 +238,12 @@ export function createSessionSyncCoordinator({
       if (origin === TURN_INPUT_ORIGINS.im || state.origin === null) state.origin = origin;
     } else {
       state.sawInternal = true;
+      const source = event.data?.source;
+      if ((source?.kind === 'agent-message' || source?.kind === 'subagent-settled')
+        && typeof source.senderSessionId === 'string'
+        && imChildren.has(`${sessionId}\0${source.senderSessionId}`)) {
+        state.imContinuation = true;
+      }
     }
     if (state.origin === TURN_INPUT_ORIGINS.im) return;
     // Every message decides its own echo from its own origin: Host framing that
@@ -257,15 +267,21 @@ export function createSessionSyncCoordinator({
     // meaningful origin is a service turn only when at least one service
     // message announced it. Anything else — no input at all — stays silent.
     const serviceTurn = state.origin === null && state.sawInternal === true;
+    const imContinuation = serviceTurn && state.imContinuation;
     const mirroredTurn = state.origin === TURN_INPUT_ORIGINS.web;
     if (!mirroredTurn && !serviceTurn) return;
     const settings = await readSettings(state);
-    if (!settings.deliverModelAnswers || !completedTurn(event.data?.reason)) return;
+    if ((!settings.deliverModelAnswers && !imContinuation) || !completedTurn(event.data?.reason)) return;
     // An answer the reader cannot connect to their own input is worse than no
     // answer at all: a turn whose input mirror failed stays silent.
     if (state.echoFailed) return;
     const text = state.assistant.text;
     if (!text) return;
+    // A child spawned by this chat continues its reply even with Web mirroring off.
+    if (imContinuation && !settings.deliverModelAnswers) {
+      await deliverToBinding(sessionId, text, 'subagent reply', 'markdown');
+      return;
+    }
     // The card carries the answer itself, so it gets the text without the icon
     // label that marks a delivered message.
     await deliver(
@@ -287,16 +303,27 @@ export function createSessionSyncCoordinator({
         turn,
         origin: null,
         sawInternal: false,
+        imContinuation: false,
         settings: null,
         echoed: new Set(),
         echoFailed: false,
         assistant: new AssistantTextAccumulator(),
+        subagentDispatch: new SubagentDispatchTracker(),
       });
       return;
     }
 
     const state = turns.get(sessionId);
     if (!state) return;
+
+    if ((event.data?.turn === undefined || event.data.turn === state.turn)
+      && (state.origin === TURN_INPUT_ORIGINS.im || (state.origin === null && state.imContinuation))) {
+      const childId = state.subagentDispatch.consume(event);
+      if (childId) {
+        imChildren.add(`${sessionId}\0${childId}`);
+        while (imChildren.size > MAX_IM_CHILDREN) imChildren.delete(imChildren.values().next().value);
+      }
+    }
 
     if (event.type === 'user/message') {
       await onUserMessage(sessionId, state, event, origin);
@@ -344,6 +371,7 @@ export function createSessionSyncCoordinator({
     close() {
       closed = true;
       turns.clear();
+      imChildren.clear();
     },
   });
 }

@@ -738,6 +738,65 @@ test('Feishu clears a submitted batch when the Harness turn is stopped', async (
   assert.match(sent.at(-1), /没有正在进行的批量输入/);
 });
 
+test('Feishu defers DONE and native completion without holding the message queue', async (t) => {
+  for (const outcome of ['completed', 'error', 'interrupted', 'offline']) {
+    await t.test(outcome, async () => {
+      const history = deferred();
+      const reactions = [];
+      const removed = [];
+      const completes = [];
+      const sent = [];
+      const abort = new AbortController();
+      const fixture = stateFixture([['p2p:ou_user', 'session-step']]);
+      const harness = stepPushHarness(async (_sessionId, _text, options) => {
+        await options.onUpdate({ type: 'turn-start', turn: 1 });
+        await options.onUpdate({ type: 'assistant-message', turn: 1, step: 0, text: 'Child started' });
+        await options.onUpdate({ type: 'turn-end', turn: 1, reason: 'completed', pendingSubagents: ['child'] });
+        options.onPendingSubagents({ sessionId: 'session-step', turn: 1, afterSeq: 10, childIds: ['child'] });
+        return 'Child started';
+      });
+      harness.rpc = async () => history.promise;
+      const bridge = new FeishuHarnessBridge({
+        client: stepPushTextClient((text) => sent.push(text)),
+        channel: {
+          ...stepPushChannel(),
+          addReaction: async (_id, emoji) => { reactions.push(emoji); return emoji; },
+          removeReaction: async (_id, emoji) => removed.push(emoji),
+          createCot: async () => ({ cotId: 'cot', messageId: 'cot-message' }),
+          writeCotEvents: async () => {},
+          completeCot: async (_handle, reason) => completes.push(reason),
+        },
+        harness, state: fixture.state, status: bridgeStatus(),
+        allowedSenderOpenIds: new Set(['ou_user']),
+        stepPush: true, stepPushMode: 'live_cot',
+        signal: abort.signal, logger: { info() {}, warn() {} },
+      });
+      try {
+        await bridge.accept(event('pending-child', 'Run the task'));
+        await bridge.waitForIdle();
+        assert.deepEqual(reactions, ['OnIt']);
+        assert.deepEqual(completes, []);
+        assert.equal(sent.filter((text) => text === 'Child started').length, 1);
+        if (outcome === 'offline') history.reject(new Error('offline'));
+        else history.resolve({ events: [
+          { seq: 11, type: 'turn/start', data: { turn: 2 } },
+          { seq: 12, type: 'user/message', data: { source: { kind: 'subagent-settled', senderSessionId: 'child' } } },
+          { seq: 13, type: 'turn/end', data: { turn: 2, reason: outcome } },
+        ] });
+        await eventually(() => removed.length === 1);
+        assert.deepEqual(reactions, outcome === 'completed' ? ['OnIt', 'DONE']
+          : outcome === 'error' ? ['OnIt', 'ERROR'] : ['OnIt']);
+        assert.equal(completes.length, 1);
+        assert.equal(sent.filter((text) => text === 'Child started').length, 1,
+          'status observation must not resend the answer');
+      } finally {
+        abort.abort();
+        history.resolve({ events: [] });
+      }
+    });
+  }
+});
+
 test('bridge maps a Feishu conversation to a persistent Harness session and replies', async () => {
   const sent = [];
   const reactions = [];

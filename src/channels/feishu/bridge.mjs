@@ -95,6 +95,7 @@ import {
   setLastMessageFailure,
 } from '../shared/message-failure.mjs';
 import { beginStatusReaction } from '../shared/status-reaction.mjs';
+import { waitForSubagentTask } from '../shared/subagent-task.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
@@ -684,6 +685,7 @@ export class FeishuHarnessBridge {
    * concurrent topics of one group chat never share a voice slot.
    */
   #voiceTurns = new Map();
+  #pendingTaskReactions = new Map();
   #appId;
   #botOpenId;
   #groupResponseMode;
@@ -4896,6 +4898,7 @@ export class FeishuHarnessBridge {
 
   #interactionAskOptions(event, key, files, images) {
     return {
+      onPendingSubagents: (task) => this.#deferTaskReaction(event.message.message_id, key, task),
       groupHistory: event.groupHistory,
       timeoutMs: this.#replyTimeoutMs,
       signal: this.#signal,
@@ -5449,6 +5452,9 @@ export class FeishuHarnessBridge {
    * seals 已停止 and a native live process closes as interrupted right away.
    */
   #markStepStopRequested(key) {
+    for (const pending of this.#pendingTaskReactions.values()) {
+      if (pending.key === key) pending.controller.abort();
+    }
     const flag = this.#stepStopFlags.get(key);
     if (!flag || flag.requested) return;
     flag.requested = true;
@@ -5970,6 +5976,13 @@ export class FeishuHarnessBridge {
         ...baseAskOptions,
         progressMode: liveCot ? 'live' : 'all',
         ...(liveCot ? { finalAnswerOnly: true } : {}),
+        ...(liveCot ? {
+          onPendingSubagents: (task) => {
+            baseAskOptions.onPendingSubagents(task);
+            const pending = this.#pendingTaskReactions.get(messageId);
+            if (pending) pending.cot = cot;
+          },
+        } : {}),
         // 提问/审批卡弹出前先定格当前过程卡，答案随之流到交互消息之后
         // 的新卡上（与主流式路径的 rotate 语义一致）。
         ...(streamingCard ? {
@@ -6047,7 +6060,9 @@ export class FeishuHarnessBridge {
     }
     markAskComplete(completed.sessionId);
     // stop 后 ask 仍可能带着部分答案正常返回：过程按中断收口，而非已完成。
-    await cot?.finish(stepStopFlag?.requested === true ? { kind: 'interrupted' } : undefined);
+    if (!this.#pendingTaskReactions.has(messageId) || stepStopFlag?.requested === true) {
+      await cot?.finish(stepStopFlag?.requested === true ? { kind: 'interrupted' } : undefined);
+    }
     if (liveCot) this.#stepStopFlags.delete(key);
     const finalStepText = liveCot ? liveFinalAnswer.text : pendingStep ? pendingStep.text : null;
     pendingStep = null;
@@ -7013,11 +7028,52 @@ export class FeishuHarnessBridge {
     });
   }
 
-  #removeProcessingReaction(_messageId, processingReaction) {
+  #deferTaskReaction(messageId, key, task) {
+    // Bound detached status observers; eviction clears the indicator, never says DONE.
+    if (this.#pendingTaskReactions.size >= MAX_CONVERSATION_ROUTES) {
+      this.#pendingTaskReactions.values().next().value.controller.abort();
+    }
+    const controller = new AbortController();
+    const pending = { key, controller, reaction: null, cot: null, result: undefined };
+    this.#pendingTaskReactions.set(messageId, pending);
+    const signal = AbortSignal.any([
+      controller.signal, AbortSignal.timeout(24 * 60 * 60_000),
+      ...(this.#signal ? [this.#signal] : []),
+    ]);
+    void waitForSubagentTask(this.#harness, task, { signal }).then((reason) => {
+      pending.result = reason === 'completed' ? 'DONE' : reason === 'interrupted' ? null : 'ERROR';
+      return pending.cot?.finish({ kind: reason });
+    }).catch((error) => {
+      pending.result = null;
+      if (!signal.aborted) this.#logger.warn?.('[dsh-feishu] task status observation failed:', error.message);
+      return pending.cot?.finish({ kind: 'interrupted' });
+    }).finally(() => {
+      if (pending.reaction) this.#settleTaskReaction(messageId, pending);
+    });
+  }
+
+  #settleTaskReaction(messageId, pending) {
+    this.#pendingTaskReactions.delete(messageId);
+    if (pending.result === 'DONE') pending.reaction.success();
+    else if (pending.result === 'ERROR') pending.reaction.error();
+    else pending.reaction.clear();
+  }
+
+  #removeProcessingReaction(messageId, processingReaction) {
+    this.#pendingTaskReactions.get(messageId)?.controller.abort();
+    this.#pendingTaskReactions.delete(messageId);
     processingReaction.clear();
   }
 
-  #finishReaction(_messageId, processingReaction, finalEmojiType) {
+  #finishReaction(messageId, processingReaction, finalEmojiType) {
+    const pending = this.#pendingTaskReactions.get(messageId);
+    if (pending && finalEmojiType !== 'ERROR') {
+      pending.reaction = processingReaction;
+      if (pending.result !== undefined) this.#settleTaskReaction(messageId, pending);
+      return;
+    }
+    pending?.controller.abort();
+    this.#pendingTaskReactions.delete(messageId);
     if (finalEmojiType === 'ERROR') processingReaction.error();
     else processingReaction.success();
   }

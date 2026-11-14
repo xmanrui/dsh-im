@@ -43,6 +43,25 @@ function deferred() {
   return { promise, resolve };
 }
 
+test('FeishuLiveCot stays open while subagents are pending and closes once after their summary', async () => {
+  const { cot, calls } = fixture();
+  await cot.handle({ type: 'turn-start', turn: 1 });
+  await cot.handle({ type: 'turn-end', turn: 1, reason: 'completed', pendingSubagents: ['child'] });
+  assert.equal(calls.completes.length, 0);
+  assert.deepEqual(decoded(calls).map(({ type }) => type), ['RUN_STARTED']);
+  await cot.finish({ kind: 'completed' });
+  await cot.finish({ kind: 'completed' });
+  assert.equal(calls.completes.length, 1);
+  assert.equal(decoded(calls).at(-1).type, 'RUN_FINISHED');
+});
+
+test('FeishuLiveCot still closes on interruption with unresolved children', async () => {
+  const { cot, calls } = fixture();
+  await cot.handle({ type: 'turn-end', turn: 1, reason: 'interrupted', pendingSubagents: ['child'] });
+  assert.equal(calls.completes.length, 1);
+  assert.equal(decoded(calls).at(-1).content.status, 'interrupted');
+});
+
 test('FeishuLiveCot maps a complete Harness process to ordered native events', async () => {
   const { cot, calls } = fixture();
   await cot.handle({ type: 'turn-start', turn: 7 });

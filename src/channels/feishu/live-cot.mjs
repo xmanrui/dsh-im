@@ -306,6 +306,8 @@ export class FeishuLiveCot {
       return;
     }
     if (update.type === 'turn-end') {
+      if (update.pendingSubagents?.length > 0
+        && (update.reason?.kind ?? update.reason) === 'completed') return;
       await this.finish(update.reason);
     }
   }
