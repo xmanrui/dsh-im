@@ -1828,9 +1828,13 @@ export class TelegramRuntime {
           logger: this.#logger,
         });
         accepted = true;
+        // Pass the bot's steer/queue setting explicitly, matching DingTalk and
+        // Discord; the bridge would otherwise fall back to the same scoped
+        // harness getter, but an explicit value keeps the wiring visible.
+        const busyMessageMode = this.#harness.currentBusyMessageMode?.() ?? 'queue';
         // The bridge owns turn ordering; awaiting it here would park the
         // conversation behind a turn that waits for the user.
-        void this.#bridge.accept(message, { contextSnapshot }).catch((error) => {
+        void this.#bridge.accept(message, { contextSnapshot, busyMessageMode }).catch((error) => {
           if (signal.aborted) return;
           this.#logger.error?.(
             `[dsh-im:telegram] bot ${this.#config.botId} message handling failed:`,
