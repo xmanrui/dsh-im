@@ -23,6 +23,8 @@ import {
   normalizeThinkingIntervalSeconds,
   normalizeThinkingNumbering,
   normalizeSendLimitPerMinute,
+  normalizeSegmentPrefix,
+  normalizeSegmentProgress,
   TELEGRAM_ACCESS_MODES,
 } from './config-store.mjs';
 
@@ -774,6 +776,7 @@ export class TelegramBotClient {
   #logger;
   #thinkingNumbering;
   #thinkingIntervalMs;
+  #segmentPrefix;
 
   constructor({
     api,
@@ -781,6 +784,7 @@ export class TelegramBotClient {
     logger = console,
     thinkingNumbering = false,
     thinkingIntervalSeconds = 0,
+    segmentPrefix = '🤤 ',
   }) {
     this.#api = api;
     this.#signal = signal;
@@ -788,6 +792,7 @@ export class TelegramBotClient {
     // Read once: the runtime restarts whenever the owner changes either value.
     this.#thinkingNumbering = normalizeThinkingNumbering(thinkingNumbering);
     this.#thinkingIntervalMs = normalizeThinkingIntervalSeconds(thinkingIntervalSeconds) * 1_000;
+    this.#segmentPrefix = normalizeSegmentPrefix(segmentPrefix);
   }
 
   async sendText(target, text) {
@@ -1205,6 +1210,28 @@ export class TelegramBotClient {
       armWindowTimer();
       return undefined;
     };
+    // Progress segments: each assistant note becomes its own permanent message.
+    // They never edit the placeholder (tools keep that line), and only the first
+    // segment replies to the inbound message so a burst does not fan out a
+    // reply chain.
+    const segmentIds = [];
+    let firstSegmentSent = false;
+    const sendSegment = async (text) => {
+      const body = `${this.#segmentPrefix}${text}`;
+      const route = firstSegmentSent
+        ? { ...target, replyToMessageId: undefined }
+        : target;
+      try {
+        const result = await this.#sendRich(route, createTextDeliveryBlock(body, 'markdown'));
+        firstSegmentSent = true;
+        segmentIds.push(...(result.providerMessageIds ?? []));
+        return true;
+      } catch (error) {
+        // A failed segment must never take the turn down; the answer still follows.
+        this.#logger?.warn?.('[dsh-im:telegram] progress segment failed:', error);
+        return false;
+      }
+    };
     stream = new TelegramDeliveryStream({
       update: (block) => pushProgress(block),
       // The placeholder carries progress only: its last frame would be a silent
@@ -1213,7 +1240,11 @@ export class TelegramBotClient {
       finish: async (block) => {
         await drainHeld();
         await this.#deletePlaceholder(target, messageId);
-        return this.#sendRich(target, block);
+        const result = await this.#sendRich(target, block);
+        return {
+          ...result,
+          providerMessageIds: [...new Set([...segmentIds, ...(result.providerMessageIds ?? [])])],
+        };
       },
       fail: async (block) => {
         await drainHeld();
@@ -1234,6 +1265,7 @@ export class TelegramBotClient {
       uniqueFrames: numbering,
       logger: this.#logger,
     });
+    stream.sendSegment = sendSegment;
     return stream;
   }
 
@@ -1674,6 +1706,8 @@ export class TelegramRuntime {
         // Trace frames are numbered and paced per bot; 0 seconds means no pacing.
         thinkingNumbering: this.#config?.thinkingNumbering,
         thinkingIntervalSeconds: this.#config?.thinkingIntervalSeconds,
+        // Segment prefix is free-form text/emoji; the runtime restarts on change.
+        segmentPrefix: this.#config?.segmentPrefix,
       });
       this.#bridge = new TelegramHarnessBridge({
         bot: client,
@@ -1683,6 +1717,9 @@ export class TelegramRuntime {
         accessPolicy: this.#accessPolicy,
         // Default ON; an explicit false in the bot config opts out.
         thinkingTraces: this.#config?.thinkingTraces !== false,
+        // Opt-in progress segments; each assistant note becomes its own message.
+        segmentProgress: normalizeSegmentProgress(this.#config?.segmentProgress),
+        segmentPrefix: normalizeSegmentPrefix(this.#config?.segmentPrefix),
         status: this.#status,
         logger: this.#logger,
         replyTimeoutMs: this.#replyTimeoutMs,

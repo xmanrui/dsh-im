@@ -10,6 +10,10 @@ import {
   normalizeThinkingNumbering,
 } from '../shared/thinking-cadence.mjs';
 import {
+  normalizeSegmentPrefix,
+  normalizeSegmentProgress,
+} from '../shared/progress-segment.mjs';
+import {
   GROUP_TRIGGER_VERSION,
   groupTriggersSettings,
   normalizeGroupTriggers,
@@ -64,6 +68,9 @@ export class TelegramController extends TokenBotController {
           thinkingIntervalSeconds: normalizeThinkingIntervalSeconds(config?.thinkingIntervalSeconds),
           groupTriggers: normalizeGroupTriggers(config?.groupTriggers),
           sendLimitPerMinute: normalizeSendLimitPerMinute(config?.sendLimitPerMinute),
+          // Opt-in progress segments; absent means off.
+          segmentProgress: normalizeSegmentProgress(config?.segmentProgress),
+          segmentPrefix: normalizeSegmentPrefix(config?.segmentPrefix),
         };
       }),
     };
@@ -99,6 +106,22 @@ export class TelegramController extends TokenBotController {
   async setSendLimitPerMinute(botId, value) {
     const sendLimitPerMinute = normalizeSendLimitPerMinute(value);
     return this.updateBotConfig(botId, (config) => ({ ...config, sendLimitPerMinute }));
+  }
+
+  /** Toggle progress segments; the runtime restarts so the next turn follows. */
+  async setSegmentProgress(botId, value) {
+    return this.updateBotConfig(botId, (config) => ({
+      ...config,
+      segmentProgress: normalizeSegmentProgress(value),
+    }));
+  }
+
+  /** Persist the free-form segment prefix (text and emoji). */
+  async setSegmentPrefix(botId, value) {
+    return this.updateBotConfig(botId, (config) => ({
+      ...config,
+      segmentPrefix: normalizeSegmentPrefix(value),
+    }));
   }
 
   /** Channels the bot has actually received messages from. */

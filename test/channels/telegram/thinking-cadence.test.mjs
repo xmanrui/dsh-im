@@ -366,8 +366,8 @@ test('the settings card renders the numbering switch and the interval select', a
   assert.match(markup, /<option value="0">不限制（0）<\/option>/);
   assert.match(markup, /<option value="5" selected="">5<\/option>/);
   assert.match(markup, /<option value="60">60<\/option>/);
-  // Two switches now: thinking traces and frame numbering.
-  assert.equal((markup.match(/type="checkbox"/g) ?? []).length, 2);
+  // Three switches now: thinking traces, frame numbering and progress segments.
+  assert.equal((markup.match(/type="checkbox"/g) ?? []).length, 3);
   assert.equal(calls.length, 0, 'rendering must not save anything');
 });
 

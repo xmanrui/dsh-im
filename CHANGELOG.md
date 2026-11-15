@@ -8,6 +8,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Added / 新增
 
+- Telegram 机器人新增默认关闭的「过程说明分段」设置：开启后，模型在工具调用之间写下的中间说明会作为独立消息发送，前缀可配置（文字和 emoji 均可，留空表示不加），工具调用仍显示在占位符里，最终答案单独成条且不重复已经发过的说明。分段按每个模型步骤的定稿说明切分，而不是整轮累积文本；「思考过程留痕」开启时分段不生效。设置页同时提供前缀输入框，修改后下一轮即生效。
+  Telegram bots gain an opt-in "progress segments" setting: each interim note the model writes between tool calls is delivered as its own message with a configurable prefix (text and emoji, or empty for none), tool calls keep the placeholder, and the final answer arrives as its own message without repeating notes already sent. Segments follow each completed model step instead of the cumulative turn text, and they stay off while thinking traces drive the stream. The settings page also carries the prefix field, and the next turn picks the change up immediately.
+
 - 新增 `/sessionarchive <Session ID>`（别名 `/sessarchive`）：通过 Discord 等渠道触发 DSH 的会话归档（`workspace.archiveSession`）。传序号只做预览（标题、工作区、ID），不会执行归档——会话列表随新会话出现而位移，按序号直接归档会归档到错误会话；破坏性操作必须点名完整 ID。机器人只负责解析目标并转达 Host 结果，拒绝归档本对话当前绑定的会话与已归档会话；`--stop` 让 Host 先停止该会话正在运行的任务。归档后的会话不再出现在默认的 `/sessionlist`。
   Added `/sessionarchive <Session ID>` (alias `/sessarchive`) to trigger DSH Session archiving; a numerical argument only previews the Session behind that index (title, workspace, ID) and never archives, because the list shifts and archiving by index would hit the wrong Session — destructive actions must name the full ID (`workspace.archiveSession`) from the chat. The bot only resolves the target and relays the Host result; it refuses the Session this chat is bound to and one that is already archived, and `--stop` lets the Host stop that Session's running work. Archived Sessions leave the default `/sessionlist`.
 

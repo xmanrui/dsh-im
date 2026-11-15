@@ -12,6 +12,10 @@ import {
   SET_THINKING_CADENCE_ENDPOINT,
 } from '../../../../src/channels/shared/thinking-cadence.mjs';
 import { normalizeSendLimitPerMinute, SET_SEND_LIMIT_ENDPOINT } from '../../../../src/channels/shared/send-limit.mjs';
+import {
+  normalizeSegmentPrefix,
+  normalizeSegmentProgress,
+} from '../../../../src/channels/shared/progress-segment.mjs';
 import { channelName, localizeTemplate, localizeText } from '../../i18n.js';
 
 const ACCOUNT_STATES = new Set(['connected', 'connecting', 'offline', 'error']);
@@ -50,6 +54,8 @@ export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   setThinkingTraces: 'bot.thinking-traces.set',
   setThinkingCadence: SET_THINKING_CADENCE_ENDPOINT,
   setSendLimit: SET_SEND_LIMIT_ENDPOINT,
+  setSegmentProgress: 'bot.segment-progress.set',
+  setSegmentPrefix: 'bot.segment-prefix.set',
 });
 
 export function createTokenChannelApi(channel, connectionSummary, {
@@ -88,6 +94,9 @@ export function createTokenChannelApi(channel, connectionSummary, {
       thinkingIntervalSeconds: normalizeThinkingIntervalSeconds(value.thinkingIntervalSeconds),
       // Absent or unusable falls back to the same default the backend applies.
       sendLimitPerMinute: normalizeSendLimitPerMinute(value.sendLimitPerMinute),
+      // Opt-in progress segments; an absent field means off.
+      segmentProgress: normalizeSegmentProgress(value.segmentProgress),
+      segmentPrefix: normalizeSegmentPrefix(value.segmentPrefix),
       ...(Object.hasOwn(value, 'accessPolicy')
         ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }
         : {}),

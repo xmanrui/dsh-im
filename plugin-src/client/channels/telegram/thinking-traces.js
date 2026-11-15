@@ -60,6 +60,74 @@ function SendLimitField({ account, busy, saving, onCommit }) {
     }));
 }
 
+
+/** 过程说明分段：独立消息的开关与前缀（文字 + emoji 均可）。 */
+function SegmentProgressFields({ account, busy, rpcCall, endpoints, onChanged }) {
+  const enabled = account.segmentProgress === true;
+  const savedPrefix = account.segmentPrefix ?? '🤤 ';
+  const [prefix, setPrefix] = React.useState(savedPrefix);
+  const [saving, setSaving] = React.useState(false);
+  // 另一个标签页保存过、或重连之后，服务端存的值才是准的。
+  React.useEffect(() => { setPrefix(savedPrefix); }, [savedPrefix]);
+
+  const commit = async (endpoint, payload) => {
+    if (typeof rpcCall !== 'function' || !endpoint) return false;
+    setSaving(true);
+    try {
+      const response = await rpcCall(endpoint, payload);
+      if (response && response.ok === false) throw new Error(response.error?.message ?? '请求失败');
+      await onChanged?.({ silent: true });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggle = (next) => {
+    void commit(endpoints?.setSegmentProgress, { botId: account.botId, segmentProgress: next });
+  };
+  const commitPrefix = () => {
+    if (prefix === savedPrefix) return;
+    void commit(endpoints?.setSegmentPrefix, { botId: account.botId, segmentPrefix: prefix })
+      .then((ok) => { if (!ok) setPrefix(savedPrefix); });
+  };
+
+  return h(React.Fragment, null,
+    h('label', { className: 'dim-accountSettingsRow' },
+      h('span', { className: 'dim-accountSettingsText' },
+        h('span', { className: 'dim-accountSettingsLabel' }, '过程说明分段'),
+        h('span', { className: 'dim-accountSettingsHelp' },
+          '把中间说明单独发成消息，工具调用仍显示在占位符里；与思考过程留痕互斥')),
+      h('input', {
+        type: 'checkbox',
+        className: 'dim-accountSettingsSwitch',
+        checked: enabled,
+        disabled: Boolean(busy) || saving,
+        onChange: (event) => { toggle(event.target.checked); },
+      })),
+    h('label', { className: 'dim-accountSettingsRow' },
+      h('span', { className: 'dim-accountSettingsText' },
+        h('span', { className: 'dim-accountSettingsLabel' }, '分段消息前缀'),
+        h('span', { className: 'dim-accountSettingsHelp' },
+          '支持文字和 emoji，比如「🤤 」或「[过程] 」；留空表示不加前缀')),
+      h('input', {
+        type: 'text',
+        className: 'dim-accountSettingsInput',
+        value: prefix,
+        placeholder: '🤤 ',
+        disabled: Boolean(busy) || saving,
+        onChange: (event) => { setPrefix(event.target.value); },
+        onBlur: commitPrefix,
+        onKeyDown: (event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          commitPrefix();
+        },
+      })));
+}
+
 export function ThinkingTracesSettings({
   account, busy, onSave, rpcCall, endpoints, onChanged,
 }) {
@@ -149,6 +217,13 @@ export function ThinkingTracesSettings({
         key: value,
         value: String(value),
       }, value === 0 ? '不限制（0）' : String(value))))),
+    h(SegmentProgressFields, {
+      account,
+      busy: Boolean(busy),
+      rpcCall,
+      endpoints,
+      onChanged,
+    }),
     h(SendLimitField, {
       account,
       busy: Boolean(busy),

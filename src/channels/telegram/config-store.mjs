@@ -9,6 +9,20 @@ import {
   normalizeThinkingIntervalSeconds,
   normalizeThinkingNumbering,
 } from '../shared/thinking-cadence.mjs';
+import {
+  normalizeSegmentPrefix,
+  normalizeSegmentProgress,
+} from '../shared/progress-segment.mjs';
+
+export {
+  DEFAULT_SEGMENT_PREFIX,
+  SEGMENT_PREFIX_MAX_CHARS,
+} from '../shared/progress-segment.mjs';
+
+export {
+  normalizeSegmentPrefix,
+  normalizeSegmentProgress,
+};
 
 export {
   DEFAULT_THINKING_INTERVAL_SECONDS,
@@ -77,8 +91,11 @@ function normalizeTelegramBotExtension(value) {
   const hasThinkingNumbering = Object.hasOwn(value, 'thinkingNumbering');
   const hasThinkingInterval = Object.hasOwn(value, 'thinkingIntervalSeconds');
   const hasSendLimit = Object.hasOwn(value, 'sendLimitPerMinute');
+  const hasSegmentProgress = Object.hasOwn(value, 'segmentProgress');
+  const hasSegmentPrefix = Object.hasOwn(value, 'segmentPrefix');
   if (!hasAccessMode && !hasAllowedUsers && !hasThinkingTraces && !hasGroupTriggers
-    && !hasThinkingNumbering && !hasThinkingInterval && !hasSendLimit) return {};
+    && !hasThinkingNumbering && !hasThinkingInterval && !hasSendLimit
+    && !hasSegmentProgress && !hasSegmentPrefix) return {};
   try {
     const policy = normalizeTelegramAccessPolicy(value);
     return {
@@ -96,6 +113,10 @@ function normalizeTelegramBotExtension(value) {
         : {}),
       // Stored clamped so a bad value never reaches the runtime.
       ...(hasSendLimit ? { sendLimitPerMinute: normalizeSendLimitPerMinute(value.sendLimitPerMinute) } : {}),
+      // Opt-in progress segments; only an explicit true enables them.
+      ...(hasSegmentProgress ? { segmentProgress: normalizeSegmentProgress(value.segmentProgress) } : {}),
+      // The prefix is free-form text/emoji; unusable input falls back safely.
+      ...(hasSegmentPrefix ? { segmentPrefix: normalizeSegmentPrefix(value.segmentPrefix) } : {}),
     };
   } catch {
     return null;

@@ -76,6 +76,11 @@ import {
   setLastMessageFailure,
 } from './message-failure.mjs';
 import { logDeliveryFailure } from './delivery-failure-log.mjs';
+import {
+  DEFAULT_SEGMENT_PREFIX,
+  normalizeSegmentPrefix,
+  normalizeSegmentProgress,
+} from './progress-segment.mjs';
 import { beginStatusReaction } from './status-reaction.mjs';
 import { startNewConversation, isNewCommand, newCommandTitle } from './new-command.mjs';
 import {
@@ -206,6 +211,8 @@ export class TextHarnessBridge {
   #contextEnhancement;
   #accessPolicy;
   #thinkingTraces;
+  #segmentProgress;
+  #segmentPrefix;
   #status;
   #logger;
   #replyTimeoutMs;
@@ -256,6 +263,8 @@ export class TextHarnessBridge {
     contextEnhancement,
     accessPolicy,
     thinkingTraces = false,
+    segmentProgress = false,
+    segmentPrefix = DEFAULT_SEGMENT_PREFIX,
     status = createTextBridgeStatus(),
     logger = console,
     replyTimeoutMs = 600_000,
@@ -280,6 +289,8 @@ export class TextHarnessBridge {
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
     this.#thinkingTraces = thinkingTraces;
+    this.#segmentProgress = normalizeSegmentProgress(segmentProgress);
+    this.#segmentPrefix = normalizeSegmentPrefix(segmentPrefix);
     this.#status = status;
     this.#logger = logger;
     this.#replyTimeoutMs = replyTimeoutMs;
@@ -1291,6 +1302,21 @@ export class TextHarnessBridge {
       const thinkingMode = Boolean(stream
         && this.#thinkingTraces
         && typeof stream.sendToolTrace === 'function');
+      // Progress segments are an alternative to the trace stream: assistant
+      // notes become separate messages while tools keep the placeholder.
+      const segmentMode = Boolean(stream
+        && this.#segmentProgress
+        && !thinkingMode
+        && typeof stream.sendSegment === 'function');
+      // The newest assistant note is held for one event so finish() can post it
+      // as the answer instead of duplicating it as a segment.
+      let pendingSegment = null;
+      const flushSegment = async () => {
+        if (pendingSegment === null) return;
+        const text = pendingSegment;
+        pendingSegment = null;
+        await stream.sendSegment(text);
+      };
       // What the model sees. A message may carry two texts: `controlText`, the
       // plain body the parsers read, and `content`, the same body decorated for
       // the model — the email channel prefixes the mail headers there, so a
@@ -1413,7 +1439,9 @@ export class TextHarnessBridge {
           // order; latest mode filters as before. Only thinking mode subscribes
           // to reasoning updates, so default-mode consumers on other channels
           // never see them (their progress handlers would render update.text).
-          progressMode: thinkingMode ? 'all' : undefined,
+          // Progress segments also need every step: the assistant-message
+          // canonical text is what each segment carries.
+          progressMode: thinkingMode || segmentMode ? 'all' : undefined,
           reasoning: thinkingMode,
           onUpdate: stream ? async (update) => {
             if (thinkingMode) {
@@ -1427,6 +1455,22 @@ export class TextHarnessBridge {
               return;
             }
             if (update.type === 'reasoning') return;
+            if (segmentMode) {
+              // One assistant note per step: the canonical assistant-message
+              // text. The cumulative `text` update would repeat every note, so
+              // it is absorbed here instead of becoming another segment.
+              if (update.type === 'assistant-message') {
+                const note = cleanText(update.text);
+                if (!note) return;
+                if (pendingSegment !== null) await flushSegment();
+                pendingSegment = note;
+                return;
+              }
+              if (update.type === 'text') return;
+              // A tool call closes the note it follows; the placeholder keeps
+              // showing the tool itself (the segment mode does not post tools).
+              if (update.type === 'tool') await flushSegment();
+            }
             // A carrier that delivers the answer as its own message must not
             // stream that answer into itself first: the reader would see the
             // reply twice, and every preview costs an edit.
@@ -1476,6 +1520,12 @@ export class TextHarnessBridge {
         ? t(FILE_ONLY_COMPLETION_TEXT)
         : answer;
       const answerFormat = fileOnlyCompletion ? 'plain' : 'markdown';
+      // With segments, the last assistant note is the answer: earlier notes
+      // already went out as separate messages, so finish posts only this one.
+      const segmentAnswer = segmentMode && pendingSegment !== null && !fileOnlyCompletion
+        ? pendingSegment
+        : null;
+      const finalText = segmentAnswer ?? visibleAnswer;
       let textDeliveryError = null;
       let textReceipt = null;
       // What the channel observed about the send itself; it is written to the
@@ -1484,8 +1534,8 @@ export class TextHarnessBridge {
       if (stream) {
         try {
           const result = await stream.finish(semanticStream || thinkingStream
-            ? createTextDeliveryBlock(visibleAnswer, answerFormat)
-            : visibleAnswer);
+            ? createTextDeliveryBlock(finalText, answerFormat)
+            : finalText);
           streamFinished = true;
           deliveryEvidence = result?.deliveryEvidence ?? deliveryEvidence;
           textReceipt = createDeliveryReceipt({
@@ -1514,9 +1564,9 @@ export class TextHarnessBridge {
           const result = typeof this.#bot.sendDelivery === 'function'
             ? await this.#bot.sendDelivery(
                 answerTarget,
-                createTextDeliveryBlock(visibleAnswer, answerFormat),
+                createTextDeliveryBlock(finalText, answerFormat),
               )
-            : await this.#bot.sendText(answerTarget, visibleAnswer);
+            : await this.#bot.sendText(answerTarget, finalText);
           deliveryEvidence = result?.deliveryEvidence ?? deliveryEvidence;
           textReceipt = createDeliveryReceipt({
             deliveryId: messageId,
