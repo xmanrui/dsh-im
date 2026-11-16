@@ -197,13 +197,16 @@ export function createImHostPlugin(internals = {}) {
     } else if (ctx?.sessions && typeof ctx.on === 'function') {
       startTitlePrefix(ctx);
     }
+    // Presenting a file is a Host tool; its files follow the same channel
+    // delivery as the return-file tool unless the operator turns that off.
+    const artifactOptions = { deliverPresentedFiles: config?.deliverPresentedFiles !== false };
     if (typeof ctx?.inject === 'function') {
       ctx.inject(['tools', 'systemPrompt'], (artifactCtx) => {
-        installOutboundArtifactTool(artifactCtx);
+        installOutboundArtifactTool(artifactCtx, artifactOptions);
         installGroupHistoryTools(artifactCtx);
       });
     } else {
-      installOutboundArtifactTool(ctx);
+      installOutboundArtifactTool(ctx, artifactOptions);
       installGroupHistoryTools(ctx);
     }
     const logger = typeof ctx?.logger === 'function'

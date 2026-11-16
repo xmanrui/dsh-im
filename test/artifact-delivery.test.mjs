@@ -106,8 +106,50 @@ test('image artifacts prefer the native image sender', async (t) => {
   await assertReleased(artifact);
 });
 
-test('an image uses file delivery when the channel has no image sender', async (t) => {
-  const artifact = await committedArtifact(t, 'result.jpg', Buffer.from([1]));
+test('ogg artifacts prefer the native voice sender', async (t) => {
+  const artifact = await committedArtifact(t, 'reply.ogg', Buffer.from([1, 2, 3]));
+  const calls = [];
+
+  const delivery = await deliverOutboundArtifacts({
+    artifacts: [artifact],
+    channelKey: 'test',
+    sendVoice: async (file) => {
+      calls.push(`voice:${file.mediaType}`);
+      return { message_id: 41 };
+    },
+    sendImage: async () => calls.push('image'),
+    sendFile: async () => calls.push('file'),
+  });
+
+  assert.deepEqual(calls, ['voice:audio/ogg']);
+  assert.equal(delivery.receipt.presentation, 'test-voice');
+  assert.deepEqual(delivery.receipt.providerMessageIds, ['41']);
+  await assertReleased(artifact);
+});
+
+test('a voice-note failure falls back to the file sender', async (t) => {
+  const artifact = await committedArtifact(t, 'reply.opus', Buffer.from([1, 2, 3]));
+  const calls = [];
+
+  const delivery = await deliverOutboundArtifacts({
+    artifacts: [artifact],
+    channelKey: 'test',
+    sendVoice: async () => {
+      calls.push('voice');
+      throw rejected('telegram-voice-rejected');
+    },
+    sendFile: async () => {
+      calls.push('file');
+      return { message_id: 42 };
+    },
+  });
+
+  assert.deepEqual(calls, ['voice', 'file']);
+  assert.equal(delivery.receipt.presentation, 'test-file');
+  await assertReleased(artifact);
+});
+
+test('an image uses file delivery when the channel has no image sender', async (t) => {  const artifact = await committedArtifact(t, 'result.jpg', Buffer.from([1]));
   let fileCalls = 0;
 
   const delivery = await deliverOutboundArtifacts({
