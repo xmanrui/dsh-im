@@ -24,6 +24,16 @@ const PROVIDER_FAILURES = Object.freeze({
   EMPTY_RESPONSE: 'MODEL_EMPTY_REPLY',
   CONTENT_FILTER: 'MODEL_CONTENT_REJECTED',
   UNSUPPORTED_CONTENT: 'MODEL_CONFIG',
+  // Codes DSH reports when a turn failed inside the model provider. These
+  // three were missing from the table, so the most common provider failures
+  // reached the user as the generic "the cause is unknown" notice: an
+  // exhausted balance (ACCOUNT_QUOTA), a provider error the provider itself
+  // did not name (PI_AI_ERROR) and a rejected request (INVALID_REQUEST, for
+  // example a 413 or a model on cooldown). Each one now names its cause and
+  // the way out.
+  ACCOUNT_QUOTA: 'MODEL_QUOTA',
+  PI_AI_ERROR: 'MODEL_SERVICE',
+  INVALID_REQUEST: 'MODEL_REQUEST_REJECTED',
 });
 
 // 提交超时（stage=prompt.submit 且 harness-timeout）单列文案：与「已提交、结果
@@ -66,6 +76,8 @@ const FAILURE_MESSAGES = Object.freeze({
     '暂时无法连接模型服务，本次任务未完成。请稍后重试。',
   MODEL_SERVICE:
     '模型服务暂时异常，本次任务未完成。请稍后重试。',
+  MODEL_REQUEST_REJECTED:
+    '模型请求被服务拒绝（可能是上下文过长或该模型当前不可用）。请发送 /compact 或 /new 后重试，或改用其他模型。',
   MODEL_STREAM:
     '模型回复中断或格式异常，本次任务未完成。请重试。',
   MODEL_EMPTY_REPLY:
