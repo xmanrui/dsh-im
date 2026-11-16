@@ -75,6 +75,8 @@ export default {
     'The model service is temporarily unreachable and the task did not finish. Please try again later.',
   '模型服务暂时异常，本次任务未完成。请稍后重试。':
     'The model service is temporarily unavailable and the task did not finish. Please try again later.',
+  '模型请求被服务拒绝（可能是上下文过长或该模型当前不可用）。请发送 /compact 或 /new 后重试，或改用其他模型。':
+    'The model service rejected the request (the context may be too long, or that model may be unavailable right now). Send /compact or /new and try again, or switch to another model.',
   '模型回复中断或格式异常，本次任务未完成。请重试。':
     'The model reply was interrupted or malformed, so the task did not finish. Please try again.',
   '模型没有返回可显示的内容。请重试；若持续发生，请切换模型。':
