@@ -440,6 +440,16 @@ export class TelegramApi {
     });
   }
 
+  async sendVoice({ chatId, file, replyToMessageId, messageThreadId, signal }) {
+    return this.#sendArtifact('sendVoice', 'voice', 'voice', {
+      chatId,
+      file,
+      replyToMessageId,
+      messageThreadId,
+      signal,
+    });
+  }
+
   async #sendArtifact(method, fieldName, mediaLabel, {
     chatId,
     file,

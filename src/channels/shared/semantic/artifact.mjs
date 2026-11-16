@@ -6,10 +6,22 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 
 export const OUTBOUND_ARTIFACT_TOOL = 'dsh_im_return_file';
 
+/** Session event the Host `present` tool appends once its call succeeded. */
+export const PRESENTED_EVENT = 'deliverables/presented';
+
 const ARTIFACT_KIND = 'dsh-im-outbound-artifact';
+// Who registered an artifact: the return-file tool call, or the Host `present`
+// event. The two are deduplicated against each other, never against themselves.
+const REGISTERED_BY_TOOL = 'tool-result';
+const REGISTERED_BY_PRESENT = 'presented';
+
 const ARTIFACT_READ_CHUNK_BYTES = 64 * 1024;
 const MIME_BY_EXTENSION = new Map([
   ['.csv', 'text/csv'],
+  ['.oga', 'audio/ogg'],
+  ['.ogg', 'audio/ogg'],
+  ['.opus', 'audio/opus'],
+  ['.mp3', 'audio/mpeg'],
   ['.doc', 'application/msword'],
   ['.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
   ['.gif', 'image/gif'],
@@ -29,6 +41,8 @@ const MIME_BY_EXTENSION = new Map([
   ['.zip', 'application/zip'],
 ]);
 
+/** Canonical source path of each queued artifact, for per-turn deduplication. */
+const artifactSourcePaths = new WeakMap();
 const artifactStorage = new WeakMap();
 const materializedArtifactSources = new WeakMap();
 const artifactProviderSettlements = new WeakMap();
@@ -222,6 +236,9 @@ async function snapshotFile(workspace, requestedPath, signal) {
       size,
       digest: await hashFile(storagePath, signal),
       storagePath,
+      // The canonical path, not the requested spelling: two names for one file
+      // (a relative path, a symbolic link) must count as the same file.
+      sourcePath: canonicalPath,
     });
   } catch (error) {
     if (storagePath) await unlink(storagePath).catch(() => undefined);
@@ -276,11 +293,15 @@ export class OutboundArtifactRegistry {
   #turns = new Map();
   #stagedTurns = new Map();
   #claimedTurns = new Map();
+
   #claimSignals = new Map();
   #signalClaims = new Map();
   #consumersByPrompt = new Map();
   #consumersByTurn = new Map();
   #openTurns = new Map();
+  // Presented-file snapshots still being copied, per Session Turn, so a channel
+  // that claims right after turn/end can wait for them instead of losing them.
+  #pendingPresented = new Map();
   #uuid;
 
   constructor({ uuid = randomUUID } = {}) {
@@ -362,6 +383,11 @@ export class OutboundArtifactRegistry {
     // Retain the observed closed state so a stale Session snapshot cannot
     // reopen a Turn while its consumer is still waiting to claim the files.
     if (this.#currentTurn(session) === turn) this.#openTurns.set(sessionId, null);
+    // No "never claimed" warning here. The claim is not a turn/end job: the channel
+    // calls settle() and then take() from its own poll, up to a few hundred
+    // milliseconds after the turn closes. Anything still queued at this instant is
+    // the normal state of a successful delivery, and a warning that fires on every
+    // success teaches everyone to ignore the log.
     if (!this.#consumerForTurn(sessionId, turn)) {
       const keyForTurn = turnKey(sessionId, turn);
       const artifactCount = (this.#turns.get(keyForTurn)?.size ?? 0)
@@ -375,11 +401,171 @@ export class OutboundArtifactRegistry {
     }
   }
 
+  /**
+   * Queue the files the Host `present` tool declared in this Turn for the same
+   * channel delivery the return-file tool uses.
+   *
+   * The event carries absolute paths, so nothing here has to guess a workspace.
+   * A Turn no channel waits for (a Web turn, a turn whose delivery owner has
+   * gone) keeps its files where they already are — in the Web GUI.
+   *
+   * Returns the pending registration so the claim path can `settle()` on it:
+   * copying and hashing a presented file outlives the event announcing it.
+   */
+  observePresentedEvent(session, event, { logger } = {}) {
+    if (!event || typeof event !== 'object' || event.type !== PRESENTED_EVENT) return null;
+    const sessionId = sessionIdOf(session);
+    const turn = event.data?.turn;
+    const files = event.data?.files;
+    const currentTurn = this.#currentTurn(session);
+    const consumer = sessionId && Number.isInteger(turn)
+      ? this.#consumerForTurn(sessionId, turn)
+      : null;
+    if (!sessionId || !Number.isInteger(turn) || turn < 0 || !Array.isArray(files)) {
+      return null;
+    }
+    // present() runs inside an open Turn: a Turn that already ended has been
+    // claimed (or discarded) and cannot take new files.
+    //
+    // A dropped record used to be silent, and silence cost hours: the plugin that
+    // wrote it reported success, the channel reported nothing, and neither said
+    // why the file never arrived. These two lines are the answer to that question.
+    if (currentTurn !== turn) {
+      logger?.warn?.('[dsh-im] presented files dropped: the turn is not open here', {
+        sessionId, turn, currentTurn,
+      });
+      return null;
+    }
+    if (!consumer) {
+      logger?.warn?.('[dsh-im] presented files dropped: no delivery consumer for the turn', {
+        sessionId, turn,
+      });
+      return null;
+    }
+    const callId = typeof event.data?.callId === 'string' ? event.data.callId : null;
+    const keyForTurn = turnKey(sessionId, turn);
+    const registration = this.#registerPresented(
+      session,
+      { sessionId, turn, callId, files },
+      { logger },
+    ).catch((error) => {
+      // Queueing a presented file never fails the Turn that presented it.
+      logger?.warn?.('[dsh-im] could not queue presented files:', {
+        sessionId, turn, reason: error?.code ?? error?.message,
+      });
+      return 0;
+    });
+    let pending = this.#pendingPresented.get(keyForTurn);
+    if (!pending) {
+      pending = new Set();
+      this.#pendingPresented.set(keyForTurn, pending);
+    }
+    pending.add(registration);
+    const forget = () => {
+      pending.delete(registration);
+      if (pending.size === 0 && this.#pendingPresented.get(keyForTurn) === pending) {
+        this.#pendingPresented.delete(keyForTurn);
+      }
+    };
+    void registration.then(forget, forget);
+    return registration;
+  }
+
+  /** Snapshot every presented file into the Turn's queue, skipping duplicates. */
+  async #registerPresented(session, { sessionId, turn, callId, files }, { logger } = {}) {
+    const workspace = typeof session?.header?.cwd === 'string' && session.header.cwd
+      ? session.header.cwd
+      : undefined;
+    let queued = 0;
+    for (const entry of files) {
+      const requestedPath = typeof entry === 'string' ? entry : entry?.path;
+      if (typeof requestedPath !== 'string' || !requestedPath.trim()) continue;
+      // Ownership is re-checked per file: a Turn can end while a large file copies,
+      // and a copy that outlives `turn/end` is exactly the case this delivery has to
+      // survive — the channel claims from its own poll afterwards. What must not
+      // survive is a *different* turn taking over the session.
+      if (!this.#ownsTurn(session, sessionId, turn)) break;
+      let snapshot;
+      try {
+        snapshot = await snapshotFile(workspace, requestedPath, undefined);
+      } catch (error) {
+        // A file that moved away between present() and this copy is reported and
+        // skipped: the answer it belongs to still reaches the reader.
+        logger?.warn?.('[dsh-im] skipped a presented file that cannot be read:', {
+          sessionId, turn, reason: error?.code ?? error?.message,
+        });
+        continue;
+      }
+      const { storagePath, sourcePath, ...snapshotMetadata } = snapshot;
+      if (!this.#ownsTurn(session, sessionId, turn)) {
+        await unlink(storagePath).catch(() => undefined);
+        break;
+      }
+      // The same file already queued in this Turn (by present or by
+      // dsh_im_return_file) is sent once, so its snapshot is dropped here.
+      if (this.#findSourceInTurn(sessionId, turn, sourcePath)) {
+        await unlink(storagePath).catch(() => undefined);
+        continue;
+      }
+      const artifact = this.#createArtifact({
+        snapshotMetadata,
+        storagePath,
+        sourcePath,
+        registeredBy: {
+          kind: REGISTERED_BY_PRESENT,
+          eventId: callId ?? 'unknown',
+          toolName: 'present',
+        },
+        origin: { sessionId, turn, callId },
+      });
+      // A presented file is already a successful declaration, so it enters the
+      // delivered queue directly instead of waiting for another tool result.
+      const keyForTurn = turnKey(sessionId, turn);
+      let committed = this.#turns.get(keyForTurn);
+      if (!committed) {
+        committed = new Map();
+        this.#turns.set(keyForTurn, committed);
+      }
+      committed.set(artifactKey(artifact), artifact);
+      queued += 1;
+    }
+    return queued;
+  }
+
+  /** Wait until the presented files of one Turn have finished registering. */
+  async settle(sessionId, turn) {
+    if (typeof sessionId !== 'string' || !Number.isInteger(turn)) return;
+    for (;;) {
+      const pending = this.#pendingPresented.get(turnKey(sessionId, turn));
+      if (!pending || pending.size === 0) return;
+      await Promise.allSettled([...pending]);
+    }
+  }
+
   #currentTurn(session) {
     const sessionId = sessionIdOf(session);
     return this.#openTurns.has(sessionId)
       ? this.#openTurns.get(sessionId)
       : currentTurn({ session });
+  }
+
+  /**
+   * Whether this Turn still owns its files.
+   *
+   * A closed Turn reports no current turn at all, and that is not a reason to
+   * drop a file: the channel calls settle() and take() from its own poll, up to a
+   * few hundred milliseconds after `turn/end`, so a copy that finishes in that
+   * window is late, not wrong. Only a *different* live Turn, or a delivery owner
+   * that has gone away, takes the file out of its hands.
+   * @param session - the Session the record belongs to.
+   * @param sessionId - its id, for the consumer lookup.
+   * @param turn - the Turn being registered.
+   * @returns whether the files may stay.
+   */
+  #ownsTurn(session, sessionId, turn) {
+    const current = this.#currentTurn(session);
+    if (current !== null && current !== turn) return false;
+    return this.#consumerForTurn(sessionId, turn) !== null;
   }
 
   #consumerForTurn(sessionId, turn) {
@@ -418,6 +604,9 @@ export class OutboundArtifactRegistry {
       if (key.startsWith(prefix)) this.#consumersByTurn.delete(key);
     }
     this.#openTurns.delete(sessionId);
+    for (const key of this.#pendingPresented.keys()) {
+      if (key.startsWith(prefix)) this.#pendingPresented.delete(key);
+    }
     for (const artifact of artifacts) cleanupArtifactStorage(artifact);
   }
 
@@ -446,7 +635,7 @@ export class OutboundArtifactRegistry {
     if (!consumer) throw unavailable();
 
     const snapshot = await snapshotFile(workspace, requestedPath, exec?.signal);
-    const { storagePath, ...snapshotMetadata } = snapshot;
+    const { storagePath, sourcePath, ...snapshotMetadata } = snapshot;
     // Copying and hashing yield to cancellation, disposal and Turn completion.
     // Never leave a late snapshot behind after its delivery owner has gone.
     try {
@@ -457,33 +646,27 @@ export class OutboundArtifactRegistry {
       await unlink(storagePath).catch(() => undefined);
       throw error;
     }
-    const artifact = Object.freeze({
-      kind: ARTIFACT_KIND,
-      schemaVersion: 1,
-      artifactId: this.#uuid(),
-      deliveryKey: this.#uuid(),
-      ...snapshotMetadata,
-      source: 'managed-temp',
-      registeredBy: Object.freeze({
-        kind: 'tool-result',
+    // A file the Host `present` tool already declared in this same Turn is not
+    // sent twice: the tool result still succeeds and names the queued artifact.
+    const presented = this.#findSourceInTurn(sessionId, turn, sourcePath, [REGISTERED_BY_PRESENT]);
+    if (presented) {
+      await unlink(storagePath).catch(() => undefined);
+      return presented;
+    }
+    const artifact = this.#createArtifact({
+      snapshotMetadata,
+      storagePath,
+      sourcePath,
+      registeredBy: {
+        kind: REGISTERED_BY_TOOL,
         eventId: typeof exec?.callId === 'string' ? exec.callId : 'unknown',
         toolName: OUTBOUND_ARTIFACT_TOOL,
-      }),
-      origin: Object.freeze({
+      },
+      origin: {
         sessionId,
         turn,
         callId: typeof exec?.callId === 'string' ? exec.callId : null,
-      }),
-      createdAt: Date.now(),
-    });
-    artifactStorage.set(artifact, {
-      path: storagePath,
-      materializing: 0,
-      materialized: false,
-      releaseRequested: false,
-      cleanupRequested: false,
-      cleanupDeferred: false,
-      onCleanup: () => this.#forgetArtifact(artifact),
+      },
     });
     const keyForTurn = turnKey(sessionId, turn);
     let staged = this.#stagedTurns.get(keyForTurn);
@@ -493,6 +676,49 @@ export class OutboundArtifactRegistry {
     }
     staged.set(artifactKey(artifact), artifact);
     return artifact;
+  }
+
+  /** Build a queued artifact and take ownership of its private snapshot. */
+  #createArtifact({ snapshotMetadata, storagePath, sourcePath, registeredBy, origin }) {
+    const artifact = Object.freeze({
+      kind: ARTIFACT_KIND,
+      schemaVersion: 1,
+      artifactId: this.#uuid(),
+      deliveryKey: this.#uuid(),
+      ...snapshotMetadata,
+      source: 'managed-temp',
+      registeredBy: Object.freeze(registeredBy),
+      origin: Object.freeze(origin),
+      createdAt: Date.now(),
+    });
+    artifactSourcePaths.set(artifact, sourcePath);
+    artifactStorage.set(artifact, {
+      path: storagePath,
+      materializing: 0,
+      materialized: false,
+      releaseRequested: false,
+      cleanupRequested: false,
+      cleanupDeferred: false,
+      onCleanup: () => this.#forgetArtifact(artifact),
+    });
+    return artifact;
+  }
+
+  /**
+   * One queued artifact of this Turn whose source is `sourcePath`, optionally
+   * restricted to the kinds that registered it.
+   */
+  #findSourceInTurn(sessionId, turn, sourcePath, kinds = null) {
+    const keyForTurn = turnKey(sessionId, turn);
+    for (const entries of [this.#turns.get(keyForTurn), this.#stagedTurns.get(keyForTurn)]) {
+      if (!entries) continue;
+      for (const artifact of entries.values()) {
+        if (artifactSourcePaths.get(artifact) !== sourcePath) continue;
+        if (kinds && !kinds.includes(artifact.registeredBy?.kind)) continue;
+        return artifact;
+      }
+    }
+    return null;
   }
 
   commit(artifact) {
@@ -522,10 +748,11 @@ export class OutboundArtifactRegistry {
     cleanupArtifactStorage(artifact);
   }
 
-  take(sessionId, turn, { signal } = {}) {
+  take(sessionId, turn, { signal, logger = null } = {}) {
     const keyForTurn = turnKey(sessionId, turn);
     const committed = this.#turns.get(keyForTurn);
     this.#turns.delete(keyForTurn);
+    // Nothing queued is the ordinary case for most turns: no warning, no noise.
     if (!committed) return [];
     if (signal?.aborted) {
       for (const artifact of committed.values()) cleanupArtifactStorage(artifact);
@@ -534,10 +761,16 @@ export class OutboundArtifactRegistry {
     const claimed = this.#claimedTurns.get(keyForTurn) ?? new Map();
     this.#claimedTurns.set(keyForTurn, claimed);
     const artifacts = [];
+    let lost = 0;
     for (const [key, artifact] of committed) {
-      if (!artifactStorage.has(artifact)) continue;
+      if (!artifactStorage.has(artifact)) { lost += 1; continue; }
       claimed.set(key, artifact);
       artifacts.push(artifact);
+    }
+    if (lost > 0) {
+      logger?.warn?.('[dsh-im] a presented file lost its snapshot before the claim', {
+        sessionId, turn, lost, kept: artifacts.length,
+      });
     }
     if (claimed.size === 0) this.#claimedTurns.delete(keyForTurn);
     else if (!this.#bindClaimSignal(keyForTurn, signal)) return [];
@@ -571,6 +804,7 @@ export class OutboundArtifactRegistry {
     this.#turns.clear();
     this.#stagedTurns.clear();
     this.#claimedTurns.clear();
+    this.#pendingPresented.clear();
     for (const turnKey of this.#claimSignals.keys()) this.#releaseClaimSignal(turnKey);
     for (const consumer of this.#consumersByPrompt.values()) consumer.released = true;
     this.#consumersByPrompt.clear();
@@ -718,8 +952,15 @@ export function createOutboundArtifactTool({ registry = outboundArtifactRegistry
   return Object.freeze({ definition, onResult });
 }
 
-/** Register the file-return tool with guidance scoped to an owned IM Turn. */
-export function installOutboundArtifactTool(ctx, { registry = outboundArtifactRegistry } = {}) {
+/**
+ * Register the file-return tool with guidance scoped to an owned IM Turn, and
+ * forward the files the Host `present` tool declares to the same IM delivery.
+ * `deliverPresentedFiles: false` keeps presented files in the Web GUI only.
+ */
+export function installOutboundArtifactTool(ctx, {
+  registry = outboundArtifactRegistry,
+  deliverPresentedFiles = true,
+} = {}) {
   if (typeof ctx?.tools?.register !== 'function'
     || typeof ctx?.systemPrompt?.context !== 'function'
     || typeof ctx?.on !== 'function') return false;
@@ -732,8 +973,15 @@ export function installOutboundArtifactTool(ctx, { registry = outboundArtifactRe
   ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
     registry.observeClaimedMessage(agent?.session, message, turn);
   }, { global: true });
-  ctx.on('session/event', (session, event) => registry.observeSessionEvent(session, event, { logger }));
-  ctx.on('session/disposed', (session) => registry.disposeSession(session));
+  // Session events reach a plugin only as a global listener: dsh-session
+  // dispatches them through the carrier from scopeTarget(), whose filter drops
+  // a listener whose own context carries a different scope tag. Every other
+  // Session observer in this package registers globally for that reason.
+  ctx.on('session/event', (session, event) => {
+    registry.observeSessionEvent(session, event, { logger });
+    if (deliverPresentedFiles) registry.observePresentedEvent(session, event, { logger });
+  }, { global: true });
+  ctx.on('session/disposed', (session) => registry.disposeSession(session), { global: true });
   ctx.systemPrompt.context({
     name: 'dsh-im:return-file',
     order: 115,
