@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { ActionCardRegistry, ACTION_CARD_STATUS } from '../../../src/channels/shared/action-card.mjs';
-import { setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
+import { getImHostLanguage, setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
 import { runMenuCommand } from '../../../src/channels/shared/menu-command.mjs';
 import { TextHarnessBridge } from '../../../src/channels/shared/text-harness-bridge.mjs';
 import {
@@ -329,4 +329,34 @@ test('menu labels follow the host language', (t) => {
   const card = renderMenuCard('abcd1234EFGH');
   assert.equal(card.markup.inline_keyboard[0][0].text, '💬 Sessions');
   assert.equal(card.markup.inline_keyboard[1][2].text, '❓ Help');
+});
+
+test('a group /menu hub hides the absolute workspace and the full Session id', async (t) => {
+  const previousLanguage = getImHostLanguage();
+  setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previousLanguage));
+  const sessions = new Map([['group:g1', SESSION_ID]]);
+  const seen = new Set();
+  const state = {
+    sessionFor: (key) => sessions.get(key) ?? null,
+    async setSession(key, value) { sessions.set(key, value); },
+    async clearSession(key) { sessions.delete(key); },
+    hasSeen: (id) => seen.has(id),
+    async markSeen(id) { seen.add(id); },
+    async unmarkSeen(id) { return seen.delete(id); },
+  };
+  const { bot, cards } = botFixture();
+  const bridge = bridgeFor({ bot, state });
+  await bridge.accept({
+    ...menuMessage('m-group'),
+    kind: 'group',
+    conversationId: 'g1',
+  });
+  assert.equal(cards.length, 1, 'the hub lands in the group');
+
+  const text = cards[0].text;
+  assert.doesNotMatch(text, /\/home\/wings\/project/u, 'no absolute workspace path');
+  assert.doesNotMatch(text, new RegExp(SESSION_ID, 'u'), 'no full Session id');
+  assert.match(text, /工作区：project/u, 'the recognizable workspace tail stays');
+  assert.match(text, /会话：…/u, 'only a short Session tail is shown');
 });

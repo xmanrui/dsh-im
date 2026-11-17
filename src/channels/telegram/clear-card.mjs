@@ -157,13 +157,30 @@ export class TelegramClearCard {
   /**
    * Send one confirmation prompt. Returns false — leaving the caller free to run
    * `/clear` immediately — when the channel has no keyboard or the send fails.
+   *
+   * `sessionId` is the Session this press will be allowed to clear: it is kept
+   * with the card so a later rebind makes the button stale instead of erasing a
+   * Session the confirmation never named. `displaySessionId` only changes what
+   * the body prints, which lets a group chat see a shortened id.
    */
-  async present({ bot, target, conversationKey, workspace, sessionId } = {}) {
+  async present({
+    bot,
+    target,
+    conversationKey,
+    workspace,
+    sessionId,
+    displaySessionId = null,
+  } = {}) {
     if (!target || typeof conversationKey !== 'string' || !conversationKey) return false;
     if (typeof bot?.sendInteractionCard !== 'function') return false;
     const previous = this.#registry.activeFor(conversationKey);
     const entry = this.#registry.issue({ conversationKey, kind: 'clear' });
-    const card = renderClearCard(entry.nonce, clearCardText({ workspace, sessionId }));
+    const card = renderClearCard(entry.nonce, clearCardText({
+      workspace,
+      sessionId: typeof displaySessionId === 'string' && displaySessionId
+        ? displaySessionId
+        : sessionId,
+    }));
     let sent;
     try {
       sent = await bot.sendInteractionCard(target, card);
@@ -179,7 +196,13 @@ export class TelegramClearCard {
     const messageId = Array.isArray(sent?.providerMessageIds) && sent.providerMessageIds.length > 0
       ? String(sent.providerMessageIds[0])
       : null;
-    this.#records.set(entry.nonce, { messageId, target, conversationKey, text: card.text });
+    this.#records.set(entry.nonce, {
+      messageId,
+      target,
+      conversationKey,
+      text: card.text,
+      sessionId: typeof sessionId === 'string' && sessionId ? sessionId : null,
+    });
     this.#pruneRecords();
     if (previous && previous.nonce !== entry.nonce) {
       await this.#retireKeyboard(bot, previous.nonce);
@@ -226,9 +249,15 @@ export class TelegramClearCard {
     }
 
     let result = null;
+    // The Session this prompt was rendered for, not whatever is bound now: the
+    // runner revalidates it before it erases anything.
+    const record = this.#records.get(owned.nonce);
+    const pinnedSessionId = typeof record?.sessionId === 'string' && record.sessionId
+      ? record.sessionId
+      : (typeof sessionId === 'string' && sessionId ? sessionId : null);
     try {
       result = typeof run === 'function'
-        ? await run({ sessionId, callback })
+        ? await run({ sessionId: pinnedSessionId, callback })
         : null;
     } catch (error) {
       this.#logger.warn?.(
@@ -236,6 +265,16 @@ export class TelegramClearCard {
         error?.message ?? error,
       );
       result = null;
+    }
+    // A stale re-check (the chat was rebound after this prompt was sent) must
+    // say so and leave both Sessions alone, instead of reporting a clear failure.
+    if (result?.stale === true) {
+      this.#registry.settle(owned.nonce, ACTION_CARD_STATUS.STALE);
+      const staleText = actionCardStateText(ACTION_CARD_STATUS.STALE, this.#notices);
+      const edited = await this.#editInPlace(bot, owned.nonce, staleText);
+      if (!edited) await this.#retireKeyboard(bot, owned.nonce);
+      await notice(staleText);
+      return true;
     }
     this.#registry.settle(owned.nonce, ACTION_CARD_STATUS.RESOLVED);
     const text = resultMessages(result).join('\n\n').trim();

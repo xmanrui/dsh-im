@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { ActionCardRegistry, ACTION_CARD_STATUS } from '../../../src/channels/shared/action-card.mjs';
-import { setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
+import { getImHostLanguage, setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
 import { TextHarnessBridge } from '../../../src/channels/shared/text-harness-bridge.mjs';
 import {
   CLEAR_CARD_CANCEL,
@@ -377,4 +377,87 @@ test('a stale claim never runs the command twice', async () => {
   assert.equal(ran, 0);
   assert.equal(card.registry.get(parseTelegramClearCardCallback(data).nonce).status,
     ACTION_CARD_STATUS.CLAIMED);
+});
+
+/** A state fixture whose binding can be changed after the prompt was sent. */
+function rebindableState({ key = 'direct:chat-a', sessionId = SESSION_ID } = {}) {
+  const sessions = new Map();
+  const seen = new Set();
+  if (sessionId) sessions.set(key, sessionId);
+  return {
+    sessionFor: (conversationKey) => sessions.get(conversationKey) ?? null,
+    async setSession(conversationKey, value) { sessions.set(conversationKey, value); },
+    async clearSession(conversationKey) { sessions.delete(conversationKey); },
+    hasSeen: (id) => seen.has(id),
+    async markSeen(id) { seen.add(id); },
+    async unmarkSeen(id) { return seen.delete(id); },
+  };
+}
+
+/** A harness that records every /clear it is actually asked to run. */
+function recordingHarness() {
+  const executed = [];
+  return {
+    executed,
+    async ensureRunning() {},
+    currentWorkspace: () => WORKSPACE,
+    currentConversationWorkspace: () => WORKSPACE,
+    workspaceSession: (sessionId, key) => ({
+      async executeCommand(text) {
+        executed.push({ sessionId, key, text });
+        return { result: { kind: 'success' } };
+      },
+    }),
+  };
+}
+
+test('rebinding the chat makes the old confirmation stale instead of clearing the new session', async (t) => {
+  const previousLanguage = getImHostLanguage();
+  setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previousLanguage));
+  const state = rebindableState();
+  const harness = recordingHarness();
+  const { bot, cards, edits, notices } = botFixture();
+  const bridge = bridgeFor({ bot, harness, state });
+  await bridge.accept(clearMessage('m-old'));
+  assert.equal(cards.length, 1);
+  const confirm = cards[0].markup.inline_keyboard[0][0].callback_data;
+
+  // `/session` (or `/new` plus a message) rebinds the chat while the card lives.
+  await state.setSession('direct:chat-a', 'session-new-9999999999');
+  await bridge.acceptCallback(callbackFor(confirm));
+
+  assert.deepEqual(harness.executed, [], 'the newer session must not be cleared');
+  assert.match(edits.at(-1)?.text ?? '', /这条清空确认已失效，请重新发送 \/clear。/u);
+  assert.match(notices.at(-1)?.text ?? '', /这条清空确认已失效/u);
+});
+
+test('a group /clear card hides the absolute workspace and the full Session id', async (t) => {
+  const previousLanguage = getImHostLanguage();
+  setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previousLanguage));
+  const state = rebindableState({ key: 'group:g1' });
+  const harness = recordingHarness();
+  const { bot, cards } = botFixture();
+  const bridge = bridgeFor({ bot, harness, state });
+  await bridge.accept({
+    ...clearMessage('m-group'),
+    kind: 'group',
+    conversationId: 'g1',
+  });
+  assert.equal(cards.length, 1, 'the group member gets the confirmation');
+
+  const text = cards[0].text;
+  assert.doesNotMatch(text, /\/home\/wings\/project/u, 'no absolute workspace path');
+  assert.doesNotMatch(text, new RegExp(SESSION_ID, 'u'), 'no full Session id');
+  assert.match(text, /工作区：project/u, 'the recognizable workspace tail stays');
+  assert.match(text, /会话：…/u, 'only a short Session tail is shown');
+
+  // Redaction is display-only: the press still revalidates and clears the real id.
+  await bridge.acceptCallback(callbackFor(
+    cards[0].markup.inline_keyboard[0][0].callback_data,
+    { kind: 'group', conversationId: 'g1' },
+  ));
+  assert.equal(harness.executed.length, 1);
+  assert.equal(harness.executed[0].sessionId, SESSION_ID);
 });

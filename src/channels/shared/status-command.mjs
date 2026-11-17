@@ -109,11 +109,20 @@ function settledWithin(operation, timeoutMs) {
  * make the command hang.
  */
 /** The last path segment, used when a full path must not be shown. */
-function workspaceTail(path) {
+export function workspaceTail(path) {
   const text = typeof path === 'string' ? path.replace(/[/\\]+$/u, '') : '';
   if (!text) return '（未知）';
   const tail = text.slice(Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\')) + 1);
   return tail || text;
+}
+
+/**
+ * The short Session tail a shared conversation may see: long enough to tell two
+ * bindings apart, short enough that the room never learns a usable identifier.
+ */
+export function sessionIdTail(sessionId) {
+  const text = typeof sessionId === 'string' ? sessionId : '';
+  return text ? `…${text.slice(-6)}` : '';
 }
 
 /**
@@ -124,7 +133,7 @@ function workspaceTail(path) {
  * business. So in a group the reply keeps the useful part (is it connected, is
  * something running) and drops the identifying part.
  */
-function isSharedConversation(conversationKey) {
+export function isSharedConversation(conversationKey) {
   return typeof conversationKey === 'string' && conversationKey.startsWith('group:');
 }
 
@@ -165,7 +174,7 @@ export async function runStatusCommand({
   const boundSessionId = typeof sessionId === 'string' && sessionId ? sessionId : null;
   lines.push(boundSessionId
     ? t('绑定会话：{session}', {
-      session: shared ? `…${boundSessionId.slice(-6)}` : shortenedSessionId(boundSessionId),
+      session: shared ? sessionIdTail(boundSessionId) : shortenedSessionId(boundSessionId),
     })
     : t('绑定会话：未绑定（发送消息后自动创建）'));
 

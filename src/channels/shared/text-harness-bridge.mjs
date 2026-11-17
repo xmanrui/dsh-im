@@ -26,7 +26,12 @@ import {
   runWorkspaceCommand,
   workspaceSwitchFailureText,
 } from './workspace-command.mjs';
-import { runStatusCommand } from './status-command.mjs';
+import {
+  isSharedConversation,
+  runStatusCommand,
+  sessionIdTail,
+  workspaceTail,
+} from './status-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
 import { isClearCommand, runClearCommand } from './clear-command.mjs';
 import { isResetCommand, runResetCommand } from './reset-command.mjs';
@@ -2365,6 +2370,30 @@ export class TextHarnessBridge {
       });
       if (handled) return;
     }
+    // The ⏹ button on a running turn: checked before the command gate, because
+    // its payload carries no card registry entry to look up and it has its own
+    // per-task sender check.
+    if (typeof callback?.data === 'string' && callback.data.startsWith('st|')) {
+      if (await this.#handleStopPress(callback, key)) return;
+    }
+    // Every card branch below this point replays a command that the typed path
+    // gates through `evaluateInboundAccess(..., { isCommand: true })`, so the
+    // press has to pass the same policy: otherwise a member who may not type
+    // `/clear` could press an authorized member's confirmation and wipe the
+    // chat, or move the bot-wide `/display` level. A question card is not a
+    // command — it belongs to the user who was asked and is handled by the actor
+    // check further down — so it passes through untouched.
+    if (!this.#interactionCard?.parse?.(callback.data)) {
+      const decision = evaluateInboundAccess(this.#accessPolicy, {
+        conversationType: kind,
+        senderIds: [senderId].filter(Boolean),
+        isCommand: true,
+      });
+      if (!decision.allowed) {
+        await this.#answerInteractionCallback(callback, t(COMMAND_PERMISSION_DENIED_MESSAGE));
+        return;
+      }
+    }
     // The /conv card pins this conversation's workspace. It replays `/conv <path>`
     // and `/conv clear`, so the card can never change the bot-wide default (/ws).
     if (this.#convCard && typeof this.#convCard.handlePress === 'function') {
@@ -2382,11 +2411,6 @@ export class TextHarnessBridge {
         return false;
       });
       if (handled) return;
-    }
-    // The ⏹ button on a running turn: checked first, because its payload carries
-    // no card registry entry to look up.
-    if (typeof callback?.data === 'string' && callback.data.startsWith('st|')) {
-      if (await this.#handleStopPress(callback, key)) return;
     }
     // The /start greeting is a launcher: a press replays the command it names and
     // leaves the card in place.
@@ -2491,9 +2515,27 @@ export class TextHarnessBridge {
         bot: this.#bot,
         answer: (text) => this.#answerInteractionCallback(callback, text),
         conversationKey: key,
-        run: () => runClearCommand('/clear', this.#harness, this.#state, key, {
-          signal: this.#signal,
-        }),
+        // The card pins the Session it was shown for. A `/session` rebind (or
+        // `/new` plus a message) after the prompt would otherwise let an old
+        // button erase a Session its confirmation never named.
+        run: ({ sessionId: pinnedSessionId } = {}) => {
+          let currentSessionId = null;
+          try {
+            currentSessionId = typeof this.#state?.sessionFor === 'function'
+              ? this.#state.sessionFor(key)
+              : null;
+          } catch {
+            currentSessionId = null;
+          }
+          if (typeof pinnedSessionId !== 'string' || !pinnedSessionId
+            || typeof currentSessionId !== 'string' || !currentSessionId
+            || currentSessionId !== pinnedSessionId) {
+            return { handled: false, stale: true };
+          }
+          return runClearCommand('/clear', this.#harness, this.#state, key, {
+            signal: this.#signal,
+          });
+        },
       }).catch((error) => {
         this.#logger.error?.(
           `[dsh-im:${this.#descriptor.key}] failed to handle a /clear confirmation press:`,
@@ -3258,13 +3300,21 @@ export class TextHarnessBridge {
       workspace = null;
     }
     let presented = false;
+    // A group is a room: the card keeps the recognizable workspace tail and a
+    // short Session tail, never the operator's absolute path or a usable id.
+    // The full id still travels as `sessionId`, but only for revalidation and
+    // never into the rendered body.
+    const shared = isSharedConversation(key);
     try {
       presented = await this.#clearCard.present({
         bot: this.#bot,
         target: message.replyTarget,
         conversationKey: key,
-        workspace: typeof workspace === 'string' ? workspace : null,
+        workspace: typeof workspace === 'string'
+          ? (shared ? workspaceTail(workspace) : workspace)
+          : null,
         sessionId,
+        displaySessionId: shared ? sessionIdTail(sessionId) : sessionId,
       });
     } catch (error) {
       this.#logger.warn?.(
@@ -3307,6 +3357,16 @@ export class TextHarnessBridge {
         : null;
     } catch {
       snapshot.sessionId = null;
+    }
+    // The same redaction the /status text applies: a group must not learn the
+    // operator's absolute workspace path or a full Session id from a card.
+    if (isSharedConversation(key)) {
+      if (typeof snapshot.workspace === 'string' && snapshot.workspace) {
+        snapshot.workspace = workspaceTail(snapshot.workspace);
+      }
+      if (typeof snapshot.sessionId === 'string' && snapshot.sessionId) {
+        snapshot.sessionId = sessionIdTail(snapshot.sessionId);
+      }
     }
     let presented = false;
     try {
