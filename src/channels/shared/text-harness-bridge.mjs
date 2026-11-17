@@ -3568,6 +3568,12 @@ export class TextHarnessBridge {
         target,
         conversationKey,
         listing,
+        // Same group rule as the /clear and /menu cards: the room may see the
+        // workspace tail, never the operator's absolute path.
+        displayCurrent: isSharedConversation(conversationKey)
+          && typeof listing?.current === 'string'
+          ? workspaceTail(listing.current)
+          : null,
       });
     } catch (error) {
       this.#logger.warn?.(

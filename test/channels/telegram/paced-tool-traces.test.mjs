@@ -86,3 +86,26 @@ test('a held tool trace replaced by a newer frame never registers its call id', 
   assert.match(edits[0].text, /grep/u);
   assert.match(edits[0].text, /✓/u);
 });
+
+test('a result that beats the paced frame is applied once the frame is released', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const { sent, edits, api } = recorder();
+  const client = new TelegramBotClient({
+    api, signal: undefined, logger: quietLogger, thinkingIntervalSeconds: 3,
+  });
+  const stream = client.openThinkingStream({ chatId: 42 });
+  await stream.sendThinking('checking');
+  assert.equal(sent.length, 1);
+
+  assert.equal(await stream.sendToolTrace('read', { path: 'a' }, 'call-fast'), null);
+  // A fast tool can finish before the cadence window lets its line out.
+  await stream.settleToolTrace({ callId: 'call-fast', ok: true });
+  assert.equal(edits.length, 0, 'there is no message to edit until the frame is sent');
+
+  await advance(t, 3_000);
+  assert.equal(sent.length, 2, 'the timer releases the held tool trace');
+  assert.equal(sent[1].text, '🔧 read → a');
+  assert.equal(edits.length, 1, 'the released line carries its already-known result');
+  assert.equal(edits[0].messageId, 5000 + 2);
+  assert.match(edits[0].text, /✓/u, 'the line must not stay running');
+});

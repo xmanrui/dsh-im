@@ -1358,6 +1358,10 @@ export class TelegramBotClient {
     let windowEndsAt = 0;
     // callId → the trace message it produced, so its result can rewrite that line.
     const toolCalls = new Map();
+    // Named calls whose line is still held by the cadence window. A result can
+    // beat the release; remembering it here lets the frame settle immediately
+    // when it finally goes out instead of leaving the line running forever.
+    const pendingToolResults = new Map();
     let anonymousToolCalls = 0;
     const logger = this.#logger;
     const warnFailure = (label, error) => {
@@ -1411,6 +1415,7 @@ export class TelegramBotClient {
       const delivered = messageId === null || messageId === undefined
         ? null : { messageId, text: draft.text };
       if (delivered) draft.onDelivered?.(delivered);
+      else draft.onDropped?.();
       return delivered;
     });
     const sendHeld = () => {
@@ -1436,24 +1441,51 @@ export class TelegramBotClient {
      * fires only if that frame really goes out — a held frame can still be
      * replaced or cancelled, and must not be attributed in that case.
      */
-    const emit = (label, text, onDelivered) => {
-      if (closed) return Promise.resolve(null);
+    const emit = (label, text, hooks = {}) => {
+      if (closed) {
+        hooks.onDropped?.();
+        return Promise.resolve(null);
+      }
       sequence += 1;
-      const frame = { label, text: numbering ? `${sequence} ${text}` : text, onDelivered };
+      const frame = {
+        label,
+        text: numbering ? `${sequence} ${text}` : text,
+        onDelivered: hooks.onDelivered,
+        onDropped: hooks.onDropped,
+      };
       if (intervalMs <= 0) return release(frame);
       if (Date.now() >= windowEndsAt) {
         // The deadline has passed but its timer may not have run yet, and that
         // callback would deliver the frame this newer one supersedes. Drop both
         // the held frame and its timer before letting the new frame through.
         clearWindowTimer();
+        held?.onDropped?.();
         held = null;
         windowEndsAt = Date.now() + intervalMs;
         return release(frame);
       }
       // Inside the window: replace whatever waited, never append.
+      held?.onDropped?.();
       held = frame;
       armWindowTimer();
       return Promise.resolve(null);
+    };
+    // Rewrite one visible tool line with its outcome. Shared by the normal
+    // settle path and by a frame that is released after its result has already
+    // arrived, so both produce the same wording and duration.
+    const applyToolOutcome = async (call, ok) => {
+      const seconds = ((Date.now() - call.startedAt) / 1_000).toFixed(1);
+      const text = formatToolOutcome(call.text, { ok, seconds });
+      try {
+        await this.#api.editMessageText({
+          chatId: target.chatId,
+          messageId: call.messageId,
+          text,
+          signal: this.#signal,
+        });
+      } catch (error) {
+        warnFailure('tool outcome', error);
+      }
     };
     return {
       get messageId() {
@@ -1474,18 +1506,32 @@ export class TelegramBotClient {
       // instead of adding another line to the chat.
       sendToolTrace: async (name, argumentsValue, callId) => {
         const startedAt = Date.now();
+        const named = callId !== undefined && callId !== null;
+        const key = named ? String(callId) : `anonymous:${++anonymousToolCalls}`;
         // Recorded only once the line is actually on the wire. Inside a pacing
         // window that happens later, when the timer releases the held frame, so
         // the identity travels with the frame instead of riding the await here.
         // Recorded even without a call id: the result may arrive unattributed,
         // and an unrecorded line would keep claiming to be running.
         const record = (delivered) => {
-          const key = callId === undefined || callId === null
-            ? `anonymous:${++anonymousToolCalls}`
-            : String(callId);
-          toolCalls.set(key, { messageId: delivered.messageId, text: delivered.text, startedAt });
+          const waiting = named ? pendingToolResults.get(key) : null;
+          if (named) pendingToolResults.delete(key);
+          const call = { messageId: delivered.messageId, text: delivered.text, startedAt };
+          // A result that beat the paced line is applied now that it exists.
+          if (waiting && waiting.ok !== undefined) {
+            void applyToolOutcome(call, waiting.ok);
+            return;
+          }
+          toolCalls.set(key, call);
         };
-        const delivered = await emit('tool trace', formatToolTrace(name, argumentsValue), record);
+        const drop = () => {
+          if (named) pendingToolResults.delete(key);
+        };
+        if (named) pendingToolResults.set(key, { ok: undefined });
+        const delivered = await emit('tool trace', formatToolTrace(name, argumentsValue), {
+          onDelivered: record,
+          onDropped: drop,
+        });
         return delivered?.messageId ?? null;
       },
       settleToolTrace: async ({ callId, ok = true } = {}) => {
@@ -1494,25 +1540,20 @@ export class TelegramBotClient {
         // line still waiting is the one it belongs to. A result that names an id
         // we never recorded is dropped instead — guessing there would close
         // somebody else's line (the frame may have been merged away by the edit
-        // window, and the tool it belongs to is still running).
-        if (key && !toolCalls.has(key)) return;
+        // window, and the tool it belongs to is still running). The one
+        // exception is a call whose paced line is still held: its result is
+        // remembered and applied the moment that line is released.
+        if (key && !toolCalls.has(key)) {
+          const waiting = pendingToolResults.get(key);
+          if (waiting) waiting.ok = ok === true;
+          return;
+        }
         const [settleKey, call] = key
           ? [key, toolCalls.get(key)]
           : (toolCalls.size > 0 ? [...toolCalls.entries()][0] : [null, null]);
         if (!call || closed) return;
         toolCalls.delete(settleKey);
-        const seconds = ((Date.now() - call.startedAt) / 1_000).toFixed(1);
-        const text = formatToolOutcome(call.text, { ok, seconds });
-        try {
-          await this.#api.editMessageText({
-            chatId: target.chatId,
-            messageId: call.messageId,
-            text,
-            signal: this.#signal,
-          });
-        } catch (error) {
-          warnFailure('tool outcome', error);
-        }
+        await applyToolOutcome(call, ok);
       },
       sendThinking: (text) => {
         const line = formatThinkingLine(text);
@@ -1602,6 +1643,7 @@ export class TelegramBotClient {
         closed = true;
         // A cancelled turn must not leave a timer that sends a stale frame.
         clearWindowTimer();
+        held?.onDropped?.();
         held = null;
       },
     };

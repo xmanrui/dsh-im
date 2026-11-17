@@ -60,10 +60,13 @@ const NOTICES = Object.freeze({
  * the default. The distinction is spelled out because that is the one thing users
  * get wrong about `/conv` versus `/ws`.
  */
-export function convCardText({ current = null, bound = false, paths = [] } = {}) {
+export function convCardText({ current = null, displayCurrent = null, bound = false, paths = [] } = {}) {
+  // A group sees the recognizable tail of the path, never the operator's
+  // absolute layout; the full path stays on the listing for press resolution.
+  const shown = typeof displayCurrent === 'string' && displayCurrent ? displayCurrent : current;
   const lines = [t('本对话专属工作区')];
-  lines.push(typeof current === 'string' && current
-    ? t('当前：{workspace}', { workspace: current })
+  lines.push(typeof shown === 'string' && shown
+    ? t('当前：{workspace}', { workspace: shown })
     : t('当前：未设置'));
   lines.push(bound
     ? t('状态：已为本对话显式绑定，之后修改 bot 默认工作区不影响本对话。')
@@ -81,7 +84,7 @@ export function convCardText({ current = null, bound = false, paths = [] } = {})
  * Paint the picker. Returns null when the listing cannot be rendered as a
  * keyboard, which keeps the caller's text output in charge.
  */
-export function renderConvCard(listing, nonce) {
+export function renderConvCard(listing, nonce, { displayCurrent = null } = {}) {
   if (!listing || typeof listing !== 'object') return null;
   const paths = Array.isArray(listing.paths) ? listing.paths : [];
   if (paths.length === 0 || paths.length > TELEGRAM_CONV_CARD_MAX_ITEMS) return null;
@@ -106,7 +109,7 @@ export function renderConvCard(listing, nonce) {
       callback_data: callback(TELEGRAM_CONV_CLEAR_ACTION),
     }]);
   }
-  return { text: convCardText(listing), markup: { inline_keyboard: rows } };
+  return { text: convCardText({ ...listing, displayCurrent }), markup: { inline_keyboard: rows } };
 }
 
 /** Parse a press produced by {@link renderConvCard}; null for foreign payloads. */
@@ -165,7 +168,7 @@ export class TelegramConvCard {
   }
 
   /** Send the card. Returns false so the caller can keep the text output. */
-  async present({ bot, target, conversationKey, listing } = {}) {
+  async present({ bot, target, conversationKey, listing, displayCurrent = null } = {}) {
     if (!target || typeof conversationKey !== 'string' || !conversationKey) return false;
     if (typeof bot?.sendInteractionCard !== 'function') return false;
     const previous = this.#registry.activeFor(conversationKey);
@@ -174,7 +177,7 @@ export class TelegramConvCard {
       kind: 'conv',
       payload: { listing, target, messageId: null },
     });
-    const card = renderConvCard(listing, entry.nonce);
+    const card = renderConvCard(listing, entry.nonce, { displayCurrent });
     if (!card) {
       this.#registry.settle(entry.nonce, ACTION_CARD_STATUS.REVOKED);
       return false;

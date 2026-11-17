@@ -350,3 +350,20 @@ test('conv card labels follow the host language', (t) => {
   assert.match(card.markup.inline_keyboard.at(-1)[0].text, /Clear pin/u);
 });
 
+
+test('a group /conv card shows the workspace tail instead of the absolute path', async () => {
+  const harness = harnessFixture();
+  const { bot, cards } = botFixture();
+  const bridge = bridgeFor({ bot, harness });
+  await bridge.accept({
+    ...convMessage(),
+    kind: 'group',
+    conversationId: 'g1',
+    replyTarget: { chatId: -100 },
+  });
+  assert.equal(cards.length, 1, 'the group still gets the conversation picker');
+  assert.doesNotMatch(cards[0].text, new RegExp(A.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'),
+    'the absolute path must never reach the room');
+  assert.match(cards[0].text, new RegExp(A.split('/').pop(), 'u'),
+    'the last path segment is enough to recognize the workspace');
+});
