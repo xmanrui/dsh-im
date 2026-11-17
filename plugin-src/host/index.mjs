@@ -267,7 +267,7 @@ export function createImHostPlugin(internals = {}) {
       try {
         startSessionSync(ctx, deliveryService, {
           logger,
-          inputScope: ctx.root ?? ctx,
+          inputScope: ctx[Symbol.for('cordis.root')] ?? ctx,
           config,
         });
         installDsBotQuestionSync(ctx, deliveryService, { logger });
