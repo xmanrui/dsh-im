@@ -5,6 +5,39 @@ import { dirname } from 'node:path';
 
 const EMPTY_STATE = Object.freeze({ version: 1, sessions: {}, seenMessageIds: [] });
 
+/**
+ * How many conversations remember their last author. One entry per
+ * conversation, overwritten on every inbound message, so this is a bounded
+ * map of "who spoke here last" -- never a transcript.
+ */
+const AUTHOR_LIMIT = 500;
+
+/**
+ * Keep only what identifies the speaker: no message text, no display extras.
+ * A missing or malformed id drops the entry instead of storing a half record.
+ */
+function normalizeAuthor(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const senderId = typeof value.senderId === 'string' ? value.senderId : '';
+  if (!senderId) return null;
+  const author = { senderId, isBot: value.isBot === true };
+  if (typeof value.senderName === 'string' && value.senderName) author.senderName = value.senderName;
+  if (typeof value.at === 'string' && value.at) author.at = value.at;
+  return author;
+}
+
+function normalizeAuthors(value) {
+  const authors = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return authors;
+  const keys = Object.keys(value);
+  for (const key of keys.slice(Math.max(0, keys.length - AUTHOR_LIMIT))) {
+    if (typeof key !== 'string' || !key) continue;
+    const author = normalizeAuthor(value[key]);
+    if (author) authors[key] = author;
+  }
+  return authors;
+}
+
 function normalizeState(value) {
   if (!value || typeof value !== 'object') return structuredClone(EMPTY_STATE);
   const sessions = {};
@@ -17,6 +50,9 @@ function normalizeState(value) {
   // are only added when they hold something.
   const rings = normalizeSessionRings(value.rings);
   const pendingTitles = normalizePendingTitles(value.pendingTitles);
+  // Authors are optional for the same reason: a state file written before this
+  // field existed loads unchanged and simply reports no author.
+  const authors = normalizeAuthors(value.authors);
   return {
     version: 1,
     sessions,
@@ -26,6 +62,7 @@ function normalizeState(value) {
       : [],
     ...(Object.keys(rings).length ? { rings } : {}),
     ...(Object.keys(pendingTitles).length ? { pendingTitles } : {}),
+    ...(Object.keys(authors).length ? { authors } : {}),
   };
 }
 
@@ -62,6 +99,30 @@ export class WecomStateStore {
 
   sessionFor(key) {
     return this.#state.sessions[key] ?? null;
+  }
+
+  /** The last speaker of a conversation, or null when none was recorded. */
+  authorFor(key) {
+    const author = this.#state.authors?.[key];
+    return author ? structuredClone(author) : null;
+  }
+
+  /**
+   * Remember who last spoke in a conversation. Persisted so the answer survives
+   * a restart; overwritten on every inbound message and bounded by AUTHOR_LIMIT.
+   */
+  async rememberAuthor(key, value) {
+    const author = normalizeAuthor({ at: new Date().toISOString(), ...value });
+    if (typeof key !== 'string' || !key || !author) return null;
+    const authors = this.#state.authors ??= {};
+    delete authors[key];
+    authors[key] = author;
+    const keys = Object.keys(authors);
+    if (keys.length > AUTHOR_LIMIT) {
+      for (const stale of keys.slice(0, keys.length - AUTHOR_LIMIT)) delete authors[stale];
+    }
+    await this.#persist();
+    return structuredClone(author);
   }
 
   async setSession(key, sessionId) {

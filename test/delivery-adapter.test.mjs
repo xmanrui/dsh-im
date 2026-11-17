@@ -20,6 +20,7 @@ import {
   normalizeDeliveryTarget,
 } from '../plugin-src/host/delivery-adapter.mjs';
 import {
+  deliverySuggestionEntriesFromSessions,
   deliverySuggestionsFromSessions,
   privateDeliverySuggestionFromConversationKey,
 } from '../plugin-src/host/delivery-suggestions.mjs';
@@ -566,4 +567,75 @@ test('a Telegram forum topic receives mirrored text and never a question or appr
   assert.deepEqual((await adapter.listTargets('bot-telegram'))[0].sessionSync, {
     enabled: true, state: 'active',
   });
+});
+
+test('suggestion entries keep the conversation key each route was learned from', () => {
+  const sessions = {
+    'direct:88': 'secret-session-one',
+    'group:-100:42': 'secret-topic-session',
+    'direct:88:7': 'transient-reply-key',
+    'other:88': 'wrong-prefix',
+  };
+  assert.deepEqual(deliverySuggestionEntriesFromSessions('telegram', sessions), [
+    { suggestion: { kind: 'chat', route: { chatId: '88' } }, conversationKey: 'direct:88' },
+    {
+      suggestion: { kind: 'topic', route: { chatId: '-100', messageThreadId: 42 } },
+      conversationKey: 'group:-100:42',
+    },
+  ]);
+  assert.deepEqual(deliverySuggestionEntriesFromSessions('telegram', null), []);
+  assert.deepEqual(deliverySuggestionEntriesFromSessions('unknown', sessions), []);
+});
+
+test('adapters attach the recorded last author as suggestion context', async () => {
+  const workspaces = {
+    has: () => true,
+    listDeliveryTargets: () => [],
+    createDeliveryTarget: async () => {},
+    updateDeliveryTarget: async () => {},
+    deleteDeliveryTarget: async () => {},
+  };
+  const coreController = { async sendProactiveText() {} };
+  // Two conversation keys that resolve to the same telegram route: the
+  // de-duplicated suggestion keeps the context of the key seen first.
+  const sessions = { 'direct:88': 'session-one', 'group:88': 'session-group' };
+  const authors = {
+    'direct:88': { senderId: 'speaker', senderName: 'Speaker One', isBot: false, at: '2026-01-02T03:04:05.000Z' },
+    'group:88': { senderId: 'no-name-speaker', isBot: false, at: '2026-01-03T03:04:05.000Z' },
+  };
+  const adapter = createDeliveryAdapter({
+    channel: 'telegram',
+    workspaces,
+    coreController,
+    stateFor: async () => ({ snapshot: () => ({ sessions, authors }) }),
+  });
+  assert.deepEqual(await adapter.listSuggestions('bot-telegram'), [
+    {
+      kind: 'chat',
+      route: { chatId: '88' },
+      context: { speakerName: 'Speaker One', speakerId: 'speaker', lastSpokeAt: '2026-01-02T03:04:05.000Z' },
+    },
+  ]);
+});
+
+test('adapters skip suggestion context for malformed author records', async () => {
+  const workspaces = {
+    has: () => true,
+    listDeliveryTargets: () => [],
+    createDeliveryTarget: async () => {},
+    updateDeliveryTarget: async () => {},
+    deleteDeliveryTarget: async () => {},
+  };
+  const coreController = { async sendProactiveText() {} };
+  const sessions = { 'direct:88': 'session-one' };
+  const authors = { 'direct:88': 'not-a-record' };
+  const adapter = createDeliveryAdapter({
+    channel: 'telegram',
+    workspaces,
+    coreController,
+    stateFor: async () => ({ snapshot: () => ({ sessions, authors }) }),
+  });
+  assert.deepEqual(await adapter.listSuggestions('bot-telegram'), [
+    { kind: 'chat', route: { chatId: '88' } },
+  ]);
 });

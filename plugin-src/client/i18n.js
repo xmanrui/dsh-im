@@ -1130,7 +1130,7 @@ const EN = Object.freeze({
   '从已聊过的会话选择': 'Choose from conversations',
   '已聊会话': 'Conversation',
   '从会话选择targetID': 'Select a targetID from conversations',
-  '选择后会自动填写目标信息和调用别名，确认后再保存。': 'Selecting a conversation fills the target details and call alias. Review them before saving.',
+  '勾选会话可批量创建目标；点击会话名称可先查看再保存。': 'Select conversations to create targets in bulk; select a conversation name to review it before saving.',
   '正在刷新…': 'Refreshing…',
   '刷新': 'Refresh',
   '正在读取已聊会话…': 'Loading known conversations…',
@@ -1378,6 +1378,15 @@ const EN = Object.freeze({
   '宿主 sessionQuery 服务尚未就绪': 'The Host sessionQuery service is not ready',
   '该会话暂时无法读取，请稍后重试。': 'The session cannot be read right now. Try again later.',
   '请求失败': 'The request failed',
+  '选择此会话': 'Select this conversation',
+  '创建选中目标': 'Create selected targets',
+  '创建选中目标（{n}）': 'Create selected targets ({n})',
+  '正在创建 {done}/{total} 个目标…': 'Creating targets {done}/{total}…',
+  '已创建 {n} 个目标。': 'Created {n} targets.',
+  '创建失败，请稍后重试。': 'Creation failed. Try again later.',
+  '{n} 分钟前': '{n} minutes ago',
+  '{n} 小时前': '{n} hours ago',
+  '{n} 天前': '{n} days ago',
 });
 
 export const en = EN;

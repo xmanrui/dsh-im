@@ -446,9 +446,44 @@ function suggestionOptionLabel(definition, suggestion, added) {
     .map((field) => maskRouteValue(suggestion.route?.[field.key]))
     .filter(Boolean)
     .join(' · ');
-  return [name, type, route, added ? localizeText('已添加') : null]
+  return [name, type, route, ...suggestionContextParts(suggestion), added ? localizeText('已添加') : null]
     .filter(Boolean)
     .join(' · ');
+}
+
+/** The recorded display name of the conversation's last speaker, when there is one. */
+function speakerNameOf(suggestion) {
+  const context = suggestion?.context;
+  if (!context || typeof context !== 'object' || Array.isArray(context)) return null;
+  return typeof context.speakerName === 'string' && context.speakerName ? context.speakerName : null;
+}
+
+function spokeAtText(value) {
+  const at = Date.parse(String(value ?? ''));
+  if (!Number.isFinite(at)) return '';
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  if (seconds < 60) return localizeText('刚刚');
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return localizeTemplate('{n} 分钟前', { n: minutes });
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return localizeTemplate('{n} 小时前', { n: hours });
+  const days = Math.round(hours / 24);
+  if (days < 7) return localizeTemplate('{n} 天前', { n: days });
+  const date = new Date(at);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * The recognisable parts of a suggestion's conversation context: the last
+ * speaker's display name and how long ago the conversation was active.
+ */
+function suggestionContextParts(suggestion) {
+  const context = suggestion?.context;
+  if (!context || typeof context !== 'object' || Array.isArray(context)) return [];
+  return [
+    typeof context.speakerName === 'string' && context.speakerName ? context.speakerName : null,
+    spokeAtText(context.lastSpokeAt) || null,
+  ].filter(Boolean);
 }
 
 function TargetSuggestionPicker({
@@ -457,18 +492,33 @@ function TargetSuggestionPicker({
   suggestions,
   error,
   targets,
+  batch,
   onRefresh,
   onSelect,
+  onCreateSelected,
   onManual,
   onCancel,
 }) {
   const configured = new Set(targets.map((target) => routeIdentity(definition, target)).filter(Boolean));
+  const [selected, setSelected] = React.useState(() => new Set());
+  const selectable = suggestions.filter((suggestion) => (
+    suggestion && !configured.has(routeIdentity(definition, suggestion))
+  ));
+  const selectedSuggestions = selectable.filter((suggestion) => selected.has(suggestion));
+  const toggle = (suggestion) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(suggestion)) next.delete(suggestion);
+      else next.add(suggestion);
+      return next;
+    });
+  };
 
   return h('section', { className: 'dim-targetSuggestions', 'aria-label': '从已聊过的会话选择' },
     h('div', { className: 'dim-targetSuggestionHeading' },
       h('div', null,
         h('h3', null, '从已聊过的会话选择'),
-        h('p', null, '选择后会自动填写目标信息和调用别名，确认后再保存。')),
+        h('p', null, '勾选会话可批量创建目标；点击会话名称可先查看再保存。')),
       h(DeliveryButton, {
         onClick: () => void onRefresh(),
         disabled: phase === 'loading',
@@ -483,30 +533,59 @@ function TargetSuggestionPicker({
           ? h('div', { className: 'dim-targetSuggestionState' },
               h('strong', null, '还没有可选择的会话'),
               h('p', null, '先在对应平台与机器人聊一条消息，再刷新。'))
-          : h('label', { className: 'dim-targetSuggestionField' },
-              h('span', null, '已聊会话'),
-              h('select', {
-                name: 'suggestion',
-                value: '',
-                onChange: (event) => {
-                  if (event.target.value === '') return;
-                  const suggestion = suggestions[Number(event.target.value)];
-                  if (suggestion) onSelect(suggestion);
-                },
-              },
-              h('option', { value: '', disabled: true }, '从会话选择targetID'),
+          : h('ul', { className: 'dim-targetSuggestionList' },
               suggestions.map((suggestion, index) => {
                 const identity = routeIdentity(definition, suggestion);
                 const added = configured.has(identity);
-                return React.createElement('option', {
+                const checked = selected.has(suggestion);
+                return h('li', {
                   key: suggestion.id ?? suggestion.suggestionId ?? `${identity}:${index}`,
-                  value: String(index),
-                  disabled: added,
-                }, suggestionOptionLabel(definition, suggestion, added));
-              }))),
+                  className: 'dim-targetSuggestionRow',
+                  'data-added': added ? 'true' : undefined,
+                },
+                h('label', { className: 'dim-targetSuggestionCheck' },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: checked && !added,
+                    disabled: added,
+                    onChange: () => toggle(suggestion),
+                    'aria-label': '选择此会话',
+                  }),
+                  // Platform-provided names and ids render verbatim, outside
+                  // the h() localization wrapper, exactly like the option
+                  // labels this list replaces.
+                  React.createElement('button', {
+                    type: 'button',
+                    className: 'dim-targetSuggestionName',
+                    disabled: added,
+                    title: added ? localizeText('已添加') : undefined,
+                    onClick: () => onSelect(suggestion),
+                  }, suggestionOptionLabel(definition, suggestion, added))),
+                added ? h('span', { className: 'dim-targetSuggestionAdded' }, localizeText('已添加')) : null);
+              })),
+    batch?.phase === 'running'
+      ? h('p', { className: 'dim-targetFeedback', role: 'status' }, localizeTemplate('正在创建 {done}/{total} 个目标…', {
+          done: batch.done,
+          total: batch.total,
+        }))
+      : batch?.phase === 'done'
+        ? h('div', { className: 'dim-targetFeedback', role: 'status', 'data-tone': batch.failures.length ? 'error' : 'success' },
+            h('p', null, localizeTemplate('已创建 {n} 个目标。', { n: batch.created })),
+            batch.failures.length
+              ? h('ul', { className: 'dim-targetBatchFailures' }, batch.failures.map((failure, failureIndex) => h('li', { key: failureIndex },
+                  `${failure.label}：${failure.message}`)))
+              : null)
+        : null,
     h('div', { className: 'dim-targetFormActions' },
       h(DeliveryButton, { onClick: onCancel }, '取消'),
-      h(DeliveryButton, { onClick: onManual }, '手动填写（高级）')));
+      h(DeliveryButton, { onClick: onManual }, '手动填写（高级）'),
+      h(DeliveryButton, {
+        kind: 'primary',
+        disabled: batch?.phase === 'running' || selectedSuggestions.length === 0,
+        onClick: () => void onCreateSelected(selectedSuggestions),
+      }, selectedSuggestions.length > 0
+        ? localizeTemplate('创建选中目标（{n}）', { n: selectedSuggestions.length })
+        : localizeText('创建选中目标'))));
 }
 
 function TargetRow({ definition, target, botId, connected, rpcCall, onChanged, onEdit }) {
@@ -656,6 +735,7 @@ export function DeliveryTargetSettingsPage({
   const [suggestionPhase, setSuggestionPhase] = React.useState('idle');
   const [suggestions, setSuggestions] = React.useState([]);
   const [suggestionError, setSuggestionError] = React.useState(null);
+  const [batch, setBatch] = React.useState(null);
   const [error, setError] = React.useState(null);
   const [editor, setEditor] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
@@ -751,6 +831,7 @@ export function DeliveryTargetSettingsPage({
 
   const openSuggestionPicker = () => {
     setEditor({ mode: 'suggestions' });
+    setBatch(null);
     void loadSuggestions();
   };
 
@@ -767,11 +848,38 @@ export function DeliveryTargetSettingsPage({
       draftKey: identity,
       initialValue: {
         targetId: randomTargetId(targets),
-        name: suggestionFallbackName(definition, suggestion),
+        name: speakerNameOf(suggestion) ?? suggestionFallbackName(definition, suggestion),
         kind: suggestion.kind,
         route,
       },
     });
+  };
+
+  const createSelectedSuggestions = async (chosen) => {
+    if (chosen.length === 0) return;
+    const failures = [];
+    let created = 0;
+    for (let index = 0; index < chosen.length; index += 1) {
+      const suggestion = chosen[index];
+      setBatch({ phase: 'running', done: index, total: chosen.length });
+      const target = {
+        targetId: randomTargetId(targets),
+        kind: suggestion.kind,
+        route: suggestion.route,
+        ...(speakerNameOf(suggestion) ? { name: speakerNameOf(suggestion) } : {}),
+      };
+      try {
+        await invoke(DELIVERY_ENDPOINTS.create, { botId: account.botId, target });
+        created += 1;
+      } catch (caught) {
+        failures.push({
+          label: suggestionOptionLabel(definition, suggestion, false),
+          message: presentError(caught, '创建失败，请稍后重试。'),
+        });
+      }
+    }
+    await loadTargets({ silent: true });
+    if (mounted.current) setBatch({ phase: 'done', created, failures });
   };
 
   const copyBotId = async () => {
@@ -880,8 +988,10 @@ export function DeliveryTargetSettingsPage({
           suggestions,
           error: suggestionError,
           targets,
+          batch,
           onRefresh: loadSuggestions,
           onSelect: selectSuggestion,
+          onCreateSelected: createSelectedSuggestions,
           onManual: () => setEditor({
             mode: 'create',
             source: 'manual',

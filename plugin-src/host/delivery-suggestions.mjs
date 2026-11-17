@@ -221,12 +221,15 @@ export function resolveConversationKey(channel, sessions, target) {
 }
 
 /**
- * Extract and de-duplicate stable delivery routes from a persisted sessions map.
+ * Extract and de-duplicate stable delivery routes from a persisted sessions map,
+ * keeping the conversation key each route was learned from. The key lets a
+ * caller attach conversation-scoped context (for example the recorded last
+ * author) to the suggestion it produced.
  * Session ids and every other state field are intentionally ignored.
  */
-export function deliverySuggestionsFromSessions(channel, sessions) {
+export function deliverySuggestionEntriesFromSessions(channel, sessions) {
   if (!CHANNELS.has(channel) || !isRecord(sessions)) return [];
-  const suggestions = [];
+  const entries = [];
   const seen = new Set();
   for (const key of Object.keys(sessions)) {
     const suggestion = deliverySuggestionFromConversationKey(channel, key);
@@ -234,7 +237,16 @@ export function deliverySuggestionsFromSessions(channel, sessions) {
     const identity = JSON.stringify(suggestion);
     if (seen.has(identity)) continue;
     seen.add(identity);
-    suggestions.push(suggestion);
+    entries.push({ suggestion, conversationKey: key });
   }
-  return suggestions;
+  return entries;
+}
+
+/**
+ * Extract and de-duplicate stable delivery routes from a persisted sessions map.
+ * Session ids and every other state field are intentionally ignored.
+ */
+export function deliverySuggestionsFromSessions(channel, sessions) {
+  return deliverySuggestionEntriesFromSessions(channel, sessions)
+    .map((entry) => entry.suggestion);
 }
