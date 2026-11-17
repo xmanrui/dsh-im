@@ -84,7 +84,9 @@ export async function runControlCommand(text, harness, state, key, {
     const stopped = await session.stopActiveTurn(control, requestOptions(signal));
     if (!stopped && deferredDelivery) {
       const background = await deferredDelivery.stop(key);
-      if (background === 'stopped') return commandResult(t('已请求停止后台任务。'), { stopped: true });
+      // `background` tells a caller that no foreground turn will report the ending,
+      // so the message itself is the only notice the reader gets.
+      if (background === 'stopped') return commandResult(t('已请求停止后台任务。'), { stopped: true, background: true });
       if (background === 'unavailable') {
         return commandResult(t('无法安全停止后台任务，请在 Harness 中查看并停止对应任务。'));
       }

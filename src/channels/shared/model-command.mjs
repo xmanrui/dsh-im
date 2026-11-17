@@ -17,11 +17,12 @@ const SESSION_BINDING_CHANGED = 'session-binding-changed';
 const MODEL_SELECTION_MISMATCH = 'model-selection-mismatch';
 const UNSAFE_DISPLAY_TEXT_GLOBAL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
 
-function commandResult(message) {
+function commandResult(message, extra = null) {
   return {
     handled: true,
     message,
     messages: splitWorkspaceCommandMessage(message),
+    ...(extra ?? {}),
   };
 }
 
@@ -223,7 +224,7 @@ function effectiveReasoningEffort(current, model) {
   return current?.reasoningEffort ?? model?.reasoning?.defaultEffort;
 }
 
-function reasoningEffortText(model, effortId) {
+export function reasoningEffortText(model, effortId) {
   if (effortId === undefined) return t('Default（由模型或 Provider 决定）');
   const effort = reasoningEffortById(model, effortId);
   if (!effort) return safeDisplayText(effortId);
@@ -232,7 +233,7 @@ function reasoningEffortText(model, effortId) {
   return name === id ? id : `${name} (${id})`;
 }
 
-function currentReasoningEffortText(catalog) {
+export function currentReasoningEffortText(catalog) {
   const model = modelForSelection(catalog, catalog.current);
   return reasoningEffortText(
     model,
@@ -535,7 +536,7 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
       const catalog = bound
         ? await sessionCatalog(bound.session, requestOptions)
         : await listCatalog(harness, requestOptions);
-      return commandResult(formatCatalog(catalog));
+      return commandResult(formatCatalog(catalog), { card: 'models', modelCatalog: catalog });
     } catch (error) {
       return commandResult(modelErrorMessage(error, 'list'));
     }
@@ -548,9 +549,12 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
     try {
       const bound = await boundSession(harness, state, key, requestOptions);
       if (!bound) return commandResult(noReasoningSessionMessage());
-      return commandResult(formatReasoningCatalog(
-        await sessionCatalog(bound.session, requestOptions),
-      ));
+      // One catalog read serves both surfaces: the text and the card.
+      const reasoningCatalog = await sessionCatalog(bound.session, requestOptions);
+      return commandResult(formatReasoningCatalog(reasoningCatalog), {
+        card: 'reasoning',
+        reasoningCatalog,
+      });
     } catch (error) {
       return commandResult(modelErrorMessage(error, 'reasoning-list'));
     }
@@ -564,9 +568,12 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
       try {
         const bound = await boundSession(harness, state, key, requestOptions);
         if (!bound) return commandResult(noReasoningSessionMessage());
-        return commandResult(currentReasoningMessage(
-          await sessionCatalog(bound.session, requestOptions),
-        ));
+        // One catalog read serves both surfaces: the text and the card.
+        const catalog = await sessionCatalog(bound.session, requestOptions);
+        return commandResult(currentReasoningMessage(catalog), {
+          card: 'reasoning',
+          reasoningCatalog: catalog,
+        });
       } catch (error) {
         return commandResult(modelErrorMessage(error, 'reasoning-list'));
       }
@@ -628,7 +635,11 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
             model,
             effectiveReasoningEffort(applied, model),
           ),
-        }));
+        }), {
+          // Machine-readable half a picker card repaints from; the text above
+          // stays the whole answer for a channel without a keyboard.
+          selection: applied,
+        });
       });
     } catch (error) {
       return commandResult(modelErrorMessage(error, 'reasoning-select'));
@@ -644,7 +655,7 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
       const bound = await boundSession(harness, state, key, requestOptions);
       if (!bound) return commandResult(noSessionMessage());
       const catalog = await sessionCatalog(bound.session, requestOptions);
-      return commandResult(currentModelMessage(catalog));
+      return commandResult(currentModelMessage(catalog), { card: 'models', modelCatalog: catalog });
     } catch (error) {
       return commandResult(modelErrorMessage(error, 'select'));
     }
@@ -739,7 +750,9 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
           targetModel,
           effectiveReasoningEffort(applied, targetModel),
         ),
-      }));
+      }), {
+        selection: applied,
+      });
     });
   } catch (error) {
     return commandResult(modelErrorMessage(error, 'select'));

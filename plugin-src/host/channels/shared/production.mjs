@@ -205,6 +205,14 @@ export async function createTokenProductionController(ctx, config, internals, de
         token,
         // The mailbox may authenticate with an OAuth pair instead of a password.
         ...(credential ? { credential } : {}),
+        // `/display` writes the bot's display level through the controller: the
+        // runtime owns the chat, the controller owns the config file.
+        ...(channel === 'telegram' ? {
+          onPresentationLevelChange: async (level) => {
+            if (!controllerRef) throw new Error('The Telegram controller is not ready');
+            await controllerRef.setPresentationLevel(botId, level);
+          },
+        } : {}),
         // A transport that rotates its tokens needs them written back.
         ...(persistTokens ? { onTokensRefreshed: persistTokens } : {}),
         // The channel decides which transport a mailbox uses; without this the

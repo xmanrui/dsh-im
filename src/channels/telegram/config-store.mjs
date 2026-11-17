@@ -18,6 +18,7 @@ export {
   THINKING_INTERVAL_MAX_SECONDS,
 } from '../shared/thinking-cadence.mjs';
 import { normalizeSendLimitPerMinute } from '../shared/send-limit.mjs';
+import { normalizePresentationLevel } from '../shared/presentation-level.mjs';
 
 export {
   DEFAULT_SEND_LIMIT_PER_MINUTE,
@@ -76,9 +77,11 @@ function normalizeTelegramBotExtension(value) {
   const hasGroupTriggers = Object.hasOwn(value, 'groupTriggers');
   const hasThinkingNumbering = Object.hasOwn(value, 'thinkingNumbering');
   const hasThinkingInterval = Object.hasOwn(value, 'thinkingIntervalSeconds');
+  const hasPresentationLevel = Object.hasOwn(value, 'presentationLevel');
   const hasSendLimit = Object.hasOwn(value, 'sendLimitPerMinute');
   if (!hasAccessMode && !hasAllowedUsers && !hasThinkingTraces && !hasGroupTriggers
-    && !hasThinkingNumbering && !hasThinkingInterval && !hasSendLimit) return {};
+    && !hasThinkingNumbering && !hasThinkingInterval && !hasPresentationLevel
+    && !hasSendLimit) return {};
   try {
     const policy = normalizeTelegramAccessPolicy(value);
     return {
@@ -86,6 +89,11 @@ function normalizeTelegramBotExtension(value) {
       ...(hasAllowedUsers || hasAccessMode ? { allowedUsers: policy.allowedUsers } : {}),
       // Explicit field is kept; an absent field stays absent.
       ...(hasThinkingTraces ? { thinkingTraces: value.thinkingTraces === true } : {}),
+      // Three-rung display level; an unknown stored value falls back instead of
+      // refusing to load the whole bot config.
+      ...(hasPresentationLevel
+        ? { presentationLevel: normalizePresentationLevel(value.presentationLevel, null) }
+        : {}),
       // Per-group reply triggers; absent means "no rule configured".
       ...(hasGroupTriggers ? { groupTriggers: normalizeGroupTriggers(value.groupTriggers) } : {}),
       // Trace cadence: stored clamped, so a bad value never reaches the runtime.
@@ -121,6 +129,11 @@ export class TelegramConfigStore extends TokenBotConfigStore {
 
   async save(value) {
     const previous = value?.platformId ? this.getByPlatformId(String(value.platformId)) : null;
-    return super.save({ ...previous, ...value });
+    const merged = { ...previous, ...value };
+    // The legacy on/off and the three-rung level describe the same setting. Once
+    // a level is stored the boolean is dropped, so a hand-edited config cannot
+    // leave the two contradicting each other.
+    if (Object.hasOwn(value ?? {}, 'presentationLevel')) delete merged.thinkingTraces;
+    return super.save(merged);
   }
 }

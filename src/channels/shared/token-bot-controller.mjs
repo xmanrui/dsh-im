@@ -177,7 +177,15 @@ export class TokenBotController {
     return this.status();
   }
 
-  async updateBotConfig(botId, update) {
+  /**
+   * Persist one config change and (by default) reconnect so the runtime starts
+   * with it.
+   *
+   * `restart: false` exists for a setting the running channel already reads from
+   * memory: reconnecting would abort every turn in every chat — including the
+   * turn that asked for the change — just to change how progress is drawn.
+   */
+  async updateBotConfig(botId, update, { restart = true } = {}) {
     if (this.#closed) throw new Error(`${this.#descriptor.label} controller is closed`);
     if (typeof update !== 'function') throw new TypeError('Bot config update must be a function');
     await this.#withBotTransition(botId, async () => {
@@ -189,6 +197,10 @@ export class TokenBotController {
       if (this.#closed) throw new Error(`${this.#descriptor.label} controller is closed`);
       const nextConfig = update(config);
       const savedConfig = await atConnectionStage('account.save', () => this.#configStore.save(nextConfig), 'account-config');
+      if (!restart) {
+        this.#touch();
+        return;
+      }
       try {
         await this.#startRuntime(savedConfig, token);
         this.#errors.delete(botId);
@@ -415,6 +427,11 @@ export class TokenBotController {
   async #restoreCredential(ref, previous) {
     if (previous?.value) await atConnectionStage('credential.save', () => this.#credentials.set(ref, previous.value), 'credential-store').catch(() => undefined);
     else await atConnectionStage('credential.remove', () => this.#credentials.unset(ref), 'credential-store').catch(() => undefined);
+  }
+
+  /** The live runtime of one bot, or undefined when it is not connected. */
+  runtimeFor(botId) {
+    return this.#runtimes.get(botId);
   }
 
   #withBotTransition(botId, operation) {

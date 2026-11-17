@@ -626,15 +626,24 @@ test('D: thinkingTraces=false keeps placeholder editing and ignores reasoning', 
     replyTarget: { chatId: 42, replyToMessageId: 7 },
   });
   assert.equal(openedThinking, false, 'the thinking stream must not be opened when the toggle is off');
-  assert.ok(updates.includes('正在使用bash…'));
-  assert.ok(updates.includes('working…'));
+  // Behaviour change (5.10.1-wings.2): a channel with the legacy toggle off is
+  // `standard`, so the placeholder carries the compact two-line summary instead
+  // of one "正在使用…" line per tool, and the old line is gone on purpose.
+  const summary = updates.find((line) => line.includes('处理中'));
+  assert.ok(summary, 'the compact progress line must be edited into the placeholder');
+  assert.match(summary, /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → /);
+  // The reply text is never mirrored into the placeholder: its arrival only
+  // switches the compact line to 「写回复」 (or is merged away by the edit
+  // window — the writing frame itself is covered by presentation-levels L2).
+  assert.ok(!updates.includes('working…'), 'the answer must not be previewed');
+  assert.ok(!updates.some((line) => /^[^⏳].*working/u.test(line ?? '')));
   assert.ok(!updates.includes('hidden reasoning'));
   assert.equal(lines[lines.length - 1], 'Final answer');
 });
 
 // --- config store + controller: persistence and status ---------------------
 
-test('E1: an explicit thinkingTraces=false is persisted and reported, absent means ON', async (t) => {
+test('E1: the legacy toggle writes the scale; an absent field is the compact default', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-im-thinking-traces-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const configPath = join(directory, 'config.json');
@@ -657,14 +666,21 @@ test('E1: an explicit thinkingTraces=false is persisted and reported, absent mea
   });
   const bound = await controller.bindCredentials({ token: TOKEN });
   const botId = bound.bots[0].botId;
-  assert.equal(bound.bots[0].thinkingTraces, true, 'absent config means ON');
+  assert.equal(bound.bots[0].presentationLevel, 'standard', 'absent config means the compact default');
+  assert.equal(bound.bots[0].thinkingTraces, false, 'the legacy checkbox reads the compact default as off');
 
+  // Behaviour change (5.10.1-wings.2): the legacy boolean is an alias for the
+  // two ends of the scale, so it writes `presentationLevel` (full / standard)
+  // and drops the boolean. Keeping both would let them contradict each other.
   const off = await controller.setThinkingTraces(botId, false);
-  assert.equal(off.bots[0].thinkingTraces, false);
-  assert.equal(configStore.get(botId).thinkingTraces, false);
-  assert.ok(runtimeRecords.at(-1).config.thinkingTraces === false, 'the runtime restarts with the new config');
+  assert.equal(off.bots[0].presentationLevel, 'standard');
+  assert.equal(configStore.get(botId).presentationLevel, 'standard');
+  assert.equal(configStore.get(botId).thinkingTraces, undefined);
+  // No reconnect: the live runtime is switched in place (the level is read per
+  // turn), so no new runtime record appears here.
 
   const on = await controller.setThinkingTraces(botId, true);
+  assert.equal(on.bots[0].presentationLevel, 'full');
   assert.equal(on.bots[0].thinkingTraces, true);
-  assert.equal(configStore.get(botId).thinkingTraces, true);
+  assert.equal(configStore.get(botId).presentationLevel, 'full');
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SHARED_COMMAND_CATALOG } from '../../../src/channels/shared/command-catalog.mjs';
+import { commandsForChannel } from '../../../src/channels/shared/command-catalog.mjs';
 import {
   listSlashCommands,
   registerSlashCommands,
@@ -51,7 +51,13 @@ test('SLASH_COMMAND_MANIFEST has unique plain command names and bilingual descri
 test('Feishu panel covers supported shared primary commands and its repair command', () => {
   const byName = new Map(SLASH_COMMAND_MANIFEST.map((entry) => [entry.command, entry]));
   // Feishu uses the shared history, workspace, model, preset, control and batch handlers.
-  for (const entry of SHARED_COMMAND_CATALOG.filter((item) => item.enabled !== false && item.menuVisible !== false)) {
+  // The Feishu panel mirrors the *text-family* catalog (Feishu has its own
+  // manifest and handlers); a command scoped to one channel — `/display` is
+  // Telegram-only — is deliberately not part of it. 'slack' stands in for the
+  // text family here so this loop can never become vacuous.
+  const textFamily = commandsForChannel('slack');
+  assert.ok(textFamily.length > 20, 'the text-family catalog must not be empty');
+  for (const entry of textFamily.filter((item) => item.enabled !== false && item.menuVisible !== false)) {
     assert.ok(byName.has(entry.name), `Supported /${entry.name} is missing from the Feishu panel`);
   }
   for (const name of ['permission', 'permissionlist']) assert.ok(byName.has(name));

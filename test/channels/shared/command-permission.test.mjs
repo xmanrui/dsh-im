@@ -20,10 +20,18 @@ test('isSharedLocalCommand matches existing local command families', () => {
 test('isSharedLocalCommand leaves unknown and channel-specific slash text as ordinary prompts', () => {
   for (const text of [
     '/foo', '/help me', 'hello', '/', '',
-    '/menu', '/repair verify', '/watch session-id', '/unwatch session-id',
+    '/repair verify', '/watch session-id', '/unwatch session-id',
     '/watchlist', '/archived off',
   ]) {
     assert.equal(isSharedLocalCommand(text), false, text);
+  }
+});
+
+test('isSharedLocalCommand covers the console hub and the display picker', () => {
+  // Both are answered by the bridge from its own state, so a group tap on either
+  // must count as addressed and must never reach the model.
+  for (const text of ['/menu', '/display', '/display 全面']) {
+    assert.equal(isSharedLocalCommand(text), true, text);
   }
 });
 

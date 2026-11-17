@@ -8,10 +8,24 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Added / 新增
 
+- 新增 `/display` 与「过程展示挡位」（极简 / 标准 / 全面）：极简只发最终答案；标准用一条可原地改写的占位消息显示「处理中 · 已用秒数 · 步数 · 最近工具」，模型开始写答案时变成「✍️ 正在整理回复」，回合结束收成一行 `✅ 完成 · 42 秒 · 5 步`（有失败步时是 `⚠️ 完成 · … · 2 步失败`）回执再发答案；全面保留逐条 💭/🔧 消息，工具结果回写到自己那一行（`· ✓ 0.8s` / `· ⚠️ 失败 0.8s`）而不是多发一条。默认挡位为「标准」，`/display` 卡片、`/display 极简|标准|全面` 与设置页下拉三处入口等价。
+  Added `/display` and a three-rung display setting (minimal / standard / full): minimal sends only the final answer; standard keeps one editable placeholder with a compact "processing · elapsed · steps · latest tool" line that becomes “✍️ Writing the reply” once the model starts answering, and collapses into a one-line `✅ Done · 42s · 5 steps` receipt (or `⚠️ Done · … · 2 failed` when steps failed) before the answer; full keeps the per-line 💭/🔧 trace and writes each tool outcome back onto its own line (`· ✓ 0.8s` / `· ⚠️ failed 0.8s`) instead of adding a message. The default is standard, and the `/display` card, `/display minimal|standard|full`, and the settings select are equivalent entry points.
+- 新增 `/menu` 控制台卡片：会话 / 工作区 / 模型 / 预设 / 状态一张摘要卡加行内按钮，排在原生菜单与 `/help` 首位，省掉「先打字去问状态」这一跳；`/start` 改为三入口欢迎卡（菜单 / 显示挡位 / 帮助），不再把字面 `/start` 交给模型。
+  Added the `/menu` hub card: one summary card with inline entries into sessions / workspace / models / presets / status, leading both the native menu and `/help`; `/start` now answers with a three-entry welcome card (menu / display / help) instead of forwarding the literal command to the model.
+- 新增 `⏹ 停止` 按钮：极简与标准挡位的过程消息带一个一次性停止令牌，只认该回合的发起者，按下即请求停止并清掉键盘，回合结束时按钮不会留在聊天里。
+  Added the `⏹ Stop` button: minimal and standard progress messages carry a single-use stop token honoured only for the sender who started the turn; pressing it stops the turn and clears the keyboard, and the button never stays in the chat after the turn ends.
+
 - 新增 `/sessionarchive <Session ID>`（别名 `/sessarchive`）：通过 Discord 等渠道触发 DSH 的会话归档（`workspace.archiveSession`）。传序号只做预览（标题、工作区、ID），不会执行归档——会话列表随新会话出现而位移，按序号直接归档会归档到错误会话；破坏性操作必须点名完整 ID。机器人只负责解析目标并转达 Host 结果，拒绝归档本对话当前绑定的会话与已归档会话；`--stop` 让 Host 先停止该会话正在运行的任务。归档后的会话不再出现在默认的 `/sessionlist`。
   Added `/sessionarchive <Session ID>` (alias `/sessarchive`) to trigger DSH Session archiving; a numerical argument only previews the Session behind that index (title, workspace, ID) and never archives, because the list shifts and archiving by index would hit the wrong Session — destructive actions must name the full ID (`workspace.archiveSession`) from the chat. The bot only resolves the target and relays the Host result; it refuses the Session this chat is bound to and one that is already archived, and `--stop` lets the Host stop that Session's running work. Archived Sessions leave the default `/sessionlist`.
 
 ### Changed / 变更
+
+- `/status` 卡片多一行「显示挡位」与一键跳转按钮（文本版 `/status` 逐字不变）；`/clear` 先弹二次确认卡，`/conv`、`/sessionlist` 的结果改由可点的选择卡呈现，`/help` 分成四段可翻页。
+  The `/status` card gains a display-level line and a one-tap entry into its picker (the text `/status` stays byte-identical); `/clear` asks once through a confirmation card, `/conv` and `/sessionlist` answers become tappable pickers, and `/help` is split into four sections.
+- 群聊里发送共享本地命令（`/status`、`/menu`、`/display` 等）算「已点名」：群组命令菜单点下去真的会有反应，不再被「仅 @ 时回复」规则静默丢弃；普通文字与未知 slash 命令仍按原规则处理。
+  Shared local commands (`/status`, `/menu`, `/display`, …) now count as addressed in groups, so tapping the group command menu actually works instead of being silently dropped by the mention-only rule; ordinary text and unknown slash text keep the old rule.
+- 旧开关 `thinkingTraces` 变成挡位别名：显式 `true` 是全面、显式 `false` 是标准、不配置跟随默认标准；保存挡位会清掉旧的布尔字段，避免两个开关互相打架。切换挡位不再重连机器人，配置落盘后直接推给在跑的 runtime 与 bridge，不会打断别的聊天里正在跑的任务。其他渠道不传挡位时渲染完全不变。
+  The legacy `thinkingTraces` toggle becomes an alias for a rung: explicit `true` is full, explicit `false` is standard, and an absent value follows the standard default; saving a rung clears the stale boolean so the two switches cannot fight. Switching no longer reconnects the bot — the new value is pushed into the running runtime and bridge, so turns in other chats are not aborted. Channels that pass no level render exactly as before.
 
 - `/sessionlist` 与 `/sessionlist --all` 默认不再列出已归档会话，只提示隐藏了几条；新增 `--archived` 把它们列在末尾且不编号。序号只对应可按下标绑定的未归档会话，归档会话仍可用完整 Session ID 绑定。
   `/sessionlist` and `/sessionlist --all` no longer list archived Sessions by default; they report how many were hidden, and the new `--archived` flag appends them unnumbered. Indices only cover the non-archived Sessions that `/session N` can bind; archived Sessions remain bindable by full Session ID.
@@ -20,6 +34,13 @@ This file records the notable changes in each dsh-im release. Its format follows
   `/session` gains the short alias `/sess`: some clients own a native slash command of the same name and grab the input box, so `/sess` takes exactly the same arguments (Session ID, workspace index, title keyword) and behaves identically. It appears in `/help` while the native menu registers the primary name only.
 
 ### Fixed / 修复
+
+- 失败的工具调用不再显示 `✓`，`· ⚠️ 失败` 与回执里的失败步数由状态帧的 `error` 判定而不是写死的成功。
+  A failed tool call no longer renders `✓`: `· ⚠️ failed` and the failed-step count in the receipt come from the status frame's `error` rather than a hard-coded success.
+- `⏹ 停止` 真的会停（补上 control 参数），且不再重复回一条提示；取消时占位消息先删除，不再留半张卡片。
+  `⏹ Stop` actually stops the turn (the control argument was missing) and no longer posts a duplicate notice; a cancelled turn deletes its placeholder instead of leaving half a card behind.
+- 工具结果按 `callId` 结算，未命中的 id 不再误结算别的行；`/display` 保存后重绘卡片用的是新 nonce，连点不会得到死卡；`/start@other_bot` 不再抢答。
+  Tool results settle by `callId`, so an unknown id no longer settles someone else's line; the repainted `/display` card uses a fresh nonce, so rapid presses never leave a dead keyboard; `/start@other_bot` no longer answers for another bot.
 
 - 飞书过程卡的最终答案若包含指向本地文件的 Markdown 图片（如 `![标题画面](/tmp/host_13.png)`），飞书会以 `230099 / 200570` 拒绝整张卡，卡片从此冻结在「运行中」；目标续跑轮由于没有第二条投递路径，本轮答案也会一并丢失。现在这类图片在写入卡片前降级为 caption 文本（判据是「飞书能否渲染」：只有 `http(s)` 地址与 `img_key` 保留，绝对路径、`file:`、Windows 盘符、裸相对路径如 `06-log/shot.png`、`data:` URI 都降级），目标轮封卡失败时还会用纯文本回复补投本轮答案，并记录封卡失败的日志。方案见 `docs/方案/飞书过程卡本地图片降级与封卡回退方案.md`。
   When a Feishu step card's final answer carried a Markdown image pointing at a local file (e.g. `![screenshot](/tmp/host_13.png)`), Feishu rejected the whole card update with `230099 / 200570` and the card froze at "running"; a Goal round then lost its answer too, because it has no second delivery path. Local image targets are now degraded to their caption before the text reaches the card — the rule is "can Feishu render it": only `http(s)` URLs and `img_key`s survive, while absolute paths, `file:` URLs, Windows drives, bare relative paths such as `06-log/shot.png` and `data:` URIs degrade, a Goal round whose card cannot be sealed posts its result as a plain reply, and the skipped seal is logged. See `docs/方案/飞书过程卡本地图片降级与封卡回退方案.md`.

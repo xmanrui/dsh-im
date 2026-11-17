@@ -932,6 +932,7 @@ test('shared bridge marks assistant updates and final as markdown but status as 
       openDeliveryStream: async () => stream,
     },
     state: memoryState(),
+    presentationLevel: 'standard',
     harness: {
       createSession: async () => 'session-rich',
       ask: async (_sessionId, _text, options) => {
@@ -952,11 +953,15 @@ test('shared bridge marks assistant updates and final as markdown but status as 
     replyTarget: { chatId: 42, chatType: 'private', replyToMessageId: 44 },
   });
 
-  assert.deepEqual(blocks, [{
-    kind: 'text', text: '正在使用搜索…', format: 'plain',
-  }, {
-    kind: 'text', text: '## partial', format: 'markdown',
-  }, {
+  // Behaviour change (5.10.1-wings.2): the default rung is `standard`, so a tool
+  // update rewrites the placeholder with the compact summary line instead of a
+  // bare "正在使用…". The format contract this test guards is unchanged.
+  // Behaviour change: in `standard` the answer text is never mirrored into the
+  // placeholder, so the partial frame is dropped and only the final answer
+  // block arrives (as markdown). The format contract per frame is unchanged.
+  assert.deepEqual(blocks.map((block) => block.format), ['plain', 'markdown']);
+  assert.match(blocks[0].text, /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 搜索$/);
+  assert.deepEqual(blocks.slice(1), [{
     kind: 'text', text: '## final', format: 'markdown',
   }]);
   assert.equal(receipt.presentation, 'telegram-rich-final');

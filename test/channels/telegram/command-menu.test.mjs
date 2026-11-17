@@ -15,11 +15,11 @@ import { telegramCommandMenu } from '../../../src/channels/telegram/telegram-run
 // /workspacelist stays typeable and stays in /help, but main already keeps it
 // out of the native menu: /workspace (alias /ws) covers listing and switching.
 const MAIN_MENU_NAMES = [
-  'new', 'fork', 'reset', 'compact', 'clear', 'history', 'workspace', 'conv',
+  'menu', 'new', 'fork', 'reset', 'compact', 'clear', 'history', 'workspace', 'conv',
   'sessionlist', 'session', 'sessionarchive', 'ls', 'go', 'prev', 'next', 'drop', 'title', 'tail',
   'models', 'reasoninglist', 'reasoning', 'model',
   'presetlist', 'preset', 'stop', 'steer', 'batch', 'send', 'cancel',
-  'status', 'version', 'help',
+  'status', 'display', 'version', 'help',
 ];
 const HIDDEN_ALIASES = [
   'ws', 'conversation', 'thread', 'workspaces', 'wsl', 'sessions',
@@ -59,7 +59,7 @@ const DOCUMENTED_ALIASES = [
 ];
 test('hiding aliases from the native menu leaves the documented /help lines intact', () => {
   const help = commandHelpLines('telegram');
-  assert.equal(help.length, 47);
+  assert.equal(help.length, 50);
   for (const alias of DOCUMENTED_ALIASES) {
     assert.ok(help.some((line) => line.includes(`/${alias}`)), alias);
   }
@@ -123,7 +123,10 @@ test('menu filters unsupported, disabled and hidden commands and aliases in stab
 test('real catalog presents only primary names and keeps every alias in help', () => {
   const names = telegramCommandMenu().map((item) => item.command);
   assert.deepEqual(names, MAIN_MENU_NAMES);
-  for (const name of ['repair', 'role', 'roles', 'menu', 'm']) assert.ok(!names.includes(name));
+  // `/menu` is a real primary command now (the hub is the shortest path to every
+  // picker); only channel-internal or Feishu-only names stay out of this menu.
+  for (const name of ['repair', 'role', 'roles', 'm']) assert.ok(!names.includes(name));
+  assert.ok(names.includes('menu'));
   for (const alias of HIDDEN_ALIASES) assert.ok(!names.includes(alias), alias);
   const help = commandHelpLines('telegram').join('\n');
   for (const alias of DOCUMENTED_ALIASES) assert.match(help, new RegExp(`/${alias}\\b`), alias);
