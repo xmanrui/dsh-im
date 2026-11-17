@@ -363,7 +363,7 @@ export function isImOwnedInput(scope, event) {
 
 export function installSessionSyncCoordinator(ctx, deliveryService, {
   logger = console,
-  inputScope = ctx?.root ?? ctx,
+  inputScope = ctx?.[Symbol.for('cordis.root')] ?? ctx,
   loadSettings = null,
   imInputOwnership = isImOwnedInput,
   config = {},

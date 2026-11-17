@@ -961,7 +961,7 @@ class ModernHarnessApi {
 
 /** Create one modern compatibility API per Cordis Host root. */
 export function modernHarnessApi(ctx, { deliveryService } = {}) {
-  const scope = ctx?.root ?? ctx;
+  const scope = ctx?.[Symbol.for('cordis.root')] ?? ctx;
   if (!scope || !['object', 'function'].includes(typeof scope)) {
     throw new TypeError('dsh-im requires a Cordis Host context');
   }

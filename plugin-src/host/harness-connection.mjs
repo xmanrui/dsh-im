@@ -11,6 +11,6 @@ export function harnessConnection(ctx, config = {}, { competitiveApprovals = fal
     competitiveApprovals,
     // Cordis child contexts share one root; different Hosts must not share
     // ownership of pending questions and approvals.
-    interactionScope: ctx.root ?? ctx,
+    interactionScope: ctx[Symbol.for('cordis.root')] ?? ctx,
   };
 }
