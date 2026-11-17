@@ -595,6 +595,16 @@ const CSS = String.raw`
 .dim-targetSuggestionField { min-width: 0; display: grid; gap: 5px; margin-top: 12px; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 16px; }
 .dim-targetSuggestionField select { width: 100%; min-width: 0; height: 38px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; color: var(--dsw-alias-label-primary, #1f2329); background: var(--dsw-alias-bg-layer-1, #fff); font: inherit; font-size: 12px; cursor: pointer; }
 .dim-targetSuggestionField select:focus { outline: 2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #3370ff) 28%, transparent); border-color: var(--dsw-alias-state-business-primary, #3370ff); }
+.dim-targetSuggestionList { margin: 12px 0 0; padding: 0; list-style: none; max-height: 240px; overflow-y: auto; display: grid; gap: 4px; }
+.dim-targetSuggestionRow { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 8px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.dim-targetSuggestionRow[data-added='true'] { opacity: 0.55; }
+.dim-targetSuggestionCheck { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.dim-targetSuggestionCheck input { flex: none; margin: 0; }
+.dim-targetSuggestionName { min-width: 0; flex: 1; padding: 4px 2px; border: 0; background: none; color: var(--dsw-alias-label-primary, #1f2329); font: inherit; font-size: 12px; line-height: 17px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.dim-targetSuggestionName:disabled { cursor: default; }
+.dim-targetSuggestionName:not(:disabled):hover { text-decoration: underline; }
+.dim-targetSuggestionAdded { flex: none; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; }
+.dim-targetBatchFailures { margin: 6px 0 0; padding: 0 0 0 16px; color: var(--dsw-alias-label-primary, #1f2329); font-size: 12px; line-height: 18px; }
 .dim-targetForm { margin-top: 14px; padding: 14px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 10px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
 .dim-targetFormHeading h3 { margin: 0; font-size: 14px; line-height: 21px; }
 .dim-targetFormHeading p { margin: 2px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 11px; line-height: 17px; }

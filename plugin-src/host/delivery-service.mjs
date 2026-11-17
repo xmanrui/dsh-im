@@ -272,11 +272,20 @@ export class DeliveryService {
       return {
         botId: id,
         channel: adapter.channel,
-        suggestions: suggestions.map((suggestion) => normalizeDeliveryTarget(
-          adapter.channel,
-          suggestion,
-          { targetIdRequired: false },
-        )),
+        suggestions: suggestions.map((suggestion) => ({
+          ...normalizeDeliveryTarget(
+            adapter.channel,
+            suggestion,
+            { targetIdRequired: false },
+          ),
+          // Conversation context is attached by the adapter from server-side
+          // state, never accepted from a client payload, so it rides along
+          // instead of passing through the target normalizer.
+          ...(suggestion?.context && typeof suggestion.context === 'object'
+            && !Array.isArray(suggestion.context)
+            ? { context: suggestion.context }
+            : {}),
+        })),
       };
     } catch (error) {
       throw publicOperationError(error);

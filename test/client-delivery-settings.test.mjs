@@ -953,16 +953,16 @@ test('new target defaults to recent conversations and selection creates an edita
     payload: { botId: 'bot_feishu_01' },
   });
   const picker = renderer.root.findByProps({ 'aria-label': '从已聊过的会话选择' });
-  const suggestionSelect = picker.findByProps({ name: 'suggestion' });
-  const options = suggestionSelect.findAllByType('option');
-  assert.equal(options.length, 4);
-  const existing = options.find((option) => textOf(option).includes('ou_ex'));
+  const nameButtons = picker.findAllByProps({ className: 'dim-targetSuggestionName' });
+  assert.equal(nameButtons.length, 3);
+  const existing = nameButtons.find((option) => textOf(option).includes('ou_ex'));
   assert.equal(existing.props.disabled, true);
   assert.match(textOf(existing), /已添加/);
   assert.doesNotMatch(textOf(picker), /ou_existing_secret_123456|ou_new_secret_123456|oc_group_secret_123456/);
 
-  const groupIndex = options.find((option) => textOf(option).includes('oc_gr')).props.value;
-  await act(async () => { suggestionSelect.props.onChange({ target: { value: groupIndex } }); });
+  await act(async () => {
+    nameButtons.find((option) => textOf(option).includes('oc_gr')).props.onClick();
+  });
   let form = renderer.root.findByType('form');
   const groupTargetId = form.findByProps({ name: 'targetId' }).props.value;
   assert.match(groupTargetId, /^tgt_[0-9a-f]{16}$/);
@@ -994,10 +994,12 @@ test('new target defaults to recent conversations and selection creates an edita
   assert.match(textOf(renderer.root.findByType('form')), /测试消息已发送，请到目标会话确认。/);
 
   await act(async () => { button(renderer.root, '取消').props.onClick(); });
-  const nextSelect = renderer.root.findByProps({ name: 'suggestion' });
-  const userIndex = nextSelect.findAllByType('option')
-    .find((option) => textOf(option).includes('ou_ne')).props.value;
-  await act(async () => { nextSelect.props.onChange({ target: { value: userIndex } }); });
+  const nextButtons = renderer.root
+    .findByProps({ 'aria-label': '从已聊过的会话选择' })
+    .findAllByProps({ className: 'dim-targetSuggestionName' });
+  await act(async () => {
+    nextButtons.find((option) => textOf(option).includes('ou_ne')).props.onClick();
+  });
   form = renderer.root.findByType('form');
   const userTargetId = form.findByProps({ name: 'targetId' }).props.value;
   assert.match(userTargetId, /^tgt_[0-9a-f]{16}$/);
@@ -1142,13 +1144,10 @@ test('recent conversation names remain platform data in the English UI', async (
     button(renderer.root, 'New target').props.onClick();
     await flush();
   });
-  const select = renderer.root.findByProps({ name: 'suggestion' });
-  assert.match(textOf(select), /飞书项目群/);
-  assert.doesNotMatch(textOf(select), /Feishu项目群/);
-  assert.match(
-    textOf(renderer.root.findByProps({ className: 'dim-targetSuggestions' })),
-    /Choose from conversations/,
-  );
+  const picker = renderer.root.findByProps({ className: 'dim-targetSuggestions' });
+  assert.match(textOf(picker), /飞书项目群/);
+  assert.doesNotMatch(textOf(picker), /Feishu项目群/);
+  assert.match(textOf(picker), /Choose from conversations/);
   const docsLink = renderer.root.findByProps({ className: 'dim-deliveryDocsLink' });
   assert.equal(textOf(docsLink), 'User guide↗');
   assert.equal(
@@ -1833,4 +1832,91 @@ test('the Feishu command panel page reports a single-bot channel instead of copy
     calls.filter((call) => call.endpoint === FEISHU_ENDPOINTS.setSlashPanel).length,
     0,
   );
+});
+
+test('selected conversations are created as targets in one batch with speaker names', async (t) => {
+  const calls = [];
+  let targets = [];
+  const suggestions = [
+    { kind: 'user', route: { openId: 'ou_new_secret_123456' }, context: { speakerName: '发言人一', speakerId: 'ou_new', lastSpokeAt: '2026-01-02T03:04:05.000Z' } },
+    { kind: 'group', route: { chatId: 'oc_group_secret_123456' }, context: { speakerName: '发言人二', speakerId: 'member-two', lastSpokeAt: '2026-01-02T03:04:05.000Z' } },
+  ];
+  const rpcCall = async (endpoint, payload) => {
+    calls.push({ endpoint, payload });
+    if (endpoint === DELIVERY_ENDPOINTS.list) {
+      return { ok: true, value: { targets: structuredClone(targets) } };
+    }
+    if (endpoint === DELIVERY_ENDPOINTS.listSuggestions) {
+      return { ok: true, value: { suggestions: structuredClone(suggestions) } };
+    }
+    if (endpoint === DELIVERY_ENDPOINTS.create) {
+      targets = [...targets, structuredClone(payload.target)];
+      return { ok: true, value: structuredClone(payload.target) };
+    }
+    throw new Error(`unexpected endpoint ${endpoint}`);
+  };
+  const renderer = await mount(t, {
+    channel: 'feishu', account: connectedAccount, rpcCall, onBack() {},
+  });
+
+  await act(async () => {
+    button(renderer.root, '新建目标').props.onClick();
+    await flush();
+  });
+  const picker = renderer.root.findByProps({ 'aria-label': '从已聊过的会话选择' });
+  assert.match(textOf(picker), /发言人一 · \d+ (分钟|小时|天) 前|发言人一 · \d{4}-\d{2}-\d{2}/);
+  const boxes = picker.findAllByProps({ type: 'checkbox' });
+  assert.equal(boxes.length, 2);
+  await act(async () => {
+    boxes[0].props.onChange();
+    boxes[1].props.onChange();
+    await flush();
+  });
+  const create = button(picker, '创建选中目标（2）');
+  await act(async () => {
+    create.props.onClick();
+    await flush();
+  });
+
+  const created = calls.filter((call) => call.endpoint === DELIVERY_ENDPOINTS.create);
+  assert.equal(created.length, 2);
+  assert.deepEqual(created.map((call) => call.payload.target.name), ['发言人一', '发言人二']);
+  assert.deepEqual(created.map((call) => call.payload.target.kind), ['user', 'group']);
+  for (const call of created) assert.match(call.payload.target.targetId, /^tgt_[0-9a-f]{16}$/);
+  assert.match(textOf(picker), /已创建 2 个目标。/);
+  assert.equal(calls.at(-1).endpoint, DELIVERY_ENDPOINTS.list);
+});
+
+test('a suggestion with context prefills the speaker name instead of the masked route', async (t) => {
+  const rpcCall = async (endpoint) => {
+    if (endpoint === DELIVERY_ENDPOINTS.list) return { ok: true, value: { targets: [] } };
+    if (endpoint === DELIVERY_ENDPOINTS.listSuggestions) {
+      return {
+        ok: true,
+        value: {
+          suggestions: [{
+            kind: 'user',
+            route: { openId: 'ou_secret_123456' },
+            context: { speakerName: '张同事', speakerId: 'ou_zhang', lastSpokeAt: '2026-01-02T03:04:05.000Z' },
+          }],
+        },
+      };
+    }
+    throw new Error(`unexpected endpoint ${endpoint}`);
+  };
+  const renderer = await mount(t, {
+    channel: 'feishu', account: connectedAccount, rpcCall, onBack() {},
+  });
+
+  await act(async () => {
+    button(renderer.root, '新建目标').props.onClick();
+    await flush();
+  });
+  const picker = renderer.root.findByProps({ 'aria-label': '从已聊过的会话选择' });
+  assert.doesNotMatch(textOf(picker), /ou_secret_123456/);
+  await act(async () => {
+    picker.findAllByProps({ className: 'dim-targetSuggestionName' })[0].props.onClick();
+  });
+  const form = renderer.root.findByType('form');
+  assert.equal(form.findByProps({ name: 'name' }).props.value, '张同事');
 });

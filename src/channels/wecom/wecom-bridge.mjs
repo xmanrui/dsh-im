@@ -955,6 +955,14 @@ export class WecomHarnessBridge {
       this.#contextEnhancement,
       conversationType,
     ));
+    // Persist who spoke here last, so the delivery suggestions can name the
+    // speaker and the moment without replaying any message text. WeCom frames
+    // carry no display name, so only the sender id and timestamp are kept.
+    // Fire-and-forget: a slow state write must not delay the reply path.
+    void Promise.resolve(this.#state.rememberAuthor?.(key, { senderId, isBot: false }))
+      .catch((error) => {
+        this.#logger.warn?.(`[dsh-im:wecom] unable to remember the conversation author: ${error?.message ?? error}`);
+      });
     if (body.chattype === 'single') {
       rememberConnectionTestTarget(this.#state, { chatId });
     }

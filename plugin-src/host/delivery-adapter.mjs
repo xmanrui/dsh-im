@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   conversationKeyMatchesTarget,
+  deliverySuggestionEntriesFromSessions,
   deliverySuggestionFromConversationKey,
   deliverySuggestionsFromSessions,
   privateConversationKeyMatchesTarget,
@@ -305,6 +306,28 @@ function stateSessions(state) {
   return sessions && typeof sessions === 'object' && !Array.isArray(sessions) ? sessions : null;
 }
 
+/**
+ * Conversation context for one delivery suggestion, from the recorded last
+ * author. Only what a reader needs to recognise the conversation survives:
+ * an optional display name and the ISO timestamp of the last inbound message.
+ * Nothing the channel did not already expose as speaker metadata is kept, and
+ * a missing or malformed record yields no context at all.
+ */
+function suggestionContext(author) {
+  if (!author || typeof author !== 'object' || Array.isArray(author)) return {};
+  const context = {};
+  if (typeof author.senderName === 'string' && author.senderName) {
+    context.speakerName = author.senderName.slice(0, 80);
+  }
+  if (typeof author.senderId === 'string' && author.senderId) {
+    context.speakerId = author.senderId;
+  }
+  if (typeof author.at === 'string' && author.at) {
+    context.lastSpokeAt = author.at;
+  }
+  return Object.keys(context).length ? { context } : {};
+}
+
 function sessionSyncView(channel, target, sessions, configured) {
   if (configured) {
     const valid = conversationKeyMatchesTarget(channel, configured.conversationKey, target);
@@ -530,12 +553,16 @@ export function createDeliveryAdapter({
       if (!state || typeof state.snapshot !== 'function') {
         throw new TypeError('delivery suggestion state cannot be inspected');
       }
-      const suggestions = deliverySuggestionsFromSessions(channel, state.snapshot()?.sessions);
-      return suggestions.map((suggestion) => normalizeDeliveryTarget(
-        channel,
-        suggestion,
-        { targetIdRequired: false },
-      ));
+      const snapshot = state.snapshot();
+      const authors = snapshot?.authors && typeof snapshot.authors === 'object'
+        && !Array.isArray(snapshot.authors)
+        ? snapshot.authors
+        : {};
+      return deliverySuggestionEntriesFromSessions(channel, snapshot?.sessions)
+        .map(({ suggestion, conversationKey }) => ({
+          ...normalizeDeliveryTarget(channel, suggestion, { targetIdRequired: false }),
+          ...suggestionContext(authors[conversationKey]),
+        }));
     },
     createTarget: (botId, target) => workspaces.createDeliveryTarget(
       botId,
