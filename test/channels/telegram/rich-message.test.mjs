@@ -114,10 +114,15 @@ test('Telegram Rich Markdown keeps structure while escaping raw and encoded HTML
   assert.match(rich, /^# 标题 😀/);
   assert.match(rich, /```js/);
   assert.match(rich, /\| 公式 \| \$E = mc\^2\$ \|/);
-  assert.match(rich, /\[链接\]\(https:\/\/example\.com\/\?a=1&amp;b=2\)/);
+  // A query string keeps its ampersand: nothing in the chain decodes HTML entities, so `&amp;`
+  // used to reach the screen as itself.
+  assert.match(rich, /\[链接\]\(https:\/\/example\.com\/\?a=1&b=2\)/);
+  // A tag-looking fragment is escaped the way markdown understands: a backslash, not `&lt;`.
   assert.doesNotMatch(rich, /<tg-thinking>/);
-  assert.match(rich, /&lt;tg-thinking&gt;hidden&lt;\/tg-thinking&gt;/);
-  assert.match(rich, /&amp;lt;tg-thinking&amp;gt;/);
+  assert.match(rich, /\\<tg-thinking\\>hidden\\<\/tg-thinking\\>/);
+  // The source's own `&lt;` text stays as written — it is input, not escaping. What must not
+  // happen is the escaping itself producing entities.
+  assert.doesNotMatch(rich, /&amp;/);
 });
 
 test('Telegram splitters preserve every space, newline, Emoji, and long fenced-code character', () => {
@@ -471,7 +476,7 @@ test('Telegram final delivery degrades a definite Rich rejection directly to pla
   }, { kind: 'text', text: '<b>**answer**</b>', format: 'markdown' });
 
   assert.deepEqual(calls.map((call) => call.method), ['rich', 'plain']);
-  assert.equal(calls[0].payload.richMessage.markdown, '&lt;b&gt;**answer**&lt;/b&gt;');
+  assert.equal(calls[0].payload.richMessage.markdown, '\\<b\\>**answer**\\</b\\>');
   assert.equal(calls[1].payload.text, '<b>**answer**</b>');
   assert.ok(calls.every((call) => call.payload.replyToMessageId === 44));
   assert.deepEqual(result, {

@@ -21,6 +21,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Fixed / 修复
 
+- 富文本消息不再把 `<`、`>`、`&` 转成 HTML 实体：链路里没有任何一方会解码实体，Telegram 直接把它们显示成 `&lt;`、`&gt;`、`&amp;`，于是 `<dsh_say>` 到屏幕上是 `&lt;dsh_say&gt;`，链接里的 `?a=1&b=2` 成了 `?a=1&amp;b=2`。现在改用 Markdown 的写法 `\<`、`\>`（这是“字符而不是标签”的意思），`&` 保持原样。
+  Rich messages no longer turn `<`, `>` and `&` into HTML entities. Nothing in the chain decodes entities, so Telegram showed them literally: `<dsh_say>` arrived as `&lt;dsh_say&gt;` and `?a=1&b=2` as `?a=1&amp;b=2`. They are now written as `\<` and `\>` — markdown's way of saying "a character, not a tag" — and `&` is left alone.
+
 - 飞书过程卡的最终答案若包含指向本地文件的 Markdown 图片（如 `![标题画面](/tmp/host_13.png)`），飞书会以 `230099 / 200570` 拒绝整张卡，卡片从此冻结在「运行中」；目标续跑轮由于没有第二条投递路径，本轮答案也会一并丢失。现在这类图片在写入卡片前降级为 caption 文本（判据是「飞书能否渲染」：只有 `http(s)` 地址与 `img_key` 保留，绝对路径、`file:`、Windows 盘符、裸相对路径如 `06-log/shot.png`、`data:` URI 都降级），目标轮封卡失败时还会用纯文本回复补投本轮答案，并记录封卡失败的日志。方案见 `docs/方案/飞书过程卡本地图片降级与封卡回退方案.md`。
   When a Feishu step card's final answer carried a Markdown image pointing at a local file (e.g. `![screenshot](/tmp/host_13.png)`), Feishu rejected the whole card update with `230099 / 200570` and the card froze at "running"; a Goal round then lost its answer too, because it has no second delivery path. Local image targets are now degraded to their caption before the text reaches the card — the rule is "can Feishu render it": only `http(s)` URLs and `img_key`s survive, while absolute paths, `file:` URLs, Windows drives, bare relative paths such as `06-log/shot.png` and `data:` URIs degrade, a Goal round whose card cannot be sealed posts its result as a plain reply, and the skipped seal is logged. See `docs/方案/飞书过程卡本地图片降级与封卡回退方案.md`.
 
