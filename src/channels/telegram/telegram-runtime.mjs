@@ -427,8 +427,14 @@ export function normalizeTelegramUpdate(update, {
   // A command typed in a group is addressed to the bot by definition — that is
   // what the command menu in a group is for. Ordinary text still obeys the
   // per-chat trigger rule below, so "mention only" keeps its meaning.
+  // Telegram folds `@bot` into the `bot_command` entity when a command is
+  // targeted, and the suffix has to go before the local-command check: the
+  // shared matchers accept only the bare name. Only this bot's suffix is
+  // stripped, so `/menu@otherbot` stays a foreign command and never wakes it.
+  const text = typeof message.text === 'string' ? message.text : '';
+  const normalizedText = withoutBotMention(text, username);
   const localCommand = isSharedLocalCommand(
-    typeof message.text === 'string' ? message.text : '',
+    normalizedText,
     { hasImages: Boolean(image), hasFiles: Boolean(file) },
   );
   const addressed = direct || localCommand || groupTriggerAddressed(groupTriggers, {
@@ -468,7 +474,9 @@ export function normalizeTelegramUpdate(update, {
     senderIsBot: message.from?.is_bot === true,
     kind: direct ? 'direct' : 'group',
     conversationId,
-    content: withoutBotMention(message.text ?? message.caption ?? '', username),
+    content: typeof message.text === 'string'
+      ? normalizedText
+      : withoutBotMention(message.caption ?? '', username),
     plainText: typeof message.text === 'string',
     images: image ? [image] : [],
     files: file ? [file] : [],
@@ -1395,10 +1403,20 @@ export class TelegramBotClient {
       clearTimeout(windowTimer);
       windowTimer = null;
     };
+    // A frame is only announced once its send actually produced a message id:
+    // `onDelivered` runs after `track` resolves, never when the frame is merely
+    // held. A held frame that is superseded or cancelled therefore stays
+    // anonymous, so its tool result is dropped instead of closing another line.
+    const release = (draft) => track(draft.label, draft.text).then((messageId) => {
+      const delivered = messageId === null || messageId === undefined
+        ? null : { messageId, text: draft.text };
+      if (delivered) draft.onDelivered?.(delivered);
+      return delivered;
+    });
     const sendHeld = () => {
       const frame = held;
       held = null;
-      return frame ? track(frame.label, frame.text) : Promise.resolve();
+      return frame ? release(frame) : Promise.resolve();
     };
     const armWindowTimer = () => {
       if (windowTimer !== null) return;
@@ -1414,15 +1432,14 @@ export class TelegramBotClient {
      * One frame: immediate outside a window, otherwise the newest held one.
      * Resolves to the delivered message plus the text it actually carries (the
      * numbered form), so a later edit can rewrite that line without losing the
-     * number the reader is following.
+     * number the reader is following. `onDelivered` is carried on the frame and
+     * fires only if that frame really goes out — a held frame can still be
+     * replaced or cancelled, and must not be attributed in that case.
      */
-    const emit = (label, text) => {
+    const emit = (label, text, onDelivered) => {
       if (closed) return Promise.resolve(null);
       sequence += 1;
-      const frame = { label, text: numbering ? `${sequence} ${text}` : text };
-      const release = (draft) => track(draft.label, draft.text).then((messageId) => (
-        messageId === null || messageId === undefined ? null : { messageId, text: draft.text }
-      ));
+      const frame = { label, text: numbering ? `${sequence} ${text}` : text, onDelivered };
       if (intervalMs <= 0) return release(frame);
       if (Date.now() >= windowEndsAt) {
         // The deadline has passed but its timer may not have run yet, and that
@@ -1457,15 +1474,18 @@ export class TelegramBotClient {
       // instead of adding another line to the chat.
       sendToolTrace: async (name, argumentsValue, callId) => {
         const startedAt = Date.now();
-        const delivered = await emit('tool trace', formatToolTrace(name, argumentsValue));
-        if (delivered) {
-          // Recorded even without a call id: the result may arrive unattributed,
-          // and an unrecorded line would keep claiming to be running.
+        // Recorded only once the line is actually on the wire. Inside a pacing
+        // window that happens later, when the timer releases the held frame, so
+        // the identity travels with the frame instead of riding the await here.
+        // Recorded even without a call id: the result may arrive unattributed,
+        // and an unrecorded line would keep claiming to be running.
+        const record = (delivered) => {
           const key = callId === undefined || callId === null
             ? `anonymous:${++anonymousToolCalls}`
             : String(callId);
           toolCalls.set(key, { messageId: delivered.messageId, text: delivered.text, startedAt });
-        }
+        };
+        const delivered = await emit('tool trace', formatToolTrace(name, argumentsValue), record);
         return delivered?.messageId ?? null;
       },
       settleToolTrace: async ({ callId, ok = true } = {}) => {
