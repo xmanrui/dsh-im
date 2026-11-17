@@ -8,9 +8,16 @@ function textValue(value) {
   return value;
 }
 
+/**
+ * What one character costs after escaping.
+ *
+ * A backslash before an angle bracket, because that is how markdown — including Telegram's rich
+ * markdown — writes a literal `<`. HTML entities were tried first and shown on the screen as
+ * themselves: `&lt;dsh_say&gt;` instead of `<dsh_say>`, so the escape was visible and the text
+ * was not.
+ */
 function escapedCharacterLength(value) {
-  if (value === '&') return 5;
-  if (value === '<' || value === '>') return 4;
+  if (value === '<' || value === '>') return 2;
   return 1;
 }
 
@@ -63,11 +70,16 @@ function assertCompleteFences(markdown) {
   return markers;
 }
 
+/**
+ * Neutralise the two characters markdown would read as a tag.
+ *
+ * `&` is left alone: no parser in the chain decodes HTML entities, so `&amp;` reached the screen
+ * as `&amp;`. Only `<` and `>` can open something, and a backslash is how markdown says "this is
+ * a character, not a tag".
+ */
 function escapedMarkdown(value) {
   return Array.from(value, (character) => {
-    if (character === '&') return '&amp;';
-    if (character === '<') return '&lt;';
-    if (character === '>') return '&gt;';
+    if (character === '<' || character === '>') return `\\${character}`;
     return character;
   }).join('');
 }
