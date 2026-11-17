@@ -1716,6 +1716,28 @@ export class TelegramRuntime {
     return structuredClone(this.#status);
   }
 
+  /** The level the live bridge renders turns at; the saved config before connect. */
+  get presentationLevel() {
+    return this.#bridge?.presentationLevel ?? presentationLevelFromConfig(this.#config);
+  }
+
+  /**
+   * Adopt a display level persisted elsewhere (the settings page).
+   *
+   * The bridge is built once per connection and reads its level per turn, so
+   * changing it in place is both enough and required: reconnecting to apply a
+   * purely visual setting would abort every turn in every chat. The runtime's
+   * config is replaced rather than mutated, so a later reconnect rebuilds the
+   * bridge with the same level and a caller's object is never touched.
+   */
+  setPresentationLevel(value) {
+    const next = normalizePresentationLevel(value);
+    // `presentationLevel` wins over the legacy boolean, but keeping the two in
+    // agreement means a config snapshot never carries a contradictory pair.
+    this.#config = { ...this.#config, presentationLevel: next, thinkingTraces: next === 'full' };
+    this.#bridge?.setPresentationLevel(next);
+  }
+
   async sendConnectionTest(text) {
     if (!this.#status.ready || !this.#bridge) {
       const error = new Error('Telegram bot is not connected');

@@ -976,3 +976,118 @@ test('L25: the greeting\'s 菜单 entry opens the hub instead of failing', async
   assert.equal(cards.length, 2, 'the hub card was sent');
   assert.ok(!acks.some((text) => /无法打开/u.test(text ?? '')), acks.join('|'));
 });
+
+test('L26: a settings-page level change reaches the live bridge and the next turn', async (t) => {
+  // Regression: the settings page persisted the new level with `restart: false`
+  // and then asked the runtime to adopt it, but TelegramRuntime exposed no such
+  // method, so the optional call was skipped and the bridge kept rendering the
+  // old rung until the bot reconnected.
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-im-display-live-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const state = await new TelegramStateStore(join(directory, 'state.json')).load();
+  const calls = [];
+  let releaseMessage = () => {};
+  const gate = new Promise((resolve) => { releaseMessage = resolve; });
+  let richSent = 0;
+  const fakeApi = {
+    getMe: async () => ({ id: 123456789, is_bot: true, username: 'HarnessBot' }),
+    getWebhookInfo: async () => ({ url: '' }),
+    deleteMyCommands: async () => true,
+    setMyCommands: async () => true,
+    setChatMenuButton: async () => true,
+    setMessageReaction: async () => true,
+    sendChatAction: async () => true,
+    getUpdates: async ({ offset, timeout, signal } = {}) => {
+      if (timeout === 0) return [];
+      if (offset <= 100) {
+        // Hold the update until the test has changed the level: this is the
+        // "next turn" whose rendering must follow it.
+        await Promise.race([
+          gate,
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+          }),
+        ]);
+        return [{
+          update_id: 100,
+          message: {
+            message_id: 100,
+            date: 1_700_000_000,
+            chat: { id: 42, type: 'private' },
+            from: { id: 42, is_bot: false, first_name: 'Wings' },
+            text: 'hello there',
+          },
+        }];
+      }
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    },
+    sendMessage: async (request) => {
+      calls.push({ method: 'send', text: request.text });
+      return { message_id: 700 + calls.length };
+    },
+    editMessageText: async (request) => {
+      calls.push({ method: 'edit', text: request.text });
+      return true;
+    },
+    deleteMessage: async () => { calls.push({ method: 'delete' }); return true; },
+    sendRichMessage: async (request) => {
+      calls.push({ method: 'rich', text: request.richMessage?.markdown });
+      richSent += 1;
+      return { message_id: 999 };
+    },
+  };
+  const runtime = new TelegramRuntime({
+    // Frozen on purpose: the setter must replace the config reference instead of
+    // writing a field, so a shared or frozen snapshot can never be mutated.
+    config: Object.freeze({
+      botId: 'telegram_display_live',
+      platformId: '123456789',
+      username: 'HarnessBot',
+      presentationLevel: 'standard',
+    }),
+    token: '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456',
+    state,
+    createApi: () => fakeApi,
+    logger: { error() {}, warn() {}, info() {}, debug() {} },
+    harness: {
+      ensureRunning: async () => true,
+      createSession: async () => 'session-live',
+      ask: async (_sessionId, _text, options) => {
+        await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+        await options.onUpdate({ type: 'text', text: 'Writing the answer…' });
+        return '**final answer**';
+      },
+    },
+  });
+  await runtime.start();
+  try {
+    // What the settings page does after persisting the level ({ restart: false }).
+    assert.equal(typeof runtime.setPresentationLevel, 'function',
+      'the controller can only update the live bridge if the runtime exposes setPresentationLevel');
+    assert.equal(runtime.presentationLevel, 'standard',
+      'the bridge starts at the saved rung, observably');
+    runtime.setPresentationLevel('minimal');
+    assert.equal(runtime.presentationLevel, 'minimal',
+      'the live bridge adopted the stored level without reconnecting');
+    assert.equal(runtime.status.ready, true, 'changing the display level must not reconnect');
+
+    releaseMessage();
+    const deadline = Date.now() + 5_000;
+    while (richSent === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(richSent, 1, 'the turn never delivered an answer');
+    // Minimal: one placeholder, deleted, then the answer. A bridge that kept the
+    // old standard level would have edited a progress line instead.
+    assert.deepEqual(calls.map((call) => call.method), ['send', 'delete', 'rich']);
+
+    // A garbage value must not crash the settings path: both the stored config
+    // and the bridge fall back to the default rung.
+    assert.doesNotThrow(() => runtime.setPresentationLevel('shout'));
+    assert.equal(runtime.presentationLevel, 'standard');
+  } finally {
+    await runtime.stop();
+  }
+});
