@@ -91,6 +91,47 @@ test('DingTalk maps undocumented repliedMsg runtime fields into a reply snapshot
   });
 });
 
+test('DingTalk records the last group author for each message', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('group:author-chat', 'session-author');
+  const bridge = new DingtalkHarnessBridge({
+    api: { sendText: async () => ({}) },
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    harness: {
+      sessionExists: async () => true,
+      ask: async () => '已处理',
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('ding-author-one', '第一条', {
+    conversationType: '2',
+    conversationId: 'author-chat',
+    isInAtList: true,
+    senderStaffId: 'staff-a',
+    senderNick: '张三',
+  }));
+  assert.deepEqual(fixture.authors.get('group:author-chat'), {
+    senderId: 'staff-a',
+    senderName: '张三',
+    isBot: false,
+  });
+
+  await bridge.accept(message('ding-author-two', '第二条', {
+    conversationType: '2',
+    conversationId: 'author-chat',
+    isInAtList: true,
+    senderStaffId: 'staff-b',
+    senderNick: '李四',
+  }));
+  assert.deepEqual(fixture.authors.get('group:author-chat'), {
+    senderId: 'staff-b',
+    senderName: '李四',
+    isBot: false,
+  });
+});
+
 test('DingTalk sends quote context to Harness but does not execute quoted commands', async () => {
   const fixture = stateFixture();
   fixture.sessions.set('p2p:staff-approved', 'session-quote');
@@ -226,14 +267,17 @@ function stateFixture() {
   const seen = new Set();
   const pending = new Map();
   const outbound = [];
+  const authors = new Map();
   return {
     sessions,
     seen,
     pending,
     outbound,
+    authors,
     state: {
       hasSeen: (id) => seen.has(id),
       markSeen: async (id) => seen.add(id),
+      rememberAuthor: async (key, value) => authors.set(key, structuredClone(value)),
       rememberOutboundMessage: async (entry) => outbound.push(structuredClone(entry)),
       recentOutboundTextFor: ({ conversationKey, processQueryKey, messageId }) => {
         const ids = [processQueryKey, messageId].filter(Boolean);
