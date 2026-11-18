@@ -1282,6 +1282,25 @@ test('Telegram reports service messages as text instead of an empty turn', () =>
   assert.match(unknown.content, /unknown_service_message/u);
   assert.match(unknown.content, /some_new_service_field/u);
 
+  // Block-based text is a person's message, not a service event: dropping it would mean the
+  // words never arrive at all.
+  const blocks = normalizeTelegramUpdate({
+    update_id: 29,
+    message: {
+      message_id: 509,
+      chat: { id: -1001, type: 'supergroup' },
+      from: { id: 43, is_bot: false },
+      rich_message: { blocks: [
+        { type: 'paragraph', text: 'первый блок' },
+        { type: 'paragraph', text: 'второй блок' },
+      ] },
+    },
+  }, { botId: '123456789', username: 'HarnessBot' });
+  assert.match(blocks.content, /первый блок/u);
+  assert.match(blocks.content, /второй блок/u);
+  assert.doesNotMatch(blocks.content, /unknown_service_message/u);
+  assert.equal(blocks.plainText, true);
+
   // Ordinary text keeps its shape: the service path must not leak into it.
   const text = normalizeTelegramUpdate({
     update_id: 22,
