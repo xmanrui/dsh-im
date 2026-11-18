@@ -138,7 +138,7 @@ test('QQ controller delegates the shared connection-test message to the selected
   await controller.close();
 });
 
-test('QQ RPC turns the host-only QR URL into an image and strips credential fields', async () => {
+test('QQ RPC exposes the pending scan target with its image and strips credential fields', async () => {
   const handler = createQqRpcHandler({
     status: () => ({ bots: [], totals: { configured: 0, connected: 0 } }),
     startProvisioning: async () => ({
@@ -156,7 +156,8 @@ test('QQ RPC turns the host-only QR URL into an image and strips credential fiel
   const result = await handler(QQ_ENDPOINTS.beginProvisioning, { locale: 'zh-CN' });
   assert.equal(result.ok, true);
   assert.equal(result.value.qrCodeDataUrl, 'data:image/png;base64,YWJjZA==');
-  assert.doesNotMatch(JSON.stringify(result), /q\.qq\.com|never-public|ownerUserOpenid|appSecret/);
+  assert.equal(result.value.verificationUrl, 'https://q.qq.com/opaque');
+  assert.doesNotMatch(JSON.stringify(result), /never-public|ownerUserOpenid|appSecret/);
   const legacyReconnect = await handler(QQ_ENDPOINTS.reconnectBot, {
     botId: 'qq_bot', sendTest: true,
   });
@@ -164,6 +165,53 @@ test('QQ RPC turns the host-only QR URL into an image and strips credential fiel
   assert.deepEqual(legacyReconnect.value.testMessage, {
     sent: false, code: 'test-target-unavailable',
   });
+});
+
+test('QQ public scan target survives real controller begin, poll and status without credential fields', async t => {
+  const target = 'https://q.qq.com/connect?task=original-scan';
+  const controller = new QqController({
+    qrAuth: { start(callbacks) { queueMicrotask(() => callbacks.onQrDisplayed(target)); return () => {}; } },
+    credentials: { resolve: async () => undefined, set: async () => {}, unset: async () => {} },
+    configStore: { list: () => [], get: () => null, getByAppId: () => null, save: async () => {}, remove: async () => null },
+    createRuntime: async () => { throw new Error('No account is activated by this test'); },
+  });
+  t.after(() => controller.close());
+  const handler = createQqRpcHandler(controller);
+  const begun = await handler(QQ_ENDPOINTS.beginProvisioning, {});
+  const polled = await handler(QQ_ENDPOINTS.pollProvisioning, { attemptId: begun.value.attemptId });
+  const status = await handler(QQ_ENDPOINTS.status, {});
+  for (const value of [begun.value, polled.value, status.value.provisioning]) {
+    assert.equal(value.verificationUrl, target);
+    assert.match(value.qrCodeDataUrl, /^data:image\/png;base64,/);
+    assert.doesNotMatch(JSON.stringify(value), /appSecret|ownerUserOpenid|secretRef|device_code|scode/);
+  }
+  const cancelled = await handler(QQ_ENDPOINTS.cancelProvisioning, { attemptId: begun.value.attemptId });
+  assert.equal(cancelled.value.verificationUrl, undefined);
+});
+
+test('QQ exposes no terminal, nested or invalid verification target', async () => {
+  let attempt = { attemptId: 'attempt_1', status: 'pending', verificationUrl: 'https://q.qq.com/original',
+    nested: { verificationUrl: 'https://q.qq.com/another', appSecret: 'private-value' } };
+  const handler = createQqRpcHandler({
+    status: () => ({ provisioning: attempt, bots: [{ verificationUrl: 'https://q.qq.com/another' }] }),
+    startProvisioning: async () => attempt, registrationStatus: () => attempt,
+    cancelProvisioning: async () => attempt, bindCredentials: async () => ({}),
+    reconnectBot: async () => ({}), deleteBot: async () => ({}),
+  }, { encodeQr: async () => 'data:image/png;base64,YWJjZA==' });
+  for (const status of ['connected', 'cancelled', 'failed', 'expired']) {
+    attempt = { ...attempt, status };
+    assert.equal((await handler(QQ_ENDPOINTS.pollProvisioning, { attemptId: 'attempt_1' })).value.verificationUrl, undefined);
+  }
+  for (const verificationUrl of ['http://q.qq.com/scan', 'https://user:pass@q.qq.com/scan',
+    'https://q.qq.com/white space', 'https://q.qq.com/' + 'a'.repeat(4096), 'not-a-url']) {
+    attempt = { ...attempt, status: 'pending', verificationUrl };
+    assert.equal((await handler(QQ_ENDPOINTS.beginProvisioning, {})).value.verificationUrl, undefined);
+  }
+  attempt = { ...attempt, status: 'refreshing', verificationUrl: 'https://q.qq.com/refreshed' };
+  const snapshot = (await handler(QQ_ENDPOINTS.status, {})).value;
+  assert.equal(snapshot.provisioning.verificationUrl, attempt.verificationUrl);
+  assert.deepEqual(snapshot.provisioning.nested, {});
+  assert.deepEqual(snapshot.bots, [{}]);
 });
 
 test('QQ credential RPC validates the pair and never returns AppSecret', async () => {
