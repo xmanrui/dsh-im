@@ -18,6 +18,7 @@ export const DINGTALK_RECENT_OUTBOUND_LIMIT = 200;
 export const DINGTALK_RECENT_OUTBOUND_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 export const DINGTALK_RECENT_OUTBOUND_TEXT_LIMIT = 8_000;
 export const DINGTALK_RECENT_OUTBOUND_MATCH_TOLERANCE_MS = 15_000;
+const AUTHOR_LIMIT = 500;
 
 function nonEmptyString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -86,6 +87,27 @@ function normalizePendingSender(value, fallbackRequestId) {
   };
 }
 
+function normalizeAuthor(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const senderId = typeof value.senderId === 'string' ? value.senderId : '';
+  if (!senderId) return null;
+  const author = { senderId, isBot: value.isBot === true };
+  if (typeof value.senderName === 'string' && value.senderName) author.senderName = value.senderName;
+  if (typeof value.senderUsername === 'string' && value.senderUsername) author.senderUsername = value.senderUsername;
+  if (typeof value.at === 'string' && value.at) author.at = value.at;
+  return author;
+}
+
+function normalizeAuthors(value) {
+  const authors = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return authors;
+  for (const key of Object.keys(value).slice(-AUTHOR_LIMIT)) {
+    const author = normalizeAuthor(value[key]);
+    if (author) authors[key] = author;
+  }
+  return authors;
+}
+
 function normalizeState(value) {
   if (!value || typeof value !== 'object') return structuredClone(EMPTY_STATE);
   const sessions = {};
@@ -117,9 +139,11 @@ function normalizeState(value) {
   // are only added when they hold something.
   const rings = normalizeSessionRings(value.rings);
   const pendingTitles = normalizePendingTitles(value.pendingTitles);
+  const authors = normalizeAuthors(value.authors);
   return {
     version: 1,
     sessions,
+    ...(Object.keys(authors).length ? { authors } : {}),
     ...(value.deferred ? { deferred: normalizeDeferredState(value.deferred) } : {}),
     seenMessageIds: Array.isArray(value.seenMessageIds)
       ? [...new Set(value.seenMessageIds.map(nonEmptyString).filter(Boolean))].slice(-1_000)
@@ -173,6 +197,25 @@ export class DingtalkStateStore {
 
   sessionFor(key) {
     return this.#state.sessions[key] ?? null;
+  }
+
+  authorFor(key) {
+    const author = this.#state.authors?.[key];
+    return author ? structuredClone(author) : null;
+  }
+
+  async rememberAuthor(key, value) {
+    const author = normalizeAuthor({ at: this.#now(), ...value });
+    if (typeof key !== 'string' || !key || !author) return null;
+    const authors = this.#state.authors ??= {};
+    delete authors[key];
+    authors[key] = author;
+    const keys = Object.keys(authors);
+    if (keys.length > AUTHOR_LIMIT) {
+      for (const stale of keys.slice(0, keys.length - AUTHOR_LIMIT)) delete authors[stale];
+    }
+    await this.#persist();
+    return structuredClone(author);
   }
 
   async setSession(key, sessionId) {

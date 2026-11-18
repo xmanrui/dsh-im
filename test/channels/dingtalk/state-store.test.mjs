@@ -65,6 +65,37 @@ test('state store persists sessions, dedupe IDs, and host-only pending sender re
   assert.deepEqual(reloaded.pendingSenders(), []);
 });
 
+test('state store persists the last conversation author', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-dingtalk-state-author-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'bot.json');
+  const store = await new DingtalkStateStore(path, {
+    now: () => '2026-08-15T01:00:00.000Z',
+  }).load();
+
+  await store.rememberAuthor('group:chat', {
+    senderId: 'user-1',
+    senderName: 'User One',
+    isBot: false,
+  });
+  assert.deepEqual(store.authorFor('group:chat'), {
+    senderId: 'user-1',
+    senderName: 'User One',
+    isBot: false,
+    at: '2026-08-15T01:00:00.000Z',
+  });
+  assert.equal(
+    JSON.parse(await readFile(path, 'utf8')).authors['group:chat'].senderId,
+    'user-1',
+  );
+
+  const reloaded = await new DingtalkStateStore(path).load();
+  assert.equal(reloaded.authorFor('group:chat').senderId, 'user-1');
+
+  await store.rememberAuthor('group:chat', { senderId: 'user-2', isBot: false });
+  assert.equal(store.authorFor('group:chat').senderId, 'user-2');
+});
+
 test('state store keeps only normalized fields from an existing pending-sender document', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-dingtalk-state-normalize-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
