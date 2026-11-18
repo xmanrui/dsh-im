@@ -38,6 +38,22 @@ This file records the notable changes in each dsh-im release. Its format follows
 - `/sessionlist --all` 跨工作区汇总列出会话，每个工作区默认显示 10 个并可用 `--limit N` 调整；单个工作区读取失败时跳过该分组并提示未包含的工作区数量，无效会话记录只跳过该行，均不影响其余结果。`/sessionlist` 用「（当前绑定）」标出本对话已绑定的会话，生产作用域也能正确读取该标记。`/session <关键词>` 按标题不区分大小写模糊匹配：仅在当前对话有效工作区内唯一命中时直接绑定；唯一命中位于其他工作区、命中多个、或部分工作区读取失败时只列出候选并要求完整 Session ID，避免误切换 bot 工作区并清除其他聊天的旧绑定；零命中保留原有按 Session ID 绑定的行为。标题关键词限制为单个连续词，未知旗标返回用法；对话专属工作区目录已不存在时回退到 bot 默认工作区。全部新增文案已同步英文与俄文词典。
   `/sessionlist --all` summarizes sessions across all workspaces, 10 per workspace unless `--limit N` says otherwise. A workspace whose list cannot be read is skipped and the number of omitted workspaces is reported; invalid session rows are skipped individually without hiding the rest. `/sessionlist` marks the session this chat is already bound to, and the production scope now exposes that binding correctly. `/session <keyword>` matches session titles case-insensitively and binds directly only when a single match is in the conversation's effective workspace. A unique match in another workspace, several matches, or a partial search list candidates and require the full Session ID, so an accidental keyword cannot move the bot workspace and clear other chats' bindings. When nothing matches, the previous Session-ID behaviour is preserved. Keywords are limited to a single token, unknown flags return usage, and a missing conversation workspace directory falls back to the bot default. Every new string ships with English and Russian translations.
 
+## [5.10.1] - 2026-11-17
+
+### Added / 新增
+
+- 回合声明的文件（`present` 工具、`deliverables/presented` 事件）现在会送到聊天渠道：图片、文档和语音一样，走的是与 `dsh_im_return_file` 相同的出站队列。Telegram 把 OGG/Opus 作为语音消息发送（`sendVoice`），其他渠道只要有 `sendFile`/`sendImage`/`sendVoice` 之一就能收到自己的那一份；投递逻辑在通用层（`src/channels/shared/semantic/`），各渠道无需为音频写特例。
+  Files declared by a Turn — the `present` tool and the `deliverables/presented` event — now reach the chat channel: images, documents and audio travel the same outbound queue the `dsh_im_return_file` tool uses. Telegram sends OGG/Opus as a voice message (`sendVoice`); any other channel that has `sendFile`/`sendImage`/`sendVoice` gets its own form of the same file, and the delivery logic lives in the shared layer (`src/channels/shared/semantic/`), so no channel needs a special case for audio.
+
+### Fixed / 修复
+
+- 声明文件的事件此前永远收不到：`session/event` 与 `session/disposed` 的订阅没有带 `{ global: true }`，dsh-session 的 carrier 会丢弃带其他作用域标签的监听者。同一个坑也让群历史工具永远看不到会话事件。
+  The declaration was invisible to the channel: the `session/event` and `session/disposed` subscriptions were not `{ global: true }`, and the Session carrier drops a listener tagged with another scope. The same trap kept the group-history tools from ever seeing Session events.
+- 文件的副本晚于 `turn/end` 完成时不再被静默删除：渠道是在自己的轮询里 `settle()` + `take()` 的，副本跑在这之后属于正常情况，只有**另一个**回合接管会话才会让文件脱手。记录被拒绝时也会说明原因（回合不在这里开着，或没有投递消费者）。
+  A file whose copy finished after `turn/end` is no longer deleted silently: the channel settles and claims from its own poll, so a late copy is normal — only a *different* Turn taking over the session takes the file away. A refused record names its reason (the turn is not open here, or the turn has no delivery consumer).
+- 群里的服务消息会转给 агент，而不是被丢掉。
+  Service messages from the chat are reported to the agent instead of being dropped.
+
 ## [5.10.0] - 2026-11-04
 
 ### Added / 新增

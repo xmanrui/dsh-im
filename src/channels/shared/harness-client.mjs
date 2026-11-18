@@ -2104,7 +2104,13 @@ export class HarnessClient {
         return deliveredArtifactCount;
       }
       artifactsDelivered = true;
-      const artifacts = outboundArtifactRegistry.take(sessionId, tracker.turn, { signal });
+      // A presented file is still being copied and hashed when its Turn ends;
+      // wait for those snapshots before claiming, or the last file is lost.
+      await outboundArtifactRegistry.settle(sessionId, tracker.turn);
+      const artifacts = outboundArtifactRegistry.take(sessionId, tracker.turn, {
+        signal,
+        logger: typeof options.logger === 'function' ? options.logger('dsh-im:outbound-artifact') : options.logger ?? null,
+      });
       for (const artifact of artifacts) {
         try {
           await onArtifact(artifact);

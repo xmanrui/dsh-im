@@ -364,6 +364,10 @@ DingTalk menus use a shared template built into the plugin; no template setup is
 
 Set `groupByAgentPreset: true` in the plugin Host config to opt in (off by default). A per-channel value overrides the plugin default. An explicit preset creates or reuses a named `presets/<preset-id>` workspace under the default IM directory for new sessions. Existing chats retain their history and location; manual workspaces, conversation overrides and Feishu directory isolation take priority. See [configuration and behavior](docs/preset-workspaces.md).
 
+### Deliver presented files to the chat
+
+Files the assistant declares with the Host `present` tool now reach the chat as well, instead of staying in the Web GUI. After the turn ends the answer text goes first, then each presented file on its own message: an image through `sendPhoto`, `audio/ogg|oga|opus` through `sendVoice`, anything else through `sendDocument`. A file already sent in the same turn by `dsh_im_return_file` is not sent twice, a file that cannot be read is logged and skipped, and a turn with no IM delivery owner (a Web-only turn) is untouched. Set `deliverPresentedFiles: false` in the plugin Host config to keep presented files in the Web GUI only (forwarding is on by default).
+
 
 - **Image understanding**: built-in channels with image input support can send JPEG, PNG, WebP, and GIF files sent as images to Harness, with an optional text description. Originals are saved in the workspace (default 30 MB per image, 20 images per message). Model copies are resized or compressed within configurable 5 MB per-image and 20 MB total budgets, with workspace-file fallback when necessary. Configure these limits in General settings → Attachments → Image input. iMessage's MVP supports text DMs only.
 - **Switch workspaces from a bot card**: every bot card on the settings page shows its current Harness workspace. Enter an existing absolute directory path directly or open the directory picker. Switching clears only that bot's old chat mappings; it never deletes, empties, or archives old Sessions. Replies already in progress may finish, while later messages use the new workspace.
