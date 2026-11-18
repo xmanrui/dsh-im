@@ -130,13 +130,22 @@ async function qrDataUrl(value) {
 
 async function withEncodedQr(value, encodeQr) {
   if (!value || typeof value.verificationUrl !== 'string') return sanitizePublic(value);
-  return sanitizePublic({ ...value, qrCodeDataUrl: await encodeQr(value.verificationUrl) });
+  const safe = sanitizePublic({ ...value, qrCodeDataUrl: await encodeQr(value.verificationUrl) });
+  const target = value.verificationUrl;
+  if (['pending', 'refreshing'].includes(value.status) && target.length <= 4096 && !/[\s\x00-\x1f\x7f]/u.test(target)) {
+    try {
+      const url = new URL(target);
+      if (url.protocol === 'https:' && url.hostname && !url.username && !url.password)
+        safe.verificationUrl = target;
+    } catch {}
+  }
+  return safe;
 }
 
 async function publicStatus(status, encodeQr) {
-  const value = structuredClone(status);
-  if (value?.provisioning) value.provisioning = await withEncodedQr(value.provisioning, encodeQr);
-  return sanitizePublic(value);
+  const value = sanitizePublic(status);
+  if (status?.provisioning) value.provisioning = await withEncodedQr(status.provisioning, encodeQr);
+  return value;
 }
 
 export function createQqRpcHandler(controller, { encodeQr = qrDataUrl } = {}) {
