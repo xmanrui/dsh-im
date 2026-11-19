@@ -30,6 +30,14 @@ function safeSenderKey(value) {
   return key && /^dt_sender_[a-f0-9]{32}$/.test(key) ? key : null;
 }
 
+function normalizeApprovedScenes(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return Object.freeze({
+    direct: source.direct === undefined ? true : source.direct === true,
+    group: source.group === undefined ? true : source.group === true,
+  });
+}
+
 function normalizeApprovedSender(value) {
   const record = typeof value === 'string' ? { staffId: value } : value;
   if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
@@ -41,6 +49,7 @@ function normalizeApprovedSender(value) {
     staffId,
     displayName: cleanString(record.displayName),
     approvedAt: cleanString(record.approvedAt),
+    scenes: normalizeApprovedScenes(record.scenes),
   });
 }
 
@@ -153,6 +162,10 @@ function storedDocument(document) {
         staffId: sender.staffId,
         displayName: sender.displayName,
         approvedAt: sender.approvedAt,
+        // 两个场景都开是默认值，不写进文档，保持老格式不变。
+        ...(sender.scenes && sender.scenes.direct === true && sender.scenes.group === true
+          ? {}
+          : { scenes: sender.scenes }),
       })),
     })),
   };

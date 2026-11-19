@@ -33,6 +33,7 @@ test('client exposes the fixed DingTalk RPC channel and endpoint names', () => {
     setAlias: 'bot.alias.set',
     allowSender: 'bot.sender.allow',
     removeApproved: 'bot.sender.remove',
+    setApprovedScenes: 'bot.sender.scenes.set',
   });
 });
 

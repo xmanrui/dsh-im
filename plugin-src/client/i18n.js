@@ -1412,6 +1412,8 @@ const DINGTALK_TEXTS_EN = Object.freeze({
   '已加入私聊白名单。': 'Added to the direct-message allowlist.',
   '已允许该用户，下一条消息会正常回答。': 'This user is now allowed; their next message is answered normally.',
   '已批准的用户': 'Approved users',
+  '切换场景失败，请重试。': 'Could not switch the scene. Try again.',
+  '优先级最高：命中此名单的人私聊和群聊都会放行，不再受下面白名单与访问模式的约束。': 'Highest priority: anyone on this list is allowed in both direct and group chats, regardless of the allowlists and access modes below.',
   '移除': 'Remove',
   '正在移除…': 'Removing…',
   '移除失败，请重试。': 'Remove failed. Try again.',

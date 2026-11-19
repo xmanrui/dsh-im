@@ -125,6 +125,10 @@ function publicApprovedSender(sender) {
     displayName: cleanString(sender.displayName) ?? t('钉钉用户'),
     senderIdMasked: maskDingtalkSenderId(sender.staffId),
     approvedAt: cleanString(sender.approvedAt),
+    scenes: {
+      direct: sender.scenes?.direct !== false,
+      group: sender.scenes?.group !== false,
+    },
   };
 }
 
@@ -526,9 +530,30 @@ export class DingtalkController {
         },
       ],
     };
+    // 先写白名单：失败就整体失败，避免"已批准但白名单没有"的中间态。
+    await this.#syncAllowlist?.(botId, sender.staffId, true);
     await this.#saveAndRestart(config, updated);
-    // 面板上的「允许」= 这个人在访问设置里可见，所以同时写访问策略白名单。
-    await this.#syncAllowlist?.(botId, sender.staffId, true).catch(() => undefined);
+    return this.status();
+  }
+
+  /** Toggles which conversation types an approved sender bypasses. */
+  async setApprovedSenderScenes(botId, senderKey, scenes) {
+    const config = this.#configStore.get(botId);
+    if (!config) throw new Error('Unknown DingTalk bot');
+    const index = config.approvedSenders.findIndex((sender) => sender.senderKey === senderKey);
+    if (index === -1) {
+      const error = new Error('Unknown approved DingTalk sender');
+      error.code = 'approved-sender-not-found';
+      throw error;
+    }
+    const next = {
+      direct: scenes?.direct !== false,
+      group: scenes?.group !== false,
+    };
+    const approvedSenders = config.approvedSenders.map((sender, senderIndex) => (
+      senderIndex === index ? { ...sender, scenes: next } : sender
+    ));
+    await this.#saveAndRestart(config, { ...config, approvedSenders });
     return this.status();
   }
 
@@ -546,8 +571,9 @@ export class DingtalkController {
     }
     const approvedSenders = [...config.approvedSenders];
     approvedSenders.splice(index, 1);
+    // 先从白名单摘掉（失败就整体失败），再删已批准记录，两边不会各走各的。
+    await this.#syncAllowlist?.(botId, sender.staffId, false);
     await this.#saveAndRestart(config, { ...config, approvedSenders });
-    await this.#syncAllowlist?.(botId, sender.staffId, false).catch(() => undefined);
     return this.status();
   }
 

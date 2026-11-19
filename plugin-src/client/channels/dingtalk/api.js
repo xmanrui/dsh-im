@@ -28,6 +28,7 @@ export const DINGTALK_ENDPOINTS = Object.freeze({
   setAlias: 'bot.alias.set',
   allowSender: 'bot.sender.allow',
   removeApproved: 'bot.sender.remove',
+  setApprovedScenes: 'bot.sender.scenes.set',
 });
 
 const ACCOUNT_STATES = new Set(['connected', 'connecting', 'offline', 'error']);

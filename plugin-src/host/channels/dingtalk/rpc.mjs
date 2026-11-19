@@ -37,6 +37,7 @@ export const DINGTALK_ENDPOINTS = Object.freeze({
   approveSender: 'bot.sender.approve',
   allowPendingSender: 'bot.sender.allow',
   removeApprovedSender: 'bot.sender.remove',
+  setApprovedSenderScenes: 'bot.sender.scenes.set',
   revokeSender: 'bot.sender.revoke',
 });
 export const DINGTALK_RPC_ENDPOINTS = Object.freeze(Object.values(DINGTALK_ENDPOINTS));
@@ -142,6 +143,18 @@ function payloadFailure(endpoint, payload) {
       && payload.confirm === true
       ? null
       : 'bot.sender.allow requires botId, requestId, and confirm=true.';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.setApprovedSenderScenes) {
+    const scenes = payload?.scenes;
+    return exactKeys(payload, ['botId', 'senderKey', 'confirm', 'scenes'])
+      && validId(payload.botId)
+      && validId(payload.senderKey)
+      && payload.confirm === true
+      && scenes && typeof scenes === 'object' && !Array.isArray(scenes)
+      && (scenes.direct === undefined || typeof scenes.direct === 'boolean')
+      && (scenes.group === undefined || typeof scenes.group === 'boolean')
+      ? null
+      : 'bot.sender.scenes.set requires botId, senderKey, confirm=true and scenes.';
   }
   if (endpoint === DINGTALK_ENDPOINTS.removeApprovedSender) {
     return exactKeys(payload, ['botId', 'senderKey', 'confirm'])
@@ -343,6 +356,12 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
         if (typeof controller.updateBusyMessageMode !== 'function') throw new Error('Message mode update is unavailable');
         value = await controller.updateBusyMessageMode(
           payload.botId, payload.busyMessageMode, (status) => publicStatus(status, cachedEncode),
+        );
+      } else if (endpoint === DINGTALK_ENDPOINTS.setApprovedSenderScenes) {
+        if (typeof controller.setApprovedSenderScenes !== 'function') throw new Error('Sender scene update is unavailable');
+        value = await publicStatus(
+          await controller.setApprovedSenderScenes(payload.botId, payload.senderKey, payload.scenes),
+          cachedEncode,
         );
       } else if (endpoint === DINGTALK_ENDPOINTS.removeApprovedSender) {
         if (typeof controller.revokeSender !== 'function') throw new Error('Sender removal is unavailable');

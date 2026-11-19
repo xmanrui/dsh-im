@@ -295,6 +295,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   const [pendingLoading, setPendingLoading] = React.useState(channel === 'dingtalk');
   const [approvingId, setApprovingId] = React.useState(null);
   const [removingId, setRemovingId] = React.useState(null);
+  const [sceneBusyKey, setSceneBusyKey] = React.useState(null);
   const [pendingFeedback, setPendingFeedback] = React.useState(null);
 
   const refreshPolicyFromServer = async () => {
@@ -389,6 +390,26 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       setPendingFeedback(error.message);
     } finally {
       setRemovingId(null);
+    }
+  };
+
+  const toggleApprovedScene = async (sender, scene, enabled) => {
+    if (sceneBusyKey) return;
+    setSceneBusyKey(sender.senderKey);
+    setPendingFeedback(null);
+    try {
+      const result = await rpcCall(DINGTALK_ENDPOINTS.setApprovedScenes, {
+        botId: account.botId,
+        senderKey: sender.senderKey,
+        confirm: true,
+        scenes: { ...sender.scenes, [scene]: enabled },
+      });
+      if (result?.ok !== true) throw new Error(result?.error?.message || '切换场景失败，请重试。');
+      await loadPendingSenders();
+    } catch (error) {
+      setPendingFeedback(error.message);
+    } finally {
+      setSceneBusyKey(null);
     }
   };
 
@@ -489,6 +510,8 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   h('legend', null,
     h('span', { className: 'dim-accessLegendContent' },
       h('span', null, '已批准的用户'))),
+  h('p', { className: 'dim-accessHint' },
+    '优先级最高：命中此名单的人私聊和群聊都会放行，不再受下面白名单与访问模式的约束。'),
   h('ul', { className: 'dim-accessUserList' }, approvedSenders.map((sender) => h('li', {
     key: sender.senderKey ?? sender.senderIdMasked,
     className: 'dim-accessDeniedRow',
@@ -496,6 +519,21 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     h('div', { className: 'dim-accessDeniedName' },
       h('strong', null, sender.displayName || '钉钉用户'),
       h('code', null, sender.senderIdMasked)),
+    h('div', { className: 'dim-accessDeniedName' },
+      h('label', null,
+        h('input', {
+          type: 'checkbox',
+          checked: sender.scenes?.direct !== false,
+          disabled: sceneBusyKey !== null,
+          onChange: (event) => void toggleApprovedScene(sender, 'direct', event.target.checked),
+        }), ' ', '单聊'),
+      h('label', null,
+        h('input', {
+          type: 'checkbox',
+          checked: sender.scenes?.group !== false,
+          disabled: sceneBusyKey !== null,
+          onChange: (event) => void toggleApprovedScene(sender, 'group', event.target.checked),
+        }), ' ', '群聊')),
     h('button', {
       type: 'button',
       className: 'dim-deliveryButton',
