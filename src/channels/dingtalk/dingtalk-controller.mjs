@@ -547,27 +547,6 @@ export class DingtalkController {
     return this.status();
   }
 
-  /** Toggles which conversation types an approved sender bypasses. */
-  async setApprovedSenderScenes(botId, senderKey, scenes) {
-    const config = this.#configStore.get(botId);
-    if (!config) throw new Error('Unknown DingTalk bot');
-    const index = config.approvedSenders.findIndex((sender) => sender.senderKey === senderKey);
-    if (index === -1) {
-      const error = new Error('Unknown approved DingTalk sender');
-      error.code = 'approved-sender-not-found';
-      throw error;
-    }
-    const next = {
-      direct: scenes?.direct !== false,
-      group: scenes?.group !== false,
-    };
-    const approvedSenders = config.approvedSenders.map((sender, senderIndex) => (
-      senderIndex === index ? { ...sender, scenes: next } : sender
-    ));
-    await this.#saveAndRestart(config, { ...config, approvedSenders });
-    return this.status();
-  }
-
   /** Revokes one approved sender by its browser-safe sender key. */
   async revokeSender(botId, senderKey) {
     const config = this.#configStore.get(botId);
