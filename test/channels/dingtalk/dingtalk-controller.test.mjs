@@ -84,6 +84,12 @@ function runtimeFactory({ events = [], pendingByClient = new Map(), failStart = 
         pendingSender(requestId) {
           return pending.find((sender) => sender.requestId === requestId) ?? null;
         },
+        async forgetPendingSender(requestId) {
+          const index = pending.findIndex((sender) => sender.requestId === requestId);
+          if (index === -1) return false;
+          pending.splice(index, 1);
+          return true;
+        },
         async start() {
           events.push(['start', botId]);
           if (typeof failStart === 'function' ? failStart() : failStart) {
@@ -313,8 +319,9 @@ test('approving writes the selected allowlists instead of a second sender list',
   assert.deepEqual(synced, [
     { botId: identity.botId, staffId: 'staff-private-one', present: true, scene: 'group' },
   ]);
-  // 不再产生第二份名单。
+  // 不再产生第二份名单，且这条待审批已经清掉。
   assert.equal(configs.bots.get(identity.botId).approvedSenders.length, 0);
+  assert.equal(controller.status().bots[0].senders.pending.length, 0);
   await controller.close();
 });
 

@@ -210,6 +210,14 @@ export class DingtalkRuntime {
       : null;
   }
 
+  /** Drops one pending approval request once the sender has been allowed. */
+  async forgetPendingSender(requestId) {
+    if (typeof this.#state.removePendingSender !== 'function') return false;
+    const removed = await this.#state.removePendingSender(requestId);
+    this.#status.pendingSenders = this.#pendingSenders();
+    return removed;
+  }
+
   pendingSenders() {
     return this.#pendingSenders();
   }
