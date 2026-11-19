@@ -137,12 +137,19 @@ function payloadFailure(endpoint, payload) {
       ? null : '请输入有效的别名（最多 80 个字符）。';
   }
   if (endpoint === DINGTALK_ENDPOINTS.allowPendingSender) {
-    return exactKeys(payload, ['botId', 'requestId', 'confirm'])
+    const scenes = payload?.scenes;
+    const scenesOk = scenes === undefined
+      || (Array.isArray(scenes)
+        && scenes.length > 0
+        && scenes.every((scene) => scene === 'direct' || scene === 'group'));
+    return (exactKeys(payload, ['botId', 'requestId', 'confirm', 'scenes'])
+        || exactKeys(payload, ['botId', 'requestId', 'confirm']))
       && validId(payload.botId)
       && validId(payload.requestId)
       && payload.confirm === true
+      && scenesOk
       ? null
-      : 'bot.sender.allow requires botId, requestId, and confirm=true.';
+      : 'bot.sender.allow requires botId, requestId, confirm=true and optional scenes.';
   }
   if (endpoint === DINGTALK_ENDPOINTS.setApprovedSenderScenes) {
     const scenes = payload?.scenes;
@@ -384,7 +391,7 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
         if (typeof controller.approveSender !== 'function') throw new Error('Sender allow is unavailable');
         try {
           value = await publicStatus(
-            await controller.approveSender(payload.botId, payload.requestId),
+            await controller.approveSender(payload.botId, payload.requestId, payload.scenes),
             cachedEncode,
           );
         } catch (error) {

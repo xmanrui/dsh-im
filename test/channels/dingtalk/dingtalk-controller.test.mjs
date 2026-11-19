@@ -273,7 +273,7 @@ test('sender approval uses opaque request and sender keys while raw staff IDs st
   await controller.close();
 });
 
-test('approving mirrors the sender into both allowlists and removing undoes both', async () => {
+test('approving writes the selected allowlists instead of a second sender list', async () => {
   const events = [];
   const identity = deriveDingtalkBotIdentity('ding-client-one');
   const config = {
@@ -308,22 +308,12 @@ test('approving mirrors the sender into both allowlists and removing undoes both
   await controller.initialize();
 
   const pending = controller.status().bots[0].senders.pending[0];
-  await controller.approveSender(identity.botId, pending.requestId);
+  await controller.approveSender(identity.botId, pending.requestId, ['group']);
 
   assert.deepEqual(synced, [
-    { botId: identity.botId, staffId: 'staff-private-one', present: true, scene: 'direct' },
     { botId: identity.botId, staffId: 'staff-private-one', present: true, scene: 'group' },
   ]);
-  assert.equal(configs.bots.get(identity.botId).approvedSenders.length, 1);
-
-  const approved = controller.status().bots[0].senders.approved[0];
-  synced.length = 0;
-  await controller.revokeSender(identity.botId, approved.senderKey);
-
-  assert.deepEqual(synced, [
-    { botId: identity.botId, staffId: 'staff-private-one', present: false, scene: 'direct' },
-    { botId: identity.botId, staffId: 'staff-private-one', present: false, scene: 'group' },
-  ]);
+  // 不再产生第二份名单。
   assert.equal(configs.bots.get(identity.botId).approvedSenders.length, 0);
   await controller.close();
 });

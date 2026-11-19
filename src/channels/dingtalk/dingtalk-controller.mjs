@@ -498,15 +498,17 @@ export class DingtalkController {
     return { ...this.status(), ...(warnings.length ? { warnings } : {}) };
   }
 
-  /** Approves one opaque pending-sender request for a bot. */
-  async approveSender(botId, requestId) {
-    const config = this.#configStore.get(botId);
-    if (!config) throw new Error('Unknown DingTalk bot');
+  /**
+   * Allows one opaque pending-sender request into the selected access-policy
+   * scenes. There is no second list: the settings page derives its user list
+   * from these allowlists, so writing them is the whole approval.
+   */
+  async approveSender(botId, requestId, scenes = ['direct', 'group']) {
     const runtime = this.#runtimes.get(botId);
+    const pending = internalPendingSenders(runtimeStatus(runtime));
     const direct = typeof runtime?.pendingSender === 'function'
       ? normalizePendingSender(runtime.pendingSender(requestId))
       : null;
-    const pending = internalPendingSenders(runtimeStatus(runtime));
     const sender = direct?.requestId === requestId
       ? direct
       : pending.find((candidate) => candidate.requestId === requestId);
@@ -515,36 +517,33 @@ export class DingtalkController {
       error.code = 'sender-request-not-found';
       throw error;
     }
-    if (config.approvedSenders.some((approved) => approved.staffId === sender.staffId)) {
+    const wanted = Array.isArray(scenes)
+      ? [...new Set(scenes.filter((scene) => scene === 'direct' || scene === 'group'))]
+      : [];
+    const targets = wanted.length ? wanted : ['direct', 'group'];
+    if (!this.#syncAllowlist) {
+      // 没有白名单写入能力时退回旧行为，保持既有调用方语义。
+      const config = this.#configStore.get(botId);
+      if (!config) throw new Error('Unknown DingTalk bot');
+      const updated = {
+        ...config,
+        approvedSenders: [
+          ...config.approvedSenders,
+          {
+            senderKey: deriveDingtalkSenderKey(),
+            staffId: sender.staffId,
+            displayName: sender.displayName,
+            approvedAt: isoNow(this.#clock),
+          },
+        ],
+      };
+      await this.#saveAndRestart(config, updated);
       return this.status();
     }
-    const updated = {
-      ...config,
-      approvedSenders: [
-        ...config.approvedSenders,
-        {
-          senderKey: deriveDingtalkSenderKey(),
-          staffId: sender.staffId,
-          displayName: sender.displayName,
-          approvedAt: isoNow(this.#clock),
-        },
-      ],
-    };
-    // 先写白名单再落配置：白名单失败就当整体失败，不会留下"已批准但白名单缺失"。
-    const written = [];
-    try {
-      for (const scene of ['direct', 'group']) {
-        if (!this.#syncAllowlist) break;
-        await this.#syncAllowlist(botId, sender.staffId, true, scene);
-        written.push(scene);
-      }
-      await this.#saveAndRestart(config, updated);
-    } catch (error) {
-      for (const scene of written) {
-        await this.#syncAllowlist?.(botId, sender.staffId, false, scene).catch(() => undefined);
-      }
-      throw error;
+    for (const scene of targets) {
+      await this.#syncAllowlist(botId, sender.staffId, true, scene);
     }
+    await runtime?.forgetPendingSender?.(requestId);
     return this.status();
   }
 

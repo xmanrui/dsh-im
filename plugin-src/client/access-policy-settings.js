@@ -291,11 +291,11 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   const [feedback, setFeedback] = React.useState(null);
   // 被访问策略拦下的人：桥接层记进 pendingSenders，这里逐个放行。
   const [pendingSenders, setPendingSenders] = React.useState([]);
-  const [approvedSenders, setApprovedSenders] = React.useState([]);
   const [pendingLoading, setPendingLoading] = React.useState(channel === 'dingtalk');
   const [approvingId, setApprovingId] = React.useState(null);
-  const [removingId, setRemovingId] = React.useState(null);
-  const [sceneBusyKey, setSceneBusyKey] = React.useState(null);
+  // 允许时勾选的场景：默认两个都勾。
+  const [scenes, setScenes] = React.useState({ direct: true, group: true });
+  const [removingUserId, setRemovingUserId] = React.useState(null);
   const [pendingFeedback, setPendingFeedback] = React.useState(null);
 
   const refreshPolicyFromServer = async () => {
@@ -336,8 +336,12 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     setApprovingId(sender.requestId);
     setPendingFeedback(null);
     try {
+      const picked = ['direct', 'group'].filter((scene) => scenes[scene]);
       const result = await rpcCall(DINGTALK_ENDPOINTS.allowSender, {
-        botId: account.botId, requestId: sender.requestId, confirm: true,
+        botId: account.botId,
+        requestId: sender.requestId,
+        confirm: true,
+        scenes: picked.length ? picked : ['direct'],
       });
       if (result?.ok !== true) {
         const code = result?.error?.code;
@@ -358,58 +362,44 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     }
   };
 
-  const removeApprovedSender = async (sender) => {
-    if (removingId) return;
-    // 没有 senderKey 就不要静默失败：旧数据或读取失败时给出明确提示。
-    if (!sender?.senderKey) {
-      setPendingFeedback('这条记录缺少身份标识（可能是旧版本留下的数据）。请刷新页面后重试；仍然失败就重启一次应用。');
-      return;
-    }
-    setRemovingId(sender.senderKey);
-    setPendingFeedback(null);
-    try {
-      const result = await rpcCall(DINGTALK_ENDPOINTS.removeApproved, {
-        botId: account.botId, senderKey: sender.senderKey, confirm: true,
-      });
-      if (result?.ok !== true) {
-        const code = result?.error?.code;
-        if (code === 'approved-sender-not-found') {
-          // 记录已经不在了：刷新列表即可，不要拿它当错误吓人。
-          await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
-          setFeedback({ tone: 'success', message: STALE_NOTICE });
-          return;
-        }
-        const fallback = '移除失败，请重试。';
-        throw new Error(code
-          ? `${result?.error?.message || fallback} [${code}]`
-          : (result?.error?.message || fallback));
-      }
-      await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
-      setFeedback({ tone: 'success', message: '已移除该用户，之后发消息会被重新拦截。' });
-    } catch (error) {
-      setPendingFeedback(error.message);
-    } finally {
-      setRemovingId(null);
-    }
-  };
 
-  const toggleApprovedScene = async (sender, scene, enabled) => {
-    if (sceneBusyKey) return;
-    setSceneBusyKey(sender.senderKey);
-    setPendingFeedback(null);
+
+  // 用户列表不是独立存储：它就是两份白名单的合并视图。
+  const directoryUsers = React.useMemo(() => {
+    const merged = new Map();
+    for (const scene of ['direct', 'group']) {
+      for (const user of draft[scene].allowlist.users) {
+        const entry = merged.get(user.id) ?? { id: user.id, direct: false, group: false };
+        entry[scene] = true;
+        merged.set(user.id, entry);
+      }
+    }
+    return [...merged.values()];
+  }, [draft]);
+
+  const removeUserEverywhere = async (id) => {
+    if (removingUserId) return;
+    setRemovingUserId(id);
+    setFeedback(null);
     try {
-      const result = await rpcCall(DINGTALK_ENDPOINTS.setApprovedScenes, {
-        botId: account.botId,
-        senderKey: sender.senderKey,
-        confirm: true,
-        scenes: { ...sender.scenes, [scene]: enabled },
-      });
-      if (result?.ok !== true) throw new Error(result?.error?.message || '切换场景失败，请重试。');
-      await loadPendingSenders();
+      const next = {
+        ...draft,
+        direct: { ...draft.direct, allowlist: { users: draft.direct.allowlist.users.filter((user) => user.id !== id) } },
+        group: { ...draft.group, allowlist: { users: draft.group.allowlist.users.filter((user) => user.id !== id) } },
+      };
+      const policy = validateAccessPolicy(next);
+      const value = unwrapRpcResult(await rpcCall(ACCESS_POLICY_ENDPOINT, {
+        botId: account.botId, policy,
+      }));
+      const saved = policyFromSnapshot(value, account.botId);
+      if (!saved) throw new Error('服务没有返回已保存的访问策略，请刷新后重试。');
+      setDraft(clonePolicy(saved));
+      onSaved?.(saved);
+      setFeedback({ tone: 'success', message: '已从单聊和群聊白名单中移除该用户。' });
     } catch (error) {
-      setPendingFeedback(error.message);
+      setFeedback({ tone: 'error', message: error?.message || '移除失败，请稍后重试。' });
     } finally {
-      setSceneBusyKey(null);
+      setRemovingUserId(null);
     }
   };
 
@@ -482,6 +472,21 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       h('span', null, '被拦截的用户'))),
   h('p', { className: 'dim-accessHint' },
     '不在白名单、私聊过机器人的人。允许后会加入白名单，下一次消息就能正常回答。'),
+  h('div', { className: 'dim-accessDeniedRow' },
+    h('div', { className: 'dim-accessDeniedName' },
+      h('span', null, '加入白名单'),
+      h('label', null,
+        h('input', {
+          type: 'checkbox',
+          checked: scenes.direct,
+          onChange: (event) => setScenes({ ...scenes, direct: event.target.checked }),
+        }), ' ', '单聊'),
+      h('label', null,
+        h('input', {
+          type: 'checkbox',
+          checked: scenes.group,
+          onChange: (event) => setScenes({ ...scenes, group: event.target.checked }),
+        }), ' ', '群聊'))),
   pendingLoading
     ? h('div', { className: 'dim-accessState' }, '正在读取…')
     : pendingSenders.length === 0
@@ -502,44 +507,31 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   pendingFeedback ? h('p', {
     className: 'dim-accessFeedback', 'data-tone': 'error', role: 'alert',
   }, pendingFeedback) : null,
-  approvedSenders.length === 0 ? null : h('fieldset', {
+  directoryUsers.length === 0 ? null : h('fieldset', {
     className: 'dim-accessScene',
-    'data-scene': 'approved',
-    'aria-label': localizeText('已批准的用户'),
+    'data-scene': 'directory',
+    'aria-label': localizeText('用户列表'),
   },
   h('legend', null,
     h('span', { className: 'dim-accessLegendContent' },
-      h('span', null, '已批准的用户'))),
+      h('span', null, '用户列表'))),
   h('p', { className: 'dim-accessHint' },
-    '优先级最高：命中此名单的人私聊和群聊都会放行，不再受下面白名单与访问模式的约束。'),
-  h('ul', { className: 'dim-accessUserList' }, approvedSenders.map((sender) => h('li', {
-    key: sender.senderKey ?? sender.senderIdMasked,
+    '两份白名单的合并视图：显示每个人当前拥有的单聊/群聊权限；移除后两处都会清掉。'),
+  h('ul', { className: 'dim-accessUserList' }, directoryUsers.map((user) => h('li', {
+    key: user.id,
     className: 'dim-accessDeniedRow',
   },
     h('div', { className: 'dim-accessDeniedName' },
-      h('strong', null, sender.displayName || '钉钉用户'),
-      h('code', null, sender.senderIdMasked)),
+      h('code', null, user.id)),
     h('div', { className: 'dim-accessDeniedName' },
-      h('label', null,
-        h('input', {
-          type: 'checkbox',
-          checked: sender.scenes?.direct !== false,
-          disabled: sceneBusyKey !== null,
-          onChange: (event) => void toggleApprovedScene(sender, 'direct', event.target.checked),
-        }), ' ', '单聊'),
-      h('label', null,
-        h('input', {
-          type: 'checkbox',
-          checked: sender.scenes?.group !== false,
-          disabled: sceneBusyKey !== null,
-          onChange: (event) => void toggleApprovedScene(sender, 'group', event.target.checked),
-        }), ' ', '群聊')),
+      user.direct ? h('span', { className: 'dim-accessState' }, '单聊') : null,
+      user.group ? h('span', { className: 'dim-accessState' }, '群聊') : null),
     h('button', {
       type: 'button',
       className: 'dim-deliveryButton',
-      disabled: removingId !== null,
-      onClick: () => void removeApprovedSender(sender),
-    }, removingId === sender.senderKey ? '正在移除…' : '移除')))))) : null,
+      disabled: removingUserId !== null,
+      onClick: () => void removeUserEverywhere(user.id),
+    }, removingUserId === user.id ? '正在移除…' : '移除')))))) : null,
   feedback ? h('p', {
     className: 'dim-accessFeedback',
     'data-tone': feedback.tone,
