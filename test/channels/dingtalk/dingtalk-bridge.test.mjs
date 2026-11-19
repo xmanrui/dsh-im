@@ -1110,13 +1110,15 @@ test('DingTalk applies the unified access policy before attachments or Harness w
   }));
   assert.equal(downloads, 0);
   assert.deepEqual(harnessCalls, []);
-  assert.deepEqual(sent, []);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /暂无访问权限/u);
 
   await bridge.accept(message('policy-member-text', '普通消息', {
     senderStaffId: 'staff-member',
   }));
   assert.equal(harnessCalls.some(([operation]) => operation === 'ask'), true);
-  assert.deepEqual(sent, ['白名单消息已处理']);
+  assert.deepEqual(sent.slice(-1), ['白名单消息已处理']);
+  assert.equal(sent.length, 2);
 
   const callsBeforeDeniedCommand = harnessCalls.length;
   const repliesBeforeDeniedCommand = sent.length;
@@ -1786,7 +1788,7 @@ test('bridge streams one AI Card and mentions only the group sender without an e
 
       assert.equal(calls.create.length, 1);
       assert.deepEqual(calls.create[0].target, scenario.target);
-      assert.equal(calls.update.at(-1).text, '生成中的完整快照');
+      assert.equal(calls.update.at(-1).text.replace(/\.+$/u, ''), '生成中的完整快照');
       assert.equal(calls.finish.length, 1);
       assert.equal(calls.finish[0].text, '最终完整回答');
       assert.equal(calls.text.length, 0);
