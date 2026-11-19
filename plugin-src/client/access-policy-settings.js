@@ -341,7 +341,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       });
       if (result?.ok !== true) {
         const code = result?.error?.code;
-        if (code === 'sender-allow-failed' || code === 'sender-request-not-found') {
+        if (code === 'sender-request-not-found') {
           await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
           setFeedback({ tone: 'success', message: STALE_NOTICE });
           return;
@@ -373,7 +373,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       });
       if (result?.ok !== true) {
         const code = result?.error?.code;
-        if (code === 'sender-remove-failed' || code === 'approved-sender-not-found') {
+        if (code === 'approved-sender-not-found') {
           // 记录已经不在了：刷新列表即可，不要拿它当错误吓人。
           await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
           setFeedback({ tone: 'success', message: STALE_NOTICE });

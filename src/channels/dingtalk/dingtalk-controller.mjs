@@ -569,10 +569,13 @@ export class DingtalkController {
       error.code = 'approved-sender-not-found';
       throw error;
     }
+    const sender = config.approvedSenders[index];
     const approvedSenders = [...config.approvedSenders];
     approvedSenders.splice(index, 1);
-    // 先从白名单摘掉（失败就整体失败），再删已批准记录，两边不会各走各的。
-    await this.#syncAllowlist?.(botId, sender.staffId, false);
+    // 先从两个场景的白名单里摘掉（失败就整体失败），再删已批准记录。
+    for (const scene of ['direct', 'group']) {
+      await this.#syncAllowlist?.(botId, sender.staffId, false, scene);
+    }
     await this.#saveAndRestart(config, { ...config, approvedSenders });
     return this.status();
   }
