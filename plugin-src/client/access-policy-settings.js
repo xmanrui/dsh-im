@@ -319,7 +319,6 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       if (result?.ok !== true) throw new Error(result?.error?.message || '无法读取被拦截的用户。');
       const bot = result.value?.bots?.find((entry) => entry.botId === account?.botId);
       setPendingSenders(Array.isArray(bot?.senders?.pending) ? bot.senders.pending : []);
-      setApprovedSenders(Array.isArray(bot?.senders?.approved) ? bot.senders.approved : []);
     } catch (error) {
       setPendingFeedback(error.message);
     } finally {
