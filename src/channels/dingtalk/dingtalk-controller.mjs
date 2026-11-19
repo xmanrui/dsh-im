@@ -530,9 +530,21 @@ export class DingtalkController {
         },
       ],
     };
-    // 先写白名单：失败就整体失败，避免"已批准但白名单没有"的中间态。
-    await this.#syncAllowlist?.(botId, sender.staffId, true);
-    await this.#saveAndRestart(config, updated);
+    // 先写白名单再落配置：白名单失败就当整体失败，不会留下"已批准但白名单缺失"。
+    const written = [];
+    try {
+      for (const scene of ['direct', 'group']) {
+        if (!this.#syncAllowlist) break;
+        await this.#syncAllowlist(botId, sender.staffId, true, scene);
+        written.push(scene);
+      }
+      await this.#saveAndRestart(config, updated);
+    } catch (error) {
+      for (const scene of written) {
+        await this.#syncAllowlist?.(botId, sender.staffId, false, scene).catch(() => undefined);
+      }
+      throw error;
+    }
     return this.status();
   }
 
@@ -572,11 +584,18 @@ export class DingtalkController {
     const sender = config.approvedSenders[index];
     const approvedSenders = [...config.approvedSenders];
     approvedSenders.splice(index, 1);
-    // 先从两个场景的白名单里摘掉（失败就整体失败），再删已批准记录。
-    for (const scene of ['direct', 'group']) {
-      await this.#syncAllowlist?.(botId, sender.staffId, false, scene);
-    }
+    // 先撤掉旁路（权限的真相），再清白名单；白名单失败就把配置还原。
     await this.#saveAndRestart(config, { ...config, approvedSenders });
+    try {
+      for (const scene of ['direct', 'group']) {
+        if (!this.#syncAllowlist) break;
+        await this.#syncAllowlist(botId, sender.staffId, false, scene);
+      }
+    } catch (error) {
+      // 还原：把带这条已批准记录的旧配置写回去。
+      await this.#saveAndRestart({ ...config, approvedSenders }, config).catch(() => undefined);
+      throw error;
+    }
     return this.status();
   }
 
