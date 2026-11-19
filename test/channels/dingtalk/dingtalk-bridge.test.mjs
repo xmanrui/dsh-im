@@ -3262,3 +3262,39 @@ test('an unset text override keeps the i18n default', async () => {
   await bridge.accept(message('texts-default', '你好'));
   assert.equal(calls.create[0].initialText, '正在思考 🤔');
 });
+
+test('a denied sender is recorded for the access settings page', async () => {
+  const fixture = stateFixture();
+  const bridge = new DingtalkHarnessBridge({
+    api: { sendText: async () => ({ messageId: 'denied-notice' }) },
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    accessPolicy: directAccessPolicy({
+      users: [{ id: 'staff-approved', canExecuteCommands: true }],
+    }),
+    harness: {
+      sessionExists: async () => true,
+      ask: async () => '不会被调用',
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('denied-sender', '你好', {
+    senderStaffId: 'staff-intruder',
+    senderNick: '陌生人',
+  }));
+
+  assert.equal(fixture.pending.size, 1);
+  const entry = [...fixture.pending.values()][0];
+  assert.equal(entry.staffId, 'staff-intruder');
+  assert.equal(entry.displayName, '陌生人');
+  assert.equal(typeof entry.requestId, 'string');
+  assert.ok(entry.requestId);
+
+  const status = bridge.status;
+  assert.equal(status.pendingSenders.length, 1);
+  assert.equal(status.pendingSenders[0].staffId, 'staff-intruder');
+  // 私聊被拒会回一句提示，所以计的是 replied 而不是 rejected。
+  assert.equal(status.messagesReplied, 1);
+  assert.equal(status.messagesReceived, 1);
+});

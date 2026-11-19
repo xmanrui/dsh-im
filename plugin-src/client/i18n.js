@@ -1401,6 +1401,14 @@ const DINGTALK_TEXTS_EN = Object.freeze({
   '留空即使用默认文案；只有填过的字段会被保存，切换界面语言时默认文案仍会自动翻译。': 'Leave a field empty to use the default wording. Only the fields you fill are stored, so the rest keep following the interface language.',
   '提示文案': 'Status texts',
   '默认：{text}': 'Default: {text}',
+  '被拦截的用户': 'Intercepted users',
+  '不在白名单、私聊过机器人的人。允许后会加入白名单，下一次消息就能正常回答。': 'People outside the allowlist who messaged the bot directly. Allowing one adds them to the allowlist, and their next message is answered normally.',
+  '暂无被拦截的用户': 'No intercepted users',
+  '钉钉用户': 'DingTalk user',
+  '允许': 'Allow',
+  '正在允许…': 'Allowing…',
+  '无法读取被拦截的用户。': 'Could not load intercepted users.',
+  '允许失败，请重试。': 'Allow failed. Try again.',
 });
 
 export const en = { ...EN, ...DINGTALK_TEXTS_EN };

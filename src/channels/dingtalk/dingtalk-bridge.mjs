@@ -1310,6 +1310,17 @@ export class DingtalkHarnessBridge {
           senderName: nonEmptyString(message?.senderNick),
           conversationType: message?.conversationType,
         });
+        // 记进待审批列表，设置页的「访问设置」可以逐个放行；记不下来也不影响拒绝本身。
+        try {
+          await this.#state.recordPendingSender?.({
+            staffId: senderStaffId(message),
+            displayName: message?.senderNick,
+            lastSeenAt: new Date().toISOString(),
+          });
+          this.#refreshPendingSenders();
+        } catch {
+          // 记录失败不改变访问决定。
+        }
         // 只在私聊回提示：群里对非白名单成员逐条回复会变成刷屏。
         if (Number(message?.conversationType) === 1) {
           await this.#send(sessionWebhook, this.#accessDeniedText(), this.#atUsersFor(message));

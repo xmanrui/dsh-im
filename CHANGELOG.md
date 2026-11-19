@@ -8,6 +8,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Added / 新增
 
+- 钉钉：「访问设置」新增「被拦截的用户」列表 —— 非白名单用户私聊机器人被拒后会被记下来（同一个人重复被拒只更新时间），面板里显示昵称与打码后的 ID，点「允许」即把人加入白名单，下一条消息就能正常回答。之前这类拒绝只写进宿主日志，运维看不到是谁。
+  DingTalk: the access settings tab now lists intercepted users — a direct message rejected by the allowlist is recorded (a repeat sender only refreshes the timestamp), shown with its nickname and masked id, and one click on "Allow" adds the sender to the allowlist so the next message is answered. These rejections used to exist only in the host log.
+
 - 钉钉：新增「提示文案」设置（每个机器人单独配置）—— 卡片初始文案、处理中文案、工具进度文案（支持 `{name}`）、联网搜索文案、无权限提示，共 5 项，可在机器人设置页直接修改。留空即回退到 i18n 默认文案，因此只保存真正改过的字段，切换界面语言时其余文案仍自动翻译；保存后立即生效，无需重启。
   DingTalk: a new per-bot "status texts" settings tab for the card initial text, the working text, the tool progress text (with a `{name}` placeholder), the web search text and the access-denied notice. An empty field falls back to the i18n default, so only the values an operator actually changed are stored and every other text keeps following the interface language; changes take effect immediately.
 
