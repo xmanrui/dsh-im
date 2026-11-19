@@ -1603,6 +1603,9 @@ export class WeixinHarnessBridge {
       sendImage: typeof this.#api.sendImage === 'function'
         ? (file) => sendArtifact('sendImage', file)
         : undefined,
+      sendVideo: typeof this.#api.sendVideo === 'function'
+        ? (file) => sendArtifact('sendVideo', file)
+        : undefined,
       sendFile: typeof this.#api.sendFile === 'function'
         ? (file) => sendArtifact('sendFile', file)
         : undefined,

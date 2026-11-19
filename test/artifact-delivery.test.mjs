@@ -106,6 +106,82 @@ test('image artifacts prefer the native image sender', async (t) => {
   await assertReleased(artifact);
 });
 
+test('video artifacts prefer the native video sender', async (t) => {
+  const artifact = await committedArtifact(t, 'result.mp4', Buffer.from([1, 2, 3]));
+  const calls = [];
+
+  const delivery = await deliverOutboundArtifacts({
+    artifacts: [artifact],
+    channelKey: 'test',
+    sendVideo: async (file) => {
+      calls.push(`video:${file.mediaType}`);
+      return { id: 'video-1' };
+    },
+    sendImage: async () => calls.push('image'),
+    sendFile: async () => calls.push('file'),
+  });
+
+  assert.deepEqual(calls, ['video:video/mp4']);
+  assert.equal(delivery.receipt.presentation, 'test-video');
+  assert.deepEqual(delivery.receipt.providerMessageIds, ['video-1']);
+  await assertReleased(artifact);
+});
+
+test('a definitive native-video rejection falls back to file delivery', async (t) => {
+  const artifact = await committedArtifact(t, 'result.mov', Buffer.from([1]));
+  const calls = [];
+
+  const delivery = await deliverOutboundArtifacts({
+    artifacts: [artifact],
+    channelKey: 'test',
+    sendVideo: async () => {
+      calls.push('video');
+      throw rejected('artifact-provider-rejected');
+    },
+    sendFile: async () => {
+      calls.push('file');
+      return { id: 'file-after-video' };
+    },
+  });
+
+  assert.deepEqual(calls, ['video', 'file']);
+  assert.equal(delivery.receipt.presentation, 'test-file');
+  assert.equal(delivery.artifactsSent, 1);
+  assert.equal(delivery.artifactSendErrors, 0);
+  await assertReleased(artifact);
+});
+
+test('an uncertain native-video result never sends a duplicate file', async (t) => {
+  const artifact = await committedArtifact(t, 'result.m4v', Buffer.from([1]));
+  let fileCalls = 0;
+  let notices = 0;
+
+  const delivery = await deliverOutboundArtifacts({
+    artifacts: [artifact],
+    channelKey: 'test',
+    sendVideo: async () => {
+      throw rejected('artifact-delivery-uncertain');
+    },
+    sendFile: async () => {
+      fileCalls += 1;
+    },
+    sendFailureNotice: async () => {
+      notices += 1;
+      return { messageId: 'notice-video' };
+    },
+  });
+
+  assert.equal(fileCalls, 0);
+  assert.equal(notices, 1);
+  assert.deepEqual(delivery.receipt.artifacts, [{
+    artifactId: artifact.artifactId,
+    outcome: 'unknown',
+    reason: 'artifact-delivery-uncertain',
+  }]);
+  assert.equal(delivery.userVisible, true);
+  await assertReleased(artifact);
+});
+
 test('an image uses file delivery when the channel has no image sender', async (t) => {
   const artifact = await committedArtifact(t, 'result.jpg', Buffer.from([1]));
   let fileCalls = 0;

@@ -529,6 +529,82 @@ test('sendFile uses the iLink 2.4.6 encrypted CDN flow and sends a native file i
   }]);
 });
 
+test('sendVideo uses the encrypted CDN flow and sends a native video item', async () => {
+  const calls = [];
+  const api = createWeixinApi({
+    fetchImpl: async (url, init) => {
+      calls.push({ url: url.toString(), init });
+      if (url.pathname.endsWith('/getuploadurl')) {
+        return jsonResponse({
+          ret: 0,
+          upload_full_url: 'https://novac2c.cdn.weixin.qq.com/c2c/upload?ticket=video-one',
+        });
+      }
+      if (url.pathname === '/c2c/upload') {
+        calls.at(-1).ciphertext = await uploadBytes(init.body);
+        return new Response(null, {
+          status: 200,
+          headers: { 'x-encrypted-param': 'download-video-ticket' },
+        });
+      }
+      return jsonResponse({ ret: 0 });
+    },
+  });
+  const plaintext = Buffer.from('weixin-native-video');
+  const result = await api.sendVideo({
+    baseUrl: 'https://ilinkai.weixin.qq.com',
+    token: 'host-only-token',
+    toUserId: 'wx-user',
+    contextToken: 'message-context',
+    runId: 'run-video',
+    file: {
+      artifactId: 'artifact-video',
+      deliveryKey: 'session:turn:artifact-video',
+      fileName: 'result.mp4',
+      mediaType: 'video/mp4',
+      bytes: plaintext,
+    },
+  });
+
+  assert.equal(calls.length, 3);
+  const ticket = JSON.parse(calls[0].init.body);
+  assert.equal(ticket.media_type, 2);
+  assert.equal(ticket.to_user_id, 'wx-user');
+  assert.equal(ticket.rawsize, plaintext.length);
+  assert.equal(ticket.rawfilemd5, '96860712a1430e2374ea3eacdb2ba257');
+  assert.equal(ticket.filesize, 32);
+  assert.equal(ticket.no_need_thumb, true);
+  assert.match(ticket.aeskey, /^[0-9a-f]{32}$/);
+
+  assert.equal(calls[1].init.headers.Authorization, undefined);
+  assert.equal(calls[1].init.headers['content-type'], 'application/octet-stream');
+  assert.equal(calls[1].ciphertext.byteLength, 32);
+  assert.equal(calls[1].init.headers['content-length'], '32');
+  assert.equal(calls[1].init.duplex, 'half');
+  assert.equal(
+    decryptWeixinImage(calls[1].ciphertext, Buffer.from(ticket.aeskey, 'hex')).equals(plaintext),
+    true,
+  );
+
+  const sent = JSON.parse(calls[2].init.body).msg;
+  assert.equal(sent.context_token, 'message-context');
+  assert.equal(sent.run_id, 'run-video');
+  assert.match(sent.client_id, /^dsh-weixin-[0-9a-f]{32}$/);
+  assert.equal(result.messageId, sent.client_id);
+  assert.deepEqual(sent.item_list, [{
+    type: 5,
+    video_item: {
+      media: {
+        encrypt_query_param: 'download-video-ticket',
+        aes_key: Buffer.from(ticket.aeskey).toString('base64'),
+        encrypt_type: 1,
+      },
+      video_size: 32,
+      video_md5: ticket.rawfilemd5,
+    },
+  }]);
+});
+
 test('sendImage uses the encrypted CDN flow and sends a native image item', async () => {
   const calls = [];
   const api = createWeixinApi({
@@ -634,8 +710,8 @@ function weixinFileFetch(finalResponse) {
   };
 }
 
-test('images and files use the injected CDN fetch while JSON requests keep their existing fetch', async () => {
-  for (const operation of ['sendImage', 'sendFile']) {
+test('images, videos and files use the injected CDN fetch while JSON requests keep their existing fetch', async () => {
+  for (const operation of ['sendImage', 'sendVideo', 'sendFile']) {
     const jsonCalls = [];
     const uploads = [];
     const api = createWeixinApi({
@@ -666,7 +742,7 @@ test('images and files use the injected CDN fetch while JSON requests keep their
       request.file.bytes,
     );
     const item = jsonCalls[1].body.msg.item_list[0];
-    assert.equal((item.image_item ?? item.file_item).media.encrypt_query_param, 'private-download');
+    assert.equal((item.image_item ?? item.video_item ?? item.file_item).media.encrypt_query_param, 'private-download');
   }
 });
 
