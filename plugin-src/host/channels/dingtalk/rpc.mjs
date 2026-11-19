@@ -35,6 +35,8 @@ export const DINGTALK_ENDPOINTS = Object.freeze({
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
   approveSender: 'bot.sender.approve',
+  allowPendingSender: 'bot.sender.allow',
+  removeApprovedSender: 'bot.sender.remove',
   revokeSender: 'bot.sender.revoke',
 });
 export const DINGTALK_RPC_ENDPOINTS = Object.freeze(Object.values(DINGTALK_ENDPOINTS));
@@ -132,6 +134,22 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === DINGTALK_ENDPOINTS.setAlias) {
     return validAliasPayload(payload)
       ? null : '请输入有效的别名（最多 80 个字符）。';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.allowPendingSender) {
+    return exactKeys(payload, ['botId', 'requestId', 'confirm'])
+      && validId(payload.botId)
+      && validId(payload.requestId)
+      && payload.confirm === true
+      ? null
+      : 'bot.sender.allow requires botId, requestId, and confirm=true.';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.removeApprovedSender) {
+    return exactKeys(payload, ['botId', 'senderKey', 'confirm'])
+      && validId(payload.botId)
+      && validId(payload.senderKey)
+      && payload.confirm === true
+      ? null
+      : 'bot.sender.remove requires botId, senderKey, and confirm=true.';
   }
   if (endpoint === DINGTALK_ENDPOINTS.approveSender) {
     return exactKeys(payload, ['botId', 'requestId', 'confirm'])
@@ -326,6 +344,39 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
         value = await controller.updateBusyMessageMode(
           payload.botId, payload.busyMessageMode, (status) => publicStatus(status, cachedEncode),
         );
+      } else if (endpoint === DINGTALK_ENDPOINTS.removeApprovedSender) {
+        if (typeof controller.revokeSender !== 'function') throw new Error('Sender removal is unavailable');
+        try {
+          value = await publicStatus(
+            await controller.revokeSender(payload.botId, payload.senderKey),
+            cachedEncode,
+          );
+        } catch (error) {
+          return {
+            ok: false,
+            error: {
+              code: 'sender-remove-failed',
+              message: String(error?.message ?? error).slice(0, 240),
+            },
+          };
+        }
+      } else if (endpoint === DINGTALK_ENDPOINTS.allowPendingSender) {
+        // 设置页只拿得到不透明的 requestId；原始 staffId 始终留在宿主侧。
+        if (typeof controller.approveSender !== 'function') throw new Error('Sender allow is unavailable');
+        try {
+          value = await publicStatus(
+            await controller.approveSender(payload.botId, payload.requestId),
+            cachedEncode,
+          );
+        } catch (error) {
+          return {
+            ok: false,
+            error: {
+              code: 'sender-allow-failed',
+              message: String(error?.message ?? error).slice(0, 240),
+            },
+          };
+        }
       } else if (endpoint === DINGTALK_ENDPOINTS.setTextOverrides) {
         if (typeof controller.updateTextOverrides !== 'function') throw new Error('Text override update is unavailable');
         value = await controller.updateTextOverrides(

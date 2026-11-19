@@ -134,6 +134,7 @@ export class DingtalkController {
   #credentials;
   #configStore;
   #createRuntime;
+  #syncAllowlist;
   #deleteState;
   #logger;
   #diagnostics;
@@ -162,6 +163,7 @@ export class DingtalkController {
     configStore,
     createRuntime,
     deleteState = async () => {},
+    syncAllowlist = null,
     logger = console,
     clock = Date,
   }) {
@@ -194,6 +196,7 @@ export class DingtalkController {
     this.#configStore = configStore;
     this.#createRuntime = createRuntime;
     this.#deleteState = deleteState;
+    this.#syncAllowlist = typeof syncAllowlist === 'function' ? syncAllowlist : null;
     this.#logger = logger;
     this.#diagnostics = createConnectionDiagnostics({ channel: 'dingtalk', prefix: 'DT-CONN', logger });
     this.#clock = clock;
@@ -503,7 +506,11 @@ export class DingtalkController {
     const sender = direct?.requestId === requestId
       ? direct
       : pending.find((candidate) => candidate.requestId === requestId);
-    if (!sender) throw new Error('Unknown DingTalk sender approval request');
+    if (!sender) {
+      const error = new Error('Unknown DingTalk sender approval request');
+      error.code = 'sender-request-not-found';
+      throw error;
+    }
     if (config.approvedSenders.some((approved) => approved.staffId === sender.staffId)) {
       return this.status();
     }
@@ -520,6 +527,8 @@ export class DingtalkController {
       ],
     };
     await this.#saveAndRestart(config, updated);
+    // 面板上的「允许」= 这个人在访问设置里可见，所以同时写访问策略白名单。
+    await this.#syncAllowlist?.(botId, sender.staffId, true).catch(() => undefined);
     return this.status();
   }
 
@@ -530,10 +539,15 @@ export class DingtalkController {
     const index = config.approvedSenders.findIndex(
       (sender) => sender.senderKey === senderKey,
     );
-    if (index === -1) throw new Error('Unknown approved DingTalk sender');
+    if (index === -1) {
+      const error = new Error('Unknown approved DingTalk sender');
+      error.code = 'approved-sender-not-found';
+      throw error;
+    }
     const approvedSenders = [...config.approvedSenders];
     approvedSenders.splice(index, 1);
     await this.#saveAndRestart(config, { ...config, approvedSenders });
+    await this.#syncAllowlist?.(botId, sender.staffId, false).catch(() => undefined);
     return this.status();
   }
 

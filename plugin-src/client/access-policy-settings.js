@@ -9,6 +9,7 @@ import { h, localizeText } from './i18n.js';
 import { DINGTALK_ENDPOINTS } from './channels/dingtalk/api.js';
 
 export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
+const STALE_NOTICE = '这条记录已经不存在了（可能已被处理过），列表已刷新。';
 const CONFIRMED_OWNER_CHANNELS = new Set(['weixin', 'feishu', 'qq', 'whatsapp', 'discord']);
 
 export const ACCESS_CHANNEL_DEFINITIONS = Object.freeze({
@@ -290,9 +291,25 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   const [feedback, setFeedback] = React.useState(null);
   // 被访问策略拦下的人：桥接层记进 pendingSenders，这里逐个放行。
   const [pendingSenders, setPendingSenders] = React.useState([]);
+  const [approvedSenders, setApprovedSenders] = React.useState([]);
   const [pendingLoading, setPendingLoading] = React.useState(channel === 'dingtalk');
   const [approvingId, setApprovingId] = React.useState(null);
+  const [removingId, setRemovingId] = React.useState(null);
   const [pendingFeedback, setPendingFeedback] = React.useState(null);
+
+  const refreshPolicyFromServer = async () => {
+    try {
+      const result = await rpcCall('connection.status', {});
+      const bot = result?.value?.bots?.find((entry) => entry.botId === account?.botId);
+      const refreshed = normalizeAccessPolicy(bot?.accessPolicy);
+      if (refreshed) {
+        setDraft(clonePolicy(refreshed));
+        onSaved?.(refreshed);
+      }
+    } catch {
+      // 读不到就保持当前草稿，用户可手动刷新。
+    }
+  };
 
   const loadPendingSenders = React.useCallback(async () => {
     if (channel !== 'dingtalk') return;
@@ -301,6 +318,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       if (result?.ok !== true) throw new Error(result?.error?.message || '无法读取被拦截的用户。');
       const bot = result.value?.bots?.find((entry) => entry.botId === account?.botId);
       setPendingSenders(Array.isArray(bot?.senders?.pending) ? bot.senders.pending : []);
+      setApprovedSenders(Array.isArray(bot?.senders?.approved) ? bot.senders.approved : []);
     } catch (error) {
       setPendingFeedback(error.message);
     } finally {
@@ -310,16 +328,28 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
 
   React.useEffect(() => { void loadPendingSenders(); }, [loadPendingSenders]);
 
-  const approvePendingSender = async (requestId) => {
-    if (approvingId) return;
-    setApprovingId(requestId);
+  // 上游要求原始 staffId 只留在宿主侧，所以这里只把不透明的 requestId 交回去，
+  // 由宿主完成放行（加入该机器人的已批准名单）。
+  const allowPendingSender = async (sender) => {
+    if (approvingId || !sender?.requestId) return;
+    setApprovingId(sender.requestId);
     setPendingFeedback(null);
     try {
-      const result = await rpcCall(DINGTALK_ENDPOINTS.approveSender, {
-        botId: account.botId, requestId, confirm: true,
+      const result = await rpcCall(DINGTALK_ENDPOINTS.allowSender, {
+        botId: account.botId, requestId: sender.requestId, confirm: true,
       });
-      if (result?.ok !== true) throw new Error(result?.error?.message || '允许失败，请重试。');
-      await loadPendingSenders();
+      if (result?.ok !== true) {
+        const code = result?.error?.code;
+        if (code === 'sender-allow-failed' || code === 'sender-request-not-found') {
+          await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
+          setFeedback({ tone: 'success', message: STALE_NOTICE });
+          return;
+        }
+        throw new Error(result?.error?.message || '允许失败，请重试。');
+      }
+      // 以服务端返回为准刷新：senderKey 是宿主生成的，前端不能自己编。
+      await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
+      setFeedback({ tone: 'success', message: '已允许该用户，下一条消息会正常回答。' });
     } catch (error) {
       setPendingFeedback(error.message);
     } finally {
@@ -327,19 +357,40 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     }
   };
 
-  React.useEffect(() => {
-    const next = normalizeAccessPolicy(account?.accessPolicy);
-    setDraft(clonePolicy(next ?? DEFAULT_ACCESS_POLICY));
-  }, [account?.botId, initialKey]);
-
-  React.useEffect(() => {
-    setFeedback(null);
-  }, [account?.botId]);
-
-  if (!definition) {
-    return h('div', { className: 'dim-accessState', role: 'alert' },
-      '当前渠道暂不支持访问设置。');
-  }
+  const removeApprovedSender = async (sender) => {
+    if (removingId) return;
+    // 没有 senderKey 就不要静默失败：旧数据或读取失败时给出明确提示。
+    if (!sender?.senderKey) {
+      setPendingFeedback('这条记录缺少身份标识（可能是旧版本留下的数据）。请刷新页面后重试；仍然失败就重启一次应用。');
+      return;
+    }
+    setRemovingId(sender.senderKey);
+    setPendingFeedback(null);
+    try {
+      const result = await rpcCall(DINGTALK_ENDPOINTS.removeApproved, {
+        botId: account.botId, senderKey: sender.senderKey, confirm: true,
+      });
+      if (result?.ok !== true) {
+        const code = result?.error?.code;
+        if (code === 'sender-remove-failed' || code === 'approved-sender-not-found') {
+          // 记录已经不在了：刷新列表即可，不要拿它当错误吓人。
+          await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
+          setFeedback({ tone: 'success', message: STALE_NOTICE });
+          return;
+        }
+        const fallback = '移除失败，请重试。';
+        throw new Error(code
+          ? `${result?.error?.message || fallback} [${code}]`
+          : (result?.error?.message || fallback));
+      }
+      await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
+      setFeedback({ tone: 'success', message: '已移除该用户，之后发消息会被重新拦截。' });
+    } catch (error) {
+      setPendingFeedback(error.message);
+    } finally {
+      setRemovingId(null);
+    }
+  };
 
   const save = async (event) => {
     event.preventDefault();
@@ -400,30 +451,57 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     unsupported: definition.groupSupported === false,
     onChange: (group) => { setDraft((current) => ({ ...current, group })); setFeedback(null); },
   }),
-  channel === 'dingtalk' ? h('section', { className: 'dim-accessScene' },
-    h('h3', null, '被拦截的用户'),
-    h('p', { className: 'dim-accessLegendHelp' },
-      '不在白名单、私聊过机器人的人。允许后会加入白名单，下一次消息就能正常回答。'),
-    pendingLoading
-      ? h('div', { className: 'dim-accessState' }, '正在读取…')
-      : pendingSenders.length === 0
-        ? h('div', { className: 'dim-accessState' }, '暂无被拦截的用户')
-        : h('ul', { className: 'dim-accessUserList' }, pendingSenders.map((sender) => h('li', {
-            key: sender.requestId,
-            className: 'dim-accessUserRow',
-          },
-            h('div', { className: 'dim-accessField dim-accessUserId' },
-              h('strong', null, sender.displayName || '钉钉用户'), ' ',
-              h('code', null, sender.senderIdMasked)),
-            h('button', {
-              type: 'button',
-              className: 'dim-deliveryButton',
-              disabled: approvingId !== null,
-              onClick: () => void approvePendingSender(sender.requestId),
-            }, approvingId === sender.requestId ? '正在允许…' : '允许')))),
-    pendingFeedback ? h('p', {
-      className: 'dim-accessFeedback', 'data-tone': 'error', role: 'alert',
-    }, pendingFeedback) : null) : null,
+  channel === 'dingtalk' ? h('fieldset', {
+    className: 'dim-accessScene',
+    'data-scene': 'denied',
+    'aria-label': localizeText('被拦截的用户'),
+  },
+  h('legend', null,
+    h('span', { className: 'dim-accessLegendContent' },
+      h('span', null, '被拦截的用户'))),
+  h('p', { className: 'dim-accessHint' },
+    '不在白名单、私聊过机器人的人。允许后会加入白名单，下一次消息就能正常回答。'),
+  pendingLoading
+    ? h('div', { className: 'dim-accessState' }, '正在读取…')
+    : pendingSenders.length === 0
+      ? h('div', { className: 'dim-accessUsersEmpty' }, '暂无被拦截的用户')
+      : h('ul', { className: 'dim-accessUserList' }, pendingSenders.map((sender) => h('li', {
+          key: sender.requestId,
+          className: 'dim-accessDeniedRow',
+        },
+          h('div', { className: 'dim-accessDeniedName' },
+            h('strong', null, sender.displayName || '钉钉用户'),
+            h('code', null, sender.senderIdMasked)),
+          h('button', {
+            type: 'button',
+            className: 'dim-deliveryButton',
+            disabled: approvingId !== null,
+            onClick: () => void allowPendingSender(sender),
+          }, approvingId === sender.requestId ? '正在允许…' : '允许')))),
+  pendingFeedback ? h('p', {
+    className: 'dim-accessFeedback', 'data-tone': 'error', role: 'alert',
+  }, pendingFeedback) : null,
+  approvedSenders.length === 0 ? null : h('fieldset', {
+    className: 'dim-accessScene',
+    'data-scene': 'approved',
+    'aria-label': localizeText('已批准的用户'),
+  },
+  h('legend', null,
+    h('span', { className: 'dim-accessLegendContent' },
+      h('span', null, '已批准的用户'))),
+  h('ul', { className: 'dim-accessUserList' }, approvedSenders.map((sender) => h('li', {
+    key: sender.senderKey ?? sender.senderIdMasked,
+    className: 'dim-accessDeniedRow',
+  },
+    h('div', { className: 'dim-accessDeniedName' },
+      h('strong', null, sender.displayName || '钉钉用户'),
+      h('code', null, sender.senderIdMasked)),
+    h('button', {
+      type: 'button',
+      className: 'dim-deliveryButton',
+      disabled: removingId !== null,
+      onClick: () => void removeApprovedSender(sender),
+    }, removingId === sender.senderKey ? '正在移除…' : '移除')))))) : null,
   feedback ? h('p', {
     className: 'dim-accessFeedback',
     'data-tone': feedback.tone,

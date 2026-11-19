@@ -1409,6 +1409,15 @@ const DINGTALK_TEXTS_EN = Object.freeze({
   '正在允许…': 'Allowing…',
   '无法读取被拦截的用户。': 'Could not load intercepted users.',
   '允许失败，请重试。': 'Allow failed. Try again.',
+  '已加入私聊白名单。': 'Added to the direct-message allowlist.',
+  '已允许该用户，下一条消息会正常回答。': 'This user is now allowed; their next message is answered normally.',
+  '已批准的用户': 'Approved users',
+  '移除': 'Remove',
+  '正在移除…': 'Removing…',
+  '移除失败，请重试。': 'Remove failed. Try again.',
+  '这条记录已经不存在了（可能已被处理过），列表已刷新。': 'This record no longer exists (it may already have been handled); the list was refreshed.',
+  '这条记录缺少身份标识（可能是旧版本留下的数据）。请刷新页面后重试；仍然失败就重启一次应用。': 'This record has no identity key (it may be legacy data). Refresh the page and retry; if it still fails, restart the app once.',
+  '已移除该用户，之后发消息会被重新拦截。': 'Removed. The next message from this user is intercepted again.',
 });
 
 export const en = { ...EN, ...DINGTALK_TEXTS_EN };
