@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { AccessPolicySettingsPage } from './access-policy-settings.js';
 import { BotGeneralSettingsPage } from './bot-general-settings.js';
+import { BotTextsSettingsPage } from './bot-texts-settings.js';
 import { BotSettingsTabs } from './bot-settings-tabs.js';
 import { DsBotSettingsPage } from './ds-bot-settings.js';
 import { FeishuGroupSettingsPage } from './channels/feishu/group-settings.js';
@@ -48,7 +49,13 @@ export const TELEGRAM_BOT_SETTINGS_TABS = Object.freeze([
   Object.freeze({ id: 'groups', label: '机器人群聊行为' }),
 ]);
 
+export const DINGTALK_BOT_SETTINGS_TABS = Object.freeze([
+  ...BOT_SETTINGS_TABS,
+  Object.freeze({ id: 'texts', label: '提示文案' }),
+]);
+
 export function botSettingsTabsForChannel(channel) {
+  if (channel === 'dingtalk') return DINGTALK_BOT_SETTINGS_TABS;
   if (channel === 'feishu') return FEISHU_BOT_SETTINGS_TABS;
   if (channel === 'telegram') return TELEGRAM_BOT_SETTINGS_TABS;
   return BOT_SETTINGS_TABS;
@@ -818,6 +825,12 @@ export function DeliveryTargetSettingsPage({
       })
     : activeTab.id === 'conversation-directory' && channel === 'feishu'
       ? h(FeishuConversationDirectorySettingsPage, { account, rpcCall: accessRpcCall })
+    : activeTab.id === 'texts' && channel === 'dingtalk'
+      ? h(BotTextsSettingsPage, {
+          key: `${channel}:${account.botId}:texts`,
+          account,
+          rpcCall: accessRpcCall,
+        })
     : activeTab.id === 'groups' && channel === 'telegram'
       ? h(TelegramGroupTriggersSettings, {
           key: `${channel}:${account.botId}:groups`,

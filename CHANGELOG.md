@@ -8,6 +8,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Added / 新增
 
+- 钉钉：新增「提示文案」设置（每个机器人单独配置）—— 卡片初始文案、处理中文案、工具进度文案（支持 `{name}`）、联网搜索文案、无权限提示，共 5 项，可在机器人设置页直接修改。留空即回退到 i18n 默认文案，因此只保存真正改过的字段，切换界面语言时其余文案仍自动翻译；保存后立即生效，无需重启。
+  DingTalk: a new per-bot "status texts" settings tab for the card initial text, the working text, the tool progress text (with a `{name}` placeholder), the web search text and the access-denied notice. An empty field falls back to the i18n default, so only the values an operator actually changed are stored and every other text keeps following the interface language; changes take effect immediately.
+
 - 新增 `/sessionarchive <Session ID>`（别名 `/sessarchive`）：通过 Discord 等渠道触发 DSH 的会话归档（`workspace.archiveSession`）。传序号只做预览（标题、工作区、ID），不会执行归档——会话列表随新会话出现而位移，按序号直接归档会归档到错误会话；破坏性操作必须点名完整 ID。机器人只负责解析目标并转达 Host 结果，拒绝归档本对话当前绑定的会话与已归档会话；`--stop` 让 Host 先停止该会话正在运行的任务。归档后的会话不再出现在默认的 `/sessionlist`。
   Added `/sessionarchive <Session ID>` (alias `/sessarchive`) to trigger DSH Session archiving; a numerical argument only previews the Session behind that index (title, workspace, ID) and never archives, because the list shifts and archiving by index would hit the wrong Session — destructive actions must name the full ID (`workspace.archiveSession`) from the chat. The bot only resolves the target and relays the Host result; it refuses the Session this chat is bound to and one that is already archived, and `--stop` lets the Host stop that Session's running work. Archived Sessions leave the default `/sessionlist`.
 

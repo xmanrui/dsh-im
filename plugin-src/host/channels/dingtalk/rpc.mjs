@@ -6,6 +6,7 @@ import { registerManagementRpc } from '../../../management-rpc.mjs';
 import QRCode from '../../../../src/channels/shared/qrcode.mjs';
 import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
+import { SET_TEXT_OVERRIDES_ENDPOINT, validTextOverridesPayload } from '../shared/text-overrides-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { publicWorkspaceError, SET_WORKSPACE_ENDPOINT, validWorkspacePayload } from '../shared/workspace-rpc.mjs';
@@ -29,6 +30,7 @@ export const DINGTALK_ENDPOINTS = Object.freeze({
   setModel: SET_MODEL_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
+  setTextOverrides: SET_TEXT_OVERRIDES_ENDPOINT,
   setBusyMessageMode: SET_MESSAGE_MODE_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
@@ -118,6 +120,10 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === DINGTALK_ENDPOINTS.setContextEnhancement) {
     return validContextEnhancementPayload(payload)
       ? null : '请提交有效的上下文增强设置。';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.setTextOverrides) {
+    return validTextOverridesPayload(payload)
+      ? null : '请提交有效的提示文案设置。';
   }
   if (endpoint === DINGTALK_ENDPOINTS.setAccessPolicy) {
     return validAccessPolicyPayload(payload)
@@ -319,6 +325,11 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
         if (typeof controller.updateBusyMessageMode !== 'function') throw new Error('Message mode update is unavailable');
         value = await controller.updateBusyMessageMode(
           payload.botId, payload.busyMessageMode, (status) => publicStatus(status, cachedEncode),
+        );
+      } else if (endpoint === DINGTALK_ENDPOINTS.setTextOverrides) {
+        if (typeof controller.updateTextOverrides !== 'function') throw new Error('Text override update is unavailable');
+        value = await controller.updateTextOverrides(
+          payload.botId, payload.texts, (status) => publicStatus(status, cachedEncode),
         );
       } else if (endpoint === DINGTALK_ENDPOINTS.setContextEnhancement) {
         if (typeof controller.updateContextEnhancement !== 'function') throw new Error('Context enhancement update is unavailable');

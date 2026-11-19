@@ -1380,9 +1380,32 @@ const EN = Object.freeze({
   '请求失败': 'The request failed',
 });
 
-export const en = EN;
+const DINGTALK_TEXTS_EN = Object.freeze({
+  '卡片初始文案': 'Card initial text',
+  '正在思考 🤔': 'Thinking 🤔',
+  'AI 卡片刚创建时显示的文字。': 'Shown while the AI Card is being created.',
+  '处理中文案': 'Working text',
+  '正在处理': 'Working on it',
+  '还没有具体工具可显示时的占位文字。': 'Placeholder shown before any tool runs.',
+  '工具进度文案': 'Tool progress text',
+  '正在使用 {name}': 'Using {name}',
+  '支持 {name} 占位符；不写占位符时只显示你填的文字。': 'Supports a {name} placeholder; without it the text you enter is shown as-is.',
+  '联网搜索文案': 'Web search text',
+  '正在搜索网络并整理信息': 'Searching the web and gathering information',
+  '执行 web_search 时显示的文字。': 'Shown while web_search runs.',
+  '无权限提示': 'Access denied notice',
+  '你好，当前账号暂无访问权限，如需使用请联系管理员。': 'Hello — this account does not have access. Contact an administrator if you need it enabled.',
+  '非白名单账号私聊机器人时回复的提示；群聊不回复。': 'Replied to a direct message from an account outside the allowlist; groups stay silent.',
+  '无法读取提示文案设置，请稍后重试。': 'Could not load the text settings. Try again later.',
+  '机器人提示文案': 'Bot status texts',
+  '留空即使用默认文案；只有填过的字段会被保存，切换界面语言时默认文案仍会自动翻译。': 'Leave a field empty to use the default wording. Only the fields you fill are stored, so the rest keep following the interface language.',
+  '提示文案': 'Status texts',
+  '默认：{text}': 'Default: {text}',
+});
+
+export const en = { ...EN, ...DINGTALK_TEXTS_EN };
 export const zh = Object.freeze(Object.fromEntries(
-  Object.keys(EN).map((key) => [key, key === '$locale' ? 'zh' : key]),
+  Object.keys(en).map((key) => [key, key === '$locale' ? 'zh' : key]),
 ));
 
 // Russian, narrowed to the keys this UI asks for: the shared Host modules it is
@@ -1391,7 +1414,7 @@ export const zh = Object.freeze(Object.fromEntries(
 // Chinese key hide behind a lookup that happens to miss. The English text is the
 // last resort for a key the narrowed dictionary somehow lost.
 export const ru = Object.freeze(Object.fromEntries(
-  Object.keys(EN).map((key) => [key, RU[key] ?? EN[key]]),
+  Object.keys(en).map((key) => [key, RU[key] ?? en[key]]),
 ));
 
 let translate = (key) => key;

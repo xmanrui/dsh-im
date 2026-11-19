@@ -32,6 +32,7 @@ import {
   normalizeContextEnhancementConfig,
   validateContextEnhancementConfig,
 } from './context-enhancement.mjs';
+import { EMPTY_TEXT_OVERRIDES, normalizeTextOverrides, validateTextOverrides } from './text-overrides.mjs';
 import {
   confirmsModelSelection,
   modelCatalogEntry,
@@ -365,6 +366,18 @@ function normalizeDocument(value) {
       }
     }
   }
+  const textOverrides = Object.create(null);
+  // Text overrides are additive: an unknown or damaged entry is dropped rather
+  // than rejecting the whole workspace document.
+  if (value.textOverrides && typeof value.textOverrides === 'object'
+    && !Array.isArray(value.textOverrides)) {
+    for (const [botId, overrides] of Object.entries(value.textOverrides)) {
+      if (/^[A-Za-z0-9_-]{1,128}$/.test(botId)) {
+        const normalized = normalizeTextOverrides(overrides);
+        if (Object.keys(normalized).length > 0) textOverrides[botId] = normalized;
+      }
+    }
+  }
   if (value.version === 1 && value.deliveryTargets !== undefined) return invalidWorkspaceConfig('deliveryTargets', 'unexpected-field');
   const deliveryTargets = normalizeDeliveryTargets(value.deliveryTargets, { version: value.version });
   const dsBotBindings = normalizeDsBotBindings(value.dsBotBindings);
@@ -405,6 +418,7 @@ function normalizeDocument(value) {
     agentPresets,
     models,
     contextEnhancement,
+    textOverrides,
     deliveryTargets,
     dsBotBindings,
     accessPolicies,
@@ -423,6 +437,7 @@ function storedDocument({
   agentPresets,
   models,
   contextEnhancement,
+  textOverrides,
   deliveryTargets,
   dsBotBindings,
   accessPolicies,
@@ -443,6 +458,9 @@ function storedDocument({
   if (Object.keys(models).length > 0) document.models = models;
   if (Object.keys(contextEnhancement).length > 0) {
     document.contextEnhancement = contextEnhancement;
+  }
+  if (Object.keys(textOverrides).length > 0) {
+    document.textOverrides = textOverrides;
   }
   if (version >= DELIVERY_DOCUMENT_VERSION && Object.keys(deliveryTargets).length > 0) {
     document.deliveryTargets = deliveryTargets;
@@ -499,6 +517,7 @@ export class BotWorkspaceStore {
   #aliases = Object.create(null);
   #busyMessageModes = Object.create(null);
   #contextEnhancement = {};
+  #textOverrides = Object.create(null);
   #deliveryTargets = Object.create(null);
   #dsBotBindings = Object.create(null);
   #accessPolicies = Object.create(null);
@@ -536,6 +555,7 @@ export class BotWorkspaceStore {
       this.#aliases = normalized.aliases;
       this.#busyMessageModes = normalized.busyMessageModes;
       this.#contextEnhancement = normalized.contextEnhancement;
+      this.#textOverrides = normalized.textOverrides;
       this.#deliveryTargets = normalized.deliveryTargets;
       this.#dsBotBindings = normalized.dsBotBindings;
       this.#accessPolicies = normalized.accessPolicies;
@@ -552,6 +572,7 @@ export class BotWorkspaceStore {
       this.#aliases = Object.create(null);
       this.#busyMessageModes = Object.create(null);
       this.#contextEnhancement = {};
+      this.#textOverrides = Object.create(null);
       this.#deliveryTargets = Object.create(null);
       this.#dsBotBindings = Object.create(null);
       this.#accessPolicies = Object.create(null);
@@ -752,6 +773,13 @@ export class BotWorkspaceStore {
     return this.has(id) && Object.hasOwn(this.#contextEnhancement, id)
       ? this.#contextEnhancement[id]
       : DEFAULT_CONTEXT_ENHANCEMENT_CONFIG;
+  }
+
+  textOverridesFor(botId) {
+    const id = botIdOf(botId);
+    return this.has(id) && Object.hasOwn(this.#textOverrides, id)
+      ? this.#textOverrides[id]
+      : EMPTY_TEXT_OVERRIDES;
   }
 
   accessPolicyFor(botId) {
@@ -1184,6 +1212,25 @@ export class BotWorkspaceStore {
     });
   }
 
+  async setTextOverrides(botId, value, { incarnation } = {}) {
+    const id = botIdOf(botId);
+    const expectedIncarnation = incarnation === undefined ? this.incarnationFor(id) : incarnation;
+    const overrides = validateTextOverrides(value);
+    return this.#enqueue(id, async () => {
+      if (!this.has(id) || expectedIncarnation !== this.incarnationFor(id)) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const next = { ...this.#textOverrides };
+      if (Object.keys(overrides).length > 0) next[id] = overrides;
+      else delete next[id];
+      await this.#persist(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, next);
+      this.#textOverrides = next;
+      return overrides;
+    });
+  }
+
   async setContextEnhancement(botId, value, { incarnation } = {}) {
     const id = botIdOf(botId);
     const expectedIncarnation = incarnation === undefined ? this.incarnationFor(id) : incarnation;
@@ -1595,6 +1642,7 @@ export class BotWorkspaceStore {
           agentPreset: this.agentPresetFor(bot.botId),
           model: this.modelFor(bot.botId),
           contextEnhancement: this.contextEnhancementFor(bot.botId),
+          textOverrides: this.textOverridesFor(bot.botId),
           busyMessageMode: this.busyMessageModeFor(bot.botId),
           accessPolicy: this.accessPolicyFor(bot.botId),
         }
@@ -1698,6 +1746,7 @@ export class BotWorkspaceStore {
     conversationDirectory = this.#conversationDirectory,
     conversationDirectories = this.#conversationDirectories,
     sessionDirectories = this.#sessionDirectories,
+    textOverrides = this.#textOverrides,
   ) {
     await writeStoredDocument(this.#path, storedDocument({
       version,
@@ -1706,6 +1755,7 @@ export class BotWorkspaceStore {
       agentPresets: this.#agentPresets,
       models: this.#models,
       contextEnhancement,
+      textOverrides,
       deliveryTargets,
       dsBotBindings,
       accessPolicies,
@@ -2964,6 +3014,23 @@ export function createWorkspaceAwareController(controller, {
       return result;
     });
   };
+  const updateTextOverrides = (botId, value, projectStatus) => {
+    const incarnation = workspaces.incarnationFor(botId);
+    const textOverrides = validateTextOverrides(value);
+    return withBotTransition(botId, async () => {
+      const snapshot = await decorate(await controller.status());
+      if (!snapshot?.bots?.some((bot) => bot?.botId === botId)) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const updated = { ...snapshot, bots: snapshot.bots.map((bot) => bot.botId === botId
+        ? { ...bot, textOverrides } : bot) };
+      const result = projectStatus ? await projectStatus(updated) : updated;
+      await workspaces.setTextOverrides(botId, textOverrides, { incarnation });
+      return result;
+    });
+  };
   const updateContextEnhancement = (botId, value, projectStatus) => {
     const incarnation = workspaces.incarnationFor(botId);
     const config = validateContextEnhancementConfig(value);
@@ -3092,6 +3159,7 @@ export function createWorkspaceAwareController(controller, {
       if (property === 'updateModel') return updateModel;
       if (property === 'updateAlias') return updateAlias;
       if (property === 'updateBusyMessageMode') return updateBusyMessageMode;
+      if (property === 'updateTextOverrides') return updateTextOverrides;
       if (property === 'updateContextEnhancement') return updateContextEnhancement;
       if (property === 'updateAccessPolicy') return updateAccessPolicy;
       const value = Reflect.get(target, property, target);

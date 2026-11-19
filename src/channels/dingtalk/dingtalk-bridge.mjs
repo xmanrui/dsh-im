@@ -85,6 +85,7 @@ import {
   evaluateInboundAccess,
 } from '../shared/inbound-access.mjs';
 import { t } from '../shared/i18n.mjs';
+import { toolProgressWithName } from '../shared/text-overrides.mjs';
 
 const CARD_INITIAL_TEXT = '正在思考 🤔';
 const CARD_DOT_INTERVAL_MS = 400;
@@ -465,15 +466,6 @@ function artifactFailureText(fileName, error) {
   }
 }
 
-function progressText(update) {
-  if (update?.type === 'text' && nonEmptyString(update.text)) return update.text;
-  if (update?.type === 'tool') {
-    if (update.name === 'web_search') return t('正在搜索网络并整理信息');
-    return t('正在使用 {name}', { name: nonEmptyString(update.name) ?? t('工具') });
-  }
-  return nonEmptyString(update?.text) ?? t('正在处理');
-}
-
 function canClaimInteractionReply(message, pending, sender) {
   if (pending.needsPresentation || !pending.questions[pending.index]) return false;
   if (pending.actor !== sender) return false;
@@ -546,6 +538,7 @@ export class DingtalkHarnessBridge {
   #deferred;
   #contextEnhancement;
   #accessPolicy;
+  #texts;
   #status;
   #logger;
   #replyTimeoutMs;
@@ -571,6 +564,7 @@ export class DingtalkHarnessBridge {
     harness,
     state,
     contextEnhancement,
+    texts,
     accessPolicy,
     status = createDingtalkBridgeStatus(),
     logger = console,
@@ -590,6 +584,7 @@ export class DingtalkHarnessBridge {
     this.#harness = harness;
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
+    this.#texts = texts;
     this.#accessPolicy = accessPolicy;
     this.#status = status;
     this.#logger = logger;
@@ -1158,13 +1153,44 @@ export class DingtalkHarnessBridge {
     return { content: text };
   }
 
+  // Per-bot text overrides (settings → 提示文案). An absent field keeps the
+  // i18n default, so a deployment stores only what it actually changed.
+  #textsNow() {
+    try {
+      return this.#texts?.getSettings?.() ?? {};
+    } catch {
+      return {};
+    }
+  }
+
+  #cardInitialText() {
+    return this.#textsNow().cardInitial ?? t(CARD_INITIAL_TEXT);
+  }
+
+  #accessDeniedText() {
+    return this.#textsNow().accessDenied ?? t(ACCESS_DENIED_NOTICE);
+  }
+
+  #progressText(update) {
+    const texts = this.#textsNow();
+    if (update?.type === 'text' && nonEmptyString(update.text)) return update.text;
+    if (update?.type === 'tool') {
+      if (update.name === 'web_search') {
+        return texts.webSearching ?? t('正在搜索网络并整理信息');
+      }
+      const name = nonEmptyString(update.name) ?? t('工具');
+      return toolProgressWithName(texts.toolUsing ?? t('正在使用 {name}'), name);
+    }
+    return nonEmptyString(update?.text) ?? texts.working ?? t('正在处理');
+  }
+
   async #deliverDeferredOutcome(entry, outcome) {
     const text = deferredOutcomeText(outcome);
     if (outcome.found && ['createAiCard', 'updateAiCard', 'finishAiCard'].every((name) => typeof this.#api[name] === 'function')) {
       const card = createDingTalkCardStream({ api: this.#api, clientId: this.#clientId,
         clientSecret: this.#clientSecret, target: entry.target, signal: this.#signal, logger: this.#logger,
         dotIntervalMs: CARD_DOT_INTERVAL_MS });
-      if (await card.start(t(CARD_INITIAL_TEXT)) && await card.finish(text)) return true;
+      if (await card.start(this.#cardInitialText()) && await card.finish(text)) return true;
       this.#logger.warn?.('[dsh-dingtalk] deferred card unavailable; sending robot text');
     }
     await this.#api.sendRobotText({ clientId: this.#clientId, clientSecret: this.#clientSecret,
@@ -1286,7 +1312,7 @@ export class DingtalkHarnessBridge {
         });
         // 只在私聊回提示：群里对非白名单成员逐条回复会变成刷屏。
         if (Number(message?.conversationType) === 1) {
-          await this.#send(sessionWebhook, t(ACCESS_DENIED_NOTICE), this.#atUsersFor(message));
+          await this.#send(sessionWebhook, this.#accessDeniedText(), this.#atUsersFor(message));
           increment(this.#status, 'messagesReplied');
           this.#status.lastReplyAt = new Date().toISOString();
         } else {
@@ -1450,7 +1476,7 @@ export class DingtalkHarnessBridge {
           dotIntervalMs: CARD_DOT_INTERVAL_MS,
         });
         const startedAt = Date.now();
-        cardStarted = await cardStream.start(t(CARD_INITIAL_TEXT));
+        cardStarted = await cardStream.start(this.#cardInitialText());
         if (cardStarted) cardStartedAt = startedAt;
       }
       const { answer, artifacts = [] } = await askInWorkspaceSession({
@@ -1471,7 +1497,7 @@ export class DingtalkHarnessBridge {
           signal: this.#signal,
           control: { owner: this, key },
           onUpdate: cardStarted
-            ? (update) => cardStream.push(progressText(update))
+            ? (update) => cardStream.push(this.#progressText(update))
             : undefined,
           onInteraction: (interaction) => this.#handleInteraction(interaction, {
             key,

@@ -3188,3 +3188,77 @@ test('native menu selects exact session without a second message and updates the
   assert.equal(fixture.state.sessionFor('p2p:staff-approved'), 'session-changed-elsewhere');
   assert.deepEqual(updates.at(-1).data, { notice: COMMAND_PERMISSION_DENIED_MESSAGE });
 });
+
+test('per-bot text overrides replace the DingTalk card and tool status texts', async () => {
+  const fixture = stateFixture();
+  const calls = { create: [], update: [], finish: [], text: [] };
+  const bridge = new DingtalkHarnessBridge({
+    api: {
+      sendText: async (request) => calls.text.push(request),
+      createAiCard: async (request) => {
+        calls.create.push(request);
+        return { cardInstanceId: 'card-one' };
+      },
+      updateAiCard: async (request) => calls.update.push(request),
+      finishAiCard: async (request) => {
+        calls.finish.push(request);
+        return { delivered: true, completed: false };
+      },
+    },
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    texts: {
+      getSettings: () => ({
+        cardInitial: '自定义初始',
+        toolUsing: '自定义工具 {name}',
+      }),
+    },
+    harness: {
+      sessionExists: async () => false,
+      createSession: async () => 'session-texts',
+      ask: async (_sessionId, _text, options) => {
+        options.onUpdate({ type: 'tool', name: 'bash' });
+        // 卡片更新有 500ms 节流；等它真的发出去，finish 才不会把它丢掉。
+        await new Promise((resolve) => setTimeout(resolve, 510));
+        return '最终回答';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('texts', '你好'));
+
+  assert.equal(calls.create.length, 1);
+  assert.equal(calls.create[0].initialText, '自定义初始');
+  assert.equal(calls.update.at(-1).text.replace(/\.+$/u, ''), '自定义工具 bash');
+  assert.equal(calls.finish.at(-1).text, '最终回答');
+  assert.equal(bridge.status.messagesReplied, 1);
+});
+
+test('an unset text override keeps the i18n default', async () => {
+  const fixture = stateFixture();
+  const calls = { create: [] };
+  const bridge = new DingtalkHarnessBridge({
+    api: {
+      sendText: async () => ({ messageId: 'text-reply' }),
+      createAiCard: async (request) => {
+        calls.create.push(request);
+        return { cardInstanceId: 'card-one' };
+      },
+      updateAiCard: async () => {},
+      finishAiCard: async () => ({ delivered: true, completed: false }),
+    },
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    texts: { getSettings: () => ({}) },
+    harness: {
+      sessionExists: async () => false,
+      createSession: async () => 'session-texts-default',
+      ask: async () => '最终回答',
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('texts-default', '你好'));
+  assert.equal(calls.create[0].initialText, '正在思考 🤔');
+});

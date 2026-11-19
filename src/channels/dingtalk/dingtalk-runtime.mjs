@@ -133,6 +133,7 @@ export class DingtalkRuntime {
   #harness;
   #state;
   #contextEnhancement;
+  #texts;
   #accessPolicy;
   #logger;
   #diagnostics;
@@ -157,6 +158,7 @@ export class DingtalkRuntime {
     harness,
     state,
     contextEnhancement,
+    texts,
     accessPolicy,
     logger = console,
     replyTimeoutMs = 600_000,
@@ -176,6 +178,7 @@ export class DingtalkRuntime {
     this.#harness = harness;
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
+    this.#texts = texts;
     this.#accessPolicy = accessPolicy;
     this.#logger = logger;
     this.#diagnostics = createConnectionDiagnostics({ channel: 'dingtalk', logger, prefix: 'DT-CONN' });
@@ -248,6 +251,7 @@ export class DingtalkRuntime {
         harness: this.#harness,
         state: this.#state,
         contextEnhancement: this.#contextEnhancement,
+        texts: this.#texts,
         accessPolicy: this.#accessPolicy,
         status: this.#status,
         logger: this.#logger,
