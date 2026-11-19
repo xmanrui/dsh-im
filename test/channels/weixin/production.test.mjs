@@ -107,18 +107,18 @@ test('production CDN uploads isolate the global dispatcher, honour proxy bypass,
     });
     st.after(() => production.close().catch(() => {}));
     assert.equal(dispatchers.size, 0);
-    for (const operation of ['sendImage', 'sendFile']) await api[operation]({
+    for (const operation of ['sendImage', 'sendVideo', 'sendFile']) await api[operation]({
       baseUrl: 'https://ilinkai.weixin.qq.com', token: 'test-token', toUserId: 'test-user',
       file: { fileName: 'test.png', mediaType: 'image/png', bytes: Buffer.alloc(70_000, 1) },
       signal: AbortSignal.timeout(3_000),
     });
-    assert.equal(uploads.length, 2);
+    assert.equal(uploads.length, 3);
     for (const upload of uploads) {
       assert.equal(Number(upload.headers['content-length']), upload.bytes.length);
       assert.equal(upload.headers.authorization, undefined);
     }
-    assert.equal(jsonCalls.length, 4);
-    assert.equal(dispatchers.size, 1, 'reuse the pool across image and file uploads');
+    assert.equal(jsonCalls.length, 6);
+    assert.equal(dispatchers.size, 1, 'reuse the pool across image, video and file uploads');
     assert.equal(tunnels > 0, !scenario.bypass);
     if (scenario.failure) await assert.rejects(production.close(), error => error === closeError);
     else await production.close();

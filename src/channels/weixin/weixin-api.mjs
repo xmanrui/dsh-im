@@ -623,7 +623,7 @@ export function createWeixinApi({ fetchImpl = fetch, uploadFetchImpl = fetchImpl
             client_id: clientId,
             message_type: 2,
             message_state: 2,
-            item_list: [createItem({ file, media, ciphertextSize })],
+            item_list: [createItem({ file, media, ciphertextSize, rawMd5 })],
             ...(nonEmptyString(contextToken) ? { context_token: contextToken.trim() } : {}),
             ...(nonEmptyString(runId) ? { run_id: runId.trim() } : {}),
           },
@@ -816,6 +816,20 @@ export function createWeixinApi({ fetchImpl = fetch, uploadFetchImpl = fetchImpl
           image_item: {
             media,
             mid_size: ciphertextSize,
+          },
+        }),
+      });
+    },
+
+    async sendVideo(request) {
+      return sendArtifact(request, {
+        mediaType: 2,
+        createItem: ({ media, ciphertextSize, rawMd5 }) => ({
+          type: 5,
+          video_item: {
+            media,
+            video_size: ciphertextSize,
+            video_md5: rawMd5,
           },
         }),
       });

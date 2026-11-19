@@ -661,6 +661,93 @@ test('Weixin routes Artifact images natively and preserves the shared fallback b
   }
 });
 
+test('Weixin routes Artifact videos natively and preserves the shared fallback boundary', async (t) => {
+  const scenarios = [
+    {
+      name: 'native video',
+      fileName: 'native.mp4',
+      expectedCalls: ['video'],
+      expectedPresentation: 'weixin-video',
+      expectedProviderIds: ['weixin-native-video'],
+    },
+    {
+      name: 'definite video rejection falls back',
+      fileName: 'fallback.mov',
+      videoError: 'artifact-provider-rejected',
+      expectedCalls: ['video', 'file'],
+      expectedPresentation: 'weixin-file',
+      expectedProviderIds: ['weixin-native-file'],
+    },
+    {
+      name: 'uncertain video never falls back',
+      fileName: 'uncertain.m4v',
+      videoError: 'artifact-delivery-uncertain',
+      expectedCalls: ['video'],
+      expectedPresentation: 'text-fallback',
+      expectedProviderIds: [],
+      expectedOutcome: 'unknown',
+    },
+  ];
+
+  for (const [index, scenario] of scenarios.entries()) {
+    await t.test(scenario.name, async (subtest) => {
+      const artifact = await committedArtifact(subtest, scenario.fileName, Buffer.from([1, 2, 3]));
+      const fixture = stateFixture();
+      fixture.sessions.set('p2p:owner-user', `session-video-route-${index}`);
+      const calls = [];
+      const bridge = new WeixinHarnessBridge({
+        api: {
+          inboundImages: () => [],
+          sendText: async () => { throw new Error('text intentionally unavailable'); },
+          sendVideo: async ({ file }) => {
+            calls.push('video');
+            assert.equal(file.fileName, scenario.fileName);
+            assert.match(file.mediaType, /^video\//);
+            if (scenario.videoError) {
+              const error = new Error('private video result');
+              error.code = scenario.videoError;
+              throw error;
+            }
+            return { messageId: 'weixin-native-video' };
+          },
+          sendFile: async ({ file }) => {
+            calls.push('file');
+            assert.equal(file.fileName, scenario.fileName);
+            return { messageId: 'weixin-native-file' };
+          },
+        },
+        baseUrl: 'https://ilinkai.weixin.qq.com/',
+        token: 'host-token',
+        ownerUserId: 'owner-user',
+        harness: {
+          sessionExists: async () => true,
+          ask: async (_sessionId, _text, options) => {
+            await options.onArtifact(artifact);
+            return '';
+          },
+        },
+        state: fixture.state,
+        logger: { warn() {}, error() {} },
+      });
+
+      const receipt = await bridge.accept(message(`weixin-video-route-${index}`, '生成视频'));
+
+      assert.deepEqual(calls, scenario.expectedCalls);
+      assert.equal(receipt.presentation, scenario.expectedPresentation);
+      assert.deepEqual(receipt.providerMessageIds, scenario.expectedProviderIds);
+      assert.deepEqual(receipt.artifacts, [{
+        artifactId: artifact.artifactId,
+        outcome: scenario.expectedOutcome ?? 'sent',
+        ...(scenario.videoError === 'artifact-delivery-uncertain'
+          ? { reason: 'artifact-delivery-uncertain' }
+          : {}),
+      }]);
+      assert.equal(bridge.status.artifactsSent, scenario.expectedOutcome === 'unknown' ? 0 : 1);
+      assert.equal(bridge.status.artifactSendErrors, scenario.expectedOutcome === 'unknown' ? 1 : 0);
+    });
+  }
+});
+
 test('Weixin still attempts a registered file when the final text transport fails', async (t) => {
   const artifact = await committedArtifact(t, 'weixin-text-failed.txt', 'weixin-file');
   const fixture = stateFixture();
