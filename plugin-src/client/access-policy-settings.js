@@ -295,6 +295,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   const [approvingId, setApprovingId] = React.useState(null);
   // 允许时勾选的场景：默认两个都勾。
   const [scenes, setScenes] = React.useState({ direct: true, group: true });
+  const [selectingSender, setSelectingSender] = React.useState(null);
   const [removingUserId, setRemovingUserId] = React.useState(null);
   const [pendingFeedback, setPendingFeedback] = React.useState(null);
 
@@ -353,6 +354,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       }
       // 以服务端返回为准刷新：senderKey 是宿主生成的，前端不能自己编。
       await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
+      setSelectingSender(null);
       setFeedback({ tone: 'success', message: '已允许该用户，下一条消息会正常回答。' });
     } catch (error) {
       setPendingFeedback(error.message);
@@ -472,21 +474,6 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       h('span', null, '被拦截的用户'))),
   h('p', { className: 'dim-accessHint' },
     '不在白名单、私聊过机器人的人。允许后会加入白名单，下一次消息就能正常回答。'),
-  h('div', { className: 'dim-accessDeniedRow' },
-    h('div', { className: 'dim-accessDeniedName' },
-      h('span', null, '加入白名单'),
-      h('label', null,
-        h('input', {
-          type: 'checkbox',
-          checked: scenes.direct,
-          onChange: (event) => setScenes({ ...scenes, direct: event.target.checked }),
-        }), ' ', '单聊'),
-      h('label', null,
-        h('input', {
-          type: 'checkbox',
-          checked: scenes.group,
-          onChange: (event) => setScenes({ ...scenes, group: event.target.checked }),
-        }), ' ', '群聊'))),
   pendingLoading
     ? h('div', { className: 'dim-accessState' }, '正在读取…')
     : pendingSenders.length === 0
@@ -498,12 +485,22 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
           h('div', { className: 'dim-accessDeniedName' },
             h('strong', null, sender.displayName || '钉钉用户'),
             h('code', null, sender.senderIdMasked)),
-          h('button', {
+          selectingSender === sender.requestId ? h('div', { className: 'dim-accessDeniedName' },
+            ...['direct', 'group'].map((scene) => h('label', { key: scene },
+              h('input', { type: 'checkbox', checked: scenes[scene],
+                onChange: (event) => setScenes((current) => ({ ...current, [scene]: event.target.checked })) }),
+              ' ', scene === 'direct' ? '单聊' : '群聊')),
+            h('button', { type: 'button', className: 'dim-deliveryButton',
+              disabled: approvingId !== null || (!scenes.direct && !scenes.group),
+              onClick: () => void allowPendingSender(sender),
+            }, approvingId === sender.requestId ? '正在允许…' : '确认'),
+            h('button', { type: 'button', className: 'dim-deliveryButton', disabled: approvingId !== null,
+              onClick: () => setSelectingSender(null), }, '取消')) : h('button', {
             type: 'button',
             className: 'dim-deliveryButton',
-            disabled: approvingId !== null || (!scenes.direct && !scenes.group),
-            onClick: () => void allowPendingSender(sender),
-          }, approvingId === sender.requestId ? '正在允许…' : '允许')))),
+            disabled: approvingId !== null,
+            onClick: () => { setScenes({ direct: true, group: true }); setSelectingSender(sender.requestId); },
+          }, '允许')))),
   pendingFeedback ? h('p', {
     className: 'dim-accessFeedback', 'data-tone': 'error', role: 'alert',
   }, pendingFeedback) : null,

@@ -683,6 +683,7 @@ const EN = Object.freeze({
   '保留机器人': 'Keep bot',
   '保留账号': 'Keep account',
   '取消': 'Cancel',
+  '确认': 'Confirm',
   '关闭': 'Close',
   '立即重试': 'Retry now',
   '重新读取': 'Reload',
