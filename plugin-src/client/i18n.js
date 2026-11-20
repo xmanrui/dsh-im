@@ -1406,6 +1406,7 @@ const DINGTALK_TEXTS_EN = Object.freeze({
   '默认：{text}': 'Default: {text}',
   '被拦截的用户': 'Intercepted users',
   '不在白名单、私聊过机器人的人。允许后会加入白名单，下一次消息就能正常回答。': 'People outside the allowlist who messaged the bot directly. Allowing one adds them to the allowlist, and their next message is answered normally.',
+  '访问被拦截的用户。允许后会加入白名单，下一次消息就能正常回答。': 'Users whose access was blocked. Allowing them adds them to the allowlist for their next message.',
   '暂无被拦截的用户': 'No intercepted users',
   '钉钉用户': 'DingTalk user',
   '允许': 'Allow',

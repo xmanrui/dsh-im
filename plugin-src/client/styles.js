@@ -652,6 +652,11 @@ const CSS = String.raw`
 .dim-accessUserList { display: grid; gap: 9px; margin: 10px 0 0; padding: 0; list-style: none; }
 .dim-accessHint { margin: 8px 0 0; color: var(--dsw-alias-label-secondary, #646a73); font-size: 12px; line-height: 18px; }
 .dim-accessDeniedRow { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }
+.dim-accessDirectoryScroll { max-width: 100%; overflow-x: auto; margin-top: 10px; border: 1px solid var(--dsw-alias-border-l2, #dfe1e5); border-radius: 9px; }
+.dim-accessDirectoryTable { width: 100%; min-width: 420px; border-collapse: collapse; text-align: left; font-size: 13px; }
+.dim-accessDirectoryTable th, .dim-accessDirectoryTable td { padding: 10px 14px; white-space: nowrap; border-bottom: 1px solid var(--dsw-alias-border-l1, #eef0f3); }
+.dim-accessDirectoryTable th { background: var(--dsw-alias-bg-module-platform, #f7f8fa); font-weight: 600; }
+.dim-accessDirectoryTable tr:last-child td { border-bottom: 0; }
 .dim-accessDeniedName { min-width: 0; display: inline-flex; align-items: center; gap: 8px; color: var(--dsw-alias-label-primary, #1f2329); font-size: 13px; line-height: 20px; }
 .dim-accessDeniedName code { color: var(--dsw-alias-label-tertiary, #8f959e); font-size: 12px; }
 .dim-accessUserRow { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(145px, 180px) max-content; align-items: end; gap: 10px; padding: 11px; border: 1px solid var(--dsw-alias-border-l1, #eef0f3); border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #f7f8fa); }

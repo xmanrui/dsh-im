@@ -3298,3 +3298,25 @@ test('a denied sender is recorded for the access settings page', async () => {
   assert.equal(status.messagesReplied, 1);
   assert.equal(status.messagesReceived, 1);
 });
+
+test('denied direct and addressed group messages receive a notice before recording', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const recording = deferred();
+  fixture.state.recordPendingSender = () => recording.promise;
+  const bridge = new DingtalkHarnessBridge({
+    api: { sendText: async ({ text }) => { sent.push(text); return { messageId: 'notice' }; } },
+    clientId: 'ding-client', clientSecret: 'host-secret',
+    accessPolicy: directAccessPolicy(),
+    harness: { sessionExists: async () => true, ask: async () => 'unexpected' },
+    state: fixture.state,
+  });
+  const direct = bridge.accept(message('denied-direct-notice', '你好', { senderStaffId: 'stranger' }));
+  const group = bridge.accept(message('denied-group-notice', '你好', {
+    senderStaffId: 'stranger', conversationType: '2', isInAtList: true,
+  }));
+  await eventually(() => sent.length === 2);
+  assert.ok(sent.every((text) => /暂无访问权限/u.test(text)));
+  recording.resolve();
+  await Promise.all([direct, group]);
+});

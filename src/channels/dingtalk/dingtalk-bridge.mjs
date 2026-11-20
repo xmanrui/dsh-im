@@ -1310,7 +1310,16 @@ export class DingtalkHarnessBridge {
           senderName: nonEmptyString(message?.senderNick),
           conversationType: message?.conversationType,
         });
-        // 记进待审批列表，设置页的「访问设置」可以逐个放行；记不下来也不影响拒绝本身。
+        // 提示不依赖访问记录的写入，避免存储故障影响用户收到反馈。
+        let replyError;
+        try {
+          await this.#send(sessionWebhook, this.#accessDeniedText(), this.#atUsersFor(message));
+          increment(this.#status, 'messagesReplied');
+          this.#status.lastReplyAt = new Date().toISOString();
+        } catch (error) {
+          replyError = error;
+        }
+        // 记进待审批列表，设置页的「访问设置」可以逐个放行。
         try {
           await this.#state.recordPendingSender?.({
             staffId: senderStaffId(message),
@@ -1321,15 +1330,7 @@ export class DingtalkHarnessBridge {
         } catch {
           // 记录失败不改变访问决定。
         }
-        // 只在私聊回提示：群里对非白名单成员逐条回复会变成刷屏。
-        if (Number(message?.conversationType) === 1) {
-          await this.#send(sessionWebhook, this.#accessDeniedText(), this.#atUsersFor(message));
-          increment(this.#status, 'messagesReplied');
-          this.#status.lastReplyAt = new Date().toISOString();
-        } else {
-          increment(this.#status, 'messagesRejected');
-          this.#status.lastRejectedAt = new Date().toISOString();
-        }
+        if (replyError) throw replyError;
       } else {
         increment(this.#status, 'messagesRejected');
         this.#status.lastRejectedAt = new Date().toISOString();

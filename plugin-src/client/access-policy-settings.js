@@ -5,7 +5,7 @@ import {
   normalizeAccessPolicy,
   validateAccessPolicy,
 } from '../../src/channels/shared/access-policy.mjs';
-import { h, localizeTemplate, localizeText } from './i18n.js';
+import { h, localizeText } from './i18n.js';
 import { DINGTALK_ENDPOINTS } from './channels/dingtalk/api.js';
 
 export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
@@ -422,7 +422,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     h('span', { className: 'dim-accessLegendContent' },
       h('span', null, '被拦截的用户'))),
   h('p', { className: 'dim-accessHint' },
-    '不在白名单、私聊过机器人的人。允许后会加入白名单，下一次消息就能正常回答。'),
+    '访问被拦截的用户。允许后会加入白名单，下一次消息就能正常回答。'),
   pendingLoading
     ? h('div', { className: 'dim-accessState' }, '正在读取…')
     : pendingSenders.length === 0
@@ -458,18 +458,18 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       h('span', null, '用户列表'))),
   h('p', { className: 'dim-accessHint' },
     '显示每个人当前拥有的单聊和群聊权限。'),
-  directoryUsers.length === 0 ? h('div', { className: 'dim-accessUsersEmpty' }, '尚未添加用户') : h('ul', { className: 'dim-accessUserList' }, directoryUsers.map((user) => h('li', {
-    key: user.id,
-    className: 'dim-accessDeniedRow',
-  },
-    h('div', { className: 'dim-accessDeniedName' },
-      h('code', null, user.id)),
-    h('div', { className: 'dim-accessDeniedName' },
-      h('span', { className: 'dim-accessState' },
-        localizeTemplate('单聊：{state}', { state: user.direct ? '有' : '无' })),
-      h('span', { className: 'dim-accessState' },
-        localizeTemplate('群聊：{state}', { state: user.group ? '有' : '无' }))),
-    ))))) : null,
+  directoryUsers.length === 0 ? h('div', { className: 'dim-accessUsersEmpty' }, '尚未添加用户')
+    : h('div', { className: 'dim-accessDirectoryScroll', role: 'region',
+        'aria-label': localizeText('用户列表'), tabIndex: 0 },
+      h('table', { className: 'dim-accessDirectoryTable' },
+        h('thead', null, h('tr', null,
+          h('th', { scope: 'col' }, '钉钉用户 ID'),
+          h('th', { scope: 'col' }, '单聊'),
+          h('th', { scope: 'col' }, '群聊'))),
+        h('tbody', null, directoryUsers.map((user) => h('tr', { key: user.id },
+          h('td', null, h('code', null, user.id)),
+          h('td', null, user.direct ? '有' : '无'),
+          h('td', null, user.group ? '有' : '无'))))))) ) : null,
   feedback ? h('p', {
     className: 'dim-accessFeedback',
     'data-tone': feedback.tone,
