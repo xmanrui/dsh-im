@@ -77,6 +77,37 @@ export const ACCESS_CHANNEL_DEFINITIONS = Object.freeze({
   }),
 });
 
+const DEFAULT_COMMAND_ALLOWLIST = Object.freeze(['new', 'stop', 'help', 'status', 'compact', 'clear']);
+
+const COMMAND_CHOICES = Object.freeze([
+  ['new', '/new 新会话'],
+  ['stop', '/stop 停止任务'],
+  ['help', '/help 帮助'],
+  ['status', '/status 连接状态'],
+  ['compact', '/compact 压缩上下文'],
+  ['clear', '/clear 清空上下文'],
+  ['menu', '/m 或 /menu 菜单'],
+  ['version', '/version 版本'],
+  ['models', '/models 模型列表'],
+  ['model', '/model 模型切换'],
+  ['reasoninglist', '/reasonings 推理等级'],
+  ['reasoning', '/reasoning 推理等级切换'],
+  ['presetlist', '/presets 预设列表'],
+  ['preset', '/preset 预设切换'],
+  ['permissionlist', '/permissionlist 权限列表'],
+  ['permission', '/permission 权限切换'],
+  ['history', '/history 历史消息'],
+  ['workspace', '/workspace 工作区'],
+  ['workspacelist', '/workspaces 工作区列表'],
+  ['sessionlist', '/sessionlist 会话列表'],
+  ['session', '/session 绑定会话'],
+  ['batch', '/batch 批量输入'],
+  ['send', '/send 发送批量'],
+  ['cancel', '/cancel 取消批量'],
+  ['steer', '/steer 补充指令'],
+  ['repair', '/repair 修复'],
+]);
+
 function clonePolicy(policy) {
   const cloneScope = (scope) => ({
     mode: scope.mode,
@@ -84,7 +115,9 @@ function clonePolicy(policy) {
       defaultCanExecuteCommands: scope.open.defaultCanExecuteCommands,
       commandPermissionOverrides: scope.open.commandPermissionOverrides.map((user) => ({
         ...user,
+        ...(user.commandAllowlist === undefined ? {} : { commandAllowlist: [...user.commandAllowlist] }),
       })),
+      commandAllowlist: [...(scope.open.commandAllowlist ?? [])],
     },
     allowlist: {
       users: scope.allowlist.users.map((user) => ({ ...user })),
@@ -147,6 +180,41 @@ function ScenePolicyEditor({
   const updateUser = (index, patch) => updateUsers(users.map((user, userIndex) => (
       userIndex === index ? { ...user, ...patch } : user
     )));
+  const [commandPickerOpen, setCommandPickerOpen] = React.useState(false);
+  const [commandQuery, setCommandQuery] = React.useState('');
+  const commandMode = policy.open.defaultCanExecuteCommands
+    ? 'allow'
+    : (policy.open.commandAllowlist?.length ? 'custom' : 'deny');
+  const allowedCommands = new Set(policy.open.commandAllowlist ?? []);
+  const updateOpen = (patch) => onChange({
+    ...policy,
+    open: { ...policy.open, ...patch },
+  });
+  const changeCommandMode = (nextMode) => {
+    if (nextMode === 'allow') {
+      updateOpen({ defaultCanExecuteCommands: true, commandAllowlist: [] });
+      setCommandPickerOpen(false);
+      return;
+    }
+    if (nextMode === 'custom') {
+      updateOpen({
+        defaultCanExecuteCommands: false,
+        commandAllowlist: policy.open.commandAllowlist?.length
+          ? [...policy.open.commandAllowlist]
+          : [...DEFAULT_COMMAND_ALLOWLIST],
+      });
+      return;
+    }
+    updateOpen({ defaultCanExecuteCommands: false, commandAllowlist: [] });
+    setCommandPickerOpen(false);
+  };
+  const toggleCommand = (name, checked) => {
+    const next = new Set(allowedCommands);
+    if (checked) next.add(name);
+    else if (next.size > 1) next.delete(name);
+    else return;
+    updateOpen({ commandAllowlist: [...next] });
+  };
 
   return h('fieldset', {
     className: 'dim-accessScene',
@@ -184,21 +252,144 @@ function ScenePolicyEditor({
             },
             h('option', { value: 'open' }, '允许所有用户'),
             h('option', { value: 'allowlist' }, '仅白名单用户'))),
-          allowlist ? null : h('label', { className: 'dim-accessField' },
-              h('span', null, '默认命令权限'),
+          allowlist ? null : h(React.Fragment, null,
+            h('label', { className: 'dim-accessField' },
+              h('span', null, '命令权限'),
               h('select', {
-                value: policy.open.defaultCanExecuteCommands ? 'allow' : 'deny',
-                'aria-label': [localizeText(title), localizeText('默认命令权限')].join(' '),
-                onChange: (event) => onChange({
-                  ...policy,
-                  open: {
-                    ...policy.open,
-                    defaultCanExecuteCommands: commandValue(event.target.value),
-                  },
-                }),
+                value: commandMode,
+                'aria-label': [localizeText(title), localizeText('命令权限')].join(' '),
+                onChange: (event) => changeCommandMode(event.target.value),
               },
+              h('option', { value: 'deny' }, '不能执行命令'),
               h('option', { value: 'allow' }, '可以执行命令'),
-              h('option', { value: 'deny' }, '不可以执行命令')))),
+              h('option', { value: 'custom' }, '可以执行指定的命令'))),
+            commandMode !== 'custom' ? null : h('div', {
+              className: 'dim-accessField dim-accessCommandPicker',
+              style: { position: 'relative' },
+            },
+              h('button', {
+                type: 'button',
+                className: 'dim-deliveryButton',
+                'aria-expanded': commandPickerOpen,
+                onClick: () => setCommandPickerOpen((value) => !value),
+              }, `选择命令（${allowedCommands.size}）`),
+              commandPickerOpen ? h('div', {
+                role: 'presentation',
+                style: {
+                  position: 'fixed', inset: 0, zIndex: 1000,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: 24, background: 'rgba(0, 0, 0, 0.42)',
+                },
+                onClick: () => setCommandPickerOpen(false),
+              },
+                h('div', {
+                  role: 'dialog',
+                  'aria-modal': 'true',
+                  'aria-label': '选择允许的命令',
+                  onClick: (event) => event.stopPropagation(),
+                  style: {
+                    width: 'min(560px, 100%)',
+                    maxHeight: 'min(680px, calc(100vh - 48px))',
+                    display: 'flex', flexDirection: 'column', gap: 12,
+                    padding: 20, borderRadius: 14,
+                    border: '1px solid var(--dsw-alias-border-l1)',
+                    background: 'var(--dsw-alias-bg-overlay)',
+                    color: 'var(--dsw-alias-label-primary)',
+                    boxShadow: '0 24px 64px rgba(0, 0, 0, 0.38)',
+                  },
+                },
+                  h('div', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 } },
+                    h('div', null,
+                      h('strong', { style: { fontSize: 15 } }, '选择允许的命令'),
+                      h('p', { style: { margin: '4px 0 0', fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-label-secondary)' } },
+                        '默认勾选 new、stop、help、status、compact、clear。')),
+                    h('button', {
+                      type: 'button',
+                      'aria-label': '关闭',
+                      onClick: () => setCommandPickerOpen(false),
+                      style: {
+                        flex: '0 0 auto', width: 28, height: 28, padding: 0,
+                        border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 7,
+                        background: 'transparent', color: 'var(--dsw-alias-label-secondary)',
+                        cursor: 'pointer', fontSize: 16, lineHeight: '24px',
+                      },
+                    }, '×')),
+                  h('input', {
+                    type: 'search',
+                    value: commandQuery,
+                    placeholder: '搜索命令…',
+                    'aria-label': '搜索命令',
+                    onChange: (event) => setCommandQuery(event.target.value),
+                    style: {
+                      width: '100%', boxSizing: 'border-box', padding: '8px 10px',
+                      border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8,
+                      background: 'var(--dsw-alias-bg-base)', color: 'var(--dsw-alias-label-primary)',
+                      fontSize: 12,
+                    },
+                  }),
+                  h('div', {
+                    style: {
+                      display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                      gap: 4, overflow: 'auto', paddingRight: 4,
+                      flex: '1 1 auto', minHeight: 0,
+                    },
+                  },
+                    COMMAND_CHOICES
+                      .filter(([name, label]) => {
+                        const query = commandQuery.trim().toLowerCase();
+                        return !query || name.includes(query) || label.toLowerCase().includes(query);
+                      })
+                      .map(([name, label]) => {
+                        const checked = allowedCommands.has(name);
+                        return h('label', {
+                          key: name,
+                          style: {
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            minWidth: 0, padding: '6px 8px', borderRadius: 6,
+                            cursor: 'pointer', fontSize: 12,
+                            background: checked ? 'var(--dsw-alias-bg-layer-2)' : 'transparent',
+                          },
+                        },
+                          h('input', {
+                            type: 'checkbox',
+                            checked,
+                            onChange: (event) => toggleCommand(name, event.target.checked),
+                            style: {
+                              flex: '0 0 16px', width: 16, height: 16, margin: 0,
+                              accentColor: 'var(--dsw-alias-brand-primary)',
+                            },
+                          }),
+                          h('span', {
+                            style: { overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' },
+                          }, label));
+                      })),
+                  h('div', {
+                    style: {
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      gap: 8, paddingTop: 4,
+                    },
+                  },
+                    h('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
+                      `已选 ${allowedCommands.size} 项`),
+                    h('div', { style: { display: 'flex', gap: 8 } },
+                      h('button', {
+                        type: 'button',
+                        className: 'dim-deliveryButton',
+                        onClick: () => updateOpen({ commandAllowlist: [...DEFAULT_COMMAND_ALLOWLIST] }),
+                      }, '恢复默认'),
+                      h('button', {
+                        type: 'button',
+                        className: 'dim-deliveryButton',
+                        onClick: () => updateOpen({ commandAllowlist: COMMAND_CHOICES.map(([name]) => name) }),
+                      }, '全部命令'),
+                      h('button', {
+                        type: 'button',
+                        className: 'dim-deliveryButton',
+                        'data-kind': 'primary',
+                        onClick: () => setCommandPickerOpen(false),
+                      }, '完成'))))) : null)
+
+          )),
         h('div', { className: 'dim-accessUsers' },
           h('div', { className: 'dim-accessUsersHeading' },
             h('div', { className: 'dim-accessUsersTitle' },
