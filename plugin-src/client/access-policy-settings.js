@@ -325,6 +325,19 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
 
   React.useEffect(() => { void loadPendingSenders(); }, [loadPendingSenders]);
 
+  // 被拦截的人是在页面打开之后才来的：轮询一次很便宜的读，外加切回页面时立即刷新。
+  React.useEffect(() => {
+    if (channel !== 'dingtalk') return undefined;
+    const timer = setInterval(() => { void loadPendingSenders(); }, 5000);
+    timer?.unref?.();
+    const onFocus = () => { void loadPendingSenders(); };
+    globalThis.addEventListener?.('focus', onFocus);
+    return () => {
+      clearInterval(timer);
+      globalThis.removeEventListener?.('focus', onFocus);
+    };
+  }, [channel, loadPendingSenders]);
+
   // 用户列表不是独立存储：它就是两份白名单的合并视图。
   const directoryUsers = React.useMemo(() => {
     const merged = new Map();
