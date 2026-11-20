@@ -11,6 +11,7 @@ import {
 } from '../../src/channels/shared/delivery-sync-settings.mjs';
 import { getDeliverySyncSettingsStore } from '../../src/channels/shared/delivery-sync-settings-store.mjs';
 import { deliverSessionSyncMirror } from '../../src/channels/shared/session-sync-registry.mjs';
+import { cordisRootContext } from './cordis-root.mjs';
 
 /**
  * Where the turn came from, as far as a chat mirror is concerned.
@@ -363,7 +364,7 @@ export function isImOwnedInput(scope, event) {
 
 export function installSessionSyncCoordinator(ctx, deliveryService, {
   logger = console,
-  inputScope = ctx?.root ?? ctx,
+  inputScope = cordisRootContext(ctx),
   loadSettings = null,
   imInputOwnership = isImOwnedInput,
   config = {},

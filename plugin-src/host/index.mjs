@@ -14,6 +14,7 @@ import { apply as applyIMessage } from './channels/imessage/index.mjs';
 import { apply as applyEmail } from './channels/email/index.mjs';
 import { apply as applyMatrix } from './channels/matrix/index.mjs';
 import { installOutboundArtifactTool } from '../../src/channels/shared/semantic/artifact.mjs';
+import { cordisRootContext } from './cordis-root.mjs';
 import { installHostLanguage } from './host-language.mjs';
 import { installHostLanguageRpc } from './host-language-rpc.mjs';
 import { installDeliveryRpc } from './delivery-rpc.mjs';
@@ -267,7 +268,7 @@ export function createImHostPlugin(internals = {}) {
       try {
         startSessionSync(ctx, deliveryService, {
           logger,
-          inputScope: ctx.root ?? ctx,
+          inputScope: cordisRootContext(ctx),
           config,
         });
         installDsBotQuestionSync(ctx, deliveryService, { logger });
