@@ -650,17 +650,6 @@ export class DingtalkHarnessBridge {
         return this.#finishAccessDecision(message, messageId, sessionWebhook, access);
       }
     }
-    // 承接名字只用于设置页展示；读不到（或来源禁用）就不记，绝不影响收消息。
-    let rememberedNick = null;
-    try {
-      rememberedNick = nonEmptyString(message?.senderNick);
-    } catch {
-      rememberedNick = null;
-    }
-    if (addressed && rememberedNick) {
-      Promise.resolve(this.#state.rememberSenderName?.(sender, rememberedNick))
-        .catch((error) => this.#logger.warn?.('[dsh-dingtalk] failed to save sender name', error));
-    }
     this.#acceptedMessageIds.set(messageId, contextSnapshot === undefined ? captureContextEnhancement(
       this.#contextEnhancement,
       conversationType,
