@@ -5,7 +5,7 @@ import {
   normalizeAccessPolicy,
   validateAccessPolicy,
 } from '../../src/channels/shared/access-policy.mjs';
-import { h, localizeText } from './i18n.js';
+import { h, localizeText, localizeTemplate } from './i18n.js';
 
 export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
 const CONFIRMED_OWNER_CHANNELS = new Set(['weixin', 'feishu', 'qq', 'whatsapp', 'discord']);
@@ -272,7 +272,7 @@ function ScenePolicyEditor({
                 className: 'dim-deliveryButton',
                 'aria-expanded': commandPickerOpen,
                 onClick: () => setCommandPickerOpen((value) => !value),
-              }, `选择命令（${allowedCommands.size}）`),
+              }, localizeTemplate('选择命令（{count}）', { count: allowedCommands.size })),
               commandPickerOpen ? h('div', {
                 role: 'presentation',
                 style: {
@@ -370,7 +370,7 @@ function ScenePolicyEditor({
                     },
                   },
                     h('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
-                      `已选 ${allowedCommands.size} 项`),
+                      localizeTemplate('已选 {count} 项', { count: allowedCommands.size })),
                     h('div', { style: { display: 'flex', gap: 8 } },
                       h('button', {
                         type: 'button',
