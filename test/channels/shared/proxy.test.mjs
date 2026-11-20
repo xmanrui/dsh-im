@@ -10,7 +10,7 @@ import {
   describeProxy,
   hasEnvProxy,
   parseProxySpec,
-  resolveChannelProxy,
+  resolveProxyForChannel,
   SUPPORTED_PROXY_SCHEMES,
 } from '../../../src/channels/shared/proxy.mjs';
 
@@ -95,26 +95,29 @@ test('the dispatcher reaches the fetch it wraps', async () => {
   }
 });
 
-test('a channel switch beats the plugin proxy, and env is the last resort', () => {
-  const plugin = { proxy: 'http://proxy.example:3128' };
-  const off = resolveChannelProxy({ proxy: plugin.proxy, override: false, channelId: 'email' });
+test('a channel switch beats the settings, the settings beat the config file', () => {
+  const settings = parseProxySpec('http://settings.example:3128');
+  const off = resolveProxyForChannel({ settingsSpec: settings, override: false });
   assert.equal(off.spec, null);
   assert.equal(off.source, 'channel-off');
 
-  const own = resolveChannelProxy({ proxy: plugin.proxy, override: 'socks5h://own:1080', channelId: 'discord' });
+  const own = resolveProxyForChannel({ settingsSpec: settings, override: 'socks5h://own:1080' });
   assert.equal(own.source, 'channel');
   assert.equal(own.spec.host, 'own');
 
-  const shared = resolveChannelProxy({ proxy: plugin.proxy, channelId: 'telegram' });
-  assert.equal(shared.source, 'plugin');
-  assert.equal(shared.spec.port, 3128);
+  const fromSettings = resolveProxyForChannel({ settingsSpec: settings, configProxy: 'http://file:3128' });
+  assert.equal(fromSettings.source, 'settings');
+  assert.equal(fromSettings.spec.port, 3128);
 
-  const fromEnv = resolveChannelProxy({ proxy: null, env: { HTTPS_PROXY: 'http://env:3128' } });
+  const fromFile = resolveProxyForChannel({ settingsSpec: null, configProxy: 'http://file:3128' });
+  assert.equal(fromFile.source, 'plugin');
+  assert.equal(fromFile.spec.host, 'file');
+
+  const fromEnv = resolveProxyForChannel({ env: { HTTPS_PROXY: 'http://env:3128' } });
   assert.equal(fromEnv.source, 'env');
   assert.equal(fromEnv.spec, null, 'env proxies stay undici business');
 
-  const none = resolveChannelProxy({ proxy: null, env: {} });
-  assert.equal(none.source, 'none');
+  assert.equal(resolveProxyForChannel({ env: {} }).source, 'none');
   assert.equal(hasEnvProxy({ http_proxy: 'http://x:3128' }), true);
   assert.equal(hasEnvProxy({}), false);
 });

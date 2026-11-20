@@ -3,6 +3,7 @@ import {
   PROXY_SETTINGS_KEYS,
   PROXY_TYPES,
   proxySettingsPatchKeys,
+  proxySettingsProblem,
   proxySettingsToSpec,
 } from '../../src/channels/shared/proxy-settings.mjs';
 import { createChannelHttp } from '../../src/channels/shared/proxy.mjs';
@@ -83,7 +84,13 @@ export function validProxyPayload(endpoint, payload) {
  * is unhappy" without reading the Host log: a plain request, timed, with the
  * error text when it fails.
  */
-export async function checkProxy(settings, { fetchImpl = null } = {}) {
+export async function checkProxy(settings, { fetchImpl = null, signal = undefined } = {}) {
+  const problem = proxySettingsProblem(settings);
+  if (problem) {
+    // Half-filled form: reporting "ok" here would test the direct route and call
+    // it a proxy check.
+    return { enabled: Boolean(settings?.enabled), proxy: 'none', problem, ms: 0, results: [] };
+  }
   const spec = proxySettingsToSpec(settings);
   const transport = createChannelHttp({ spec, useEnv: false, connections: 1 });
   const started = Date.now();
@@ -92,9 +99,12 @@ export async function checkProxy(settings, { fetchImpl = null } = {}) {
     for (const target of PROXY_CHECK_TARGETS) {
       const at = Date.now();
       try {
+        const timeout = AbortSignal.timeout(CHECK_TIMEOUT_MS);
         const response = await (fetchImpl ?? transport.fetchImpl)(target.url, {
           method: 'GET',
-          signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
+          // An abandoned page must not keep the probes running for their full
+          // timeout; the RPC signal is honoured where the caller passes one.
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
         results.push({
           id: target.id, url: target.url, ok: true,
@@ -142,7 +152,7 @@ export function createProxyRpcHandler(store, { logger = console } = {}) {
     }
     try {
       if (endpoint === PROXY_ENDPOINTS.check) {
-        return { ok: true, value: await checkProxy(await store.get()) };
+        return { ok: true, value: await checkProxy(await store.get(), { signal }) };
       }
       const value = endpoint === PROXY_ENDPOINTS.get
         ? await store.get()

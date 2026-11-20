@@ -81,15 +81,22 @@ export async function createTokenProductionController(ctx, config, internals, de
   // channel's own form) is stored next to the proxy itself, in `bypass`. A
   // channel's own `proxy` in the plugin config still wins over it, because that
   // value can name a different proxy rather than just switch this one off.
-  const bypassed = Array.isArray(proxySettings?.bypass) && proxySettings.bypass.includes(channel);
-  const proxyOverride = channelConfig.proxy !== undefined
-    ? channelConfig.proxy
-    : (bypassed ? false : undefined);
-  const proxyResolution = resolveProxyForChannel({
-    settingsSpec: proxySettingsToSpec(proxySettings),
-    configProxy: config.proxy,
-    override: proxyOverride,
-  });
+  // Resolved again on every transport (see the factory below), because the
+  // opt-out is written at runtime too: ticking "do not use the proxy" on a
+  // channel's form must reach the next connection, not the next host restart.
+  const resolveProxyNow = () => {
+    const current = proxySettingsStore.spec() ?? proxySettings;
+    const bypassed = Array.isArray(current?.bypass) && current.bypass.includes(channel);
+    const override = channelConfig.proxy !== undefined
+      ? channelConfig.proxy
+      : (bypassed ? false : undefined);
+    return resolveProxyForChannel({
+      settingsSpec: proxySettingsToSpec(current),
+      configProxy: config.proxy,
+      override,
+    });
+  };
+  const proxyResolution = resolveProxyNow();
   // Only a channel that owns its transport can be handed a proxy: the transport
   // carries channel-specific pieces (telegram's FormData, for one), so a generic
   // one would break the very calls it wraps.
@@ -100,11 +107,7 @@ export async function createTokenProductionController(ctx, config, internals, de
   // The spec is re-read on every transport: a bot reconnect then applies a
   // proxy saved in the dashboard without restarting the whole host.
   const httpTransportOption = typeof transportFactory === 'function'
-    ? {
-      createHttpTransport: () => transportFactory({
-        spec: proxySettingsToSpec(proxySettingsStore.spec()) ?? proxyResolution.spec,
-      }),
-    }
+    ? { createHttpTransport: () => transportFactory({ spec: resolveProxyNow().spec }) }
     : {};
   const createSupervisor = internals.createConnectionSupervisor ?? createTokenConnectionSupervisor;
   const seedAccessPolicy = typeof definitions.initialAccessPolicyForBot === 'function'

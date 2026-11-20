@@ -11,6 +11,22 @@ export const PROXY_SETTINGS_VERSION = 1;
 /** The schemes the dashboard offers, in the order it offers them. */
 export const PROXY_TYPES = Object.freeze(['socks5h', 'socks5', 'http', 'https']);
 
+/**
+ * The port each type falls back to when the operator leaves the field empty.
+ *
+ * It lives here, next to the form, because the settings path builds a spec
+ * itself — `parseProxySpec` is not used there (it lives in a module the client
+ * cannot bundle), so without this table an empty field produced
+ * `port: undefined`, an invalid ProxyAgent URI and a SOCKS handshake that never
+ * starts. The page promises the default port; this is what keeps the promise.
+ */
+export const PROXY_TYPE_PORTS = Object.freeze({
+  http: 8080,
+  https: 443,
+  socks5: 1080,
+  socks5h: 1080,
+});
+
 export const DEFAULT_PROXY_SETTINGS = Object.freeze({
   // Off until the operator asks: a stray proxy in a working setup is a mystery
   // outage, and the page must never take a channel down by itself.
@@ -117,10 +133,11 @@ export function proxySettingsToSpec(settings) {
   if (!settings?.enabled) return null;
   const host = cleanText(settings.host);
   if (!host) return null;
+  const port = settings.port ? Number(settings.port) : PROXY_TYPE_PORTS[settings.type];
   return Object.freeze({
     protocol: settings.type,
     host,
-    port: settings.port ? Number(settings.port) : undefined,
+    port,
     username: settings.anonymous ? null : cleanText(settings.username) || null,
     password: settings.anonymous ? null : (settings.password || null),
   });

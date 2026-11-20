@@ -236,7 +236,8 @@ export function ProxySettings({ rpcCall }) {
     h('button', {
       type: 'button',
       className: 'dim-deliveryButton dim-globalSaveButton',
-      disabled: checking,
+      // A half-filled form has nothing to check: the request would go direct.
+      disabled: checking || problem !== null,
       onClick: () => void check(),
     }, checking ? '正在检查代理…' : '检查代理'),
     phase === 'error'

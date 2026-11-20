@@ -35,6 +35,9 @@ const DEFAULT_PORTS = Object.freeze({
   socks5h: 1080,
 });
 
+/** How long a SOCKS handshake may take before the connector gives up. */
+const SOCKS_HANDSHAKE_TIMEOUT_MS = 10_000;
+
 const SCHEME_ALIASES = Object.freeze({
   http: 'http',
   https: 'https',
@@ -170,7 +173,9 @@ function createSocksConnector(spec) {
         },
         destination: { host: destinationHost, port },
         command: 'connect',
-        timeout: Number(options.connectTimeout) || 10_000,
+        // undici's connector options carry no connectTimeout (it sets its own on
+        // the Agent), so this is a fixed bound rather than a configurable one.
+        timeout: SOCKS_HANDSHAKE_TIMEOUT_MS,
       });
       if (options.protocol !== 'https:') return socket;
       return tlsConnect({ socket, servername, rejectUnauthorized: options.rejectUnauthorized !== false });
@@ -221,25 +226,6 @@ export function hasEnvProxy(env = process.env) {
   return Boolean(
     cleanString(env.HTTPS_PROXY ?? env.https_proxy ?? env.HTTP_PROXY ?? env.http_proxy),
   );
-}
-
-/**
- * What a single channel should use.
- *
- * Precedence: the channel's own switch, then the plugin-wide proxy, then the
- * environment (kept for the setups that already rely on HTTP(S)_PROXY).
- * `override === false` is the per-channel opt-out and wins over everything —
- * email, for one, must never go through the IM proxy.
- */
-export function resolveChannelProxy({ proxy = null, override, channelId = null, env = process.env } = {}) {
-  if (override === false) return { spec: null, source: 'channel-off', channelId };
-  if (override !== null && override !== undefined) {
-    return { spec: parseProxySpec(override), source: 'channel', channelId };
-  }
-  const spec = parseProxySpec(proxy);
-  if (spec) return { spec, source: 'plugin', channelId };
-  if (hasEnvProxy(env)) return { spec: null, source: 'env', channelId };
-  return { spec: null, source: 'none', channelId };
 }
 
 /**

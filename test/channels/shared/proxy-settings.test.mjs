@@ -108,3 +108,31 @@ test('a broken config value is reported, and the channel runs direct', () => {
   assert.equal(result.spec, null);
   assert.match(result.error, /unsupported proxy scheme/);
 });
+
+test('an empty port falls back to the default of the chosen type', () => {
+  // The page promises "leave it empty and the default applies"; the settings
+  // path builds the spec itself, so this is the only place that can keep it.
+  const cases = [
+    ['http', 8080], ['https', 443], ['socks5', 1080], ['socks5h', 1080],
+  ];
+  for (const [type, port] of cases) {
+    const settings = normalizeProxySettings({ enabled: true, type, host: 'proxy.example', port: '' });
+    const spec = proxySettingsToSpec(settings);
+    assert.equal(spec.port, port, `${type} must default to ${port}`);
+  }
+});
+
+test('every default-port spec produces a usable dispatcher', async () => {
+  const { createProxyDispatcher } = await import('../../../src/channels/shared/proxy.mjs');
+  for (const type of ['http', 'https', 'socks5', 'socks5h']) {
+    const spec = proxySettingsToSpec(normalizeProxySettings({
+      enabled: true, type, host: '127.0.0.1', port: '',
+    }));
+    const dispatcher = createProxyDispatcher(spec);
+    try {
+      assert.ok(dispatcher, `${type} must build a dispatcher`);
+    } finally {
+      await dispatcher.destroy();
+    }
+  }
+});

@@ -25,6 +25,7 @@ import { installInboundTtlRpc } from './inbound-ttl-rpc.mjs';
 import { installDeliverySyncRpc } from './delivery-sync-rpc.mjs';
 import { installProxyRpc } from './proxy-rpc.mjs';
 import { installOpsRpc } from './ops-rpc.mjs';
+import { forgetChannelControllers } from './channel-registry.mjs';
 import { installSidebarSettingsRpc } from './sidebar-settings.mjs';
 import { installInjectedContext } from './injected-context.mjs';
 import { installSessionSyncCoordinator } from './session-sync-coordinator.mjs';
@@ -261,6 +262,10 @@ export function createImHostPlugin(internals = {}) {
     const failures = [];
     // Each channel mounts its management RPC before awaiting initialization.
     // Start them together so a slow channel cannot leave later routes absent.
+    // A profile reload starts every channel again: drop the controllers of the
+    // previous run first, or a channel removed from the config would keep a
+    // closed controller alive in the registry forever.
+    forgetChannelControllers();
     await Promise.all(channels.map(async ([channel, start]) => {
       try {
         await start(ctx, channelConfig(config, channel, deliveryService));

@@ -18,6 +18,17 @@ export const OPS_ENDPOINTS = Object.freeze({
 
 const ENDPOINTS = new Set(Object.values(OPS_ENDPOINTS));
 
+/** One bot may not hold the whole sweep hostage. */
+export const RECONNECT_TIMEOUT_MS = 20_000;
+
+function withTimeout(promise, ms, what) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 export function validOpsPayload(endpoint, payload) {
   if (!ENDPOINTS.has(endpoint)) return false;
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return false;
@@ -32,7 +43,9 @@ function botsOf(snapshot) {
     .filter(Boolean);
 }
 
-export function createOpsRpcHandler({ channels = registeredChannels, logger = console } = {}) {
+export function createOpsRpcHandler({
+  channels = registeredChannels, logger = console, timeoutMs = RECONNECT_TIMEOUT_MS,
+} = {}) {
   return async (endpoint, payload, signal) => {
     if (!validOpsPayload(endpoint, payload)) {
       return {
@@ -59,7 +72,7 @@ export function createOpsRpcHandler({ channels = registeredChannels, logger = co
       for (const botId of botIds) {
         if (signal?.aborted) break;
         try {
-          await controller.reconnectBot(botId);
+          await withTimeout(controller.reconnectBot(botId), timeoutMs, `${channel}/${botId}`);
           results.push({ channel, botId, ok: true });
         } catch (error) {
           // One unhappy bot must not stop the others.
