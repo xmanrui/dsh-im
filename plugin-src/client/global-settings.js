@@ -1,4 +1,5 @@
 import { DeliverySyncSettings } from './delivery-sync-settings.js';
+import { ProxySettings } from './proxy-settings.js';
 import { GroupHistorySettings } from './group-history-settings.js';
 import { SidebarSettings } from './sidebar-settings.js';
 import * as React from 'react';
@@ -24,6 +25,7 @@ export const GLOBAL_SETTINGS_TABS = Object.freeze([
   { key: 'general', label: '通用' },
   { key: 'attachments', label: '附件' },
   { key: 'delivery', label: '投递' },
+  { key: 'network', label: '网络' },
 ]);
 
 export const GLOBAL_SETTINGS_ENDPOINTS = Object.freeze({
@@ -427,7 +429,7 @@ function AttachmentSettingsPanel({ rpcCall }) {
     h(ImageInputSettings, { rpcCall }));
 }
 
-export function GlobalSettingsPanel({ rpcCall, deliverySyncRpcCall = null, languageRpcCall = null }) {
+export function GlobalSettingsPanel({ rpcCall, deliverySyncRpcCall = null, languageRpcCall = null, proxyRpcCall = null }) {
   const [tab, setTab] = React.useState('general');
   const tabs = GLOBAL_SETTINGS_TABS;
   const selectTab = (next) => {
@@ -443,6 +445,13 @@ export function GlobalSettingsPanel({ rpcCall, deliverySyncRpcCall = null, langu
   };
   const panel = tab === 'attachments'
     ? h(AttachmentSettingsPanel, { rpcCall })
+    : tab === 'network'
+      ? h('div', {
+        id: 'dim-general-settings-panel-network',
+        className: 'dim-generalSettingsTabPanel',
+        role: 'tabpanel',
+        'aria-labelledby': 'dim-general-settings-tab-network',
+      }, h(ProxySettings, { rpcCall: proxyRpcCall }))
     : tab === 'delivery'
       ? h('div', {
         id: DELIVERY_PANEL_ID,

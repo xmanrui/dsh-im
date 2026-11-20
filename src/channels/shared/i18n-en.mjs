@@ -1,4 +1,5 @@
 import imageInput from './i18n-en/image-input.mjs';
+import settings from './i18n-en/settings.mjs';
 import permission from './i18n-en/permission.mjs';
 import diagnostics from './i18n-en/diagnostics.mjs';
 // English translations for host-side user-facing text.
@@ -28,6 +29,7 @@ export const EN = Object.freeze(Object.assign(
   {},
   diagnostics,
   imageInput,
+  settings,
   permission,
   sharedA,
   sharedB,

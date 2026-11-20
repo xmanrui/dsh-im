@@ -502,7 +502,7 @@ export function WecomSettingsTab({ rpcCall }) {
       } else if (snapshot.testMessage?.sent) {
         feedback = '企业微信连接检查完成，测试消息已发送。';
       } else if (snapshot.testMessage?.code === 'test-target-unavailable') {
-        feedback = '连接检查完成。机器人尚未收到可用于测试的私聊消息。';
+        feedback = '机器人尚未收到可用于测试的私聊消息。请先给机器人发一条私聊消息，然后重试。';
       } else if (snapshot.testMessage) {
         feedback = '企业微信连接检查完成，但测试消息发送失败。';
       } else {

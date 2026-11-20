@@ -1,21 +1,27 @@
-import {
-  EnvHttpProxyAgent,
-  FormData as UndiciFormData,
-  fetch as undiciFetch,
-} from 'undici';
+import { FormData as UndiciFormData } from 'undici';
+import { createChannelHttp } from '../shared/proxy.mjs';
 
 const TELEGRAM_CONNECTIONS = 4;
 
-export function createTelegramHttpTransport() {
-  const dispatcher = new EnvHttpProxyAgent({ connections: TELEGRAM_CONNECTIONS });
-  let destroyed = false;
-  return {
-    fetchImpl: (url, options = {}) => undiciFetch(url, { ...options, dispatcher }),
+/**
+ * The HTTP transport the Telegram channel runs on.
+ *
+ * Without `spec` the channel keeps its old behaviour: undici's environment-aware
+ * agent, so HTTPS_PROXY/NO_PROXY still decide. With a spec (the IM proxy from the
+ * plugin config) every API call, file download and upload of this channel — and
+ * only this channel — goes through that proxy.
+ */
+export function createTelegramHttpTransport({ spec = null, useEnv = true } = {}) {
+  const transport = createChannelHttp({
+    spec,
+    useEnv,
+    connections: TELEGRAM_CONNECTIONS,
     FormDataImpl: UndiciFormData,
-    async destroy() {
-      if (destroyed) return;
-      destroyed = true;
-      await dispatcher.destroy();
-    },
+  });
+  return {
+    fetchImpl: transport.fetchImpl,
+    FormDataImpl: UndiciFormData,
+    proxy: transport.proxy,
+    destroy: transport.destroy,
   };
 }

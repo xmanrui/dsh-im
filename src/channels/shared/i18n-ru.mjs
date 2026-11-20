@@ -6,6 +6,7 @@
 
 import diagnostics from './i18n-ru/diagnostics.mjs';
 import imageInput from './i18n-ru/image-input.mjs';
+import settings from './i18n-ru/settings.mjs';
 import permission from './i18n-ru/permission.mjs';
 import sharedA from './i18n-ru/shared-a.mjs';
 import sharedB from './i18n-ru/shared-b.mjs';
@@ -29,6 +30,7 @@ export const RU = Object.freeze(Object.assign(
   {},
   diagnostics,
   imageInput,
+  settings,
   permission,
   sharedA,
   sharedB,

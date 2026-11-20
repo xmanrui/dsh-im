@@ -23,6 +23,8 @@ import { createDsBotClient } from './ds-bot-client.mjs';
 import { installDsBotQuestionSync } from './ds-bot-question-sync.mjs';
 import { installInboundTtlRpc } from './inbound-ttl-rpc.mjs';
 import { installDeliverySyncRpc } from './delivery-sync-rpc.mjs';
+import { installProxyRpc } from './proxy-rpc.mjs';
+import { installOpsRpc } from './ops-rpc.mjs';
 import { installSidebarSettingsRpc } from './sidebar-settings.mjs';
 import { installInjectedContext } from './injected-context.mjs';
 import { installSessionSyncCoordinator } from './session-sync-coordinator.mjs';
@@ -57,6 +59,8 @@ export function createImHostPlugin(internals = {}) {
   const startUpdate = internals.installUpdateRpc ?? installUpdateRpc;
   const startInboundTtl = internals.installInboundTtlRpc ?? installInboundTtlRpc;
   const startDeliverySync = internals.installDeliverySyncRpc ?? installDeliverySyncRpc;
+  const startProxyRpc = internals.installProxyRpc ?? installProxyRpc;
+  const startOpsRpc = internals.installOpsRpc ?? installOpsRpc;
   const startSidebarSettings = internals.installSidebarSettingsRpc ?? installSidebarSettingsRpc;
   const startInjectedContext = internals.installInjectedContext ?? installInjectedContext;
   const startDelivery = internals.installDeliveryRpc ?? installDeliveryRpc;
@@ -238,6 +242,8 @@ export function createImHostPlugin(internals = {}) {
       try {
         startInboundTtl(ctx, { config });
         startDeliverySync(ctx, { config });
+        startProxyRpc(ctx, { config });
+        startOpsRpc(ctx, { config });
       } catch (error) {
         logger.error?.('[dsh-im] failed to activate inbound TTL settings; continuing with channels', error);
       }
