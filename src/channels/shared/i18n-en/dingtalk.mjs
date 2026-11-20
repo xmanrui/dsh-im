@@ -3,6 +3,11 @@ export default {
   // Bot chat replies and card text (dingtalk-bridge.mjs, dingtalk-card-stream.mjs,
   // dingtalk-api.mjs)
   '已连接 DeepSeek Harness，正在思考…': 'Connected to DeepSeek Harness, thinking…',
+  '正在思考 🤔': 'Thinking 🤔',
+  '你好，当前账号暂无访问权限，如需使用请联系管理员。': 'Hello — this account does not have access. Contact an administrator if you need it enabled.',
+  '正在搜索网络并整理信息': 'Searching the web and gathering information',
+  '正在使用 {name}': 'Using {name}',
+  '正在处理': 'Working on it',
 
   '钉钉机器人已连接 DeepSeek Harness。': 'The DingTalk bot is connected to DeepSeek Harness.',
   '/m 或 /menu  打开下拉操作菜单': '/m or /menu  Open the dropdown action menu',

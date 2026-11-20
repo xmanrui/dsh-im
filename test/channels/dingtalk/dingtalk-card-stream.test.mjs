@@ -199,3 +199,50 @@ test('a failed final frame closes the delivered card once and requests text fall
   assert.equal(fixtureValue.calls.fail[0].text, '卡片已结束，请查看后续消息。');
   assert.notEqual(fixtureValue.calls.fail[0].signal, fixtureValue.calls.finish[0].signal);
 });
+
+test('a progress push schedules only the throttle update when dotIntervalMs is omitted', async () => {
+  const timers = scheduler();
+  const fixtureValue = fixture();
+  const stream = createStream(fixtureValue.api, {
+    updateIntervalMs: 800,
+    clock: timers.clock,
+    timer: timers.timer,
+  });
+
+  assert.equal(await stream.start('开始'), true);
+  stream.push('草稿');
+
+  // 默认不做圆点动画：只挂一个节流更新定时器。
+  assert.equal(timers.tasks.length, 1);
+  assert.equal(await stream.finish('完成'), true);
+});
+
+test('dotIntervalMs animates the trailing dots and stops after finish', async () => {
+  const timers = scheduler();
+  const fixtureValue = fixture();
+  const stream = createStream(fixtureValue.api, {
+    updateIntervalMs: 0,
+    dotIntervalMs: 400,
+    clock: timers.clock,
+    timer: timers.timer,
+  });
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(await stream.start('开始'), true);
+  stream.push('正在使用 bash…');
+  await flush();
+
+  // 基准文案去掉了尾部省略号。
+  assert.deepEqual(fixtureValue.calls.update.map(({ text }) => text), ['正在使用 bash']);
+
+  await timers.advance(400);
+  assert.equal(fixtureValue.calls.update.at(-1).text, '正在使用 bash.');
+
+  await timers.advance(400);
+  assert.equal(fixtureValue.calls.update.at(-1).text, '正在使用 bash..');
+
+  assert.equal(await stream.finish('完成'), true);
+  const updatesAfterFinish = fixtureValue.calls.update.length;
+  await timers.advance(2_000);
+  assert.equal(fixtureValue.calls.update.length, updatesAfterFinish);
+});

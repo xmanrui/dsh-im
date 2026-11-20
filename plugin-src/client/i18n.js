@@ -683,6 +683,9 @@ const EN = Object.freeze({
   '保留机器人': 'Keep bot',
   '保留账号': 'Keep account',
   '取消': 'Cancel',
+  '确认': 'Confirm',
+  '请选择单聊或群聊。': 'Select direct, group, or both.',
+  '显示每个人当前拥有的单聊和群聊权限。': 'Shows the direct and group permissions each user currently holds.',
   '关闭': 'Close',
   '立即重试': 'Retry now',
   '重新读取': 'Reload',
@@ -1380,9 +1383,63 @@ const EN = Object.freeze({
   '请求失败': 'The request failed',
 });
 
-export const en = EN;
+const DINGTALK_TEXTS_EN = Object.freeze({
+  '卡片初始文案': 'Card initial text',
+  '正在思考 🤔': 'Thinking 🤔',
+  'AI 卡片刚创建时显示的文字。': 'Shown while the AI Card is being created.',
+  '处理中文案': 'Working text',
+  '正在处理': 'Working on it',
+  '还没有具体工具可显示时的占位文字。': 'Placeholder shown before any tool runs.',
+  '工具进度文案': 'Tool progress text',
+  '正在使用 {name}': 'Using {name}',
+  '支持 {name} 占位符；不写占位符时只显示你填的文字。': 'Supports a {name} placeholder; without it the text you enter is shown as-is.',
+  '联网搜索文案': 'Web search text',
+  '正在搜索网络并整理信息': 'Searching the web and gathering information',
+  '执行 web_search 时显示的文字。': 'Shown while web_search runs.',
+  '无权限提示': 'Access denied notice',
+  '你好，当前账号暂无访问权限，如需使用请联系管理员。': 'Hello — this account does not have access. Contact an administrator if you need it enabled.',
+  '非白名单账号私聊机器人时回复的提示；群聊不回复。': 'Replied to a direct message from an account outside the allowlist; groups stay silent.',
+  '无法读取提示文案设置，请稍后重试。': 'Could not load the text settings. Try again later.',
+  '机器人提示文案': 'Bot status texts',
+  '留空即使用默认文案；只有填过的字段会被保存，切换界面语言时默认文案仍会自动翻译。': 'Leave a field empty to use the default wording. Only the fields you fill are stored, so the rest keep following the interface language.',
+  '提示文案': 'Status texts',
+  '默认：{text}': 'Default: {text}',
+  '被拦截的用户': 'Intercepted users',
+  '不在白名单、私聊过机器人的人。允许后会加入白名单，下一次消息就能正常回答。': 'People outside the allowlist who messaged the bot directly. Allowing one adds them to the allowlist, and their next message is answered normally.',
+  '访问被拦截的用户。允许后会加入白名单，下一次消息就能正常回答。': 'Users whose access was blocked. Allowing them adds them to the allowlist for their next message.',
+  '暂无被拦截的用户': 'No intercepted users',
+  '钉钉用户': 'DingTalk user',
+  '允许': 'Allow',
+  '正在允许…': 'Allowing…',
+  '无法读取被拦截的用户。': 'Could not load intercepted users.',
+  '允许失败，请重试。': 'Allow failed. Try again.',
+  '已加入私聊白名单。': 'Added to the direct-message allowlist.',
+  '已允许该用户，下一条消息会正常回答。': 'This user is now allowed; their next message is answered normally.',
+  '已批准的用户': 'Approved users',
+  '用户列表': 'Users',
+  '用户名': 'User name',
+  '未知': 'Unknown',
+  '两份白名单的合并视图：显示每个人当前拥有的单聊/群聊权限；移除后两处都会清掉。': 'A merged view of both allowlists: it shows the direct/group permission each user has, and removing one clears both.',
+  '加入白名单': 'Add to allowlist',
+  '已从单聊和群聊白名单中移除该用户。': 'Removed this user from both the direct and the group allowlist.',
+  '切换场景失败，请重试。': 'Could not switch the scene. Try again.',
+  '优先级最高：命中此名单的人私聊和群聊都会放行，不再受下面白名单与访问模式的约束。': 'Highest priority: anyone on this list is allowed in both direct and group chats, regardless of the allowlists and access modes below.',
+  '移除': 'Remove',
+  '正在移除…': 'Removing…',
+  '移除失败，请重试。': 'Remove failed. Try again.',
+  '移除失败，请稍后重试。': 'Remove failed. Try again later.',
+  '单聊：{state}': 'Direct: {state}',
+  '群聊：{state}': 'Groups: {state}',
+  '有': 'yes',
+  '无': 'no',
+  '这条记录已经不存在了（可能已被处理过），列表已刷新。': 'This record no longer exists (it may already have been handled); the list was refreshed.',
+  '这条记录缺少身份标识（可能是旧版本留下的数据）。请刷新页面后重试；仍然失败就重启一次应用。': 'This record has no identity key (it may be legacy data). Refresh the page and retry; if it still fails, restart the app once.',
+  '已移除该用户，之后发消息会被重新拦截。': 'Removed. The next message from this user is intercepted again.',
+});
+
+export const en = { ...EN, ...DINGTALK_TEXTS_EN };
 export const zh = Object.freeze(Object.fromEntries(
-  Object.keys(EN).map((key) => [key, key === '$locale' ? 'zh' : key]),
+  Object.keys(en).map((key) => [key, key === '$locale' ? 'zh' : key]),
 ));
 
 // Russian, narrowed to the keys this UI asks for: the shared Host modules it is
@@ -1391,7 +1448,7 @@ export const zh = Object.freeze(Object.fromEntries(
 // Chinese key hide behind a lookup that happens to miss. The English text is the
 // last resort for a key the narrowed dictionary somehow lost.
 export const ru = Object.freeze(Object.fromEntries(
-  Object.keys(EN).map((key) => [key, RU[key] ?? EN[key]]),
+  Object.keys(en).map((key) => [key, RU[key] ?? en[key]]),
 ));
 
 let translate = (key) => key;

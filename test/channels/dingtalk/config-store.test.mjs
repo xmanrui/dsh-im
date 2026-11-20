@@ -68,6 +68,7 @@ test('config persists only clientId, derived secretRef, and approvedSenders with
       staffId: 'staff-private-one',
       displayName: '测试用户',
       approvedAt: '2026-08-15T00:00:00.000Z',
+      scenes: { direct: true, group: true },
     }],
   });
 });

@@ -1,6 +1,7 @@
 import { t } from '../shared/i18n.mjs';
 
 const DEFAULT_UPDATE_INTERVAL_MS = 500;
+const DOT_STEPS = Object.freeze(['', '.', '..', '...']);
 const CLOSED_TEXT = '卡片已结束，请查看后续消息。';
 
 function requiredText(value, name) {
@@ -30,6 +31,7 @@ function requiredCredential(value, name) {
  * @param {AbortSignal} [options.signal] Stream cancellation signal.
  * @param {object} [options.logger] Safe diagnostic sink.
  * @param {number} [options.updateIntervalMs=500] Minimum delay between updates.
+ * @param {number} [options.dotIntervalMs=0] Trailing-dot animation interval; 0 disables it.
  * @param {()=>number} [options.clock] Monotonic millisecond clock.
  * @param {{setTimeout: Function, clearTimeout: Function}} [options.timer] Timer implementation.
  * @returns {{start(initialText: string): Promise<boolean>, push(progressText: string): void, finish(finalText: string): Promise<boolean>, readonly providerMessageIds: string[]}}
@@ -43,6 +45,7 @@ export function createDingTalkCardStream({
   signal,
   logger = console,
   updateIntervalMs = DEFAULT_UPDATE_INTERVAL_MS,
+  dotIntervalMs = 0,
   clock = () => Date.now(),
   timer = {
     setTimeout: (callback, delay) => globalThis.setTimeout(callback, delay),
@@ -60,6 +63,9 @@ export function createDingTalkCardStream({
   if (target === undefined || target === null) throw new TypeError('target is required');
   if (!Number.isFinite(updateIntervalMs) || updateIntervalMs < 0) {
     throw new TypeError('updateIntervalMs must be a non-negative number');
+  }
+  if (!Number.isFinite(dotIntervalMs) || dotIntervalMs < 0) {
+    throw new TypeError('dotIntervalMs must be a non-negative number');
   }
   if (typeof clock !== 'function') throw new TypeError('clock must be a function');
   if (typeof timer?.setTimeout !== 'function' || typeof timer?.clearTimeout !== 'function') {
@@ -81,6 +87,8 @@ export function createDingTalkCardStream({
   let finishPromise = null;
   let cleanupPromise = null;
   let lastUpdateAt = 0;
+  let dotTimer = null;
+  let dotBaseText = '';
 
   const clearScheduledUpdate = () => {
     if (scheduledUpdate === null) return;
@@ -88,11 +96,32 @@ export function createDingTalkCardStream({
     scheduledUpdate = null;
   };
 
+  const clearDotTimer = () => {
+    if (dotTimer === null) return;
+    timer.clearTimeout(dotTimer);
+    dotTimer = null;
+  };
+
+  // 状态文案末尾省略号循环跳动，让「还在处理」看得见。
+  const scheduleDotTick = () => {
+    if (dotIntervalMs <= 0 || phase !== 'active' || !dotBaseText) return;
+    dotTimer = timer.setTimeout(() => {
+      dotTimer = null;
+      if (phase !== 'active' || !dotBaseText) return;
+      const step = DOT_STEPS[Math.floor(readClock() / dotIntervalMs) % DOT_STEPS.length];
+      pendingText = `${dotBaseText}${step}`;
+      if (!scheduledUpdate && !updateWorker) launchUpdate();
+      scheduleDotTick();
+    }, dotIntervalMs);
+  };
+
   const removeAbortListener = () => signal?.removeEventListener('abort', onAbort);
 
   const close = (nextPhase) => {
     phase = nextPhase;
     pendingText = null;
+    dotBaseText = '';
+    clearDotTimer();
     clearScheduledUpdate();
     removeAbortListener();
   };
@@ -197,7 +226,10 @@ export function createDingTalkCardStream({
   const push = (progressText) => {
     requiredText(progressText, 'progressText');
     if (phase !== 'active') return;
-    pendingText = progressText;
+    dotBaseText = progressText.replace(/[.…]+$/u, '');
+    pendingText = dotBaseText;
+    clearDotTimer();
+    scheduleDotTick();
     if (!scheduledUpdate && !updateWorker) launchUpdate();
   };
 
@@ -209,6 +241,8 @@ export function createDingTalkCardStream({
 
     phase = 'finishing';
     pendingText = null;
+    dotBaseText = '';
+    clearDotTimer();
     clearScheduledUpdate();
     const activeUpdate = updateWorker;
     finishPromise = (async () => {

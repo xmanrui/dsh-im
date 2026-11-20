@@ -138,6 +138,28 @@ export async function createProductionController(ctx, config = {}, internals = {
     credentials: ctx.credentials,
     configStore: observedConfigStore,
     logger,
+    directoryNames: (botId) => {
+      const policy = workspaces.accessPolicyFor(botId);
+      const state = stateForSync(botId);
+      if (!policy || typeof state?.senderName !== 'function') return [];
+      const ids = new Set(['direct', 'group'].flatMap((scene) => policy[scene].allowlist.users.map((user) => user.id)));
+      return [...ids].flatMap((id) => {
+        const name = state.senderName(id);
+        return name ? [{ id, displayName: name }] : [];
+      });
+    },
+    // 「允许」把发送人同时写进访问设置的白名单；「移除」再摘掉，两处保持一致。
+    syncAllowlist: async (botId, staffId, present, scene = 'direct') => {
+      const current = workspaces.accessPolicyFor(botId);
+      const existing = current[scene].allowlist.users;
+      const users = present
+        ? (existing.some((user) => user.id === staffId) ? existing : [...existing, { id: staffId, canExecuteCommands: false }])
+        : existing.filter((user) => user.id !== staffId);
+      await workspaces.setAccessPolicy(botId, {
+        ...current,
+        [scene]: { ...current[scene], allowlist: { users } },
+      });
+    },
     createRuntime: async ({ botId, config: botConfig, clientSecret }) => {
       const state = await stateFor(botId);
       await workspaces.ensure(botId, {
@@ -154,6 +176,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         harness: workspaceScope.harness,
         state: workspaceScope.state,
         contextEnhancement: { botId, getSettings: () => workspaces.contextEnhancementFor(botId) },
+        texts: { botId, getSettings: () => workspaces.textOverridesFor(botId) },
         accessPolicy: accessPolicyProvider(workspaces, botId, {
           channel: 'dingtalk', config: botConfig,
         }),

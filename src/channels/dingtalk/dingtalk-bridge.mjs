@@ -85,8 +85,11 @@ import {
   evaluateInboundAccess,
 } from '../shared/inbound-access.mjs';
 import { t } from '../shared/i18n.mjs';
+import { toolProgressWithName } from '../shared/text-overrides.mjs';
 
-const CARD_INITIAL_TEXT = '已连接 DeepSeek Harness，正在思考…';
+const CARD_INITIAL_TEXT = '正在思考 🤔';
+const CARD_DOT_INTERVAL_MS = 400;
+const ACCESS_DENIED_NOTICE = '你好，当前账号暂无访问权限，如需使用请联系管理员。';
 const INTERACTION_RESOLVED_TEXT = '这个问题已在其他客户端处理，无需再次回答。';
 
 const HELP_TEXT_LINES = [
@@ -463,15 +466,6 @@ function artifactFailureText(fileName, error) {
   }
 }
 
-function progressText(update) {
-  if (update?.type === 'text' && nonEmptyString(update.text)) return update.text;
-  if (update?.type === 'tool') {
-    if (update.name === 'web_search') return t('_正在搜索网络并整理信息…_');
-    return t('_正在使用 {name}…_', { name: nonEmptyString(update.name) ?? t('工具') });
-  }
-  return t('_{text}_', { text: nonEmptyString(update?.text) ?? t('正在处理…') });
-}
-
 function canClaimInteractionReply(message, pending, sender) {
   if (pending.needsPresentation || !pending.questions[pending.index]) return false;
   if (pending.actor !== sender) return false;
@@ -544,6 +538,7 @@ export class DingtalkHarnessBridge {
   #deferred;
   #contextEnhancement;
   #accessPolicy;
+  #texts;
   #status;
   #logger;
   #replyTimeoutMs;
@@ -569,6 +564,7 @@ export class DingtalkHarnessBridge {
     harness,
     state,
     contextEnhancement,
+    texts,
     accessPolicy,
     status = createDingtalkBridgeStatus(),
     logger = console,
@@ -588,6 +584,7 @@ export class DingtalkHarnessBridge {
     this.#harness = harness;
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
+    this.#texts = texts;
     this.#accessPolicy = accessPolicy;
     this.#status = status;
     this.#logger = logger;
@@ -1156,12 +1153,44 @@ export class DingtalkHarnessBridge {
     return { content: text };
   }
 
+  // Per-bot text overrides (settings → 提示文案). An absent field keeps the
+  // i18n default, so a deployment stores only what it actually changed.
+  #textsNow() {
+    try {
+      return this.#texts?.getSettings?.() ?? {};
+    } catch {
+      return {};
+    }
+  }
+
+  #cardInitialText() {
+    return this.#textsNow().cardInitial ?? t(CARD_INITIAL_TEXT);
+  }
+
+  #accessDeniedText() {
+    return this.#textsNow().accessDenied ?? t(ACCESS_DENIED_NOTICE);
+  }
+
+  #progressText(update) {
+    const texts = this.#textsNow();
+    if (update?.type === 'text' && nonEmptyString(update.text)) return update.text;
+    if (update?.type === 'tool') {
+      if (update.name === 'web_search') {
+        return texts.webSearching ?? t('正在搜索网络并整理信息');
+      }
+      const name = nonEmptyString(update.name) ?? t('工具');
+      return toolProgressWithName(texts.toolUsing ?? t('正在使用 {name}'), name);
+    }
+    return nonEmptyString(update?.text) ?? texts.working ?? t('正在处理');
+  }
+
   async #deliverDeferredOutcome(entry, outcome) {
     const text = deferredOutcomeText(outcome);
     if (outcome.found && ['createAiCard', 'updateAiCard', 'finishAiCard'].every((name) => typeof this.#api[name] === 'function')) {
       const card = createDingTalkCardStream({ api: this.#api, clientId: this.#clientId,
-        clientSecret: this.#clientSecret, target: entry.target, signal: this.#signal, logger: this.#logger });
-      if (await card.start(t(CARD_INITIAL_TEXT)) && await card.finish(text)) return true;
+        clientSecret: this.#clientSecret, target: entry.target, signal: this.#signal, logger: this.#logger,
+        dotIntervalMs: CARD_DOT_INTERVAL_MS });
+      if (await card.start(this.#cardInitialText()) && await card.finish(text)) return true;
       this.#logger.warn?.('[dsh-dingtalk] deferred card unavailable; sending robot text');
     }
     await this.#api.sendRobotText({ clientId: this.#clientId, clientSecret: this.#clientSecret,
@@ -1273,6 +1302,35 @@ export class DingtalkHarnessBridge {
         );
         increment(this.#status, 'messagesReplied');
         this.#status.lastReplyAt = new Date().toISOString();
+      } else if (access.reason === 'sender-not-allowed' && sessionWebhook) {
+        increment(this.#status, 'messagesReceived');
+        this.#status.lastMessageAt = new Date().toISOString();
+        this.#logger.warn?.('[dsh-dingtalk] denied an inbound message outside the access policy', {
+          senderId: senderStaffId(message),
+          senderName: nonEmptyString(message?.senderNick),
+          conversationType: message?.conversationType,
+        });
+        // 提示不依赖访问记录的写入，避免存储故障影响用户收到反馈。
+        let replyError;
+        try {
+          await this.#send(sessionWebhook, this.#accessDeniedText(), this.#atUsersFor(message));
+          increment(this.#status, 'messagesReplied');
+          this.#status.lastReplyAt = new Date().toISOString();
+        } catch (error) {
+          replyError = error;
+        }
+        // 记进待审批列表，设置页的「访问设置」可以逐个放行。
+        try {
+          await this.#state.recordPendingSender?.({
+            staffId: senderStaffId(message),
+            displayName: message?.senderNick,
+            lastSeenAt: new Date().toISOString(),
+          });
+          this.#refreshPendingSenders();
+        } catch {
+          // 记录失败不改变访问决定。
+        }
+        if (replyError) throw replyError;
       } else {
         increment(this.#status, 'messagesRejected');
         this.#status.lastRejectedAt = new Date().toISOString();
@@ -1427,9 +1485,10 @@ export class DingtalkHarnessBridge {
           target: cardTarget(message, sender),
           signal: this.#signal,
           logger: this.#logger,
+          dotIntervalMs: CARD_DOT_INTERVAL_MS,
         });
         const startedAt = Date.now();
-        cardStarted = await cardStream.start(t(CARD_INITIAL_TEXT));
+        cardStarted = await cardStream.start(this.#cardInitialText());
         if (cardStarted) cardStartedAt = startedAt;
       }
       const { answer, artifacts = [] } = await askInWorkspaceSession({
@@ -1450,7 +1509,7 @@ export class DingtalkHarnessBridge {
           signal: this.#signal,
           control: { owner: this, key },
           onUpdate: cardStarted
-            ? (update) => cardStream.push(progressText(update))
+            ? (update) => cardStream.push(this.#progressText(update))
             : undefined,
           onInteraction: (interaction) => this.#handleInteraction(interaction, {
             key,

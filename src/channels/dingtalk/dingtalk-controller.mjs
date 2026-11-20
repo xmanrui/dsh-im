@@ -125,6 +125,10 @@ function publicApprovedSender(sender) {
     displayName: cleanString(sender.displayName) ?? t('钉钉用户'),
     senderIdMasked: maskDingtalkSenderId(sender.staffId),
     approvedAt: cleanString(sender.approvedAt),
+    scenes: {
+      direct: sender.scenes?.direct !== false,
+      group: sender.scenes?.group !== false,
+    },
   };
 }
 
@@ -134,6 +138,8 @@ export class DingtalkController {
   #credentials;
   #configStore;
   #createRuntime;
+  #syncAllowlist;
+  #directoryNames;
   #deleteState;
   #logger;
   #diagnostics;
@@ -162,6 +168,8 @@ export class DingtalkController {
     configStore,
     createRuntime,
     deleteState = async () => {},
+    syncAllowlist = null,
+    directoryNames = null,
     logger = console,
     clock = Date,
   }) {
@@ -194,6 +202,8 @@ export class DingtalkController {
     this.#configStore = configStore;
     this.#createRuntime = createRuntime;
     this.#deleteState = deleteState;
+    this.#syncAllowlist = typeof syncAllowlist === 'function' ? syncAllowlist : null;
+    this.#directoryNames = typeof directoryNames === 'function' ? directoryNames : () => [];
     this.#logger = logger;
     this.#diagnostics = createConnectionDiagnostics({ channel: 'dingtalk', prefix: 'DT-CONN', logger });
     this.#clock = clock;
@@ -491,35 +501,52 @@ export class DingtalkController {
     return { ...this.status(), ...(warnings.length ? { warnings } : {}) };
   }
 
-  /** Approves one opaque pending-sender request for a bot. */
-  async approveSender(botId, requestId) {
-    const config = this.#configStore.get(botId);
-    if (!config) throw new Error('Unknown DingTalk bot');
+  /**
+   * Allows one opaque pending-sender request into the selected access-policy
+   * scenes. There is no second list: the settings page derives its user list
+   * from these allowlists, so writing them is the whole approval.
+   */
+  async approveSender(botId, requestId, scenes = ['direct', 'group']) {
     const runtime = this.#runtimes.get(botId);
+    const pending = internalPendingSenders(runtimeStatus(runtime));
     const direct = typeof runtime?.pendingSender === 'function'
       ? normalizePendingSender(runtime.pendingSender(requestId))
       : null;
-    const pending = internalPendingSenders(runtimeStatus(runtime));
     const sender = direct?.requestId === requestId
       ? direct
       : pending.find((candidate) => candidate.requestId === requestId);
-    if (!sender) throw new Error('Unknown DingTalk sender approval request');
-    if (config.approvedSenders.some((approved) => approved.staffId === sender.staffId)) {
+    if (!sender) {
+      const error = new Error('Unknown DingTalk sender approval request');
+      error.code = 'sender-request-not-found';
+      throw error;
+    }
+    const wanted = Array.isArray(scenes)
+      ? [...new Set(scenes.filter((scene) => scene === 'direct' || scene === 'group'))]
+      : [];
+    const targets = wanted.length ? wanted : ['direct', 'group'];
+    if (!this.#syncAllowlist) {
+      // 没有白名单写入能力时退回旧行为，保持既有调用方语义。
+      const config = this.#configStore.get(botId);
+      if (!config) throw new Error('Unknown DingTalk bot');
+      const updated = {
+        ...config,
+        approvedSenders: [
+          ...config.approvedSenders,
+          {
+            senderKey: deriveDingtalkSenderKey(),
+            staffId: sender.staffId,
+            displayName: sender.displayName,
+            approvedAt: isoNow(this.#clock),
+          },
+        ],
+      };
+      await this.#saveAndRestart(config, updated);
       return this.status();
     }
-    const updated = {
-      ...config,
-      approvedSenders: [
-        ...config.approvedSenders,
-        {
-          senderKey: deriveDingtalkSenderKey(),
-          staffId: sender.staffId,
-          displayName: sender.displayName,
-          approvedAt: isoNow(this.#clock),
-        },
-      ],
-    };
-    await this.#saveAndRestart(config, updated);
+    for (const scene of targets) {
+      await this.#syncAllowlist(botId, sender.staffId, true, scene);
+    }
+    await runtime?.forgetPendingSender?.(requestId);
     return this.status();
   }
 
@@ -530,10 +557,26 @@ export class DingtalkController {
     const index = config.approvedSenders.findIndex(
       (sender) => sender.senderKey === senderKey,
     );
-    if (index === -1) throw new Error('Unknown approved DingTalk sender');
+    if (index === -1) {
+      const error = new Error('Unknown approved DingTalk sender');
+      error.code = 'approved-sender-not-found';
+      throw error;
+    }
+    const sender = config.approvedSenders[index];
     const approvedSenders = [...config.approvedSenders];
     approvedSenders.splice(index, 1);
+    // 先撤掉旁路（权限的真相），再清白名单；白名单失败就把配置还原。
     await this.#saveAndRestart(config, { ...config, approvedSenders });
+    try {
+      for (const scene of ['direct', 'group']) {
+        if (!this.#syncAllowlist) break;
+        await this.#syncAllowlist(botId, sender.staffId, false, scene);
+      }
+    } catch (error) {
+      // 还原：把带这条已批准记录的旧配置写回去。
+      await this.#saveAndRestart({ ...config, approvedSenders }, config).catch(() => undefined);
+      throw error;
+    }
     return this.status();
   }
 
@@ -578,6 +621,7 @@ export class DingtalkController {
         senders: {
           pending,
           approved: config.approvedSenders.map(publicApprovedSender),
+          directoryNames: this.#directoryNames(config.botId),
         },
         error: accountError ? structuredClone(accountError) : null,
       };

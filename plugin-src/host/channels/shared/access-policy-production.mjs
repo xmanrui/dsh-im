@@ -110,7 +110,14 @@ export function newBotAccessPolicyFor(channel, config = {}) {
   return initialAccessPolicyFor(channel, config);
 }
 
-export function privilegedSenderIdsFor(channel, config = {}) {
+function approvedSceneEnabled(entry, scene) {
+  if (!scene) return true;
+  const scenes = entry?.scenes;
+  if (!scenes || typeof scenes !== 'object') return true; // 老数据：两个场景都开
+  return scenes[scene] !== false;
+}
+
+export function privilegedSenderIdsFor(channel, config = {}, scene) {
   const key = String(channel ?? '').trim().toLowerCase();
   if (key === 'weixin') return cleanIds(config.ownerUserId);
   if (key === 'feishu') {
@@ -118,7 +125,9 @@ export function privilegedSenderIdsFor(channel, config = {}) {
   }
   if (key === 'dingtalk') {
     const approved = Array.isArray(config.approvedSenders) ? config.approvedSenders : [];
-    return cleanIds(approved.map((entry) => entry?.staffId));
+    return cleanIds(approved
+      .filter((entry) => approvedSceneEnabled(entry, scene))
+      .map((entry) => entry?.staffId));
   }
   if (key === 'qq') return cleanIds(config.ownerUserOpenid).filter((id) => id !== '*');
   if (key === 'whatsapp') return cleanIds(config.accountJid);
@@ -130,13 +139,18 @@ export function accessPolicyProvider(workspaces, botId, { channel, config, equal
   if (!workspaces || typeof workspaces.accessPolicyFor !== 'function') {
     throw new TypeError('A workspace store with access policies is required');
   }
-  const privilegedSenderIds = new Set(privilegedSenderIdsFor(channel, config));
+  const privilegedByScene = {
+    direct: new Set(privilegedSenderIdsFor(channel, config, 'direct')),
+    group: new Set(privilegedSenderIdsFor(channel, config, 'group')),
+  };
   const sameSender = typeof equals === 'function' ? equals : (left, right) => left === right;
   return Object.freeze({
     botId,
     getSettings: () => workspaces.accessPolicyFor(botId),
     isPrivileged(senderIds, conversationType) {
       if (!['direct', 'group'].includes(conversationType)) return false;
+      const privilegedSenderIds = privilegedByScene[conversationType];
+      if (!privilegedSenderIds) return false;
       const candidates = Array.isArray(senderIds) ? senderIds : [senderIds];
       try {
         return candidates.some((senderId) => typeof senderId === 'string'
