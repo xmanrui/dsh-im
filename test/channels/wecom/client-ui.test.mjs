@@ -135,7 +135,7 @@ test('Enterprise WeChat connection feedback is scoped to the checked bot', async
 test('Enterprise WeChat reconnect failure uses fixed translatable copy', async () => {
   const source = await readFile(CLIENT_URL, 'utf8');
   assert.match(source, /'连接检查失败，请稍后重试。'/);
-  assert.match(source, /'连接检查完成。机器人尚未收到可用于测试的私聊消息。'/);
+  assert.match(source, /'机器人尚未收到可用于测试的私聊消息。请先给机器人发一条私聊消息，然后重试。'/);
   assert.doesNotMatch(source, /请先私聊机器人发送 \/status/);
   assert.doesNotMatch(source, /连接检查失败：\$\{presentError\(error\)\.message\}/);
 });

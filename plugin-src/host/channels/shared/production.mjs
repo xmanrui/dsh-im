@@ -20,6 +20,10 @@ import {
   observeBotWorkspaceRemovals,
 } from '../../../../src/channels/shared/bot-workspace-store.mjs';
 import { prepareBotWorkspace } from '../../../../src/channels/shared/default-workspace.mjs';
+import { registerChannelController } from '../../channel-registry.mjs';
+import { describeProxy, resolveProxyForChannel } from '../../../../src/channels/shared/proxy.mjs';
+import { proxySettingsToSpec } from '../../../../src/channels/shared/proxy-settings.mjs';
+import { getProxySettingsStore } from '../../../../src/channels/shared/proxy-settings-store.mjs';
 import { listAgentPresetCatalog } from '../../../../src/channels/shared/agent-preset.mjs';
 import { listModelCatalog } from '../../../../src/channels/shared/model-setting.mjs';
 import {
@@ -62,6 +66,49 @@ export async function createTokenProductionController(ctx, config, internals, de
     || Array.isArray(channelRuntimeOptions)) {
     throw new TypeError(`dsh-im ${channel} runtimeOptions must return an object`);
   }
+  // The IM proxy belongs to the channel, not to the process: it is resolved
+  // once here and handed to this channel's HTTP transport, so the models, the
+  // nodes and the web GUI keep their own connections. `proxy: false` in a
+  // channel's own config wins over the plugin-wide setting — email relies on
+  // that, since its IMAP/SMTP sockets never go through an HTTP proxy anyway.
+  const channelConfig = config[channel] && typeof config[channel] === 'object' ? config[channel] : {};
+  // The dashboard document is written by an operator at runtime, so it is read
+  // here rather than baked into the plugin config; a broken file must not keep
+  // the channels from starting, hence the catch.
+  const proxySettingsStore = getProxySettingsStore(config);
+  const proxySettings = await proxySettingsStore.get().catch(() => null);
+  // The dashboard's per-channel opt-out ("do not use the configured proxy" on a
+  // channel's own form) is stored next to the proxy itself, in `bypass`. A
+  // channel's own `proxy` in the plugin config still wins over it, because that
+  // value can name a different proxy rather than just switch this one off.
+  // Resolved again on every transport (see the factory below), because the
+  // opt-out is written at runtime too: ticking "do not use the proxy" on a
+  // channel's form must reach the next connection, not the next host restart.
+  const resolveProxyNow = () => {
+    const current = proxySettingsStore.spec() ?? proxySettings;
+    const bypassed = Array.isArray(current?.bypass) && current.bypass.includes(channel);
+    const override = channelConfig.proxy !== undefined
+      ? channelConfig.proxy
+      : (bypassed ? false : undefined);
+    return resolveProxyForChannel({
+      settingsSpec: proxySettingsToSpec(current),
+      configProxy: config.proxy,
+      override,
+    });
+  };
+  const proxyResolution = resolveProxyNow();
+  // Only a channel that owns its transport can be handed a proxy: the transport
+  // carries channel-specific pieces (telegram's FormData, for one), so a generic
+  // one would break the very calls it wraps.
+  const transportFactory = internals.createHttpTransport ?? definitions.createHttpTransport;
+  // A factory, not a shared instance: both the controller and the runtime close
+  // the transport they were given, so one instance would be destroyed by the
+  // first bot that stops and every later connection would fail on it.
+  // The spec is re-read on every transport: a bot reconnect then applies a
+  // proxy saved in the dashboard without restarting the whole host.
+  const httpTransportOption = typeof transportFactory === 'function'
+    ? { createHttpTransport: () => transportFactory({ spec: resolveProxyNow().spec }) }
+    : {};
   const createSupervisor = internals.createConnectionSupervisor ?? createTokenConnectionSupervisor;
   const seedAccessPolicy = typeof definitions.initialAccessPolicyForBot === 'function'
     ? definitions.initialAccessPolicyForBot
@@ -70,6 +117,13 @@ export async function createTokenProductionController(ctx, config, internals, de
     : (bot) => initialAccessPolicyFor(channel === 'telegram' ? 'telegram' : 'discord', bot);
   const logger = typeof ctx.logger === 'function'
     ? ctx.logger(`dsh-im:${channel}`) : (ctx.logger ?? console);
+  if (proxyResolution.spec) {
+    logger.info?.(`http transport via ${describeProxy(proxyResolution.spec)} (${proxyResolution.source})`);
+  } else if (proxyResolution.error) {
+    logger.warn?.(`http transport: proxy setting ignored — ${proxyResolution.error}`);
+  } else if (proxyResolution.source === 'channel-off') {
+    logger.info?.('http transport without proxy (channel switched it off)');
+  }
   const agentPresetCatalog = () => listAgentPresetCatalog(ctx);
   const paths = pluginPaths(config, channel);
   const configStore = await new ResolvedConfigStore(paths.config).load();
@@ -158,6 +212,7 @@ export async function createTokenProductionController(ctx, config, internals, de
   let controllerRef = null;
   const coreController = new ResolvedController({
     credentials: ctx.credentials,
+    ...httpTransportOption,
     configStore: observedConfigStore,
     // Channel settings scoped per chat need the archived group list (titles and
     // real chat IDs) to offer something better than a blank form.
@@ -201,6 +256,7 @@ export async function createTokenProductionController(ctx, config, internals, de
         : null;
       return new ResolvedRuntime({
         ...channelRuntimeOptions,
+        ...httpTransportOption,
         config: botConfig,
         token,
         // The mailbox may authenticate with an OAuth pair instead of a password.
@@ -256,6 +312,8 @@ export async function createTokenProductionController(ctx, config, internals, de
     agentPresetCatalog,
     modelCatalog,
   });
+  // Operator actions ("reconnect every bot") need a way back to this controller.
+  registerChannelController(channel, controller);
   const supervisor = createSupervisor({
     channel,
     controller,

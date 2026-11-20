@@ -2,6 +2,7 @@ import { TelegramConfigStore } from '../../../../src/channels/telegram/config-st
 import { TelegramHarnessClient } from '../../../../src/channels/telegram/harness-client.mjs';
 import { TelegramController } from '../../../../src/channels/telegram/telegram-controller.mjs';
 import { TelegramRuntime } from '../../../../src/channels/telegram/telegram-runtime.mjs';
+import { createTelegramHttpTransport } from '../../../../src/channels/telegram/telegram-http.mjs';
 import { TelegramStateStore } from '../../../../src/channels/telegram/state-store.mjs';
 import { createTelegramVoiceTranscriber } from '../../../../src/channels/telegram/voice.mjs';
 import { createTokenProductionController } from '../shared/production.mjs';
@@ -16,6 +17,8 @@ export function createProductionController(ctx, config = {}, internals = {}) {
     HarnessClient: TelegramHarnessClient,
     Controller: TelegramController,
     Runtime: TelegramRuntime,
+    // The channel owns its HTTP transport, so the IM proxy reaches it here.
+    createHttpTransport: createTelegramHttpTransport,
     // The per-group reply rules list chats from the shared group archive.
     controllerGroupHistory: true,
     // Speech recognition is a Host service (@deepseek-ai/dsh-experimental-speech-to-text);

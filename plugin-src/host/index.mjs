@@ -23,6 +23,9 @@ import { createDsBotClient } from './ds-bot-client.mjs';
 import { installDsBotQuestionSync } from './ds-bot-question-sync.mjs';
 import { installInboundTtlRpc } from './inbound-ttl-rpc.mjs';
 import { installDeliverySyncRpc } from './delivery-sync-rpc.mjs';
+import { installProxyRpc } from './proxy-rpc.mjs';
+import { installOpsRpc } from './ops-rpc.mjs';
+import { forgetChannelControllers } from './channel-registry.mjs';
 import { installSidebarSettingsRpc } from './sidebar-settings.mjs';
 import { installInjectedContext } from './injected-context.mjs';
 import { installSessionSyncCoordinator } from './session-sync-coordinator.mjs';
@@ -57,6 +60,8 @@ export function createImHostPlugin(internals = {}) {
   const startUpdate = internals.installUpdateRpc ?? installUpdateRpc;
   const startInboundTtl = internals.installInboundTtlRpc ?? installInboundTtlRpc;
   const startDeliverySync = internals.installDeliverySyncRpc ?? installDeliverySyncRpc;
+  const startProxyRpc = internals.installProxyRpc ?? installProxyRpc;
+  const startOpsRpc = internals.installOpsRpc ?? installOpsRpc;
   const startSidebarSettings = internals.installSidebarSettingsRpc ?? installSidebarSettingsRpc;
   const startInjectedContext = internals.installInjectedContext ?? installInjectedContext;
   const startDelivery = internals.installDeliveryRpc ?? installDeliveryRpc;
@@ -197,13 +202,16 @@ export function createImHostPlugin(internals = {}) {
     } else if (ctx?.sessions && typeof ctx.on === 'function') {
       startTitlePrefix(ctx);
     }
+    // Presenting a file is a Host tool; its files follow the same channel
+    // delivery as the return-file tool unless the operator turns that off.
+    const artifactOptions = { deliverPresentedFiles: config?.deliverPresentedFiles !== false };
     if (typeof ctx?.inject === 'function') {
       ctx.inject(['tools', 'systemPrompt'], (artifactCtx) => {
-        installOutboundArtifactTool(artifactCtx);
+        installOutboundArtifactTool(artifactCtx, artifactOptions);
         installGroupHistoryTools(artifactCtx);
       });
     } else {
-      installOutboundArtifactTool(ctx);
+      installOutboundArtifactTool(ctx, artifactOptions);
       installGroupHistoryTools(ctx);
     }
     const logger = typeof ctx?.logger === 'function'
@@ -235,6 +243,8 @@ export function createImHostPlugin(internals = {}) {
       try {
         startInboundTtl(ctx, { config });
         startDeliverySync(ctx, { config });
+        startProxyRpc(ctx, { config });
+        startOpsRpc(ctx, { config });
       } catch (error) {
         logger.error?.('[dsh-im] failed to activate inbound TTL settings; continuing with channels', error);
       }
@@ -252,6 +262,10 @@ export function createImHostPlugin(internals = {}) {
     const failures = [];
     // Each channel mounts its management RPC before awaiting initialization.
     // Start them together so a slow channel cannot leave later routes absent.
+    // A profile reload starts every channel again: drop the controllers of the
+    // previous run first, or a channel removed from the config would keep a
+    // closed controller alive in the registry forever.
+    forgetChannelControllers();
     await Promise.all(channels.map(async ([channel, start]) => {
       try {
         await start(ctx, channelConfig(config, channel, deliveryService));

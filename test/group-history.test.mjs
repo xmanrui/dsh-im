@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { Context } from '@deepseek-ai/cordis';
 import { GroupHistoryStore } from '../src/channels/shared/group-history-store.mjs';
-import { GroupHistoryAccessRegistry, createGroupHistoryTools } from '../src/channels/shared/group-history-access.mjs';
+import { GroupHistoryAccessRegistry, createGroupHistoryTools, installGroupHistoryTools } from '../src/channels/shared/group-history-access.mjs';
 import { captureGroupHistory, groupHistoryEntry } from '../src/channels/shared/group-history.mjs';
 import { createGroupHistoryRpcHandler, GROUP_HISTORY_ENDPOINTS } from '../plugin-src/host/group-history-rpc.mjs';
 
@@ -242,4 +243,55 @@ test('settings RPC rejects unknown parameters and persists valid retention', asy
   assert.equal((await rpc('settings.group-history.enable', { groupId, enabled: false })).ok, false);
   assert.equal((await rpc(GROUP_HISTORY_ENDPOINTS.set, { groupHistoryRetentionDays: 0 })).ok, false);
   assert.equal((await rpc(GROUP_HISTORY_ENDPOINTS.get, { groupId })).ok, false);
+});
+
+test('the installed group-history listener hears Session events dispatched from another scope', async () => {
+  const registry = new GroupHistoryAccessRegistry();
+  const store = { query: async (groupId) => ({ groupId }) };
+  const scope = Symbol('dsh-scope');
+  const sessionScope = Symbol('session-scope');
+  const root = new Context();
+  // dsh-im's own context is tagged with its scope, while the Session belongs to
+  // another one — dsh-session publishes through the carrier built by
+  // scopeTarget(), whose filter admits an untagged listener or the Session's own
+  // scope chain, and drops a tagged sibling unless it registered globally.
+  const pluginCtx = root.extend({ [scope]: Symbol('dsh-im-scope') });
+  const carrier = {
+    [Context.filter](ctx) {
+      const tag = ctx[scope];
+      return tag === undefined || tag === sessionScope;
+    },
+  };
+  assert.equal(installGroupHistoryTools({
+    on: (...listener) => pluginCtx.on(...listener),
+    tools: { register() {} },
+    systemPrompt: { context() {} },
+  }, { registry }), true);
+
+  // The premise of this test, spelled out: the same carrier drops a plain
+  // listener on the tagged context, so a Session event only arrives globally.
+  const plain = [];
+  pluginCtx.on('session/event', () => plain.push('session/event'));
+  pluginCtx.on('session/disposed', () => plain.push('session/disposed'));
+
+  const session = { id: 'group-session', events: [] };
+  const close = registry.open(session.id, 'group-rpc', { store, groupId: 'g1' });
+  const dispatch = (name, event) => {
+    const args = event ? [session, event] : [session];
+    if (event) session.events.push(event);
+    for (const callback of [...root.events.dispatch('emit', [carrier, name, ...args])]) callback(...args);
+  };
+  dispatch('session/event', { type: 'turn/start', data: { turn: 1 } });
+  dispatch('session/event', { type: 'user/message', data: { source: { kind: 'user', rpcId: 'group-rpc' } } });
+  assert.deepEqual(plain, []);
+  // The archive becomes reachable only if the event was observed: the tool
+  // refuses every Session whose access was never granted.
+  assert.deepEqual(await createGroupHistoryTools(registry)[0].execute({}, { agent: { session } }), { groupId: 'g1' });
+
+  // A disposed Session must lose the access too, so `session/disposed` is
+  // global for the same reason as the event above.
+  dispatch('session/disposed');
+  assert.equal(registry.resolve(session), null);
+  assert.deepEqual(plain, []);
+  close();
 });

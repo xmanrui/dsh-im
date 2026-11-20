@@ -33,11 +33,30 @@ function providerIds(value) {
   return providerMessageIdsFor(value);
 }
 
+/** Ogg/Opus is what Telegram renders as a voice note rather than a file. */
+function isVoiceMaterial(file) {
+  if (/^audio\/(ogg|oga|opus)\b/i.test(file.mediaType ?? '')) return true;
+  return /\.(ogg|oga|opus)$/i.test(file.fileName ?? '');
+}
+
 async function sendMaterializedArtifact(file, {
   sendFile,
   sendImage,
+  sendVoice,
   signal,
 }) {
+  if (isVoiceMaterial(file) && typeof sendVoice === 'function') {
+    try {
+      return {
+        presentation: 'voice',
+        result: await sendVoice(file),
+      };
+    } catch (error) {
+      if (isAbort(error, signal) || error?.code === 'artifact-delivery-uncertain') {
+        throw error;
+      }
+    }
+  }
   if (file.mediaType?.startsWith('image/') && typeof sendImage === 'function') {
     try {
       return {
@@ -72,6 +91,7 @@ export async function deliverOutboundArtifacts({
   signal,
   sendFile,
   sendImage,
+  sendVoice,
   sendFailureNotice,
   onFailure,
   logger,
@@ -94,6 +114,7 @@ export async function deliverOutboundArtifacts({
         const sent = await sendMaterializedArtifact(file, {
           sendFile,
           sendImage,
+          sendVoice,
           signal,
         });
         signal?.throwIfAborted();

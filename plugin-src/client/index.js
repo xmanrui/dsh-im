@@ -1,6 +1,7 @@
 import { callManagementRpc } from '../management-rpc.mjs';
 import * as React from 'react';
 import manifest from '../../package.json' with { type: 'json' };
+import { ChannelProxyToggle } from './channel-proxy-toggle.js';
 
 import {
   DingtalkLogoGlyph,
@@ -74,6 +75,8 @@ import {
   GlobalSettingsLogoGlyph,
   GlobalSettingsPanel,
 } from './global-settings.js';
+import { PROXY_RPC_CHANNEL } from './proxy-settings.js';
+import { OPS_RPC_CHANNEL, ReconnectAllButton } from './reconnect-all.js';
 import {
   createLoopbackAwareRpcCalls,
   replacePageLocation,
@@ -239,6 +242,8 @@ export function IMSettingsTab({
   deliveryRpcCall,
   globalSettingsRpcCall,
   deliverySyncRpcCall,
+  proxyRpcCall,
+  opsRpcCall,
   languageRpcCall,
   workspaceDirectoryPicker,
   onOpenSessionHistory,
@@ -295,6 +300,7 @@ export function IMSettingsTab({
     deliveryRpcCall,
     globalSettingsRpcCall,
     deliverySyncRpcCall,
+    proxyRpcCall,
     languageRpcCall,
     imessageRpcCall,
     emailRpcCall,
@@ -336,6 +342,7 @@ export function IMSettingsTab({
           h('span', { className: 'dim-brandVersion' }, `v${runningVersion}`)),
         h('p', null, '让 DeepSeek Harness 触手可及')),
       h('div', { className: 'dim-titleActions' },
+        h(ReconnectAllButton, { rpcCall: opsRpcCall }),
         h(UpdatePanel, {
           rpcCall: rpcCalls.updateRpcCall,
           clientVersion: IM_PLUGIN_VERSION,
@@ -442,6 +449,7 @@ export function IMSettingsTab({
           ? h(GlobalSettingsPanel, {
               rpcCall: rpcCalls.globalSettingsRpcCall,
               deliverySyncRpcCall: rpcCalls.deliverySyncRpcCall,
+              proxyRpcCall: rpcCalls.proxyRpcCall,
               languageRpcCall: rpcCalls.languageRpcCall,
             })
           : deliverySettings?.channel === active.id
@@ -452,7 +460,7 @@ export function IMSettingsTab({
               accessRpcCall: rpcCalls[`${active.id}RpcCall`],
               onBack: () => setDeliverySettings(null),
             })
-          : active.id === 'weixin'
+          : h(React.Fragment, null, active.id === 'weixin'
             ? h(WeixinSettingsTab, { rpcCall: rpcCalls.weixinRpcCall })
             : active.id === 'feishu'
               ? h(FeishuSettingsTab, { rpcCall: rpcCalls.feishuRpcCall })
@@ -478,7 +486,11 @@ export function IMSettingsTab({
                             ? h(EmailSettingsTab, { rpcCall: rpcCalls.emailRpcCall })
                           : active.id === 'matrix'
                             ? h(MatrixSettingsTab, { rpcCall: rpcCalls.matrixRpcCall })
-                          : h(OfficeSettingsTab, { rpcCall: rpcCalls.officeRpcCall }))),
+                          : h(OfficeSettingsTab, { rpcCall: rpcCalls.officeRpcCall }),
+                          h(ChannelProxyToggle, {
+                            channel: active.id,
+                            proxyRpcCall: rpcCalls.proxyRpcCall,
+                          })))),
     ),
   ));
 }
@@ -589,6 +601,10 @@ export function apply(ctx) {
       ? SIDEBAR_SETTINGS_RPC_CHANNEL : GLOBAL_SETTINGS_RPC_CHANNEL, endpoint, payload, signal);
   const deliverySyncRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, DELIVERY_SYNC_SETTINGS_RPC_CHANNEL, endpoint, payload, signal);
+  const proxyRpcCall = (endpoint, payload, signal) =>
+    managementRpc(ctx.connection, PROXY_RPC_CHANNEL, endpoint, payload, signal);
+  const opsRpcCall = (endpoint, payload, signal) =>
+    managementRpc(ctx.connection, OPS_RPC_CHANNEL, endpoint, payload, signal);
   const languageRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, HOST_LANGUAGE_RPC_CHANNEL, endpoint, payload, signal);
   const channelListRpcCall = (endpoint, payload, signal) =>
@@ -619,6 +635,8 @@ export function apply(ctx) {
     globalSettingsRpcCall,
     languageRpcCall,
     deliverySyncRpcCall,
+    proxyRpcCall,
+    opsRpcCall,
     channelListRpcCall,
     workspaceDirectoryPicker,
   };

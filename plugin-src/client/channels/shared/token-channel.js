@@ -53,7 +53,7 @@ function checkedTime(value) {
 function connectionTestNotice(value) {
   if (value?.testMessage?.sent === true) return '测试消息已发送，请到对应机器人会话中确认。';
   if (value?.testMessage?.code === 'test-target-unavailable') {
-    return '连接检查完成。机器人尚未收到可用于测试的私聊消息。';
+    return '机器人尚未收到可用于测试的私聊消息。请先给机器人发一条私聊消息，然后重试。';
   }
   return value?.testMessage ? '连接检查完成，但测试消息发送失败。' : null;
 }

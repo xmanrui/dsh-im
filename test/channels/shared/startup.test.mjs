@@ -216,7 +216,8 @@ test('the composed host serves other real channels while Feishu is loading and a
   try {
     // Allow Cordis to enter its activation callback; Feishu stays gated.
     await new Promise(setImmediate);
-    assert.equal(f.routes.size, channels.length + 2);
+    // +2 plugin routes, +1 for the IM proxy settings channel, +1 for the ops channel.
+    assert.equal(f.routes.size, channels.length + 4);
     assert.equal(f.routes.has('/dsh-im-sidebar'), true);
     await allLoaded.promise;
     assert.equal((await f.call('feishu')).error.code, 'feishu-initializing');

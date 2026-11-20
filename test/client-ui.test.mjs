@@ -325,7 +325,8 @@ test('general settings defaults to group history and keeps Attachments and Deliv
   assert.match(markup, /id="dim-general-settings-tab-general"[^>]*aria-selected="true"/);
   assert.match(markup, /id="dim-general-settings-tab-attachments"[^>]*aria-selected="false"/);
   assert.match(markup, /id="dim-general-settings-tab-delivery"[^>]*aria-selected="false"/);
-  assert.equal((markup.match(/role="tab"/g) ?? []).length, 3);
+  assert.match(markup, /id="dim-general-settings-tab-network"[^>]*aria-selected="false"/);
+  assert.equal((markup.match(/role="tab"/g) ?? []).length, 4);
   assert.match(markup, /群聊天记录保留天数/);
   assert.match(markup, /value="14"/);
   assert.match(markup, /正在读取群记录设置/);

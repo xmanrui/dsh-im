@@ -42,7 +42,7 @@ test('QQ client normalizes and presents connection-test outcomes', () => {
   });
   assert.equal(
     connectionTestFeedback(unavailable.testMessage),
-    '连接检查完成。机器人尚未收到可用于测试的私聊消息。',
+    '机器人尚未收到可用于测试的私聊消息。请先给机器人发一条私聊消息，然后重试。',
   );
 
   const invalid = normalizeSnapshot({

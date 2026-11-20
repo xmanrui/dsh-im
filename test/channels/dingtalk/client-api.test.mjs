@@ -146,7 +146,7 @@ test('connection-test feedback uses fixed client-owned messages', () => {
   );
   assert.equal(
     connectionTestFeedback({ sent: false, code: 'test-target-unavailable' }),
-    '连接检查完成。机器人尚未收到可用于测试的私聊消息。',
+    '机器人尚未收到可用于测试的私聊消息。请先给机器人发一条私聊消息，然后重试。',
   );
   assert.equal(
     connectionTestFeedback({ sent: false, code: 'test-message-failed' }),
