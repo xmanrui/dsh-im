@@ -341,28 +341,35 @@ function ScenePolicyEditor({
                       })
                       .map(([name, label]) => {
                         const checked = allowedCommands.has(name);
-                        return h('label', {
+                        return h('button', {
                           key: name,
+                          type: 'button',
+                          role: 'checkbox',
+                          'aria-checked': checked,
+                          onClick: () => toggleCommand(name, !checked),
                           style: {
                             display: 'flex', alignItems: 'center', gap: 8,
                             minWidth: 0, padding: '6px 8px', borderRadius: 6,
-                            cursor: 'pointer', fontSize: 12,
+                            cursor: 'pointer', fontSize: 12, textAlign: 'left',
+                            color: 'inherit',
+                            border: checked ? '1px solid var(--dsw-alias-brand-primary)' : '1px solid transparent',
                             background: checked ? 'var(--dsw-alias-bg-layer-2)' : 'transparent',
                           },
                         },
-                          h('input', {
-                            type: 'checkbox',
-                            checked,
-                            onChange: (event) => toggleCommand(name, event.target.checked),
+                          h('span', {
                             style: {
-                              flex: '0 0 16px', width: 16, height: 16, margin: 0,
-                              accentColor: 'var(--dsw-alias-brand-primary)',
+                              flex: '0 0 16px', width: 16, height: 16, lineHeight: '16px',
+                              textAlign: 'center', borderRadius: 4, fontSize: 11,
+                              color: checked ? '#fff' : 'transparent',
+                              background: checked ? 'var(--dsw-alias-brand-primary)' : 'transparent',
+                              border: checked ? 'none' : '1px solid var(--dsw-alias-border-l2)',
                             },
-                          }),
+                          }, '✓'),
                           h('span', {
                             style: { overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' },
                           }, label));
                       })),
+
                   h('div', {
                     style: {
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
