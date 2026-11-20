@@ -114,7 +114,9 @@ function validateOpenSettings(input) {
       listMessage: '开放模式命令权限覆盖用户必须是数组。',
       duplicateMessage: '开放模式命令权限覆盖用户不能包含重复的用户标识。',
     }),
-    commandAllowlist: validateCommandAllowlist(input.commandAllowlist, '开放模式命令白名单') ?? Object.freeze([]),
+    ...(input.commandAllowlist === undefined
+      ? {}
+      : { commandAllowlist: validateCommandAllowlist(input.commandAllowlist, '开放模式命令白名单') }),
   });
 }
 
@@ -171,7 +173,6 @@ export function createAccessPolicyScope(options) {
     open: {
       defaultCanExecuteCommands: false,
       commandPermissionOverrides: [],
-      commandAllowlist: [],
     },
     allowlist: { users: [] },
   } : options);
@@ -251,7 +252,7 @@ export function evaluateAccessPolicy(policy, {
     if (!canExecuteCommands) {
       const scopeAllowsCommand = scope.mode === 'open'
         && normalizedCommand !== null
-        && scope.open.commandAllowlist.includes(normalizedCommand);
+        && (scope.open.commandAllowlist ?? []).includes(normalizedCommand);
       const usersAllowCommand = matchedUsers.length > 0
         && normalizedCommand !== null
         && matchedUsers.every((user) => user.commandAllowlist?.includes(normalizedCommand) === true);

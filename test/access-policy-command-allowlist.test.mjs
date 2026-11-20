@@ -87,7 +87,7 @@ test('legacy policies without commandAllowlist keep their previous meaning', () 
       allowlist: { users: [] },
     },
   };
-  assert.equal(validateAccessPolicy(legacy).direct.open.commandAllowlist.length, 0);
+  assert.equal((validateAccessPolicy(legacy).direct.open.commandAllowlist ?? []).length, 0);
   assert.equal(evaluateAccessPolicy(legacy, {
     conversationType: 'direct', senderIds: [user], isCommand: true, command: 'new',
   }).allowed, false);
