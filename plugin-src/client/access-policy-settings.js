@@ -257,7 +257,7 @@ function ScenePolicyEditor({
               h('span', null, '命令权限'),
               h('select', {
                 value: commandMode,
-                'aria-label': [localizeText(title), localizeText('命令权限')].join(' '),
+                'aria-label': [localizeText(title), localizeText('默认命令权限')].join(' '),
                 onChange: (event) => changeCommandMode(event.target.value),
               },
               h('option', { value: 'deny' }, '不能执行命令'),
