@@ -684,6 +684,8 @@ const EN = Object.freeze({
   '保留账号': 'Keep account',
   '取消': 'Cancel',
   '确认': 'Confirm',
+  '请选择单聊或群聊。': 'Select direct, group, or both.',
+  '显示每个人当前拥有的单聊和群聊权限。': 'Shows the direct and group permissions each user currently holds.',
   '关闭': 'Close',
   '立即重试': 'Retry now',
   '重新读取': 'Reload',

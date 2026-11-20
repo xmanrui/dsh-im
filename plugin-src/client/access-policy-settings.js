@@ -292,11 +292,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   // 被访问策略拦下的人：桥接层记进 pendingSenders，这里逐个放行。
   const [pendingSenders, setPendingSenders] = React.useState([]);
   const [pendingLoading, setPendingLoading] = React.useState(channel === 'dingtalk');
-  const [approvingId, setApprovingId] = React.useState(null);
-  // 允许时勾选的场景：默认两个都勾。
-  const [scenes, setScenes] = React.useState({ direct: true, group: true });
-  const [selectingSender, setSelectingSender] = React.useState(null);
-  const [removingUserId, setRemovingUserId] = React.useState(null);
+  const [selections, setSelections] = React.useState({});
   const [pendingFeedback, setPendingFeedback] = React.useState(null);
 
   const refreshPolicyFromServer = async () => {
@@ -329,42 +325,6 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
 
   React.useEffect(() => { void loadPendingSenders(); }, [loadPendingSenders]);
 
-  // 上游要求原始 staffId 只留在宿主侧，所以这里只把不透明的 requestId 交回去，
-  // 由宿主完成放行（加入该机器人的已批准名单）。
-  const allowPendingSender = async (sender) => {
-    if (approvingId || !sender?.requestId) return;
-    setApprovingId(sender.requestId);
-    setPendingFeedback(null);
-    try {
-      const picked = ['direct', 'group'].filter((scene) => scenes[scene]);
-      const result = await rpcCall(DINGTALK_ENDPOINTS.allowSender, {
-        botId: account.botId,
-        requestId: sender.requestId,
-        confirm: true,
-        scenes: picked,
-      });
-      if (result?.ok !== true) {
-        const code = result?.error?.code;
-        if (code === 'sender-request-not-found') {
-          await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
-          setFeedback({ tone: 'success', message: STALE_NOTICE });
-          return;
-        }
-        throw new Error(result?.error?.message || '允许失败，请重试。');
-      }
-      // 以服务端返回为准刷新：senderKey 是宿主生成的，前端不能自己编。
-      await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
-      setSelectingSender(null);
-      setFeedback({ tone: 'success', message: '已允许该用户，下一条消息会正常回答。' });
-    } catch (error) {
-      setPendingFeedback(error.message);
-    } finally {
-      setApprovingId(null);
-    }
-  };
-
-
-
   // 用户列表不是独立存储：它就是两份白名单的合并视图。
   const directoryUsers = React.useMemo(() => {
     const merged = new Map();
@@ -379,37 +339,15 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     return [...merged.values()];
   }, [draft]);
 
-  const removeUserEverywhere = async (id) => {
-    if (removingUserId) return;
-    setRemovingUserId(id);
-    setFeedback(null);
-    try {
-      const next = {
-        ...draft,
-        direct: { ...draft.direct, allowlist: { users: draft.direct.allowlist.users.filter((user) => user.id !== id) } },
-        group: { ...draft.group, allowlist: { users: draft.group.allowlist.users.filter((user) => user.id !== id) } },
-      };
-      const policy = validateAccessPolicy(next);
-      const value = unwrapRpcResult(await rpcCall(ACCESS_POLICY_ENDPOINT, {
-        botId: account.botId, policy,
-      }));
-      const saved = policyFromSnapshot(value, account.botId);
-      if (!saved) throw new Error('服务没有返回已保存的访问策略，请刷新后重试。');
-      setDraft(clonePolicy(saved));
-      onSaved?.(saved);
-      setFeedback({ tone: 'success', message: '已从单聊和群聊白名单中移除该用户。' });
-    } catch (error) {
-      setFeedback({ tone: 'error', message: error?.message || '移除失败，请稍后重试。' });
-    } finally {
-      setRemovingUserId(null);
-    }
-  };
-
   const save = async (event) => {
     event.preventDefault();
     setFeedback(null);
     setSaving(true);
+    let policySaved = false;
     try {
+      if (Object.values(selections).some((scenes) => !scenes.direct && !scenes.group)) {
+        throw new Error('请选择单聊或群聊。');
+      }
       const policy = validateAccessPolicy(draft);
       if (typeof rpcCall !== 'function') throw new Error('访问设置暂不可用。');
       const value = unwrapRpcResult(await rpcCall(ACCESS_POLICY_ENDPOINT, {
@@ -418,10 +356,21 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       }));
       const saved = policyFromSnapshot(value, account.botId);
       if (!saved) throw new Error('服务没有返回已保存的访问策略，请刷新后重试。');
+      policySaved = true;
       setDraft(clonePolicy(saved));
       onSaved?.(saved);
+      for (const [requestId, scenes] of Object.entries(selections)) {
+        const picked = ['direct', 'group'].filter((scene) => scenes[scene]);
+        if (!picked.length) continue;
+        unwrapRpcResult(await rpcCall(DINGTALK_ENDPOINTS.allowSender, {
+          botId: account.botId, requestId, confirm: true, scenes: picked,
+        }));
+        setSelections((current) => { const next = { ...current }; delete next[requestId]; return next; });
+      }
+      await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
       setFeedback({ tone: 'success', message: '访问设置已保存。' });
     } catch (error) {
+      if (policySaved && channel === 'dingtalk') await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
       setFeedback({
         tone: 'error',
         message: error?.message || '访问设置保存失败，请稍后重试。',
@@ -485,22 +434,17 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
           h('div', { className: 'dim-accessDeniedName' },
             h('strong', null, sender.displayName || '钉钉用户'),
             h('code', null, sender.senderIdMasked)),
-          selectingSender === sender.requestId ? h('div', { className: 'dim-accessDeniedName' },
+          selections[sender.requestId] ? h('div', { className: 'dim-accessDeniedName' },
             ...['direct', 'group'].map((scene) => h('label', { key: scene },
-              h('input', { type: 'checkbox', checked: scenes[scene],
-                onChange: (event) => setScenes((current) => ({ ...current, [scene]: event.target.checked })) }),
-              ' ', scene === 'direct' ? '单聊' : '群聊')),
-            h('button', { type: 'button', className: 'dim-deliveryButton',
-              disabled: approvingId !== null || (!scenes.direct && !scenes.group),
-              onClick: () => void allowPendingSender(sender),
-            }, approvingId === sender.requestId ? '正在允许…' : '确认'),
-            h('button', { type: 'button', className: 'dim-deliveryButton', disabled: approvingId !== null,
-              onClick: () => setSelectingSender(null), }, '取消')) : h('button', {
-            type: 'button',
-            className: 'dim-deliveryButton',
-            disabled: approvingId !== null,
-            onClick: () => { setScenes({ direct: true, group: true }); setSelectingSender(sender.requestId); },
-          }, '允许')))),
+              h('input', { type: 'checkbox', checked: selections[sender.requestId][scene], disabled: saving,
+                onChange: (event) => setSelections((current) => ({ ...current,
+                  [sender.requestId]: { ...current[sender.requestId], [scene]: event.target.checked },
+                })) }), ' ', scene === 'direct' ? '单聊' : '群聊')))
+            : h('button', { type: 'button', className: 'dim-deliveryButton', disabled: saving,
+                onClick: () => setSelections((current) => ({ ...current,
+                  [sender.requestId]: { direct: true, group: true },
+                })),
+              }, '允许')))),
   pendingFeedback ? h('p', {
     className: 'dim-accessFeedback', 'data-tone': 'error', role: 'alert',
   }, pendingFeedback) : null,
@@ -513,7 +457,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     h('span', { className: 'dim-accessLegendContent' },
       h('span', null, '用户列表'))),
   h('p', { className: 'dim-accessHint' },
-    '两份白名单的合并视图：显示每个人当前拥有的单聊/群聊权限；移除后两处都会清掉。'),
+    '显示每个人当前拥有的单聊和群聊权限。'),
   directoryUsers.length === 0 ? h('div', { className: 'dim-accessUsersEmpty' }, '尚未添加用户') : h('ul', { className: 'dim-accessUserList' }, directoryUsers.map((user) => h('li', {
     key: user.id,
     className: 'dim-accessDeniedRow',
@@ -525,12 +469,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
         localizeTemplate('单聊：{state}', { state: user.direct ? '有' : '无' })),
       h('span', { className: 'dim-accessState' },
         localizeTemplate('群聊：{state}', { state: user.group ? '有' : '无' }))),
-    h('button', {
-      type: 'button',
-      className: 'dim-deliveryButton',
-      disabled: removingUserId !== null,
-      onClick: () => void removeUserEverywhere(user.id),
-    }, removingUserId === user.id ? '正在移除…' : '移除')))))) : null,
+    ))))) : null,
   feedback ? h('p', {
     className: 'dim-accessFeedback',
     'data-tone': feedback.tone,
