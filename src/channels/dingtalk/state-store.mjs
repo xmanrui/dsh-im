@@ -11,6 +11,7 @@ const EMPTY_STATE = Object.freeze({
   sessions: {},
   seenMessageIds: [],
   pendingSenders: {},
+  senderNames: {},
   recentOutboundMessages: [],
 });
 
@@ -98,6 +99,12 @@ function normalizeState(value) {
   }
 
   const pendingSenders = {};
+  const senderNames = Object.create(null);
+  if (value.senderNames && typeof value.senderNames === 'object' && !Array.isArray(value.senderNames)) {
+    for (const [id, name] of Object.entries(value.senderNames)) {
+      if (nonEmptyString(id) && nonEmptyString(name)) senderNames[id] = displayName(name);
+    }
+  }
   const entries = Array.isArray(value.pendingSenders)
     ? value.pendingSenders.map((entry) => [entry?.requestId, entry])
     : Object.entries(value.pendingSenders && typeof value.pendingSenders === 'object'
@@ -106,6 +113,7 @@ function normalizeState(value) {
   for (const [key, candidate] of entries) {
     const pending = normalizePendingSender(candidate, key);
     if (!pending) continue;
+    if (!senderNames[pending.staffId]) senderNames[pending.staffId] = pending.displayName;
     const duplicate = Object.values(pendingSenders).find((entry) => entry.staffId === pending.staffId);
     if (!duplicate || duplicate.lastSeenAt < pending.lastSeenAt) {
       if (duplicate) delete pendingSenders[duplicate.requestId];
@@ -125,6 +133,7 @@ function normalizeState(value) {
       ? [...new Set(value.seenMessageIds.map(nonEmptyString).filter(Boolean))].slice(-1_000)
       : [],
     pendingSenders,
+    senderNames,
     recentOutboundMessages: recentOutboundMessages(value.recentOutboundMessages),
     ...(Object.keys(rings).length ? { rings } : {}),
     ...(Object.keys(pendingTitles).length ? { pendingTitles } : {}),
@@ -265,6 +274,21 @@ export class DingtalkStateStore {
       .map((entry) => structuredClone(entry));
   }
 
+  senderName(id) {
+    return Object.hasOwn(this.#state.senderNames ?? {}, id) ? this.#state.senderNames[id] : null;
+  }
+
+  async rememberSenderName(id, name) {
+    const staffId = nonEmptyString(id);
+    const cleanName = nonEmptyString(name);
+    if (!staffId || !cleanName) return;
+    const normalized = displayName(cleanName);
+    if (this.senderName(staffId) === normalized) return;
+    this.#state.senderNames ??= Object.create(null);
+    Object.defineProperty(this.#state.senderNames, staffId, { value: normalized, writable: true, enumerable: true, configurable: true });
+    await this.#persist();
+  }
+
   pendingSender(requestId) {
     const id = nonEmptyString(requestId);
     const entry = id ? this.#state.pendingSenders[id] : null;
@@ -283,11 +307,13 @@ export class DingtalkStateStore {
     const entry = {
       requestId: existing?.requestId ?? `ding_sender_${this.#idFactory()}`,
       staffId,
-      displayName: displayName(input.displayName ?? input.nick ?? name),
+      displayName: displayName(input.displayName ?? input.nick ?? name ?? this.senderName(staffId)),
       requestedAt: existing?.requestedAt ?? timestamp,
       lastSeenAt: timestamp,
     };
     this.#state.pendingSenders[entry.requestId] = entry;
+    this.#state.senderNames ??= Object.create(null);
+    Object.defineProperty(this.#state.senderNames, staffId, { value: entry.displayName, writable: true, enumerable: true, configurable: true });
     await this.#persist();
     return structuredClone(entry);
   }

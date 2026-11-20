@@ -1417,6 +1417,8 @@ const DINGTALK_TEXTS_EN = Object.freeze({
   '已允许该用户，下一条消息会正常回答。': 'This user is now allowed; their next message is answered normally.',
   '已批准的用户': 'Approved users',
   '用户列表': 'Users',
+  '用户名': 'User name',
+  '未知': 'Unknown',
   '两份白名单的合并视图：显示每个人当前拥有的单聊/群聊权限；移除后两处都会清掉。': 'A merged view of both allowlists: it shows the direct/group permission each user has, and removing one clears both.',
   '加入白名单': 'Add to allowlist',
   '已从单聊和群聊白名单中移除该用户。': 'Removed this user from both the direct and the group allowlist.',

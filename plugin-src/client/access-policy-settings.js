@@ -291,6 +291,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   const [feedback, setFeedback] = React.useState(null);
   // 被访问策略拦下的人：桥接层记进 pendingSenders，这里逐个放行。
   const [pendingSenders, setPendingSenders] = React.useState([]);
+  const [directoryNames, setDirectoryNames] = React.useState([]);
   const [pendingLoading, setPendingLoading] = React.useState(channel === 'dingtalk');
   const [selections, setSelections] = React.useState({});
   const [pendingFeedback, setPendingFeedback] = React.useState(null);
@@ -316,6 +317,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       if (result?.ok !== true) throw new Error(result?.error?.message || '无法读取被拦截的用户。');
       const bot = result.value?.bots?.find((entry) => entry.botId === account?.botId);
       setPendingSenders(Array.isArray(bot?.senders?.pending) ? bot.senders.pending : []);
+      setDirectoryNames(Array.isArray(bot?.senders?.directoryNames) ? bot.senders.directoryNames : []);
     } catch (error) {
       setPendingFeedback(error.message);
     } finally {
@@ -341,16 +343,17 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   // 用户列表不是独立存储：它就是两份白名单的合并视图。
   const directoryUsers = React.useMemo(() => {
     const merged = new Map();
+    const names = new Map(directoryNames.map((user) => [user.id, user.displayName]));
     for (const scene of ['direct', 'group']) {
       for (const user of draft[scene].allowlist.users) {
         if (!user.id.trim()) continue;
-        const entry = merged.get(user.id) ?? { id: user.id, direct: false, group: false };
+        const entry = merged.get(user.id) ?? { id: user.id, name: names.get(user.id), direct: false, group: false };
         entry[scene] = true;
         merged.set(user.id, entry);
       }
     }
     return [...merged.values()];
-  }, [draft]);
+  }, [draft, directoryNames]);
 
   const save = async (event) => {
     event.preventDefault();
@@ -476,10 +479,12 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
         'aria-label': localizeText('用户列表'), tabIndex: 0 },
       h('table', { className: 'dim-accessDirectoryTable' },
         h('thead', null, h('tr', null,
+          h('th', { scope: 'col' }, '用户名'),
           h('th', { scope: 'col' }, '钉钉用户 ID'),
           h('th', { scope: 'col' }, '单聊'),
           h('th', { scope: 'col' }, '群聊'))),
         h('tbody', null, directoryUsers.map((user) => h('tr', { key: user.id },
+          h('td', null, user.name || '未知'),
           h('td', null, h('code', null, user.id)),
           h('td', null, user.direct ? '有' : '无'),
           h('td', null, user.group ? '有' : '无'))))))) ) : null,

@@ -139,6 +139,7 @@ export class DingtalkController {
   #configStore;
   #createRuntime;
   #syncAllowlist;
+  #directoryNames;
   #deleteState;
   #logger;
   #diagnostics;
@@ -168,6 +169,7 @@ export class DingtalkController {
     createRuntime,
     deleteState = async () => {},
     syncAllowlist = null,
+    directoryNames = null,
     logger = console,
     clock = Date,
   }) {
@@ -201,6 +203,7 @@ export class DingtalkController {
     this.#createRuntime = createRuntime;
     this.#deleteState = deleteState;
     this.#syncAllowlist = typeof syncAllowlist === 'function' ? syncAllowlist : null;
+    this.#directoryNames = typeof directoryNames === 'function' ? directoryNames : () => [];
     this.#logger = logger;
     this.#diagnostics = createConnectionDiagnostics({ channel: 'dingtalk', prefix: 'DT-CONN', logger });
     this.#clock = clock;
@@ -618,6 +621,7 @@ export class DingtalkController {
         senders: {
           pending,
           approved: config.approvedSenders.map(publicApprovedSender),
+          directoryNames: this.#directoryNames(config.botId),
         },
         error: accountError ? structuredClone(accountError) : null,
       };

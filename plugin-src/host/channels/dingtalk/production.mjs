@@ -138,6 +138,16 @@ export async function createProductionController(ctx, config = {}, internals = {
     credentials: ctx.credentials,
     configStore: observedConfigStore,
     logger,
+    directoryNames: (botId) => {
+      const policy = workspaces.accessPolicyFor(botId);
+      const state = stateForSync(botId);
+      if (!policy || typeof state?.senderName !== 'function') return [];
+      const ids = new Set(['direct', 'group'].flatMap((scene) => policy[scene].allowlist.users.map((user) => user.id)));
+      return [...ids].flatMap((id) => {
+        const name = state.senderName(id);
+        return name ? [{ id, displayName: name }] : [];
+      });
+    },
     // 「允许」把发送人同时写进访问设置的白名单；「移除」再摘掉，两处保持一致。
     syncAllowlist: async (botId, staffId, present, scene = 'direct') => {
       const current = workspaces.accessPolicyFor(botId);

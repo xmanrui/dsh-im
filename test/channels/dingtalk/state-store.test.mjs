@@ -63,6 +63,10 @@ test('state store persists sessions, dedupe IDs, and host-only pending sender re
   }), null);
   assert.equal(await reloaded.removePendingSenderByStaffId('staff-one'), true);
   assert.deepEqual(reloaded.pendingSenders(), []);
+  const afterApproval = await new DingtalkStateStore(path).load();
+  assert.equal(afterApproval.senderName('staff-one'), '小明新名字');
+  await afterApproval.rememberSenderName('staff-one', '小明');
+  assert.equal((await new DingtalkStateStore(path).load()).senderName('staff-one'), '小明');
 });
 
 test('state store keeps only normalized fields from an existing pending-sender document', async (t) => {
@@ -100,6 +104,7 @@ test('state store keeps only normalized fields from an existing pending-sender d
         lastSeenAt: '2026-08-15T01:02:00.000Z',
       },
     },
+    senderNames: { staff: '昵称' },
     recentOutboundMessages: [],
   });
 });
