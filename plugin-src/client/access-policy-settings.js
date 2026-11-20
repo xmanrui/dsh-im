@@ -117,7 +117,7 @@ function clonePolicy(policy) {
         ...user,
         ...(user.commandAllowlist === undefined ? {} : { commandAllowlist: [...user.commandAllowlist] }),
       })),
-      commandAllowlist: [...(scope.open.commandAllowlist ?? [])],
+      ...(scope.open.commandAllowlist === undefined ? {} : { commandAllowlist: [...scope.open.commandAllowlist] }),
     },
     allowlist: {
       users: scope.allowlist.users.map((user) => ({ ...user })),
@@ -192,7 +192,7 @@ function ScenePolicyEditor({
   });
   const changeCommandMode = (nextMode) => {
     if (nextMode === 'allow') {
-      updateOpen({ defaultCanExecuteCommands: true, commandAllowlist: [] });
+      updateOpen({ defaultCanExecuteCommands: true, commandAllowlist: undefined });
       setCommandPickerOpen(false);
       return;
     }
@@ -205,7 +205,7 @@ function ScenePolicyEditor({
       });
       return;
     }
-    updateOpen({ defaultCanExecuteCommands: false, commandAllowlist: [] });
+    updateOpen({ defaultCanExecuteCommands: false, commandAllowlist: undefined });
     setCommandPickerOpen(false);
   };
   const toggleCommand = (name, checked) => {
