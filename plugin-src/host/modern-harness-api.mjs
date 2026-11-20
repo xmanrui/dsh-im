@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { activeHarnessInteractionOwner, clearModelCatalogCache, hasActiveHarnessInteractionOwner, harnessToolCallFromEvent, HarnessInteractionError } from '../../src/channels/shared/harness-client.mjs';
 import { extractConnectionEvidence } from '../../src/channels/shared/connection-error.mjs';
+import { cordisRootContext } from './cordis-root.mjs';
 import { harnessPeer } from './harness-peer.mjs';
 import { sameWorkspacePath } from '../../src/channels/shared/default-workspace.mjs';
 
@@ -961,7 +962,7 @@ class ModernHarnessApi {
 
 /** Create one modern compatibility API per Cordis Host root. */
 export function modernHarnessApi(ctx, { deliveryService } = {}) {
-  const scope = ctx?.root ?? ctx;
+  const scope = cordisRootContext(ctx);
   if (!scope || !['object', 'function'].includes(typeof scope)) {
     throw new TypeError('dsh-im requires a Cordis Host context');
   }

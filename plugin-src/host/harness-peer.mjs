@@ -1,8 +1,10 @@
+import { cordisRootContext } from './cordis-root.mjs';
+
 const peers = new WeakMap();
 
 /** One caller identity shared by the Host's session and command gateways. */
 export function harnessPeer(ctx) {
-  const scope = ctx?.root ?? ctx;
+  const scope = cordisRootContext(ctx);
   const cached = peers.get(scope);
   if (cached) return cached;
   const connection = ctx?.connection;
