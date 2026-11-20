@@ -5,7 +5,7 @@ import {
   normalizeAccessPolicy,
   validateAccessPolicy,
 } from '../../src/channels/shared/access-policy.mjs';
-import { h, localizeText } from './i18n.js';
+import { h, localizeTemplate, localizeText } from './i18n.js';
 import { DINGTALK_ENDPOINTS } from './channels/dingtalk/api.js';
 
 export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
@@ -340,7 +340,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
         botId: account.botId,
         requestId: sender.requestId,
         confirm: true,
-        scenes: picked.length ? picked : ['direct'],
+        scenes: picked,
       });
       if (result?.ok !== true) {
         const code = result?.error?.code;
@@ -368,6 +368,7 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     const merged = new Map();
     for (const scene of ['direct', 'group']) {
       for (const user of draft[scene].allowlist.users) {
+        if (!user.id.trim()) continue;
         const entry = merged.get(user.id) ?? { id: user.id, direct: false, group: false };
         entry[scene] = true;
         merged.set(user.id, entry);
@@ -500,13 +501,13 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
           h('button', {
             type: 'button',
             className: 'dim-deliveryButton',
-            disabled: approvingId !== null,
+            disabled: approvingId !== null || (!scenes.direct && !scenes.group),
             onClick: () => void allowPendingSender(sender),
           }, approvingId === sender.requestId ? '正在允许…' : '允许')))),
   pendingFeedback ? h('p', {
     className: 'dim-accessFeedback', 'data-tone': 'error', role: 'alert',
   }, pendingFeedback) : null,
-  directoryUsers.length === 0 ? null : h('fieldset', {
+  h('fieldset', {
     className: 'dim-accessScene',
     'data-scene': 'directory',
     'aria-label': localizeText('用户列表'),
@@ -516,15 +517,17 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       h('span', null, '用户列表'))),
   h('p', { className: 'dim-accessHint' },
     '两份白名单的合并视图：显示每个人当前拥有的单聊/群聊权限；移除后两处都会清掉。'),
-  h('ul', { className: 'dim-accessUserList' }, directoryUsers.map((user) => h('li', {
+  directoryUsers.length === 0 ? h('div', { className: 'dim-accessUsersEmpty' }, '尚未添加用户') : h('ul', { className: 'dim-accessUserList' }, directoryUsers.map((user) => h('li', {
     key: user.id,
     className: 'dim-accessDeniedRow',
   },
     h('div', { className: 'dim-accessDeniedName' },
       h('code', null, user.id)),
     h('div', { className: 'dim-accessDeniedName' },
-      user.direct ? h('span', { className: 'dim-accessState' }, '单聊') : null,
-      user.group ? h('span', { className: 'dim-accessState' }, '群聊') : null),
+      h('span', { className: 'dim-accessState' },
+        localizeTemplate('单聊：{state}', { state: user.direct ? '有' : '无' })),
+      h('span', { className: 'dim-accessState' },
+        localizeTemplate('群聊：{state}', { state: user.group ? '有' : '无' }))),
     h('button', {
       type: 'button',
       className: 'dim-deliveryButton',
