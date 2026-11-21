@@ -484,6 +484,48 @@ function feishuReplyAttachments(messageType, parsed, post) {
   return [];
 }
 
+/**
+ * A card can reach the bot in two shapes:
+ *  - a quoted card, whose payload is re-read when the reply is resolved;
+ *  - an inbound `interactive` event, whose `message.content` carries only the
+ *    card header title (`⚙️ 任务过程`) while the body stays behind the same
+ *    `im.v1.message.get` call.
+ * Reading with `card_msg_content_type: raw_card_content` yields the full card
+ * for both, so the two paths share one implementation.
+ */
+async function loadCardMessage(messageId, client, { signal } = {}) {
+  signal?.throwIfAborted();
+  let response;
+  try {
+    response = await client?.im?.v1?.message?.get?.({
+      path: { message_id: messageId },
+      params: {
+        with_sender_name: true,
+        card_msg_content_type: FEISHU_CARD_MESSAGE_CONTENT_TYPE,
+      },
+    });
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (await feishuProviderCode(error, signal) === FEISHU_MISSING_MESSAGE_SCOPE_CODE) {
+      return { unavailableReason: 'permission-denied' };
+    }
+    throw error;
+  }
+  signal?.throwIfAborted();
+  if (providerCode(response) === FEISHU_MISSING_MESSAGE_SCOPE_CODE) {
+    return { unavailableReason: 'permission-denied' };
+  }
+  if (providerCode(response) !== null && providerCode(response) !== 0) {
+    return { unavailableReason: 'not-delivered' };
+  }
+  const item = response?.data?.items?.find?.(
+    (candidate) => nonEmptyString(candidate?.message_id) === messageId,
+  );
+  if (!item) return { unavailableReason: 'not-found' };
+  if (item.deleted) return { unavailableReason: 'deleted' };
+  return { item, messageType: nonEmptyString(item.msg_type) ?? '' };
+}
+
 function feishuReplyReference(event, client) {
   const messageId = feishuReplyTargetId(event);
   if (!messageId) return null;
@@ -491,41 +533,14 @@ function feishuReplyReference(event, client) {
   return {
     messageId,
     async load({ signal } = {}) {
-      signal?.throwIfAborted();
-      let response;
-      try {
-        response = await client?.im?.v1?.message?.get?.({
-          path: { message_id: messageId },
-          params: {
-            with_sender_name: true,
-            card_msg_content_type: FEISHU_CARD_MESSAGE_CONTENT_TYPE,
-          },
-        });
-      } catch (error) {
-        signal?.throwIfAborted();
-        if (await feishuProviderCode(error, signal) === FEISHU_MISSING_MESSAGE_SCOPE_CODE) {
-          return { messageId, unavailableReason: 'permission-denied' };
-        }
-        throw error;
-      }
-      signal?.throwIfAborted();
-      if (providerCode(response) === FEISHU_MISSING_MESSAGE_SCOPE_CODE) {
-        return { messageId, unavailableReason: 'permission-denied' };
-      }
-      if (providerCode(response) !== null && providerCode(response) !== 0) {
-        return { messageId, unavailableReason: 'not-delivered' };
-      }
-      const item = response?.data?.items?.find?.(
-        (candidate) => nonEmptyString(candidate?.message_id) === messageId,
-      );
-      if (!item) return { messageId, unavailableReason: 'not-found' };
-      if (item.deleted) return { messageId, unavailableReason: 'deleted' };
+      const loaded = await loadCardMessage(messageId, client, { signal });
+      if (!loaded.item) return { messageId, unavailableReason: loaded.unavailableReason };
+      const { item, messageType } = loaded;
       const itemChatId = nonEmptyString(item.chat_id);
       if (!chatId || !itemChatId || itemChatId !== chatId) {
         return { messageId, unavailableReason: 'not-found' };
       }
 
-      const messageType = nonEmptyString(item.msg_type) ?? '';
       const quotedEvent = {
         message: {
           message_id: messageId,
@@ -558,6 +573,13 @@ function feishuReplyReference(event, client) {
   };
 }
 
+/**
+ * Inbound cards need the same second read as quoted ones: the delivered event
+ * only carries the card header title, so `content` would be `⚙️ 任务过程`
+ * instead of the body. The text parsed from the event stays the synchronous
+ * answer, and `card.load()` re-reads the full payload on demand — mirroring
+ * how `replyTo.load()` resolves a quoted card.
+ */
 export function extractInboundMessage(event, client) {
   const messageType = event?.message?.message_type;
   const parsed = parsedMessageContent(event);
@@ -573,6 +595,26 @@ export function extractInboundMessage(event, client) {
   // "text, image and file only" notice — even though the same extraction is
   // already trusted for quoted cards (`feishuReplyReference`).
   const cardText = messageType === 'interactive' ? interactiveCardText(parsed) : '';
+  const messageId = nonEmptyString(event?.message?.message_id);
+  const card = messageType === 'interactive' && messageId
+    ? {
+      messageId,
+      async load({ signal } = {}) {
+        const loaded = await loadCardMessage(messageId, client, { signal });
+        if (!loaded.item) return { messageId, unavailableReason: loaded.unavailableReason };
+        return {
+          messageId,
+          content: interactiveCardText(parsedMessageContent({
+            message: {
+              message_id: messageId,
+              message_type: 'interactive',
+              content: loaded.item.body?.content,
+            },
+          })),
+        };
+      },
+    }
+    : null;
   return {
     content: messageType === 'text'
       ? extractText(event) ?? ''
@@ -582,6 +624,7 @@ export function extractInboundMessage(event, client) {
     images: imageKeys.map((key) => feishuImageSource(event, client, key)),
     files: file ? [file] : [],
     ...(replyTo ? { replyTo } : {}),
+    ...(card ? { card } : {}),
   };
 }
 
