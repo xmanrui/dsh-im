@@ -405,9 +405,11 @@ Web 与机器人可同时处理同一审批，先提交的「批准一次」或�
 
 ## 本地开发
 
-最新版 dsh-im 跟随最新版 DSH，本次支持基线为 DSH `0.2.1-rc.2`（Session 格式 v4）。后续功能和修复不再增加旧版 DSH 的兼容分支，已有其他兼容逻辑暂时保留；旧宿主请使用对应的历史插件版本。`package.json` 只声明当前实际验证的宿主版本，不承诺未经验证的未来版本。升级插件后重启 Host 并刷新设置页，使 Host 和客户端使用同一版插件。
+最新版 dsh-im 跟随最新版 DSH，本次支持基线为 DSH `0.2.2-rc.5`（Session 格式 v4）。后续功能和修复不再增加旧版 DSH 的兼容分支，已有其他兼容逻辑暂时保留；旧宿主请使用对应的历史插件版本。`package.json` 只声明当前实际验证的宿主版本，不承诺未经验证的未来版本。升级插件后重启 Host 并刷新设置页，使 Host 和客户端使用同一版插件。
 
-DSH `0.2.1-rc.2` 要求内部网关请求携带调用方 `peer`。所有渠道共用的适配层通过 Host Connection 创建并复用该身份，同时用于普通调用和流式调用，在插件卸载时释放。微信和 QQ 的新会话、已有会话收发已完成真机验证。
+DSH `0.2.2-rc.5` 要求内部网关请求携带调用方 `peer`。所有渠道共用的适配层通过 Host Connection 创建并复用该身份，同时用于普通调用和流式调用，在插件卸载时释放。
+
+适配 0.2.2-rc.5 时需要更新两处与宿主版本绑定的声明：`package.json` 的 `dsh.compatibility`（验证基线）和 `dsh.client.inject`（客户端加载顺序）。客户端槽位服务由 `@deepseek-ai/dsh-client-ui-renderer` 提供，工作区服务由 `@deepseek-ai/dsh-client-ui-workspace` 提供；`@deepseek-ai/dsh-client-runtime` 自 0.1.1-rc.2 后不再发布，`@deepseek-ai/dsh-client-ui-slots` 不是可加载的客户端行，二者都不能写进 `inject`——旧声明在 0.2.2-rc.5 会让客户端行等一个永远不会到达的依赖。`test/package-client-inject.test.mjs` 锁定这份清单，`scripts/verify-package.mjs` 会核对 `dsh.compatibility` 的基线与 `dshReleases` 一致、且 `inject` 不含这两个退役包名。
 
 上下文增强中的来源信息、引导词和引用回复使用 v4 的 `plugin:dsh-im` 来源字段，修复了它们触发的 `SessionFormatError: format v4 message requires a producer-owned source kind`。消息顺序、用户正文和会话级引导词去重沿用原有机制，历史会话由宿主负责迁移。
 
