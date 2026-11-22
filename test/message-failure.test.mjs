@@ -242,6 +242,9 @@ test('message failures use verified turn-end provider codes without exposing pro
     ['STREAM_CLOSED', 'MODEL_STREAM'],
     ['EMPTY_RESPONSE', 'MODEL_EMPTY_REPLY'],
     ['CONTENT_FILTER', 'MODEL_CONTENT_REJECTED'],
+    ['ACCOUNT_QUOTA', 'MODEL_QUOTA'],
+    ['PI_AI_ERROR', 'MODEL_SERVICE'],
+    ['INVALID_REQUEST', 'MODEL_REQUEST_REJECTED'],
   ]) {
     const failure = classifyMessageFailure({
       code: 'harness-turn-failed',
@@ -259,6 +262,40 @@ test('message failures use verified turn-end provider codes without exposing pro
   assert.equal(classifyMessageFailure({
     code: 'harness-turn-failed', providerCode: 'PRIVATE_PROVIDER_CODE',
   }, options).code, 'INTERNAL_UNKNOWN');
+});
+
+test('a turn failure that names its provider code keeps that code in the public diagnostics', () => {
+  // The provider code is the only thing that tells an exhausted balance, an
+  // upstream provider error and a rejected request apart. It used to be
+  // dropped as a non-numeric value, so every one of them arrived as the
+  // unknown-error notice with no code left to act on.
+  const balance = classifyMessageFailure({
+    code: 'harness-turn-failed', providerCode: 'ACCOUNT_QUOTA',
+    message: 'Insufficient Balance (request_id: private)',
+  }, options);
+  assert.equal(balance.code, 'MODEL_QUOTA');
+  assert.match(balance.message, /额度或余额不足/u);
+  assert.equal(balance.details.providerCode, 'ACCOUNT_QUOTA');
+  assert.equal(publicMessageFailure(balance).details.providerCode, 'ACCOUNT_QUOTA');
+  assert.doesNotMatch(JSON.stringify(balance), /Insufficient Balance|private/u);
+
+  const provider = classifyMessageFailure({
+    code: 'harness-turn-failed', providerCode: 'PI_AI_ERROR',
+  }, options);
+  assert.equal(provider.code, 'MODEL_SERVICE');
+  assert.match(provider.message, /模型服务暂时异常/u);
+
+  const rejected = classifyMessageFailure({
+    code: 'harness-turn-failed', providerCode: 'INVALID_REQUEST',
+  }, options);
+  assert.equal(rejected.code, 'MODEL_REQUEST_REJECTED');
+  assert.match(rejected.message, /\/compact/u);
+
+  const unmapped = classifyMessageFailure({
+    code: 'harness-turn-failed', providerCode: 'VENDOR_SPECIFIC_CODE',
+  }, options);
+  assert.equal(unmapped.code, 'INTERNAL_UNKNOWN');
+  assert.equal(unmapped.details.providerCode, 'VENDOR_SPECIFIC_CODE');
 });
 
 test('message failure text contains a safe code and traceable reference', () => {

@@ -134,7 +134,12 @@ export function normalizeDiagnosticDetails(value) {
   if (Number.isInteger(value.httpStatus) && value.httpStatus >= 100 && value.httpStatus <= 599) result.httpStatus = value.httpStatus;
   const provider = typeof value.providerCode === 'number' && Number.isSafeInteger(value.providerCode)
     ? String(value.providerCode) : value.providerCode;
-  if (typeof provider === 'string' && /^-?\d{1,12}$/.test(provider)) result.providerCode = provider;
+  // A provider code is either a numeric platform error code or an uppercase
+  // token such as PI_AI_ERROR. The token form used to be dropped here, so a
+  // turn failure that carried one reached the user as an unknown error with no
+  // service code at all, and the copied diagnostics named no cause either.
+  if (typeof provider === 'string'
+    && (/^-?\d{1,12}$/u.test(provider) || /^[A-Z][A-Z0-9_]{1,63}$/u.test(provider))) result.providerCode = provider;
   if (typeof value.pluginVersion === 'string' && /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(value.pluginVersion)
     && value.pluginVersion.length <= 64) result.pluginVersion = value.pluginVersion;
   if (['succeeded', 'failed', 'not-attempted', 'unknown'].includes(value.rollback)) result.rollback = value.rollback;
