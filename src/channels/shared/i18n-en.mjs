@@ -1,3 +1,4 @@
+import xiaoai from './i18n-en/xiaoai.mjs';
 import imageInput from './i18n-en/image-input.mjs';
 import permission from './i18n-en/permission.mjs';
 import diagnostics from './i18n-en/diagnostics.mjs';
@@ -46,4 +47,5 @@ export const EN = Object.freeze(Object.assign(
   matrix,
   office,
   email,
+  xiaoai,
 ));

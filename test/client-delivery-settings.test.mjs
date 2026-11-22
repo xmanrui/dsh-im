@@ -129,14 +129,17 @@ test('delivery settings define the supported IM and email channel routes', () =>
     { id: 'slash', label: '指令面板' },
     { id: 'voice', label: '语音交互' },
   ]);
+  assert.deepEqual(botSettingsTabsForChannel('xiaoai'), BOT_SETTINGS_TABS.filter(tab => tab.id !== 'ds-bot'));
   assert.equal(botSettingsTabsForChannel('weixin'), BOT_SETTINGS_TABS);
   assert.equal(botSettingsTabsForChannel('dingtalk'), BOT_SETTINGS_TABS);
   assert.equal(botSettingsTabsForChannel('feishu'), FEISHU_BOT_SETTINGS_TABS);
   assert.equal(DELIVERY_RPC_CHANNEL, '/dsh-im-delivery');
   assert.deepEqual(Object.keys(DELIVERY_CHANNEL_DEFINITIONS), [
-    'weixin', 'feishu', 'dingtalk', 'wecom', 'wecomApp', 'qq',
+    'xiaoai', 'weixin', 'feishu', 'dingtalk', 'wecom', 'wecomApp', 'qq',
     'slack', 'telegram', 'discord', 'whatsapp', 'imessage', 'email',
   ]);
+  assert.equal(DELIVERY_CHANNEL_DEFINITIONS.xiaoai.kinds[0].value, 'device');
+  assert.deepEqual(DELIVERY_CHANNEL_DEFINITIONS.xiaoai.fields.device.map((field) => field.key), ['deviceId']);
   assert.deepEqual(
     DELIVERY_CHANNEL_DEFINITIONS.feishu.fields.user.map((field) => field.key),
     ['openId'],
@@ -155,6 +158,7 @@ test('delivery settings define the supported IM and email channel routes', () =>
     Object.keys(ACCESS_CHANNEL_DEFINITIONS),
     Object.keys(DELIVERY_CHANNEL_DEFINITIONS).filter((channel) => channel !== 'email'),
   );
+  assert.equal(ACCESS_CHANNEL_DEFINITIONS.xiaoai.groupSupported, false);
   assert.equal(ACCESS_CHANNEL_DEFINITIONS.weixin.groupSupported, false);
 });
 

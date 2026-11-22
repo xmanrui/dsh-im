@@ -58,6 +58,7 @@ import { installEmailStyles } from './channels/email/styles.js';
 import { MATRIX_RPC_CHANNEL } from './channels/matrix/api.js';
 import { MatrixSettingsTab } from './channels/matrix/index.js';
 import { installMatrixStyles } from './channels/matrix/styles.js';
+import { XiaoAISettingsTab, XIAOAI_RPC_CHANNEL } from './channels/xiaoai/index.js';
 import { en, h, IM_LOCALE_NAMESPACE, installImRussianLocale, setImTranslator, zh } from './i18n.js';
 import {
   HOST_LANGUAGE_RPC_CHANNEL,
@@ -104,6 +105,7 @@ function callWorkspaceDirectoryApi(ctx, method, ...args) {
 }
 
 const CHANNELS = Object.freeze([
+  { id: 'xiaoai', label: '小爱音箱' },
   { id: 'weixin', label: '微信' },
   { id: 'feishu', label: '飞书' },
   { id: 'dingtalk', label: '钉钉' },
@@ -188,6 +190,9 @@ function OfficeLogo() {
 }
 
 function ChannelLogo({ channel }) {
+  if (channel === 'xiaoai') return h('span', { className: 'dim-logo', 'aria-hidden': true },
+    h('svg', { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6 },
+      h('rect', { x: 5, y: 3, width: 14, height: 18, rx: 5 }), h('circle', { cx: 12, cy: 14, r: 3 }), h('path', { d: 'M9 7h6' })));
   if (channel === 'weixin') return h(WeixinLogo);
   if (channel === 'feishu') return h(FeishuLogo);
   if (channel === 'dingtalk') return h(DingtalkLogo);
@@ -221,6 +226,7 @@ export function LoopbackRecoveryNotice({ recovery, onNavigate = replacePageLocat
 }
 
 export function IMSettingsTab({
+  xiaoaiRpcCall,
   dingtalkRpcCall,
   discordRpcCall,
   feishuRpcCall,
@@ -280,6 +286,7 @@ export function IMSettingsTab({
     setRunningVersion(snapshot.runningVersion);
   }, []);
   const rpcCalls = React.useMemo(() => createLoopbackAwareRpcCalls({
+    xiaoaiRpcCall,
     dingtalkRpcCall,
     discordRpcCall,
     feishuRpcCall,
@@ -303,6 +310,7 @@ export function IMSettingsTab({
     location: browserLocation,
     onRecovery: reportLoopbackRecovery,
   }), [
+    xiaoaiRpcCall,
     browserLocation,
     dingtalkRpcCall,
     discordRpcCall,
@@ -452,6 +460,8 @@ export function IMSettingsTab({
               accessRpcCall: rpcCalls[`${active.id}RpcCall`],
               onBack: () => setDeliverySettings(null),
             })
+          : active.id === 'xiaoai'
+            ? h(XiaoAISettingsTab, { rpcCall: rpcCalls.xiaoaiRpcCall })
           : active.id === 'weixin'
             ? h(WeixinSettingsTab, { rpcCall: rpcCalls.weixinRpcCall })
             : active.id === 'feishu'
@@ -554,6 +564,8 @@ export function apply(ctx) {
   };
   const feishuRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, FEISHU_RPC_CHANNEL, endpoint, payload, signal);
+  const xiaoaiRpcCall = (endpoint, payload, signal) =>
+    managementRpc(ctx.connection, XIAOAI_RPC_CHANNEL, endpoint, payload, signal);
   const weixinRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, WEIXIN_RPC_CHANNEL, endpoint, payload, signal);
   const dingtalkRpcCall = (endpoint, payload, signal) =>
@@ -600,6 +612,7 @@ export function apply(ctx) {
   });
 
   const panelDependencies = {
+    xiaoaiRpcCall,
     dingtalkRpcCall,
     discordRpcCall,
     feishuRpcCall,

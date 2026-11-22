@@ -11,6 +11,11 @@ export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
 const CONFIRMED_OWNER_CHANNELS = new Set(['weixin', 'feishu', 'qq', 'whatsapp', 'discord']);
 
 export const ACCESS_CHANNEL_DEFINITIONS = Object.freeze({
+  xiaoai: Object.freeze({
+    directUserLabel: '设备 ID',
+    directPlaceholder: '填写音箱设备 ID',
+    groupSupported: false,
+  }),
   weixin: Object.freeze({
     directUserLabel: '微信用户 ID',
     directPlaceholder: '填写微信用户 ID',
@@ -234,7 +239,7 @@ function ScenePolicyEditor({
             : h('ul', { className: 'dim-accessUserList' }, users.map((user, index) =>
                 h('li', { key: `${scene}-${policy.mode}-${index}`, className: 'dim-accessUserRow' },
                   h('label', { className: 'dim-accessField dim-accessUserId' },
-                    h('span', null, userLabel),
+                    h('span', null, localizeText(userLabel)),
                     h('input', {
                       value: user.id,
                       maxLength: 256,
@@ -242,7 +247,7 @@ function ScenePolicyEditor({
                       autoCapitalize: 'none',
                       autoCorrect: 'off',
                       spellCheck: false,
-                      placeholder,
+                      placeholder: localizeText(placeholder),
                       'aria-label': [localizeText(title), localizeText(userLabel), index + 1].join(' '),
                       onChange: (event) => updateUser(index, { id: event.target.value }),
                     })),

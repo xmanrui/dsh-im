@@ -1,3 +1,4 @@
+import xiaoai from './i18n-ru/xiaoai.mjs';
 // Russian translations for host-side user-facing text.
 // Keys are the exact Chinese literals passed to t() in src/channels/**.
 // This dictionary is a partial overlay: a key missing here is answered from
@@ -47,4 +48,5 @@ export const RU = Object.freeze(Object.assign(
   matrix,
   office,
   email,
+  xiaoai,
 ));

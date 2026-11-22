@@ -17,6 +17,7 @@ import { WhatsappConfigStore } from '../../src/channels/whatsapp/config-store.mj
 import { IMessageConfigStore } from '../../src/channels/imessage/config-store.mjs';
 import { EmailConfigStore } from '../../src/channels/email/config-store.mjs';
 import { MatrixConfigStore } from '../../src/channels/matrix/matrix-config-store.mjs';
+import { XiaoAIConfigStore } from '../../src/channels/xiaoai/config-store.mjs';
 import { OfficeConfigStore } from '../../src/channels/office/config-store.mjs';
 
 export const SIDEBAR_SETTINGS_RPC_CHANNEL = '/dsh-im-sidebar';
@@ -31,7 +32,7 @@ const CHANNEL_STORES = [
   ['slack', SlackConfigStore], ['telegram', TelegramConfigStore],
   ['discord', DiscordConfigStore], ['whatsapp', WhatsappConfigStore],
   ['imessage', IMessageConfigStore], ['email', EmailConfigStore],
-  ['matrix', MatrixConfigStore], ['office', OfficeConfigStore],
+  ['matrix', MatrixConfigStore], ['xiaoai', XiaoAIConfigStore], ['office', OfficeConfigStore],
 ];
 
 function dshHome(config) {
