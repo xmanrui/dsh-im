@@ -8,6 +8,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Added / 新增
 
+- 新增按 bot 的「投递内容」开关：过程正文、工具步骤、思考过程三项互相独立、默认全开。关闭后该渠道不再推送对应内容，最终回答始终发送；关闭「过程正文」时最终回答也只取最后一次工具调用之后的助手正文，等价于把 QQ 专属的 `finalAnswerOnly` 开放给所有渠道。配置存于跨渠道共用的 bot 设置，仅在「机器人通用设置」一处可见，对全部 IM 渠道生效；超时补发沿用同一口径。（[#343](https://github.com/xmanrui/dsh-im/issues/343)）
+  Added per-bot Reply content switches — process prose, tool steps and reasoning — independent and all on by default. A switched-off part is no longer pushed to that bot while the final answer is always delivered; hiding process prose also restricts the delivered answer to the assistant text after the last tool call, which is exactly the QQ-only `finalAnswerOnly` rule made available to every channel. The setting lives in the shared per-bot configuration and appears once under General bot settings, applying to all IM channels; deferred background delivery follows the same rule. ([#343](https://github.com/xmanrui/dsh-im/issues/343))
+
 - 新增 `/sessionarchive <Session ID>`（别名 `/sessarchive`）：通过 Discord 等渠道触发 DSH 的会话归档（`workspace.archiveSession`）。传序号只做预览（标题、工作区、ID），不会执行归档——会话列表随新会话出现而位移，按序号直接归档会归档到错误会话；破坏性操作必须点名完整 ID。机器人只负责解析目标并转达 Host 结果，拒绝归档本对话当前绑定的会话与已归档会话；`--stop` 让 Host 先停止该会话正在运行的任务。归档后的会话不再出现在默认的 `/sessionlist`。
   Added `/sessionarchive <Session ID>` (alias `/sessarchive`) to trigger DSH Session archiving; a numerical argument only previews the Session behind that index (title, workspace, ID) and never archives, because the list shifts and archiving by index would hit the wrong Session — destructive actions must name the full ID (`workspace.archiveSession`) from the chat. The bot only resolves the target and relays the Host result; it refuses the Session this chat is bound to and one that is already archived, and `--stop` lets the Host stop that Session's running work. Archived Sessions leave the default `/sessionlist`.
 

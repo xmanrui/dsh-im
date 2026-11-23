@@ -2,6 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ensurePresetWorkspace } from './preset-workspaces.mjs';
 import { t } from './i18n.mjs';
 import { normalizeBusyMessageMode, validateBusyMessageMode } from './message-mode.mjs';
+import { isDefaultReplyContent, normalizeReplyContent, validateReplyContent } from './reply-content.mjs';
 import { atConnectionStage, connectionStageError, extractConnectionEvidence } from './connection-error.mjs';
 import { validateBotAlias, withBotAlias } from './bot-alias.mjs';
 import { defaultImWorkspace, ensureImWorkspaceDirectory, sameWorkspacePath } from './default-workspace.mjs';
@@ -385,6 +386,17 @@ function normalizeDocument(value) {
       if (Object.hasOwn(workspaces, id) && mode === 'steer') busyMessageModes[id] = mode;
     }
   }
+  // A damaged switch set must not take the bot's workspace or preset with it:
+  // every unreadable entry falls back to the full-content default.
+  const replyContents = Object.create(null);
+  if (value.replyContents && typeof value.replyContents === 'object'
+    && !Array.isArray(value.replyContents)) {
+    for (const [id, content] of Object.entries(value.replyContents)) {
+      if (/^[A-Za-z0-9_-]{1,128}$/.test(id) && Object.hasOwn(workspaces, id)) {
+        replyContents[id] = normalizeReplyContent(content);
+      }
+    }
+  }
   const accessPolicies = normalizeAccessPolicies(value.accessPolicies, workspaces);
   const conversationDirectory = normalizeConversationDirectory(value.conversationDirectory);
   const conversationDirectories = normalizeConversationDirectoryOverrides(value.conversationDirectories);
@@ -410,6 +422,7 @@ function normalizeDocument(value) {
     accessPolicies,
     aliases,
     busyMessageModes,
+    replyContents,
   };
 }
 
@@ -428,6 +441,7 @@ function storedDocument({
   accessPolicies,
   aliases,
   busyMessageModes,
+  replyContents,
 }) {
   const document = { version, workspaces };
   if (conversationDirectory) document.conversationDirectory = conversationDirectory;
@@ -435,6 +449,7 @@ function storedDocument({
   if (Object.keys(sessionDirectories).length) document.sessionDirectories = sessionDirectories;
   if (Object.keys(dsBotBindings).length > 0) document.dsBotBindings = dsBotBindings;
   if (Object.keys(busyMessageModes).length > 0) document.busyMessageModes = busyMessageModes;
+  if (Object.keys(replyContents).length > 0) document.replyContents = replyContents;
   if (Object.keys(aliases).length > 0) document.aliases = aliases;
   if (Object.keys(conversationWorkspaces).length > 0) {
     document.conversationWorkspaces = conversationWorkspaces;
@@ -498,6 +513,7 @@ export class BotWorkspaceStore {
   #models = {};
   #aliases = Object.create(null);
   #busyMessageModes = Object.create(null);
+  #replyContents = Object.create(null);
   #contextEnhancement = {};
   #deliveryTargets = Object.create(null);
   #dsBotBindings = Object.create(null);
@@ -535,6 +551,7 @@ export class BotWorkspaceStore {
       this.#models = normalized.models;
       this.#aliases = normalized.aliases;
       this.#busyMessageModes = normalized.busyMessageModes;
+      this.#replyContents = normalized.replyContents;
       this.#contextEnhancement = normalized.contextEnhancement;
       this.#deliveryTargets = normalized.deliveryTargets;
       this.#dsBotBindings = normalized.dsBotBindings;
@@ -551,6 +568,7 @@ export class BotWorkspaceStore {
       this.#models = {};
       this.#aliases = Object.create(null);
       this.#busyMessageModes = Object.create(null);
+      this.#replyContents = Object.create(null);
       this.#contextEnhancement = {};
       this.#deliveryTargets = Object.create(null);
       this.#dsBotBindings = Object.create(null);
@@ -745,6 +763,11 @@ export class BotWorkspaceStore {
   busyMessageModeFor(botId) {
     const id = botIdOf(botId);
     return normalizeBusyMessageMode(this.has(id) ? this.#busyMessageModes[id] : undefined);
+  }
+
+  replyContentFor(botId) {
+    const id = botIdOf(botId);
+    return normalizeReplyContent(this.has(id) ? this.#replyContents[id] : undefined);
   }
 
   contextEnhancementFor(botId) {
@@ -1184,6 +1207,30 @@ export class BotWorkspaceStore {
     });
   }
 
+  async setReplyContent(botId, value, { incarnation } = {}) {
+    const id = botIdOf(botId);
+    const expectedIncarnation = incarnation === undefined ? this.incarnationFor(id) : incarnation;
+    const content = validateReplyContent(value);
+    return this.#enqueue(id, async () => {
+      if (!this.has(id) || expectedIncarnation !== this.incarnationFor(id)) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const next = { ...this.#replyContents };
+      // The all-on default is the absence of a record, so a bot that never
+      // changed the switches leaves no field in the document.
+      if (isDefaultReplyContent(content)) delete next[id];
+      else next[id] = content;
+      await this.#persist(this.#contextEnhancement, this.#deliveryTargets,
+        this.#version, this.#accessPolicies, this.#aliases, this.#conversationWorkspaces,
+        this.#busyMessageModes, this.#dsBotBindings, this.#conversationDirectory,
+        this.#conversationDirectories, this.#sessionDirectories, next);
+      this.#replyContents = next;
+      return content;
+    });
+  }
+
   async setContextEnhancement(botId, value, { incarnation } = {}) {
     const id = botIdOf(botId);
     const expectedIncarnation = incarnation === undefined ? this.incarnationFor(id) : incarnation;
@@ -1567,6 +1614,7 @@ export class BotWorkspaceStore {
       ...Object.keys(this.#models),
       ...Object.keys(this.#aliases),
       ...Object.keys(this.#busyMessageModes),
+      ...Object.keys(this.#replyContents),
       ...Object.keys(this.#contextEnhancement),
       ...Object.keys(this.#deliveryTargets),
       ...Object.keys(this.#accessPolicies),
@@ -1596,6 +1644,7 @@ export class BotWorkspaceStore {
           model: this.modelFor(bot.botId),
           contextEnhancement: this.contextEnhancementFor(bot.botId),
           busyMessageMode: this.busyMessageModeFor(bot.botId),
+          replyContent: this.replyContentFor(bot.botId),
           accessPolicy: this.accessPolicyFor(bot.botId),
         }
         : bot),
@@ -1635,6 +1684,7 @@ export class BotWorkspaceStore {
     const hadModel = Object.hasOwn(this.#models, id);
     const hadAlias = Object.hasOwn(this.#aliases, id);
     const hadMessageMode = Object.hasOwn(this.#busyMessageModes, id);
+    const hadReplyContent = Object.hasOwn(this.#replyContents, id);
     const hadContextEnhancement = Object.hasOwn(this.#contextEnhancement, id);
     const hadDeliveryTargets = Object.hasOwn(this.#deliveryTargets, id);
     const hadDsBotBindings = Object.hasOwn(this.#dsBotBindings, id);
@@ -1643,6 +1693,7 @@ export class BotWorkspaceStore {
     const hadDirectoryRecords = Object.hasOwn(this.#conversationDirectories, id) || Object.hasOwn(this.#sessionDirectories, id);
     const needsCleanup = hadWorkspace || hadPreset || hadModel || hadAlias || hadContextEnhancement
       || hadDeliveryTargets || hadDsBotBindings || hadAccessPolicy || hadConversationWorkspaces || hadMessageMode
+      || hadReplyContent
       || hadDirectoryRecords
       || this.#dirtyRemovals.has(id);
     delete this.#workspaces[id];
@@ -1650,6 +1701,7 @@ export class BotWorkspaceStore {
     delete this.#models[id];
     delete this.#aliases[id];
     delete this.#busyMessageModes[id];
+    delete this.#replyContents[id];
     delete this.#contextEnhancement[id];
     delete this.#deliveryTargets[id];
     delete this.#dsBotBindings[id];
@@ -1698,6 +1750,7 @@ export class BotWorkspaceStore {
     conversationDirectory = this.#conversationDirectory,
     conversationDirectories = this.#conversationDirectories,
     sessionDirectories = this.#sessionDirectories,
+    replyContents = this.#replyContents,
   ) {
     await writeStoredDocument(this.#path, storedDocument({
       version,
@@ -1711,6 +1764,7 @@ export class BotWorkspaceStore {
       accessPolicies,
       aliases,
       busyMessageModes,
+      replyContents,
       conversationDirectory,
       conversationDirectories,
       sessionDirectories,
@@ -1724,6 +1778,7 @@ export class BotWorkspaceStore {
       || Object.keys(this.#models).length > 0
       || Object.keys(this.#aliases).length > 0
       || Object.keys(this.#busyMessageModes).length > 0
+      || Object.keys(this.#replyContents).length > 0
       || Object.keys(this.#contextEnhancement).length > 0
       || Object.keys(this.#deliveryTargets).length > 0
       || Object.keys(this.#dsBotBindings).length > 0
@@ -2084,6 +2139,11 @@ export function createBotWorkspaceScope(
       }
       if (property === 'currentBusyMessageMode') {
         return () => isCurrentScope() ? workspaces.busyMessageModeFor(botId) : 'queue';
+      }
+      if (property === 'currentReplyContent') {
+        return () => (isCurrentScope()
+          ? workspaces.replyContentFor(botId)
+          : normalizeReplyContent(undefined));
       }
       if (property === 'currentWorkspace') {
         return () => {
@@ -2947,6 +3007,26 @@ export function createWorkspaceAwareController(controller, {
       return result;
     });
   };
+  const updateReplyContent = (botId, value, projectStatus) => {
+    const incarnation = workspaces.incarnationFor(botId);
+    const content = validateReplyContent(value);
+    return withBotTransition(botId, async () => {
+      const snapshot = await decorate(await controller.status());
+      if (!snapshot?.bots?.some((bot) => bot?.botId === botId)) {
+        const error = new Error('找不到要修改的机器人。');
+        error.code = 'workspace-bot-not-found';
+        throw error;
+      }
+      const updated = {
+        ...snapshot,
+        bots: snapshot.bots.map((bot) => (bot.botId === botId
+          ? { ...bot, replyContent: content } : bot)),
+      };
+      const result = projectStatus ? await projectStatus(updated) : updated;
+      await workspaces.setReplyContent(botId, content, { incarnation });
+      return result;
+    });
+  };
   const updateBusyMessageMode = (botId, value, projectStatus) => {
     const incarnation = workspaces.incarnationFor(botId);
     const busyMessageMode = validateBusyMessageMode(value);
@@ -3092,6 +3172,7 @@ export function createWorkspaceAwareController(controller, {
       if (property === 'updateModel') return updateModel;
       if (property === 'updateAlias') return updateAlias;
       if (property === 'updateBusyMessageMode') return updateBusyMessageMode;
+      if (property === 'updateReplyContent') return updateReplyContent;
       if (property === 'updateContextEnhancement') return updateContextEnhancement;
       if (property === 'updateAccessPolicy') return updateAccessPolicy;
       const value = Reflect.get(target, property, target);

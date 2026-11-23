@@ -135,6 +135,7 @@ import {
   normalizeFeishuStepPushMode,
   normalizeFeishuStepCardPanels,
 } from './step-push-mode.mjs';
+import { normalizeReplyContent } from '../shared/reply-content.mjs';
 import { FeishuLiveCot } from './live-cot.mjs';
 
 // Lazily evaluated: t() must run after setImHostLanguage, not at import time.
@@ -5949,7 +5950,11 @@ export class FeishuHarnessBridge {
         messageId,
       );
     };
-    const watchdog = streamingCard || liveCot
+    // 只发最终回答的回合（三项内容全关）连"思考中"心跳也属于过程内容，
+    // 静默期不再发任何东西，答案出现即是唯一消息。
+    const replyContent = normalizeReplyContent(this.#harness.currentReplyContent?.());
+    const answerOnly = !replyContent.narration && !replyContent.tools && !replyContent.thinking;
+    const watchdog = streamingCard || liveCot || answerOnly
       ? null
       : this.#startThinkingStatusWatchdog(key, chatId, messageId);
     let completed;
