@@ -1426,6 +1426,15 @@ const EN = Object.freeze({
   '宿主 sessionQuery 服务尚未就绪': 'The Host sessionQuery service is not ready',
   '该会话暂时无法读取，请稍后重试。': 'The session cannot be read right now. Try again later.',
   '请求失败': 'The request failed',
+
+  // Featured plugins inline entry (client/featured-entry.js).
+  '精选插件': 'Featured plugins',
+  '精选插件完整版(dsh-featured)未安装。': 'The full Featured plugins module (dsh-featured) is not installed.',
+  '安装完整版': 'Install the full version',
+  '正在安装完整版…': 'Installing the full version…',
+  '已安装,刷新后即可使用完整功能。': 'Installed — refresh to get the full experience.',
+  '已安装': 'Installed',
+  '一个入口逛完社区精选的好插件:搜索、标签筛选、一键安装、README 详情。': 'One tab for community-curated plugins: search, tag filters, one-click install and README details.',
 });
 
 export const en = EN;

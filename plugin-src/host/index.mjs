@@ -31,6 +31,7 @@ import { getDeliverySyncSettingsStore } from '../../src/channels/shared/delivery
 import { installSessionTitlePrefix } from './session-title-prefix.mjs';
 import { installUpdateRpc } from './update-rpc.mjs';
 import { installChannelListRpc } from './channel-list-rpc.mjs';
+import { integrateFeaturedPlugins, FEATURED_SOURCE } from './featured-source.mjs';
 
 export const name = 'dsh-im-host';
 export const inject = [
@@ -274,6 +275,13 @@ export function createImHostPlugin(internals = {}) {
       } catch (error) {
         logger.error?.('[dsh-im] failed to activate Session sync; continuing with channels', error);
       }
+    }
+    // Featured plugins integration (community catalog entry; zero runtime
+    // deps; never throws into the channel activation path).
+    try {
+      integrateFeaturedPlugins(ctx, FEATURED_SOURCE);
+    } catch (error) {
+      logger.error?.('[dsh-im] featured-plugins integration failed; continuing', error);
     }
   }
 }

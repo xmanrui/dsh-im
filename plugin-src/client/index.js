@@ -87,6 +87,7 @@ import { WorkspaceDirectoryPickerContext } from './workspace-editor.js';
 import { IMPanelErrorBoundary } from './panel-error-boundary.js';
 import { installImPluginPage } from './plugin-page.js';
 import { installSidebarVisibilitySync, SIDEBAR_SETTINGS_ENDPOINTS, SIDEBAR_SETTINGS_RPC_CHANNEL } from './sidebar-settings.js';
+import { installFeaturedEntry } from './featured-entry.js';
 
 import { installChannelSessionsPage, CHANNEL_LIST_RPC_CHANNEL } from './im-channels.js';
 export const name = 'im-settings';
@@ -484,6 +485,9 @@ export function IMSettingsTab({
 }
 
 export function apply(ctx) {
+  // Featured plugins inline entry (community catalog tab; yields to the full
+  // dsh-featured plugin when installed). Independent of IM settings below.
+  installFeaturedEntry(ctx);
   ctx.effect(
     () => ctx.locale.register(IM_LOCALE_NAMESPACE, { zh, en }),
     'im-settings: bilingual dictionaries',
