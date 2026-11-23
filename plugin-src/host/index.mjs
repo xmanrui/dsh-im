@@ -1,3 +1,4 @@
+import { hostRoot } from './host-root.mjs';
 import { installGroupHistoryTools } from '../../src/channels/shared/group-history-access.mjs';
 import { apply as applyDingtalk } from './channels/dingtalk/index.mjs';
 import { apply as applyDiscord } from './channels/discord/index.mjs';
@@ -267,7 +268,7 @@ export function createImHostPlugin(internals = {}) {
       try {
         startSessionSync(ctx, deliveryService, {
           logger,
-          inputScope: ctx.root ?? ctx,
+          inputScope: hostRoot(ctx),
           config,
         });
         installDsBotQuestionSync(ctx, deliveryService, { logger });

@@ -1,8 +1,10 @@
+import { hostRoot } from './host-root.mjs';
+
 const peers = new WeakMap();
 
 /** One caller identity shared by the Host's session and command gateways. */
 export function harnessPeer(ctx) {
-  const scope = ctx?.root ?? ctx;
+  const scope = hostRoot(ctx);
   const cached = peers.get(scope);
   if (cached) return cached;
   const connection = ctx?.connection;
