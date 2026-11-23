@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { selectProgressUpdates } from '../src/channels/shared/harness-client.mjs';
 import {
   DEFAULT_REPLY_CONTENT,
   allowsReplyContent,
@@ -52,3 +53,34 @@ test('the settings endpoint only accepts a complete boolean set', () => {
     assert.throws(() => validateReplyContent(invalid), (error) => error.code === 'reply-content-invalid');
   }
 });
+
+test('latest mode filters by the bot switches before it keeps the last update', () => {
+  const updates = [
+    { type: 'text', text: 'Checking' },
+    { type: 'tool', name: 'bash' },
+  ];
+  // The tool update is hidden, so it must not take the single "latest" slot and
+  // drop the allowed narration text that arrived in the same poll.
+  assert.deepEqual(
+    selectProgressUpdates(updates, {
+      mode: 'latest',
+      replyContent: { narration: true, tools: false, thinking: true },
+    }).map((update) => update.type),
+    ['text'],
+  );
+  assert.deepEqual(
+    selectProgressUpdates(updates, {
+      mode: 'latest',
+      replyContent: { narration: false, tools: false, thinking: true },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    selectProgressUpdates(updates, {
+      mode: 'all',
+      replyContent: { narration: false, tools: true, thinking: true },
+    }).map((update) => update.type),
+    ['tool'],
+  );
+});
+

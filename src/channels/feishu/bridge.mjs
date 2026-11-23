@@ -5880,11 +5880,16 @@ export class FeishuHarnessBridge {
     // post 模式维持逐条直推。先预建卡片状态，纯问答回合也能在收尾时开卡。
     // 飞书原生思考过程按 chat_id 创建，不会落进话题（#244）；话题内的回合改用
     // 实时过程卡（以 reply_in_thread 回复留在话题内），避免过程出现在话题外。
+    // 只发最终回答的回合（三项内容全关）不能留下任何过程呈现：原生思考过程、
+    // 实时过程卡与"思考中"心跳都是过程内容，答案出现即是唯一消息。
+    const replyContent = normalizeReplyContent(this.#harness.currentReplyContent?.());
+    const answerOnly = !replyContent.narration && !replyContent.tools && !replyContent.thinking;
     const liveCotInTopic = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.LIVE_COT
       && this.#replyInThreadFor(messageId);
-    const streamingCard = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.STREAMING_CARD
-      || liveCotInTopic;
-    const liveCot = this.#stepPushMode === FEISHU_STEP_PUSH_MODES.LIVE_COT
+    const streamingCard = !answerOnly
+      && (this.#stepPushMode === FEISHU_STEP_PUSH_MODES.STREAMING_CARD || liveCotInTopic);
+    const liveCot = !answerOnly
+      && this.#stepPushMode === FEISHU_STEP_PUSH_MODES.LIVE_COT
       && !liveCotInTopic
       && typeof this.#channel?.createCot === 'function'
       && typeof this.#channel?.writeCotEvents === 'function';
@@ -5912,7 +5917,8 @@ export class FeishuHarnessBridge {
 
     // 上下文注入动作在详细级别下也体现为一条步骤（注入细节可忽略）。
     // 不计入工具/助手消息的熔断计数（规格口径：熔断只管「工具 + 助手」）。
-    if (contextEnhanced || content) {
+    // 只发最终回答的回合连这条过程提示也不发。
+    if (!answerOnly && (contextEnhanced || content)) {
       if (streamingCard) {
         await this.#appendStepCardUpdate(
           key, chatId, messageId,
@@ -5950,10 +5956,6 @@ export class FeishuHarnessBridge {
         messageId,
       );
     };
-    // 只发最终回答的回合（三项内容全关）连"思考中"心跳也属于过程内容，
-    // 静默期不再发任何东西，答案出现即是唯一消息。
-    const replyContent = normalizeReplyContent(this.#harness.currentReplyContent?.());
-    const answerOnly = !replyContent.narration && !replyContent.tools && !replyContent.thinking;
     const watchdog = streamingCard || liveCot || answerOnly
       ? null
       : this.#startThinkingStatusWatchdog(key, chatId, messageId);

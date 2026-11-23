@@ -516,6 +516,21 @@ function allowsUpdate(replyContent, update) {
   return kind === null || allowsReplyContent(replyContent, kind);
 }
 
+/**
+ * The updates a channel may forward for this batch.
+ *
+ * The bot's switches are applied before the `latest` reduction: a hidden
+ * update must not take the single slot and swallow an allowed update that
+ * arrived in the same poll.
+ */
+export function selectProgressUpdates(updates, { mode = 'latest', replyContent } = {}) {
+  const allowed = updates.filter((update) => allowsUpdate(replyContent, update));
+  if (mode === 'all' || mode === 'live') return allowed;
+  return allowed
+    .filter((update) => update.type !== 'assistant-message' && update.type !== 'reasoning')
+    .slice(-1);
+}
+
 function nonEmptyText(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -2073,12 +2088,10 @@ export class HarnessClient {
       lastPollSeq = tracker.lastSeq;
       if (seqAdvanced) lastProgressAt = Date.now();
       if (!onUpdate) return progressTail;
-      const visibleUpdates = (progressMode === 'all' || progressMode === 'live'
-        ? updates
-        : updates
-            .filter((update) => update.type !== 'assistant-message' && update.type !== 'reasoning')
-            .slice(-1))
-        .filter((update) => allowsUpdate(replyContent, update));
+      const visibleUpdates = selectProgressUpdates(updates, {
+        mode: progressMode,
+        replyContent,
+      });
       for (const update of visibleUpdates) {
         progressTail = progressTail
           .then(() => onUpdate(update))
