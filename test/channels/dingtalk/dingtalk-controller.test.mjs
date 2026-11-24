@@ -84,6 +84,12 @@ function runtimeFactory({ events = [], pendingByClient = new Map(), failStart = 
         pendingSender(requestId) {
           return pending.find((sender) => sender.requestId === requestId) ?? null;
         },
+        async forgetPendingSender(requestId) {
+          const index = pending.findIndex((sender) => sender.requestId === requestId);
+          if (index === -1) return false;
+          pending.splice(index, 1);
+          return true;
+        },
         async start() {
           events.push(['start', botId]);
           if (typeof failStart === 'function' ? failStart() : failStart) {
@@ -270,6 +276,52 @@ test('sender approval uses opaque request and sender keys while raw staff IDs st
   await controller.revokeSender(identity.botId, approvedStatus.approved[0].senderKey);
   assert.equal(configs.bots.get(identity.botId).approvedSenders.length, 0);
   assert.equal(controller.status().bots[0].senders.approved.length, 0);
+  await controller.close();
+});
+
+test('approving writes the selected allowlists instead of a second sender list', async () => {
+  const events = [];
+  const identity = deriveDingtalkBotIdentity('ding-client-one');
+  const config = {
+    ...identity,
+    clientId: 'ding-client-one',
+    approvedSenders: [],
+  };
+  const credentials = credentialsFixture(events);
+  credentials.values.set(identity.secretRef, 'client-secret-private');
+  const configs = configFixture([config], events);
+  const pendingByClient = new Map([[
+    'ding-client-one',
+    [{
+      staffId: 'staff-private-one',
+      senderNick: '待审批用户',
+      requestedAt: '2026-08-15T00:00:00.000Z',
+      requestId: 'ding_sender_abc123',
+    }],
+  ]]);
+  const runtimes = runtimeFactory({ events, pendingByClient });
+  const synced = [];
+  const controller = new DingtalkController({
+    deviceAuth: successfulDeviceAuth(),
+    credentials: credentials.provider,
+    configStore: configs.store,
+    createRuntime: runtimes.createRuntime,
+    syncAllowlist: async (botId, staffId, present, scene) => {
+      synced.push({ botId, staffId, present, scene });
+    },
+    clock: () => Date.parse('2026-08-15T01:00:00.000Z'),
+  });
+  await controller.initialize();
+
+  const pending = controller.status().bots[0].senders.pending[0];
+  await controller.approveSender(identity.botId, pending.requestId, ['group']);
+
+  assert.deepEqual(synced, [
+    { botId: identity.botId, staffId: 'staff-private-one', present: true, scene: 'group' },
+  ]);
+  // 不再产生第二份名单，且这条待审批已经清掉。
+  assert.equal(configs.bots.get(identity.botId).approvedSenders.length, 0);
+  assert.equal(controller.status().bots[0].senders.pending.length, 0);
   await controller.close();
 });
 

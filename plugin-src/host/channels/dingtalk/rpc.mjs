@@ -6,6 +6,7 @@ import { registerManagementRpc } from '../../../management-rpc.mjs';
 import QRCode from '../../../../src/channels/shared/qrcode.mjs';
 import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
+import { SET_TEXT_OVERRIDES_ENDPOINT, validTextOverridesPayload } from '../shared/text-overrides-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
 import { resolveRpcAuthority } from '../../rpc-authority.mjs';
 import { publicWorkspaceError, SET_WORKSPACE_ENDPOINT, validWorkspacePayload } from '../shared/workspace-rpc.mjs';
@@ -29,10 +30,12 @@ export const DINGTALK_ENDPOINTS = Object.freeze({
   setModel: SET_MODEL_ENDPOINT,
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
+  setTextOverrides: SET_TEXT_OVERRIDES_ENDPOINT,
   setBusyMessageMode: SET_MESSAGE_MODE_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
   approveSender: 'bot.sender.approve',
+  allowPendingSender: 'bot.sender.allow',
   revokeSender: 'bot.sender.revoke',
 });
 export const DINGTALK_RPC_ENDPOINTS = Object.freeze(Object.values(DINGTALK_ENDPOINTS));
@@ -119,6 +122,10 @@ function payloadFailure(endpoint, payload) {
     return validContextEnhancementPayload(payload)
       ? null : '请提交有效的上下文增强设置。';
   }
+  if (endpoint === DINGTALK_ENDPOINTS.setTextOverrides) {
+    return validTextOverridesPayload(payload)
+      ? null : '请提交有效的提示文案设置。';
+  }
   if (endpoint === DINGTALK_ENDPOINTS.setAccessPolicy) {
     return validAccessPolicyPayload(payload)
       ? null : '请提交有效的访问设置。';
@@ -126,6 +133,21 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === DINGTALK_ENDPOINTS.setAlias) {
     return validAliasPayload(payload)
       ? null : '请输入有效的别名（最多 80 个字符）。';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.allowPendingSender) {
+    const scenes = payload?.scenes;
+    const scenesOk = scenes === undefined
+      || (Array.isArray(scenes)
+        && scenes.length > 0
+        && scenes.every((scene) => scene === 'direct' || scene === 'group'));
+    return (exactKeys(payload, ['botId', 'requestId', 'confirm', 'scenes'])
+        || exactKeys(payload, ['botId', 'requestId', 'confirm']))
+      && validId(payload.botId)
+      && validId(payload.requestId)
+      && payload.confirm === true
+      && scenesOk
+      ? null
+      : 'bot.sender.allow requires botId, requestId, confirm=true and optional scenes.';
   }
   if (endpoint === DINGTALK_ENDPOINTS.approveSender) {
     return exactKeys(payload, ['botId', 'requestId', 'confirm'])
@@ -319,6 +341,30 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
         if (typeof controller.updateBusyMessageMode !== 'function') throw new Error('Message mode update is unavailable');
         value = await controller.updateBusyMessageMode(
           payload.botId, payload.busyMessageMode, (status) => publicStatus(status, cachedEncode),
+        );
+
+
+      } else if (endpoint === DINGTALK_ENDPOINTS.allowPendingSender) {
+        // 设置页只拿得到不透明的 requestId；原始 staffId 始终留在宿主侧。
+        if (typeof controller.approveSender !== 'function') throw new Error('Sender allow is unavailable');
+        try {
+          value = await publicStatus(
+            await controller.approveSender(payload.botId, payload.requestId, payload.scenes),
+            cachedEncode,
+          );
+        } catch (error) {
+          return {
+            ok: false,
+            error: {
+              code: 'sender-allow-failed',
+              message: String(error?.message ?? error).slice(0, 240),
+            },
+          };
+        }
+      } else if (endpoint === DINGTALK_ENDPOINTS.setTextOverrides) {
+        if (typeof controller.updateTextOverrides !== 'function') throw new Error('Text override update is unavailable');
+        value = await controller.updateTextOverrides(
+          payload.botId, payload.texts, (status) => publicStatus(status, cachedEncode),
         );
       } else if (endpoint === DINGTALK_ENDPOINTS.setContextEnhancement) {
         if (typeof controller.updateContextEnhancement !== 'function') throw new Error('Context enhancement update is unavailable');

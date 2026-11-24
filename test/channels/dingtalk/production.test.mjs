@@ -20,6 +20,7 @@ test('production assembly keeps secrets in credentials and creates per-bot runti
   class StateStore {
     constructor(path) { seen.statePath = path; }
     async load() { return this; }
+    senderName(id) { return id === 'staff-one' ? '小明' : null; }
   }
   class Harness {
     constructor(options) { seen.harnessOptions = options; }
@@ -71,6 +72,16 @@ test('production assembly keeps secrets in credentials and creates per-bot runti
   assert.equal(seen.runtimeOptions.clientSecret, 'host-only-secret');
   assert.equal(Object.hasOwn(seen.runtimeOptions, 'outboundArtifactsEnabled'), false);
   assertPathMatches(seen.statePath, /dt_abc\/state\.json$/);
+  await seen.controllerOptions.syncAllowlist('dt_abc', 'staff-one', true, 'direct');
+  await seen.controllerOptions.syncAllowlist('dt_abc', 'staff-one', true, 'group');
+  let policies = JSON.parse(await readFile(join(directory, 'workspaces.json'), 'utf8')).accessPolicies.dt_abc;
+  assert.deepEqual(policies.direct.allowlist.users.map((user) => user.id), ['staff-one']);
+  assert.deepEqual(policies.group.allowlist.users.map((user) => user.id), ['staff-one']);
+  assert.deepEqual(seen.controllerOptions.directoryNames('dt_abc'), [{ id: 'staff-one', displayName: '小明' }]);
+  await seen.controllerOptions.syncAllowlist('dt_abc', 'staff-one', false, 'group');
+  policies = JSON.parse(await readFile(join(directory, 'workspaces.json'), 'utf8')).accessPolicies.dt_abc;
+  assert.equal(policies.direct.allowlist.users.length, 1);
+  assert.equal(policies.group.allowlist.users.length, 0);
   await seen.controllerOptions.createRuntime({
     botId: 'dt_disabled',
     config: { botId: 'dt_disabled', clientId: 'dingdisabled' },

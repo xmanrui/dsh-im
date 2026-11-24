@@ -6,8 +6,10 @@ import {
   validateAccessPolicy,
 } from '../../src/channels/shared/access-policy.mjs';
 import { h, localizeText } from './i18n.js';
+import { DINGTALK_ENDPOINTS } from './channels/dingtalk/api.js';
 
 export const ACCESS_POLICY_ENDPOINT = 'bot.access-policy.set';
+const STALE_NOTICE = '这条记录已经不存在了（可能已被处理过），列表已刷新。';
 const CONFIRMED_OWNER_CHANNELS = new Set(['weixin', 'feishu', 'qq', 'whatsapp', 'discord']);
 
 export const ACCESS_CHANNEL_DEFINITIONS = Object.freeze({
@@ -287,26 +289,81 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
   ));
   const [saving, setSaving] = React.useState(false);
   const [feedback, setFeedback] = React.useState(null);
+  // 被访问策略拦下的人：桥接层记进 pendingSenders，这里逐个放行。
+  const [pendingSenders, setPendingSenders] = React.useState([]);
+  const [directoryNames, setDirectoryNames] = React.useState([]);
+  const [pendingLoading, setPendingLoading] = React.useState(channel === 'dingtalk');
+  const [selections, setSelections] = React.useState({});
+  const [pendingFeedback, setPendingFeedback] = React.useState(null);
 
+  const refreshPolicyFromServer = async () => {
+    try {
+      const result = await rpcCall('connection.status', {});
+      const bot = result?.value?.bots?.find((entry) => entry.botId === account?.botId);
+      const refreshed = normalizeAccessPolicy(bot?.accessPolicy);
+      if (refreshed) {
+        setDraft(clonePolicy(refreshed));
+        onSaved?.(refreshed);
+      }
+    } catch {
+      // 读不到就保持当前草稿，用户可手动刷新。
+    }
+  };
+
+  const loadPendingSenders = React.useCallback(async () => {
+    if (channel !== 'dingtalk') return;
+    try {
+      const result = await rpcCall('connection.status', {});
+      if (result?.ok !== true) throw new Error(result?.error?.message || '无法读取被拦截的用户。');
+      const bot = result.value?.bots?.find((entry) => entry.botId === account?.botId);
+      setPendingSenders(Array.isArray(bot?.senders?.pending) ? bot.senders.pending : []);
+      setDirectoryNames(Array.isArray(bot?.senders?.directoryNames) ? bot.senders.directoryNames : []);
+    } catch (error) {
+      setPendingFeedback(error.message);
+    } finally {
+      setPendingLoading(false);
+    }
+  }, [channel, account?.botId, rpcCall]);
+
+  React.useEffect(() => { void loadPendingSenders(); }, [loadPendingSenders]);
+
+  // 被拦截的人是在页面打开之后才来的：轮询一次很便宜的读，外加切回页面时立即刷新。
   React.useEffect(() => {
-    const next = normalizeAccessPolicy(account?.accessPolicy);
-    setDraft(clonePolicy(next ?? DEFAULT_ACCESS_POLICY));
-  }, [account?.botId, initialKey]);
+    if (channel !== 'dingtalk') return undefined;
+    const timer = setInterval(() => { void loadPendingSenders(); }, 5000);
+    timer?.unref?.();
+    const onFocus = () => { void loadPendingSenders(); };
+    globalThis.addEventListener?.('focus', onFocus);
+    return () => {
+      clearInterval(timer);
+      globalThis.removeEventListener?.('focus', onFocus);
+    };
+  }, [channel, loadPendingSenders]);
 
-  React.useEffect(() => {
-    setFeedback(null);
-  }, [account?.botId]);
-
-  if (!definition) {
-    return h('div', { className: 'dim-accessState', role: 'alert' },
-      '当前渠道暂不支持访问设置。');
-  }
+  // 用户列表不是独立存储：它就是两份白名单的合并视图。
+  const directoryUsers = React.useMemo(() => {
+    const merged = new Map();
+    const names = new Map(directoryNames.map((user) => [user.id, user.displayName]));
+    for (const scene of ['direct', 'group']) {
+      for (const user of draft[scene].allowlist.users) {
+        if (!user.id.trim()) continue;
+        const entry = merged.get(user.id) ?? { id: user.id, name: names.get(user.id), direct: false, group: false };
+        entry[scene] = true;
+        merged.set(user.id, entry);
+      }
+    }
+    return [...merged.values()];
+  }, [draft, directoryNames]);
 
   const save = async (event) => {
     event.preventDefault();
     setFeedback(null);
     setSaving(true);
+    let policySaved = false;
     try {
+      if (Object.values(selections).some((scenes) => !scenes.direct && !scenes.group)) {
+        throw new Error('请选择单聊或群聊。');
+      }
       const policy = validateAccessPolicy(draft);
       if (typeof rpcCall !== 'function') throw new Error('访问设置暂不可用。');
       const value = unwrapRpcResult(await rpcCall(ACCESS_POLICY_ENDPOINT, {
@@ -315,10 +372,21 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
       }));
       const saved = policyFromSnapshot(value, account.botId);
       if (!saved) throw new Error('服务没有返回已保存的访问策略，请刷新后重试。');
+      policySaved = true;
       setDraft(clonePolicy(saved));
       onSaved?.(saved);
+      for (const [requestId, scenes] of Object.entries(selections)) {
+        const picked = ['direct', 'group'].filter((scene) => scenes[scene]);
+        if (!picked.length) continue;
+        unwrapRpcResult(await rpcCall(DINGTALK_ENDPOINTS.allowSender, {
+          botId: account.botId, requestId, confirm: true, scenes: picked,
+        }));
+        setSelections((current) => { const next = { ...current }; delete next[requestId]; return next; });
+      }
+      await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
       setFeedback({ tone: 'success', message: '访问设置已保存。' });
     } catch (error) {
+      if (policySaved && channel === 'dingtalk') await Promise.all([loadPendingSenders(), refreshPolicyFromServer()]);
       setFeedback({
         tone: 'error',
         message: error?.message || '访问设置保存失败，请稍后重试。',
@@ -361,6 +429,65 @@ export function AccessPolicySettingsPage({ channel, account, rpcCall, onSaved })
     unsupported: definition.groupSupported === false,
     onChange: (group) => { setDraft((current) => ({ ...current, group })); setFeedback(null); },
   }),
+  channel === 'dingtalk' ? h('fieldset', {
+    className: 'dim-accessScene',
+    'data-scene': 'denied',
+    'aria-label': localizeText('被拦截的用户'),
+  },
+  h('legend', null,
+    h('span', { className: 'dim-accessLegendContent' },
+      h('span', null, '被拦截的用户'))),
+  h('p', { className: 'dim-accessHint' },
+    '访问被拦截的用户。允许后会加入白名单，下一次消息就能正常回答。'),
+  pendingLoading
+    ? h('div', { className: 'dim-accessState' }, '正在读取…')
+    : pendingSenders.length === 0
+      ? h('div', { className: 'dim-accessUsersEmpty' }, '暂无被拦截的用户')
+      : h('ul', { className: 'dim-accessUserList' }, pendingSenders.map((sender) => h('li', {
+          key: sender.requestId,
+          className: 'dim-accessDeniedRow',
+        },
+          h('div', { className: 'dim-accessDeniedName' },
+            h('strong', null, sender.displayName || '钉钉用户'),
+            h('code', null, sender.senderIdMasked)),
+          selections[sender.requestId] ? h('div', { className: 'dim-accessDeniedName' },
+            ...['direct', 'group'].map((scene) => h('label', { key: scene },
+              h('input', { type: 'checkbox', checked: selections[sender.requestId][scene], disabled: saving,
+                onChange: (event) => setSelections((current) => ({ ...current,
+                  [sender.requestId]: { ...current[sender.requestId], [scene]: event.target.checked },
+                })) }), ' ', scene === 'direct' ? '单聊' : '群聊')))
+            : h('button', { type: 'button', className: 'dim-deliveryButton', disabled: saving,
+                onClick: () => setSelections((current) => ({ ...current,
+                  [sender.requestId]: { direct: true, group: true },
+                })),
+              }, '允许')))),
+  pendingFeedback ? h('p', {
+    className: 'dim-accessFeedback', 'data-tone': 'error', role: 'alert',
+  }, pendingFeedback) : null,
+  h('fieldset', {
+    className: 'dim-accessScene',
+    'data-scene': 'directory',
+    'aria-label': localizeText('用户列表'),
+  },
+  h('legend', null,
+    h('span', { className: 'dim-accessLegendContent' },
+      h('span', null, '用户列表'))),
+  h('p', { className: 'dim-accessHint' },
+    '显示每个人当前拥有的单聊和群聊权限。'),
+  directoryUsers.length === 0 ? h('div', { className: 'dim-accessUsersEmpty' }, '尚未添加用户')
+    : h('div', { className: 'dim-accessDirectoryScroll', role: 'region',
+        'aria-label': localizeText('用户列表'), tabIndex: 0 },
+      h('table', { className: 'dim-accessDirectoryTable' },
+        h('thead', null, h('tr', null,
+          h('th', { scope: 'col' }, '用户名'),
+          h('th', { scope: 'col' }, '钉钉用户 ID'),
+          h('th', { scope: 'col' }, '单聊'),
+          h('th', { scope: 'col' }, '群聊'))),
+        h('tbody', null, directoryUsers.map((user) => h('tr', { key: user.id },
+          h('td', null, user.name || '未知'),
+          h('td', null, h('code', null, user.id)),
+          h('td', null, user.direct ? '有' : '无'),
+          h('td', null, user.group ? '有' : '无'))))))) ) : null,
   feedback ? h('p', {
     className: 'dim-accessFeedback',
     'data-tone': feedback.tone,

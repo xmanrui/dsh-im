@@ -8,6 +8,12 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Added / 新增
 
+- 钉钉：「访问设置」新增「被拦截的用户」列表 —— 非白名单用户私聊机器人被拒后会被记下来（同一个人重复被拒只更新时间），面板里显示昵称与打码后的 ID，点「允许」即把人加入白名单，下一条消息就能正常回答。之前这类拒绝只写进宿主日志，运维看不到是谁。
+  DingTalk: the access settings tab now lists intercepted users — a direct message rejected by the allowlist is recorded (a repeat sender only refreshes the timestamp), shown with its nickname and masked id, and one click on "Allow" adds the sender to the allowlist so the next message is answered. These rejections used to exist only in the host log.
+
+- 钉钉：新增「提示文案」设置（每个机器人单独配置）—— 卡片初始文案、处理中文案、工具进度文案（支持 `{name}`）、联网搜索文案、无权限提示，共 5 项，可在机器人设置页直接修改。留空即回退到 i18n 默认文案，因此只保存真正改过的字段，切换界面语言时其余文案仍自动翻译；保存后立即生效，无需重启。
+  DingTalk: a new per-bot "status texts" settings tab for the card initial text, the working text, the tool progress text (with a `{name}` placeholder), the web search text and the access-denied notice. An empty field falls back to the i18n default, so only the values an operator actually changed are stored and every other text keeps following the interface language; changes take effect immediately.
+
 - 新增 `/sessionarchive <Session ID>`（别名 `/sessarchive`）：通过 Discord 等渠道触发 DSH 的会话归档（`workspace.archiveSession`）。传序号只做预览（标题、工作区、ID），不会执行归档——会话列表随新会话出现而位移，按序号直接归档会归档到错误会话；破坏性操作必须点名完整 ID。机器人只负责解析目标并转达 Host 结果，拒绝归档本对话当前绑定的会话与已归档会话；`--stop` 让 Host 先停止该会话正在运行的任务。归档后的会话不再出现在默认的 `/sessionlist`。
   Added `/sessionarchive <Session ID>` (alias `/sessarchive`) to trigger DSH Session archiving; a numerical argument only previews the Session behind that index (title, workspace, ID) and never archives, because the list shifts and archiving by index would hit the wrong Session — destructive actions must name the full ID (`workspace.archiveSession`) from the chat. The bot only resolves the target and relays the Host result; it refuses the Session this chat is bound to and one that is already archived, and `--stop` lets the Host stop that Session's running work. Archived Sessions leave the default `/sessionlist`.
 
@@ -20,6 +26,12 @@ This file records the notable changes in each dsh-im release. Its format follows
   `/session` gains the short alias `/sess`: some clients own a native slash command of the same name and grab the input box, so `/sess` takes exactly the same arguments (Session ID, workspace index, title keyword) and behaves identically. It appears in `/help` while the native menu registers the primary name only.
 
 ### Fixed / 修复
+
+- 钉钉：非白名单私聊不再被静默丢弃 —— 机器人回一句「暂无访问权限」提示，并把被拒的 `senderId` 与昵称写进宿主日志，运维据此就能找到人；群聊仍只计入 `messagesRejected`，避免对群成员逐条回复刷屏。
+  DingTalk: a direct message rejected by the access allowlist is no longer dropped silently — the bot replies with a short "no access" notice and logs the rejected sender id and nickname for operators. Group messages still only count as `messagesRejected`, so the bot never replies line by line inside a group.
+
+- 钉钉：AI 卡片的过程文案不再包 `_斜体_`（钉钉卡片不渲染斜体，用户看到的是原始下划线），初始文案改为「正在思考 🤔」；进度文案末尾的省略号改为每 400ms 循环跳动，长任务不再看起来像卡死，任务结束或中止时停止。
+  DingTalk: AI Card progress lines no longer wrap text in `_italics_` (DingTalk cards do not render them and showed the underscores literally), and the initial card text is now 「正在思考 🤔」; the trailing dots of the progress text cycle every 400ms so a long-running turn no longer looks frozen, stopping on finish or abort.
 
 - 飞书过程卡的最终答案若包含指向本地文件的 Markdown 图片（如 `![标题画面](/tmp/host_13.png)`），飞书会以 `230099 / 200570` 拒绝整张卡，卡片从此冻结在「运行中」；目标续跑轮由于没有第二条投递路径，本轮答案也会一并丢失。现在这类图片在写入卡片前降级为 caption 文本（判据是「飞书能否渲染」：只有 `http(s)` 地址与 `img_key` 保留，绝对路径、`file:`、Windows 盘符、裸相对路径如 `06-log/shot.png`、`data:` URI 都降级），目标轮封卡失败时还会用纯文本回复补投本轮答案，并记录封卡失败的日志。方案见 `docs/方案/飞书过程卡本地图片降级与封卡回退方案.md`。
   When a Feishu step card's final answer carried a Markdown image pointing at a local file (e.g. `![screenshot](/tmp/host_13.png)`), Feishu rejected the whole card update with `230099 / 200570` and the card froze at "running"; a Goal round then lost its answer too, because it has no second delivery path. Local image targets are now degraded to their caption before the text reaches the card — the rule is "can Feishu render it": only `http(s)` URLs and `img_key`s survive, while absolute paths, `file:` URLs, Windows drives, bare relative paths such as `06-log/shot.png` and `data:` URIs degrade, a Goal round whose card cannot be sealed posts its result as a plain reply, and the skipped seal is logged. See `docs/方案/飞书过程卡本地图片降级与封卡回退方案.md`.

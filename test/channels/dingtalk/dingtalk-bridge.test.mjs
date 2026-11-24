@@ -1110,13 +1110,15 @@ test('DingTalk applies the unified access policy before attachments or Harness w
   }));
   assert.equal(downloads, 0);
   assert.deepEqual(harnessCalls, []);
-  assert.deepEqual(sent, []);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /暂无访问权限/u);
 
   await bridge.accept(message('policy-member-text', '普通消息', {
     senderStaffId: 'staff-member',
   }));
   assert.equal(harnessCalls.some(([operation]) => operation === 'ask'), true);
-  assert.deepEqual(sent, ['白名单消息已处理']);
+  assert.deepEqual(sent.slice(-1), ['白名单消息已处理']);
+  assert.equal(sent.length, 2);
 
   const callsBeforeDeniedCommand = harnessCalls.length;
   const repliesBeforeDeniedCommand = sent.length;
@@ -1786,7 +1788,7 @@ test('bridge streams one AI Card and mentions only the group sender without an e
 
       assert.equal(calls.create.length, 1);
       assert.deepEqual(calls.create[0].target, scenario.target);
-      assert.equal(calls.update.at(-1).text, '生成中的完整快照');
+      assert.equal(calls.update.at(-1).text.replace(/\.+$/u, ''), '生成中的完整快照');
       assert.equal(calls.finish.length, 1);
       assert.equal(calls.finish[0].text, '最终完整回答');
       assert.equal(calls.text.length, 0);
@@ -3185,4 +3187,136 @@ test('native menu selects exact session without a second message and updates the
   await bridge.acceptCard(freshCallback('new'), 'revoked-permission');
   assert.equal(fixture.state.sessionFor('p2p:staff-approved'), 'session-changed-elsewhere');
   assert.deepEqual(updates.at(-1).data, { notice: COMMAND_PERMISSION_DENIED_MESSAGE });
+});
+
+test('per-bot text overrides replace the DingTalk card and tool status texts', async () => {
+  const fixture = stateFixture();
+  const calls = { create: [], update: [], finish: [], text: [] };
+  const bridge = new DingtalkHarnessBridge({
+    api: {
+      sendText: async (request) => calls.text.push(request),
+      createAiCard: async (request) => {
+        calls.create.push(request);
+        return { cardInstanceId: 'card-one' };
+      },
+      updateAiCard: async (request) => calls.update.push(request),
+      finishAiCard: async (request) => {
+        calls.finish.push(request);
+        return { delivered: true, completed: false };
+      },
+    },
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    texts: {
+      getSettings: () => ({
+        cardInitial: '自定义初始',
+        toolUsing: '自定义工具 {name}',
+      }),
+    },
+    harness: {
+      sessionExists: async () => false,
+      createSession: async () => 'session-texts',
+      ask: async (_sessionId, _text, options) => {
+        options.onUpdate({ type: 'tool', name: 'bash' });
+        // 卡片更新有 500ms 节流；等它真的发出去，finish 才不会把它丢掉。
+        await new Promise((resolve) => setTimeout(resolve, 510));
+        return '最终回答';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('texts', '你好'));
+
+  assert.equal(calls.create.length, 1);
+  assert.equal(calls.create[0].initialText, '自定义初始');
+  assert.equal(calls.update.at(-1).text.replace(/\.+$/u, ''), '自定义工具 bash');
+  assert.equal(calls.finish.at(-1).text, '最终回答');
+  assert.equal(bridge.status.messagesReplied, 1);
+});
+
+test('an unset text override keeps the i18n default', async () => {
+  const fixture = stateFixture();
+  const calls = { create: [] };
+  const bridge = new DingtalkHarnessBridge({
+    api: {
+      sendText: async () => ({ messageId: 'text-reply' }),
+      createAiCard: async (request) => {
+        calls.create.push(request);
+        return { cardInstanceId: 'card-one' };
+      },
+      updateAiCard: async () => {},
+      finishAiCard: async () => ({ delivered: true, completed: false }),
+    },
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    texts: { getSettings: () => ({}) },
+    harness: {
+      sessionExists: async () => false,
+      createSession: async () => 'session-texts-default',
+      ask: async () => '最终回答',
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('texts-default', '你好'));
+  assert.equal(calls.create[0].initialText, '正在思考 🤔');
+});
+
+test('a denied sender is recorded for the access settings page', async () => {
+  const fixture = stateFixture();
+  const bridge = new DingtalkHarnessBridge({
+    api: { sendText: async () => ({ messageId: 'denied-notice' }) },
+    clientId: 'ding-client',
+    clientSecret: 'host-secret',
+    accessPolicy: directAccessPolicy({
+      users: [{ id: 'staff-approved', canExecuteCommands: true }],
+    }),
+    harness: {
+      sessionExists: async () => true,
+      ask: async () => '不会被调用',
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('denied-sender', '你好', {
+    senderStaffId: 'staff-intruder',
+    senderNick: '陌生人',
+  }));
+
+  assert.equal(fixture.pending.size, 1);
+  const entry = [...fixture.pending.values()][0];
+  assert.equal(entry.staffId, 'staff-intruder');
+  assert.equal(entry.displayName, '陌生人');
+  assert.equal(typeof entry.requestId, 'string');
+  assert.ok(entry.requestId);
+
+  const status = bridge.status;
+  assert.equal(status.pendingSenders.length, 1);
+  assert.equal(status.pendingSenders[0].staffId, 'staff-intruder');
+  // 私聊被拒会回一句提示，所以计的是 replied 而不是 rejected。
+  assert.equal(status.messagesReplied, 1);
+  assert.equal(status.messagesReceived, 1);
+});
+
+test('denied direct and addressed group messages receive a notice before recording', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const recording = deferred();
+  fixture.state.recordPendingSender = () => recording.promise;
+  const bridge = new DingtalkHarnessBridge({
+    api: { sendText: async ({ text }) => { sent.push(text); return { messageId: 'notice' }; } },
+    clientId: 'ding-client', clientSecret: 'host-secret',
+    accessPolicy: directAccessPolicy(),
+    harness: { sessionExists: async () => true, ask: async () => 'unexpected' },
+    state: fixture.state,
+  });
+  const direct = bridge.accept(message('denied-direct-notice', '你好', { senderStaffId: 'stranger' }));
+  const group = bridge.accept(message('denied-group-notice', '你好', {
+    senderStaffId: 'stranger', conversationType: '2', isInAtList: true,
+  }));
+  await eventually(() => sent.length === 2);
+  assert.ok(sent.every((text) => /暂无访问权限/u.test(text)));
+  recording.resolve();
+  await Promise.all([direct, group]);
 });

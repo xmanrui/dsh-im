@@ -11,6 +11,7 @@ import {
 } from '../plugin-src/client/access-policy-settings.js';
 import {
   BOT_SETTINGS_TABS,
+  DINGTALK_BOT_SETTINGS_TABS,
   DELIVERY_CHANNEL_DEFINITIONS,
   DELIVERY_ENDPOINTS,
   DELIVERY_RPC_CHANNEL,
@@ -129,8 +130,15 @@ test('delivery settings define the supported IM and email channel routes', () =>
     { id: 'slash', label: '指令面板' },
     { id: 'voice', label: '语音交互' },
   ]);
+  assert.deepEqual(DINGTALK_BOT_SETTINGS_TABS, [
+    { id: 'general', label: '通用' },
+    { id: 'delivery', label: '投递设置' },
+    { id: 'ds-bot', label: '绑定 DS Bot' },
+    { id: 'access', label: '访问设置' },
+    { id: 'texts', label: '提示文案' },
+  ]);
   assert.equal(botSettingsTabsForChannel('weixin'), BOT_SETTINGS_TABS);
-  assert.equal(botSettingsTabsForChannel('dingtalk'), BOT_SETTINGS_TABS);
+  assert.equal(botSettingsTabsForChannel('dingtalk'), DINGTALK_BOT_SETTINGS_TABS);
   assert.equal(botSettingsTabsForChannel('feishu'), FEISHU_BOT_SETTINGS_TABS);
   assert.equal(DELIVERY_RPC_CHANNEL, '/dsh-im-delivery');
   assert.deepEqual(Object.keys(DELIVERY_CHANNEL_DEFINITIONS), [
