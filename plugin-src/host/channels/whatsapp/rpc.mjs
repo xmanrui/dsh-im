@@ -1,4 +1,5 @@
 import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload } from '../../../../src/channels/shared/message-mode.mjs';
+import { SET_REPLY_CONTENT_ENDPOINT, validReplyContentPayload } from '../shared/reply-content-rpc.mjs';
 import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
@@ -28,6 +29,7 @@ export const WHATSAPP_ENDPOINTS = Object.freeze({
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
   setBusyMessageMode: SET_MESSAGE_MODE_ENDPOINT,
+  setReplyContent: SET_REPLY_CONTENT_ENDPOINT,
 });
 export const WHATSAPP_RPC_ENDPOINTS = Object.freeze(Object.values(WHATSAPP_ENDPOINTS));
 
@@ -81,6 +83,10 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === WHATSAPP_ENDPOINTS.setAgentPreset) {
     return validAgentPresetPayload(payload)
       ? null : '请选择 Agent Preset。';
+  }
+  if (endpoint === WHATSAPP_ENDPOINTS.setReplyContent) {
+    return validReplyContentPayload(payload)
+      ? null : '请选择要投递的回复内容。';
   }
   if (endpoint === WHATSAPP_ENDPOINTS.setBusyMessageMode) {
     return validMessageModePayload(payload)
@@ -202,6 +208,9 @@ export function createWhatsappRpcHandler(controller, { encodeQr = qrDataUrl } = 
           await controller.updateModel(payload.botId, payload.model),
           cachedEncode,
         );
+      } else if (endpoint === WHATSAPP_ENDPOINTS.setReplyContent) {
+        if (typeof controller.updateReplyContent !== 'function') throw new Error('Reply content update is unavailable');
+        value = await controller.updateReplyContent(payload.botId, payload.replyContent);
       } else if (endpoint === WHATSAPP_ENDPOINTS.setBusyMessageMode) {
         if (typeof controller.updateBusyMessageMode !== 'function') throw new Error('Message mode update is unavailable');
         value = await controller.updateBusyMessageMode(

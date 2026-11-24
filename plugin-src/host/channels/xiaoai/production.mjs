@@ -22,7 +22,7 @@ export async function createProductionController(ctx, config = {}, internals = {
   const packageRoot = [resolve(moduleDir, '..'), resolve(moduleDir, '../../../..')]
     .find((root) => existsSync(join(root, 'sidecar/xiaoai_sidecar.py')))
     ?? resolve(moduleDir, '..');
-  const sidecar = { python: config.python ?? '/usr/bin/python3',
+  const sidecar = { python: config.python ?? (process.platform === 'win32' ? 'python.exe' : '/usr/bin/python3'),
     script: config.sidecarScript ?? resolve(packageRoot, 'sidecar/xiaoai_sidecar.py'),
     dependencyDir: config.dependencyDir ?? resolve(packageRoot, 'sidecar/vendor') };
   const accountTransport = new AccountTransportPool({ stateRoot, sidecar, connectTimeoutMs: config.connectTimeoutMs ?? 25_000 });

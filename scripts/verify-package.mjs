@@ -77,6 +77,7 @@ const required = [
   'sidecar/speaker_adapter.py',
   'sidecar/device_profiles.json',
   'sidecar/requirements.lock',
+  'sidecar/requirements-windows.lock',
   'src/channels/shared/context-enhancement.mjs',
 ];
 await Promise.all(required.map((path) => access(resolve(root, path))));
@@ -139,6 +140,34 @@ if (forbiddenDshLockPaths.length > 0) {
   );
 }
 
+// The client inject list and the compatibility baseline both name host-side
+// packages and releases that live outside this repository, so a stale entry
+// passes every bundle assertion below while it silently costs the client row its
+// load order (or advertises a baseline the build was never verified against).
+const compatibility = manifest.dsh?.compatibility ?? {};
+const clientInject = manifest.dsh?.client?.inject ?? [];
+if (typeof compatibility.dsh !== 'string'
+  || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(compatibility.dsh)
+  || compatibility.dshReleases?.[compatibility.dsh] !== 'compatible') {
+  throw new Error('dsh.compatibility.dsh must name a release that dshReleases marks compatible');
+}
+if (clientInject.length === 0 || new Set(clientInject).size !== clientInject.length) {
+  throw new Error('dsh.client.inject must list unique DSH client packages');
+}
+for (const name of clientInject) {
+  if (!/^@deepseek-ai\/dsh-client-[a-z0-9-]+$/u.test(name)) {
+    throw new Error(`dsh.client.inject must name DSH client packages: ${name}`);
+  }
+}
+// Neither package is a Web client row on DSH 0.2.2-rc.5: the runtime package
+// stopped publishing after 0.1.1-rc.2 and ui-slots is the registry core without
+// a client entry. Injecting them waits for rows that never arrive.
+for (const retired of ['@deepseek-ai/dsh-client-runtime', '@deepseek-ai/dsh-client-ui-slots']) {
+  if (clientInject.includes(retired)) {
+    throw new Error(`${retired} is not a loadable DSH 0.2.2-rc.5 client row`);
+  }
+}
+
 if (!/\bid\s*:\s*["']@xmanrui\/dsh-im["']/u.test(client)) {
   throw new Error('client bundle does not register the dsh-im loader id');
 }
@@ -169,12 +198,17 @@ if (client.includes('settings.plugins.tab') || clientSources.includes('settings.
 // The context editor contains one switch template and one mapped field-input
 // template; the delivery target adds one ordinary checkbox template; the
 // Telegram thinking-traces block adds two ordinary checkbox templates (traces
-// and frame numbering). General settings adds one mapped switch template for
-// the two Feishu panel preferences. Conversation-directory settings adds one
+// and frame numbering). General settings adds two mapped switch templates: one
+// for the shared reply-content switches, one for the two Feishu panel
+// preferences. Conversation-directory settings adds one
 // switch template reused for the bot override and channel default. The Delivery
 // tab adds one ordinary checkbox template mapped over its two switches (mirror
 // Web input, deliver model answers). XiaoAI adds one ordinary checkbox template
 // for selecting multiple speakers.
+// The counts below cover templates in the ENTIRE generated client bundle,
+// not rendered controls or one channel file. When merging UI changes, combine
+// both additions: shared reply content contributes a switch and a checkbox;
+// XiaoAI contributes another checkbox, for global totals of 4 and 10.
 const contextEditorSource = await readFile(resolve(root, 'plugin-src/client/context-enhancement.js'), 'utf8');
 const deliverySettingsSource = await readFile(resolve(root, 'plugin-src/client/delivery-settings.js'), 'utf8');
 const emailSettingsSource = await readFile(resolve(root, 'plugin-src/client/channels/email/index.js'), 'utf8');
@@ -203,17 +237,17 @@ if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || /role:\s*["']switch["']/u.test(deliverySettingsSource)
   || (thinkingTracesSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 2
   || /role:\s*["']switch["']/u.test(thinkingTracesSource)
-  || (botGeneralSettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
-  || (botGeneralSettingsSource.match(/role:\s*["']switch["']/g) ?? []).length !== 1
+  || (botGeneralSettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 2
+  || (botGeneralSettingsSource.match(/role:\s*["']switch["']/g) ?? []).length !== 2
   || (conversationDirectorySettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || (conversationDirectorySettingsSource.match(/role:\s*["']switch["']/g) ?? []).length !== 1
   || (deliverySyncSettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySyncSettingsSource)
   || (xiaoaiClientSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(xiaoaiClientSource)
-  || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 3
-  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 9) {
-  throw new Error('checkable inputs must be limited to context enhancement, Session sync, email settings, Telegram thinking traces, Feishu panel settings, conversation-directory settings, XiaoAI multi-speaker selection, and the Delivery tab');
+  || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 4
+  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 10) {
+  throw new Error('checkable inputs must be limited to context enhancement, Session sync, email settings, Telegram thinking traces, Feishu panel settings, reply content, conversation-directory settings, XiaoAI multi-speaker selection, and the Delivery tab');
 }
 for (const marker of ['bot.conversation-directory.set', 'bot.conversation-directory.default.set']) {
   if (!host.includes(marker) || !client.includes(marker)) {

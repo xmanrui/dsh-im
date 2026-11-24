@@ -18,7 +18,8 @@ const pause = ms => new Promise(r => setTimeout(r, ms));
 async function until(predicate) { for (let n=0; n<500; n++) { if (predicate()) return; await pause(10); } throw new Error('Condition timed out'); }
 async function directory(t) {
   const root = await mkdtemp(join(tmpdir(), 'xiaoai-features-'));
-  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })); return root;
+  t.disposers = [() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })];
+  t.after(async () => { for (const dispose of [...t.disposers].reverse()) await dispose(); }); return root;
 }
 class Client extends EventEmitter {
   constructor() { super(); this.requests=[]; this.sent=[]; this.starts=[]; this.closed=false;
@@ -150,9 +151,10 @@ test('one interactive login binds multiple devices without persisting a password
   await controller.deleteBot(bots[0].botId);assert.equal(controller.status().bots.length,1);
 });
 
-test('real account-mode Python child routes two speakers through one process', {skip:process.platform==='win32'}, async t=>{
+const python = process.env.XIAOAI_TEST_PYTHON ?? (process.platform === 'win32' ? undefined : '/usr/bin/python3');
+test('real account-mode Python child routes two speakers through one process', {skip:!python,timeout:30000}, async t=>{
   const root=await directory(t);const script=fileURLToPath(new URL('../../sidecar/xiaoai_sidecar.py',import.meta.url));
-  const client=new SidecarClient({python:'/usr/bin/python3',script,stateDir:root,mock:true});t.after(()=>client.close());
+  const client=new SidecarClient({python,script,stateDir:root,mock:true});t.disposers.push(()=>client.close());
   const devices=[{deviceId:'one',name:'One',hardware:'LX01'},{deviceId:'two',name:'Two',hardware:'LX01'}];
   const messages=[];client.on('message',m=>messages.push(m));
   await client.start({...credential,devices},'account');const ready=await waitReady(client);

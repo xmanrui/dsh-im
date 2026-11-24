@@ -2,7 +2,18 @@ import * as React from 'react';
 import { h } from './i18n.js';
 import { SET_MESSAGE_MODE_ENDPOINT, normalizeBusyMessageMode } from '../../src/channels/shared/message-mode.mjs';
 import { normalizeFeishuStepCardPanels } from '../../src/channels/feishu/step-push-mode.mjs';
+import {
+  normalizeReplyContent,
+  SET_REPLY_CONTENT_ENDPOINT,
+} from '../../src/channels/shared/reply-content.mjs';
 import { FEISHU_ENDPOINTS } from './channels/feishu/api.js';
+
+/** The three switches every channel shares, in the order they are shown. */
+const REPLY_CONTENT_ROWS = Object.freeze([
+  ['narration', '过程正文', '正在执行时助手的说明文字'],
+  ['tools', '工具步骤', '工具调用、结果与失败提示'],
+  ['thinking', '思考过程', '模型的推理过程（渠道支持时）'],
+]);
 
 function settingsFromResult(result, botId) {
   if (result?.ok !== true) throw new Error(result?.error?.message || '无法读取通用设置，请稍后重试。');
@@ -11,13 +22,22 @@ function settingsFromResult(result, botId) {
   return {
     busyMessageMode: normalizeBusyMessageMode(bot.busyMessageMode),
     stepCardPanels: normalizeFeishuStepCardPanels(bot.stepCardPanels),
+    replyContent: normalizeReplyContent(bot.replyContent),
   };
 }
+
+const SAVE_ENDPOINTS = Object.freeze({
+  busyMessageMode: SET_MESSAGE_MODE_ENDPOINT,
+  stepCardPanels: FEISHU_ENDPOINTS.setStepCardPanels,
+  replyContent: SET_REPLY_CONTENT_ENDPOINT,
+});
 
 export function BotGeneralSettingsPage({ channel, account, rpcCall }) {
   const modeId = React.useId();
   const [settings, setSettings] = React.useState(() => ({
-    busyMessageMode: 'queue', stepCardPanels: normalizeFeishuStepCardPanels(),
+    busyMessageMode: 'queue',
+    stepCardPanels: normalizeFeishuStepCardPanels(),
+    replyContent: normalizeReplyContent(),
   }));
   const [savedSettings, setSavedSettings] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
@@ -57,8 +77,7 @@ export function BotGeneralSettingsPage({ channel, account, rpcCall }) {
     setBusy(true);
     setFeedback(null);
     try {
-      const endpoint = field === 'stepCardPanels' ? FEISHU_ENDPOINTS.setStepCardPanels : SET_MESSAGE_MODE_ENDPOINT;
-      const saved = settingsFromResult(await rpcCall(endpoint, {
+      const saved = settingsFromResult(await rpcCall(SAVE_ENDPOINTS[field], {
         botId: account.botId, [field]: value,
       }), account.botId);
       if (!mounted.current) return;
@@ -94,6 +113,28 @@ export function BotGeneralSettingsPage({ channel, account, rpcCall }) {
           h('option', { value: 'steer' }, '插话')),
           h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
             h('path', { d: 'm4 6 4 4 4-4', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' })))),
+      h('div', { className: 'dim-botGeneralRow dim-botGeneralPanelRow' },
+        h('div', { className: 'dim-botGeneralText' },
+          h('label', { className: 'dim-botGeneralTitle', htmlFor: `${modeId}-reply-content` }, '投递内容'),
+          h('p', {
+            className: 'dim-botGeneralHelp',
+            id: `${modeId}-reply-content-description`,
+          }, '最终回答始终发送；关闭的项不再推送。'))),
+      ...REPLY_CONTENT_ROWS.map(([field, label, help]) => h('div', {
+        key: field, className: 'dim-botGeneralRow dim-botGeneralPanelRow',
+      },
+      h('div', { className: 'dim-botGeneralText' },
+        h('label', { className: 'dim-botGeneralTitle', htmlFor: `${modeId}-${field}` }, label),
+        h('p', { className: 'dim-botGeneralHelp' }, help)),
+      h('div', { className: 'dim-botGeneralControl' },
+        h('input', {
+          id: `${modeId}-${field}`, type: 'checkbox', role: 'switch', className: 'dim-contextSwitch',
+          checked: settings.replyContent[field], disabled: busy || savedSettings === null,
+          'aria-label': label, 'aria-describedby': `${modeId}-reply-content-description`,
+          onChange: (event) => void save('replyContent', {
+            ...settings.replyContent, [field]: event.target.checked,
+          }),
+        })))),
       channel === 'feishu' ? [
         ['thinkingExpanded', '展开思考过程'],
         ['toolsExpanded', '展开工具摘要'],

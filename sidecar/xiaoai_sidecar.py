@@ -788,7 +788,12 @@ class Sidecar:
         same line framing on both platforms.
         """
         if sys.platform == 'win32':
-            return await asyncio.to_thread(sys.stdin.buffer.readline, MAX_LINE + 1)
+            line = await asyncio.to_thread(sys.stdin.buffer.readline, MAX_LINE + 1)
+            # Match StreamReader's payload limit (the newline is not counted).
+            # Never parse the remainder of an oversized frame as a new command.
+            if len(line) > MAX_LINE and not line.endswith(b'\n'):
+                raise ValueError('JSONL line too long')
+            return line
         return await self.reader.readline()
 
     async def run(self):

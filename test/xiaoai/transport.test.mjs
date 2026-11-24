@@ -16,6 +16,7 @@ import { normalizeDeliveryTarget } from '../../plugin-src/host/delivery-adapter.
 import { deliverySuggestionsFromSessions, resolvePrivateConversationKey } from '../../plugin-src/host/delivery-suggestions.mjs';
 
 const tmpRoot = tmpdir();
+const python = process.env.XIAOAI_TEST_PYTHON ?? (process.platform === 'win32' ? undefined : '/usr/bin/python3');
 const credential = { account: 'test-account', password: 'test-secret-never-log', accountId: 'a'.repeat(24), deviceId: 'test-device', hardware: 'LX01', name: 'Test speaker', keyword: '让大肥鱼回答' };
 const pause = (ms) => new Promise(r => setTimeout(r, ms));
 async function until(predicate, timeout = 5000) { const end = Date.now() + timeout; while (!predicate()) { if (Date.now() > end) throw new Error('Condition timed out'); await pause(10); } }
@@ -310,14 +311,14 @@ test('device controller accepts nested native session catalog, isolates accounts
   assert.equal(secrets.size, 1); assert.equal(controller.status().bots.length, 1);
 });
 
-test('real JSONL child handles invalid input, replay/ack and idempotent TTS, exits without orphaning', { skip: process.platform === 'win32' }, async t => {
+test('real JSONL child handles invalid input, replay/ack and idempotent TTS, exits without orphaning', { skip: !python }, async t => {
   const root = await directory(t);
   const script = fileURLToPath(new URL('../../sidecar/xiaoai_sidecar.py', import.meta.url));
-  const client = new SidecarClient({ python: '/usr/bin/python3', script, stateDir: root, mock: true });
+  const client = new SidecarClient({ python, script, stateDir: root, mock: true });
   const messages = [];
   client.on('message', message => messages.push(message));
-  await client.start(credential); await waitReady(client);
   t.disposers.push(() => client.close());
+  await client.start(credential); await waitReady(client);
   const timestamp = Date.now() + 100;
   await client.send({ type: 'mock_utterance', text: '让大肥鱼回答传输测试', timestamp, providerRequestId: 'real-child-test' });
   await until(() => messages.some(m => m.type === 'utterance'), 5000);
@@ -330,15 +331,15 @@ test('real JSONL child handles invalid input, replay/ack and idempotent TTS, exi
   await client.close();
 });
 
-test('partial UTF-8 JSONL, malformed stdout, and child death return bounded failures', { skip: process.platform === 'win32' }, async t => {
+test('partial UTF-8 JSONL, malformed stdout, and child death return bounded failures', { skip: !python }, async t => {
   const root = await directory(t);
   const script = fileURLToPath(new URL('./fixtures/protocol_peer.py', import.meta.url));
-  const client = new SidecarClient({ python: '/usr/bin/python3', script, stateDir: join(root, 'partial') });
+  const client = new SidecarClient({ python, script, stateDir: join(root, 'partial') });
   t.disposers.push(() => client.close());
   await client.start(credential); assert.equal((await waitReady(client)).accountId, 'test');
   const result = await client.request('speak', { deviceId: credential.deviceId, text: 'test' }, { timeoutMs: 1000 });
   assert.equal(result.status, 'unknown'); assert.equal(result.code, 'sidecar-exited');
-  const invalid = new SidecarClient({ python: '/usr/bin/python3', script, stateDir: join(root, 'invalid') });
+  const invalid = new SidecarClient({ python, script, stateDir: join(root, 'invalid') });
   t.disposers.push(() => invalid.close());
   await invalid.start(credential);
   await assert.rejects(waitReady(invalid, 1000), /sidecar-invalid-json/);

@@ -106,6 +106,7 @@ export function createDeferredDeliveryRegistry(store, {
     deferredId,
     async register({
       key, chatId = null, target = null, replyToMessageId = null, sessionId, turn = null, afterSeq = -1, promptRpcId = null,
+      finalAnswerOnly = false,
     }) {
       if (typeof key !== 'string' || !key) throw new TypeError('key is required');
       if ((!chatId || typeof chatId !== 'string') && (!target || typeof target !== 'object')) {
@@ -126,6 +127,9 @@ export function createDeferredDeliveryRegistry(store, {
         attempts: 0,
         status: 'pending',
         createdAt: now(),
+        // Remembered per turn: the background path must keep delivering what
+        // the foreground turn would have delivered.
+        ...(finalAnswerOnly === true ? { finalAnswerOnly: true } : {}),
       };
       const sameKey = (await store.listDeferred())
         .filter((candidate) => candidate.key === key && candidate.status === 'pending');

@@ -310,6 +310,8 @@ packages under `sidecar/vendor/`; this generated directory is excluded from
 Git. Distributed packages must retain each dependency's `*.dist-info` license
 metadata. The Linux ARM64 CPython 3.13 inputs are pinned by
 `sidecar/requirements.lock` with SHA-256 hashes.
+The Windows x64 CPython 3.11 / 3.13 wheel inputs are pinned separately in
+`sidecar/requirements-windows.lock` with SHA-256 hashes from PyPI.
 
 The conversation-history request and passToken recovery approach reference
 [XiaoGPT](https://github.com/yihong0618/xiaogpt) (MIT, copyright 2023 yihong).

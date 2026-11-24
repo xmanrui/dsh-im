@@ -1,4 +1,5 @@
 import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload } from '../../../../src/channels/shared/message-mode.mjs';
+import { SET_REPLY_CONTENT_ENDPOINT, validReplyContentPayload } from '../shared/reply-content-rpc.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
 import QRCode from '../../../../src/channels/shared/qrcode.mjs';
@@ -35,6 +36,7 @@ export const WEIXIN_ENDPOINTS = Object.freeze({
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
   setBusyMessageMode: SET_MESSAGE_MODE_ENDPOINT,
+  setReplyContent: SET_REPLY_CONTENT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
 });
@@ -97,6 +99,10 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === WEIXIN_ENDPOINTS.setAgentPreset) {
     return validAgentPresetPayload(payload)
       ? null : '请选择 Agent Preset。';
+  }
+  if (endpoint === WEIXIN_ENDPOINTS.setReplyContent) {
+    return validReplyContentPayload(payload)
+      ? null : '请选择要投递的回复内容。';
   }
   if (endpoint === WEIXIN_ENDPOINTS.setBusyMessageMode) {
     return validMessageModePayload(payload)
@@ -242,6 +248,9 @@ export function createWeixinRpcHandler(controller, { encodeQr = qrDataUrl, logge
           await controller.updateModel(payload.botId, payload.model),
           cachedEncode,
         );
+      } else if (endpoint === WEIXIN_ENDPOINTS.setReplyContent) {
+        if (typeof controller.updateReplyContent !== 'function') throw new Error('Reply content update is unavailable');
+        value = await controller.updateReplyContent(payload.botId, payload.replyContent);
       } else if (endpoint === WEIXIN_ENDPOINTS.setBusyMessageMode) {
         if (typeof controller.updateBusyMessageMode !== 'function') throw new Error('Message mode update is unavailable');
         value = await controller.updateBusyMessageMode(

@@ -132,13 +132,15 @@ TTS 超时或结果不确定时不会自动切换另一接口再播一次。接�
 ### 运行条件
 
 - Node.js 和 DSH 版本遵循根目录 `package.json` 的兼容声明；已有部署验收环境为 Node.js 24、DSH `0.2.1-rc.2`。
-- 当前 Python 锁文件只验证 **Linux ARM64 / CPython 3.13**，含 ABI 相关 wheel 的固定哈希。其他平台需重新生成匹配锁文件并验证，不能直接套用该锁文件。
+- Python 哈希锁按平台区分：`sidecar/requirements.lock` 用于 **Linux ARM64 / CPython 3.13**；`sidecar/requirements-windows.lock` 用于 **Windows x64 / CPython 3.11、3.13**。其他架构或 Python ABI 需准备匹配锁文件并验证，不能直接套用 Linux 锁。
 - DSH 服务账户能够执行配置的 Python，读写自己的 DSH 数据目录，并通过 HTTPS 访问小米账号、MiNA 和 MIoT 服务。
 - 小米账号绑定至少一台音箱。小米需要验证码时，在 Web 页面内完成。
 
 当前 MIoT 使用默认中国区入口；其他地区的账号、设备和服务端区域选择尚未验证。
 
-Python 子进程默认使用 `/usr/bin/python3` 和已安装插件中的 `sidecar/vendor/`。受信任的 Host 配置可在 `xiaoai` 配置下覆盖 `python`、`dependencyDir`、`sidecarScript`；设备管理页面不能设置可执行路径。
+Python 子进程在 POSIX 默认使用 `/usr/bin/python3`，在 Windows 默认从服务进程的 PATH 查找 `python.exe`；默认依赖目录为已安装插件中的 `sidecar/vendor/`。推荐显式配置已验证的解释器绝对路径，避免桌面进程没有继承终端的 PATH，或命中 Windows 的应用执行别名。受信任的 Host 配置可在 `xiaoai` 配置下覆盖 `python`、`dependencyDir`、`sidecarScript`；设备管理页面不能设置可执行路径。
+
+Windows 上，Node 创建的 stdin 管道不支持 Python Proactor 要求的重叠 I/O；Sidecar 因此在线程中读取相同的有界 JSONL 帧，POSIX 保留 asyncio 管道。切换到 Windows Selector loop 不能解决此问题。
 
 ### 从功能分支构建
 
@@ -170,6 +172,48 @@ dsh plugin --profile web add --save-exact "$PWD"
 `sidecar/vendor/` 是打包输入，受 Git 忽略；从 Git 拉取源码并不包含这些依赖，也不会在登录时自动安装依赖。必须先准备依赖，再让 DSH 加载完整插件。维护者发布包时需同时包含 Sidecar、能力表、匹配的 Python 依赖和各依赖许可证。
 
 按现有部署方式重启 `dsh web`，强制刷新浏览器后打开「设置 → IM机器人 → 小爱音箱」。本功能不新增独立常驻 daemon、Docker 服务或 CPU、内存、PID、IO 限额。
+
+### Windows 构建与安装（PowerShell）
+
+以下示例使用已有的 Windows x64 CPython 3.11 或 3.13。把工作根目录换成环境允许的位置；已存在兼容的解释器、虚拟环境、源码和缓存时直接复用，不重复安装。Windows 依赖可放在外部虚拟环境，不需要把它们复制到 Git 源码。
+
+```powershell
+$XiaoaiRoot = 'C:\approved\xiaoai'
+$env:TEMP = Join-Path $XiaoaiRoot 'tmp'
+$env:TMP = $env:TEMP
+$env:TMPDIR = $env:TEMP
+$env:PIP_CACHE_DIR = Join-Path $XiaoaiRoot 'cache\pip'
+$env:npm_config_cache = Join-Path $XiaoaiRoot 'cache\npm'
+New-Item -ItemType Directory -Force -Path $env:TEMP, $env:PIP_CACHE_DIR, $env:npm_config_cache | Out-Null
+
+git clone --branch feat/xiaoai-speaker-channel https://github.com/xrggen/dsh-im.git (Join-Path $XiaoaiRoot 'source')
+Set-Location (Join-Path $XiaoaiRoot 'source')
+npm ci
+npm run build
+
+# python 必须是已有的受支持版本；复用环境时跳过 venv 创建。
+python -m venv (Join-Path $XiaoaiRoot 'python')
+$XiaoaiPython = Join-Path $XiaoaiRoot 'python\Scripts\python.exe'
+& $XiaoaiPython -m pip install --cache-dir $env:PIP_CACHE_DIR --require-hashes --only-binary=:all: -r sidecar/requirements-windows.lock
+& $XiaoaiPython -c "import sys, aiohttp, miservice; print(sys.version); print(aiohttp.__version__)"
+
+$env:XIAOAI_TEST_PYTHON = $XiaoaiPython
+node --test test/xiaoai/*.test.mjs
+& $XiaoaiPython -B test/xiaoai/sidecar_test.py
+node scripts/verify-package.mjs
+```
+
+将如下字段合并到 DSH-IM 插件的受信任 Host 配置中，保留已有渠道设置；路径对应上面实际使用的虚拟环境。`python` 是解释器文件，`dependencyDir` 是包目录，两者不能互换，也不能在小米账号或密码栏中填写。
+
+```yaml
+xiaoai:
+  python: C:/approved/xiaoai/python/Scripts/python.exe
+  dependencyDir: C:/approved/xiaoai/python/Lib/site-packages
+```
+
+然后使用现有 DSH CLI 入口安装构建目录：`dsh plugin --profile web add --save-exact (Get-Location).Path`，按现有方式重启所用 Web/桌面 Host 并刷新页面。安装入口和配置作用域需与正在使用的 DSH profile 对应。外部虚拟环境是持续运行依赖，不能在验收后作为临时文件删除。
+
+上述检查只使用模拟小米云数据验证真实 Windows 子进程通信，不登录真实账号或使音箱发声。实际账号在下述页面流程中登录；以设备卡片的测试播报确认声音。
 
 ### 页面接入与日常运行
 
@@ -214,7 +258,9 @@ node --test test/xiaoai/*.test.mjs
 PYTHONPATH="$PWD/sidecar/vendor" python3 -B test/xiaoai/sidecar_test.py
 ```
 
-Node 测试覆盖页面验证状态、多设备路由、前缀过滤、原生会话绑定、回执恢复、主动推送幂等、取消与迟到回复隔离；Linux 上另外运行真实 Python JSONL 子进程用例。Python 测试覆盖鉴权流程回放、网络/授权分类、型号指令、MiNA/MIoT 设备标识、限流、401 续期、回执及分段中断。模拟提供者只有显式测试开关才可启用，管理 RPC 不提供开启入口。
+Node 测试覆盖页面验证状态、多设备路由、前缀过滤、原生会话绑定、回执恢复、主动推送幂等、取消与迟到回复隔离。POSIX 真实子进程默认使用 `/usr/bin/python3`；Windows 必须设置 `XIAOAI_TEST_PYTHON` 后运行，未设置会跳过相关用例。该路径应指向已安装匹配依赖的 Python，不是目录或 `py -3.13` 命令字符串。Windows CI 对 CPython 3.11、3.13 安装对应哈希锁并显式设置此变量，检查 ready、中文收发、TTS 幂等、多设备、UTF-8 分片、错误退出、有界帧、EOF 及无孤儿进程的清理。
+
+Python 测试覆盖鉴权流程回放、网络/授权分类、型号指令、MiNA/MIoT 设备标识、限流、401 续期、回执及分段中断。安装依赖后应为 25 项全部通过，鉴权回放不应因缺少 MiService/aiohttp 被跳过。模拟提供者只有显式测试开关才可启用，管理 RPC 不提供开启入口。
 
 部署验收来源版本的结果为 ARM64 Python **25 项通过**、ARM64 Node **25 项通过**、React 页面 **5 项通过**；三台实机（两台 OH2、一台 LX01）均由用户确认测试播报实际发声。已有音箱会话绑定和微信连接在更新后保留。移植到 5.10.0 分支后的构建与回归结果以 PR 中记录为准。
 
@@ -231,6 +277,9 @@ Node 测试覆盖页面验证状态、多设备路由、前缀过滤、原生会
 | 先听到原厂短回答 | 识别记录的上传/轮询存在延迟，原厂暂停窗口只能尽力抑制 |
 | 重启后提示需核对 | 先查原会话和音箱是否已经执行，再决定是否重发，避免重复操作 |
 | 登录验证码失败 | 结束本次登录，重新发起并使用新验证码；不复用旧验证码 |
+| Windows 无法启动 Python / `sidecar-spawn-failed` | 核对 Host 使用的 `xiaoai.python` 绝对路径及服务账户权限，不要重新输入小米密码 |
+| Windows 停在连接中、出现 `WinError 6` | 确认使用含线程 stdin 修复的 Sidecar，按 Windows 步骤运行真实子进程测试；不要切换 Selector loop |
+| 缺少 `miservice` / `aiohttp` 或 `configure-unavailable` | 用配置的同一解释器检查依赖导入，核对 `dependencyDir` 及平台哈希锁 |
 
 浏览器和日志只展示经过约束的状态、步骤、数值错误码和异常类型，不输出原始鉴权响应、密码、验证码、Cookie、令牌或带敏感查询参数的 URL。排查时也不要将运行目录或登录文件提交到 Git。
 

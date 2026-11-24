@@ -577,3 +577,43 @@ test('different Hosts never share interaction claims, even with identical sessio
   }
   assert.ok(hosts.every((host) => host.streams.size === 0));
 });
+
+test('reply content switches drop the parts a bot does not want without keeping process prose in the answer', async () => {
+  const host = hostFixture();
+  let turn = 0;
+  let seq = 0;
+  host.onPrompt = (rpcId) => {
+    turn += 1;
+    host.append({ type: 'turn/start', seq: seq++, data: { turn } });
+    host.append({ type: 'user/message', seq: seq++, data: { turn, source: { rpcId } } });
+    host.append({ type: 'assistant/message', seq: seq++, data: {
+      turn, step: 0, message: { content: [{ type: 'text', text: 'Checking' }, { type: 'tool-call', name: 'bash' }] },
+    } });
+    host.append({ type: 'tool/call', seq: seq++, data: { turn, step: 0, name: 'bash' } });
+    host.append({ type: 'assistant/message', seq: seq++, data: {
+      turn, step: 1, message: { content: [{ type: 'text', text: 'Answer' }] },
+    } });
+    host.append({ type: 'turn/end', seq: seq++, data: { turn, reason: { kind: 'completed' } } });
+  };
+  const client = localClient(host.apiProxy);
+  const ask = async (replyContent) => {
+    const updates = [];
+    const answer = await client.ask('session', 'hello', {
+      replyContent, progressMode: 'all', onUpdate: (update) => updates.push(update),
+      onInteraction: () => {}, timeoutMs: 1000,
+    });
+    return { answer, updates };
+  };
+
+  const answerOnly = await ask({ narration: false, tools: false, thinking: true });
+  assert.equal(answerOnly.answer, 'Answer', 'hidden process prose never leaks back through the answer');
+  assert.equal(answerOnly.updates.some((update) => update.type === 'tool'), false);
+  assert.equal(answerOnly.updates.some((update) => update.type === 'assistant-message'), false);
+  assert.equal(answerOnly.updates.some((update) => update.type === 'text'), false);
+
+  const stepsWithoutTools = await ask({ narration: true, tools: false, thinking: true });
+  assert.equal(stepsWithoutTools.updates.some((update) => update.type === 'tool'), false, 'tool traffic is switchable on its own');
+  assert.equal(stepsWithoutTools.updates.some((update) => update.type === 'assistant-message' && update.text === 'Checking'), true);
+  assert.equal(stepsWithoutTools.answer, ['Checking', 'Answer'].join('\n\n'));
+});
+
