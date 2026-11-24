@@ -1782,6 +1782,22 @@ export class FeishuHarnessBridge {
     const message = extractInboundMessage(event, this.#client);
     let text = message.content;
     let voiceTurnReplyTo = null;
+    // 入站卡片(interactive)在事件里只带卡片标题,正文要靠 raw_card_content
+    // 再读一次——与引用卡片走同一条路径(feishuReplyReference)。把读到的正文
+    // 并回 message.content 后,后续命令识别、访问判定与 #answerWithStream
+    // 都从 content 取文本,与文字消息完全一致。
+    if (message.card) {
+      try {
+        const loaded = await message.card.load({ signal: this.#signal });
+        const cardBody = nonEmptyString(loaded?.content);
+        if (cardBody && cardBody.length > (text?.length ?? 0)) {
+          text = cardBody;
+          message.content = cardBody;
+        }
+      } catch (error) {
+        this.#logger.warn?.('[dsh-feishu-card] 卡片正文读取失败:', error?.message ?? String(error));
+      }
+    }
     // 语音输入(渠道能力):音频消息先转写成文字并写回 message.content——
     // 下方命令识别与 #answerWithStream 都从 content 取文本。转写失败(或返回
     // 空文本)时保持原语义,走"仅支持文字、图片和文件"的明确降级提示。

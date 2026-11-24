@@ -29,6 +29,41 @@ test('extractText removes bot mentions', () => {
   assert.equal(extractText(event), '你好');
 });
 
+test('extractInboundMessage exposes an inbound card body that the event only titles', async () => {
+  const cardContent = JSON.stringify({
+    schema: '2.0',
+    header: { title: { tag: 'plain_text', content: '⚙️ 任务过程' } },
+    body: { elements: [{ tag: 'markdown', content: '清单已生成' }] },
+  });
+  let reads = 0;
+  const client = { im: { v1: { message: { get: async ({ path, params }) => {
+    reads += 1;
+    assert.equal(path.message_id, 'om_card');
+    assert.equal(params.card_msg_content_type, 'raw_card_content');
+    return { code: 0, data: { items: [{
+      message_id: 'om_card',
+      chat_id: 'oc_same',
+      msg_type: 'interactive',
+      body: { content: cardContent },
+    }] } };
+  } } } } };
+  const message = extractInboundMessage({
+    message: {
+      message_id: 'om_card',
+      chat_id: 'oc_same',
+      message_type: 'interactive',
+      content: JSON.stringify({ title: '⚙️ 任务过程' }),
+    },
+  }, client);
+  // The event itself only carries the title, so the synchronous answer stays short.
+  assert.equal(message.content, '⚙️ 任务过程');
+  assert.equal(reads, 0);
+  assert.deepEqual(await message.card.load(), {
+    messageId: 'om_card',
+    content: '⚙️ 任务过程\n清单已生成',
+  });
+  assert.equal(reads, 1);
+});
 test('extractInboundMessage lazily downloads a Feishu image resource as a bounded stream', async () => {
   const calls = [];
   const event = {
