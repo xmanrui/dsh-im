@@ -242,6 +242,7 @@ test('message failures use verified turn-end provider codes without exposing pro
     ['STREAM_CLOSED', 'MODEL_STREAM'],
     ['EMPTY_RESPONSE', 'MODEL_EMPTY_REPLY'],
     ['CONTENT_FILTER', 'MODEL_CONTENT_REJECTED'],
+    ['CONTENT_REFUSED', 'MODEL_CONTENT_REJECTED'],
   ]) {
     const failure = classifyMessageFailure({
       code: 'harness-turn-failed',
@@ -259,6 +260,29 @@ test('message failures use verified turn-end provider codes without exposing pro
   assert.equal(classifyMessageFailure({
     code: 'harness-turn-failed', providerCode: 'PRIVATE_PROVIDER_CODE',
   }, options).code, 'INTERNAL_UNKNOWN');
+
+  // A provider refusal is not a stream defect: older DSH reports it as
+  // MALFORMED_RESPONSE, newer DSH as CONTENT_REFUSED. Both must tell the user to
+  // adjust the request instead of retrying an identical one.
+  assert.equal(classifyMessageFailure({
+    code: 'harness-turn-failed',
+    providerCode: 'MALFORMED_RESPONSE',
+    message: 'DeepSeek Messages stream: unsupported stop reason refusal',
+  }, options).code, 'MODEL_CONTENT_REJECTED');
+  assert.equal(classifyMessageFailure({
+    code: 'harness-turn-failed',
+    providerCode: 'MALFORMED_RESPONSE',
+    details: { message: 'stop reason refusal' },
+  }, options).code, 'MODEL_CONTENT_REJECTED');
+  // Unrelated malformed responses must keep the stream classification.
+  assert.equal(classifyMessageFailure({
+    code: 'harness-turn-failed',
+    providerCode: 'MALFORMED_RESPONSE',
+    message: 'tool input is invalid JSON',
+  }, options).code, 'MODEL_STREAM');
+  assert.equal(classifyMessageFailure({
+    code: 'harness-turn-failed', providerCode: 'MALFORMED_RESPONSE',
+  }, options).code, 'MODEL_STREAM');
 });
 
 test('message failure text contains a safe code and traceable reference', () => {
