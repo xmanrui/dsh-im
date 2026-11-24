@@ -13699,3 +13699,76 @@ for (const mode of ['text', 'stream', 'fallback']) {
     assert.equal(status.lastError, null);
   });
 }
+
+test('step push answer-only mode never opens a native process trace', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const writes = [];
+  const creates = [];
+  const channel = {
+    ...stepPushChannel(),
+    createCot: async (chatId, options) => {
+      creates.push({ chatId, options });
+      return { cotId: 'cot-answer-only', messageId: 'om-cot-answer-only' };
+    },
+    writeCotEvents: async (_handle, events) => writes.push(...events),
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient((text) => sent.push(text)),
+    channel,
+    harness: {
+      // With all three switches off the Harness-side filter delivers only turn
+      // boundaries to the bridge; those alone must not open a process trace.
+      ...stepPushHarness(async (_sessionId, _text, options) => {
+        await options.onUpdate({ type: 'turn-start', turn: 5 });
+        await options.onUpdate({ type: 'turn-end', turn: 5, reason: { kind: 'completed' } });
+        return 'ANSWER_ONLY_MARKER';
+      }),
+      currentReplyContent: () => ({ narration: false, tools: false, thinking: false }),
+    },
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushMode: 'live_cot',
+  });
+
+  await bridge.accept(event('om_answer_only_cot', '执行任务'));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(creates, [], 'no native process trace is opened when nothing but the answer may be sent');
+  assert.deepEqual(writes, [], 'no process events are written');
+  assert.deepEqual(sent, ['ANSWER_ONLY_MARKER'], 'the answer is still delivered');
+});
+
+test('step push answer-only mode skips the process card entirely', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const streamCalls = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: stepPushTextClient((text) => sent.push(text)),
+    channel: stepPushChannel({ streamCalls }),
+    harness: {
+      ...stepPushHarness(async (_sessionId, _text, options) => {
+        await options.onUpdate({ type: 'turn-start', turn: 6 });
+        await options.onUpdate({ type: 'turn-end', turn: 6, reason: { kind: 'completed' } });
+        return 'ANSWER_CARD_MARKER';
+      }),
+      currentReplyContent: () => ({ narration: false, tools: false, thinking: false }),
+    },
+    state: fixture.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    stepPush: true,
+    stepPushMode: 'streaming_card',
+    stepPushClock,
+  });
+
+  await bridge.accept(event('om_answer_only_card', '执行任务'));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(streamCalls, [], 'no process card is created for an answer-only bot');
+  assert.deepEqual(sent, ['ANSWER_CARD_MARKER']);
+});
+

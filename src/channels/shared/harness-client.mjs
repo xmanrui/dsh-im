@@ -25,6 +25,7 @@ import { t } from './i18n.mjs';
 import { watchHarnessMux } from './harness-mux.mjs';
 import { extractConnectionEvidence, messageDiagnosticError } from './connection-error.mjs';
 import { PromptFailureTracker } from './prompt-failure-tracker.mjs';
+import { allowsReplyContent, normalizeReplyContent } from './reply-content.mjs';
 import { isSessionLogCorrupt, isSessionNotFound } from './session-error.mjs';
 
 // Every channel plugin runs in the same Host process. Sharing ownership by
@@ -486,6 +487,48 @@ export function accumulateFinalAssistantText(accumulator, event) {
     if (!text || content.some((part) => part?.type === 'tool-call')) accumulator.clear();
     else accumulator.setCanonical(event.data.step, text);
   }
+}
+
+/**
+ * The switch that owns a progress update. Text updates are the assistant's own
+ * prose, tool traffic is the step itself, and reasoning is the trace; anything
+ * else (turn boundaries) is always delivered because the consumer needs it to
+ * end the turn correctly.
+ */
+function replyContentKindOf(update) {
+  switch (update?.type) {
+    case 'tool':
+    case 'tool-result':
+    case 'status':
+      return 'tools';
+    case 'reasoning':
+      return 'thinking';
+    case 'assistant-message':
+    case 'text':
+      return 'narration';
+    default:
+      return null;
+  }
+}
+
+function allowsUpdate(replyContent, update) {
+  const kind = replyContentKindOf(update);
+  return kind === null || allowsReplyContent(replyContent, kind);
+}
+
+/**
+ * The updates a channel may forward for this batch.
+ *
+ * The bot's switches are applied before the `latest` reduction: a hidden
+ * update must not take the single slot and swallow an allowed update that
+ * arrived in the same poll.
+ */
+export function selectProgressUpdates(updates, { mode = 'latest', replyContent } = {}) {
+  const allowed = updates.filter((update) => allowsUpdate(replyContent, update));
+  if (mode === 'all' || mode === 'live') return allowed;
+  return allowed
+    .filter((update) => update.type !== 'assistant-message' && update.type !== 'reasoning')
+    .slice(-1);
 }
 
 function nonEmptyText(value) {
@@ -1999,6 +2042,9 @@ export class HarnessClient {
     // Reasoning updates only exist for consumers that opt in (thinking-trace
     // mode); default ask() consumers keep the pre-thinking-traces stream.
     const reasoning = options.reasoning === true;
+    // Per-bot content switches: a bot may hide the assistant's process prose,
+    // its tool traffic or the reasoning trace while still receiving the answer.
+    const replyContent = normalizeReplyContent(options.replyContent);
     const onArtifact = typeof options.onArtifact === 'function' ? options.onArtifact : null;
     const onInteraction = typeof options.onInteraction === 'function'
       ? options.onInteraction
@@ -2022,7 +2068,12 @@ export class HarnessClient {
     diagnostic.promptRpcId = promptRpcId;
     const releasePromptInputOrigin = registerImInputOrigin(this.#interactionRegistry, promptRpcId);
     const tracker = new HarnessReplyTracker({
-      promptRpcId, afterSeq: baselineSeq, reasoning, finalAnswerOnly: options.finalAnswerOnly,
+      promptRpcId,
+      afterSeq: baselineSeq,
+      reasoning,
+      // Hiding the assistant's process prose also means the delivered answer
+      // must not carry it: keep only the text after the last tool call.
+      finalAnswerOnly: options.finalAnswerOnly === true || replyContent.narration === false,
     });
     let checkedBlockedSeq = baselineSeq;
     let lastProgressAt = Date.now();
@@ -2037,11 +2088,10 @@ export class HarnessClient {
       lastPollSeq = tracker.lastSeq;
       if (seqAdvanced) lastProgressAt = Date.now();
       if (!onUpdate) return progressTail;
-      const visibleUpdates = progressMode === 'all' || progressMode === 'live'
-        ? updates
-        : updates
-            .filter((update) => update.type !== 'assistant-message' && update.type !== 'reasoning')
-            .slice(-1);
+      const visibleUpdates = selectProgressUpdates(updates, {
+        mode: progressMode,
+        replyContent,
+      });
       for (const update of visibleUpdates) {
         progressTail = progressTail
           .then(() => onUpdate(update))
