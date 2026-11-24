@@ -778,14 +778,28 @@ class Sidecar:
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
+    async def _readline(self):
+        """Read one JSONL line from stdin.
+
+        POSIX uses asyncio's pipe transport. On Windows the Host spawns the
+        child with a pipe that is not opened for overlapped I/O, so the
+        Proactor loop cannot give it an IOCP handle and every read raises
+        `WinError 6 句柄无效`. A worker thread on sys.stdin.buffer keeps the
+        same line framing on both platforms.
+        """
+        if sys.platform == 'win32':
+            return await asyncio.to_thread(sys.stdin.buffer.readline, MAX_LINE + 1)
+        return await self.reader.readline()
+
     async def run(self):
         self.emit('hello', instanceId=str(uuid.uuid4()), protocolVersion=VERSION, build=BUILD)
-        reader = asyncio.StreamReader(limit=MAX_LINE)
-        protocol = asyncio.StreamReaderProtocol(reader)
-        await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, sys.stdin.buffer)
+        self.reader = reader = asyncio.StreamReader(limit=MAX_LINE)
+        if sys.platform != 'win32':
+            protocol = asyncio.StreamReaderProtocol(reader)
+            await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, sys.stdin.buffer)
         try:
             while not self.stopped.is_set():
-                line = await reader.readline()
+                line = await self._readline()
                 if not line:
                     break
                 try:
