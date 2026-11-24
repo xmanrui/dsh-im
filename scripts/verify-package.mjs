@@ -123,6 +123,34 @@ if (forbiddenDshLockPaths.length > 0) {
   );
 }
 
+// The client inject list and the compatibility baseline both name host-side
+// packages and releases that live outside this repository, so a stale entry
+// passes every bundle assertion below while it silently costs the client row its
+// load order (or advertises a baseline the build was never verified against).
+const compatibility = manifest.dsh?.compatibility ?? {};
+const clientInject = manifest.dsh?.client?.inject ?? [];
+if (typeof compatibility.dsh !== 'string'
+  || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(compatibility.dsh)
+  || compatibility.dshReleases?.[compatibility.dsh] !== 'compatible') {
+  throw new Error('dsh.compatibility.dsh must name a release that dshReleases marks compatible');
+}
+if (clientInject.length === 0 || new Set(clientInject).size !== clientInject.length) {
+  throw new Error('dsh.client.inject must list unique DSH client packages');
+}
+for (const name of clientInject) {
+  if (!/^@deepseek-ai\/dsh-client-[a-z0-9-]+$/u.test(name)) {
+    throw new Error(`dsh.client.inject must name DSH client packages: ${name}`);
+  }
+}
+// Neither package is a Web client row on DSH 0.2.2-rc.5: the runtime package
+// stopped publishing after 0.1.1-rc.2 and ui-slots is the registry core without
+// a client entry. Injecting them waits for rows that never arrive.
+for (const retired of ['@deepseek-ai/dsh-client-runtime', '@deepseek-ai/dsh-client-ui-slots']) {
+  if (clientInject.includes(retired)) {
+    throw new Error(`${retired} is not a loadable DSH 0.2.2-rc.5 client row`);
+  }
+}
+
 if (!/\bid\s*:\s*["']@xmanrui\/dsh-im["']/u.test(client)) {
   throw new Error('client bundle does not register the dsh-im loader id');
 }

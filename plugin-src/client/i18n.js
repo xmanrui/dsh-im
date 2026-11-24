@@ -283,6 +283,7 @@ const EN = Object.freeze({
   'dsh-im 4.25.0 支持到 DSH v0.1.6-alpha.2。': 'dsh-im 4.25.0 supports DSH up to v0.1.6-alpha.2.',
   'dsh-im 4.39.0 仅支持 DSH 0.2.0-rc.2。': 'dsh-im 4.39.0 only supports DSH 0.2.0-rc.2.',
   'dsh-im 5.0.0 仅支持 DSH 0.2.1-rc.2。': 'dsh-im 5.0.0 only supports DSH 0.2.1-rc.2.',
+  'dsh-im 5.10.0 起支持 DSH 0.2.2-rc.5。': 'dsh-im 5.10.0 and later support DSH 0.2.2-rc.5.',
   '重新检查': 'Check again',
   '刷新状态': 'Refresh status',
   '手工更新': 'Manual update',
