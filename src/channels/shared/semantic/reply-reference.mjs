@@ -108,6 +108,7 @@ function normalizeReference(reference) {
   const content = cleanString(reference.content, REPLY_CONTENT_MAX_CODE_POINTS, { multiline: true });
   const { attachments, truncated: attachmentsTruncated } = cleanAttachments(reference.attachments);
   const files = Array.isArray(reference.files) ? reference.files.filter((file) => file && typeof file.load === 'function') : [];
+  const images = Array.isArray(reference.images) ? reference.images.filter((image) => image && typeof image.load === 'function') : [];
   let unavailableReason = cleanUnavailableReason(reference.unavailableReason);
   if (!content.value && attachments.length === 0 && !unavailableReason) {
     unavailableReason = 'not-delivered';
@@ -121,13 +122,14 @@ function normalizeReference(reference) {
     ...(content.value ? { content: content.value } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(files.length > 0 ? { files } : {}),
+    ...(images.length > 0 ? { images } : {}),
     ...(unavailableReason ? { unavailableReason } : {}),
     ...(truncated ? { truncated: true } : {}),
   };
 }
 
 function replyBlock(reference) {
-  const { files: _files, ...visibleReference } = reference;
+  const { files: _files, images: _images, ...visibleReference } = reference;
   const json = JSON.stringify(visibleReference).replace(/[<>&]/gu, (character) => ({
     '<': '\\u003c',
     '>': '\\u003e',
@@ -142,7 +144,7 @@ export function hasReplyReference(message) {
 
 export async function promptContentForInboundMessage(
   message,
-  { signal, deferImages = false, originalFiles } = {},
+  { signal, deferImages = false, originalFiles, originalImages } = {},
 ) {
   if (!hasReplyReference(message)) {
     return promptContentForMessage(message, { signal, deferImages });
@@ -162,6 +164,18 @@ export async function promptContentForInboundMessage(
   if (Array.isArray(reference.files) && reference.files.length > 0) {
     if (!Array.isArray(message.files)) message.files = [];
     message.files.push(...reference.files);
+  }
+  // Images follow the same contract: they join the current message's images so
+  // the Harness downloads them together with the message's own pictures, and
+  // the quote block itself never carries their bytes or download URLs.
+  if (Array.isArray(originalImages)) {
+    if (!Array.isArray(message.images)) message.images = [];
+    message.images.length = 0;
+    message.images.push(...originalImages);
+  }
+  if (Array.isArray(reference.images) && reference.images.length > 0) {
+    if (!Array.isArray(message.images)) message.images = [];
+    message.images.push(...reference.images);
   }
   const currentContent = await promptContentForMessage(message, { signal, deferImages });
   return [{ type: 'text', text: replyBlock(reference) }, ...currentContent];

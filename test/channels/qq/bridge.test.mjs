@@ -141,6 +141,89 @@ test('QQ maps msgElements quote snapshots and prefers voice ASR text', () => {
   });
 });
 
+test('QQ keeps quoted images as lazy reply sources the Harness can download', async () => {
+  const requested = [];
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+  const inbound = qqInboundMessage(message({
+    refMsgIdx: 'quoted-image',
+    msgElements: [{
+      attachments: [{
+        content_type: 'image/jpeg',
+        filename: '8EC232ED.png',
+        size: 329959,
+        url: 'https://multimedia.nt.qq.com.cn/download?fileid=quoted&rkey=r1',
+      }],
+    }],
+  }), {
+    fetchImpl: async (target) => {
+      requested.push(String(target));
+      return new Response(png, { status: 200 });
+    },
+  });
+
+  // Quoted media never joins the message's own attachments: local command
+  // routing must keep seeing only what the user sent just now.
+  assert.deepEqual(inbound.images, []);
+  assert.deepEqual(inbound.files, []);
+
+  assert.equal(inbound.replyTo.images.length, 1);
+  const quotedImage = inbound.replyTo.images[0];
+  assert.equal(quotedImage.name, '8EC232ED.png');
+  assert.equal(quotedImage.mediaType, 'image/jpeg');
+  assert.equal(quotedImage.size, 329959);
+  assert.deepEqual(await quotedImage.load({ maxBytes: 1024 * 1024 }), png);
+  assert.match(requested[0], /multimedia\.nt\.qq\.com\.cn/);
+  // The model-facing quote block still shows the name, never the URL.
+  assert.deepEqual(inbound.replyTo.attachments, [{ kind: 'image', name: '8EC232ED.png' }]);
+});
+
+test('QQ keeps quoted files as lazy reply sources the Harness can stage', async () => {
+  const pdf = Buffer.from('%PDF-1.7 quoted attachment');
+  const inbound = qqInboundMessage(message({
+    refMsgIdx: 'quoted-file',
+    msgElements: [{
+      attachments: [{
+        content_type: 'application/pdf',
+        filename: '说明.pdf',
+        size: pdf.length,
+        url: 'https://multimedia.nt.qq.com.cn/download?fileid=quoted-pdf',
+      }],
+    }],
+  }), { fetchImpl: async () => new Response(pdf, { status: 200 }) });
+
+  assert.deepEqual(inbound.files, []);
+  assert.equal(inbound.replyTo.files.length, 1);
+  assert.equal(inbound.replyTo.files[0].name, '说明.pdf');
+  assert.equal(inbound.replyTo.files[0].mediaType, 'application/pdf');
+  assert.deepEqual(await inbound.replyTo.files[0].load({}), pdf);
+});
+
+test('QQ leaves quoted attachments without a download URL name-only', () => {
+  const inbound = qqInboundMessage(message({
+    refMsgIdx: 'quoted-expired',
+    msgElements: [{ attachments: [{ content_type: 'image/png', filename: 'expired.png', size: 10 }] }],
+  }));
+
+  assert.equal(inbound.replyTo.images, undefined);
+  assert.equal(inbound.replyTo.files, undefined);
+  assert.deepEqual(inbound.replyTo.attachments, [{ kind: 'image', name: 'expired.png' }]);
+});
+
+test('QQ caps how many quoted attachments it exposes as sources', () => {
+  const attachments = Array.from({ length: 7 }, (_, index) => ({
+    content_type: 'image/png',
+    filename: `q-${index}.png`,
+    size: 5,
+    url: `https://multimedia.nt.qq.com.cn/download?fileid=q${index}`,
+  }));
+  const inbound = qqInboundMessage(message({
+    refMsgIdx: 'quoted-many',
+    msgElements: [{ attachments }],
+  }));
+
+  assert.equal(inbound.replyTo.images.length, 4);
+});
+
 test('QQ sends quote context to Harness but does not execute quoted commands', async () => {
   const fixture = stateFixture([['c2c:owner-openid', 'session-quote']]);
   let clears = 0;

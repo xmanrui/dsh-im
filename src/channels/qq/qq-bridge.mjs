@@ -196,7 +196,11 @@ function qqAttachmentKind(attachment) {
   return 'file';
 }
 
-function qqReplyReference(message) {
+// A quoted image or file arrives in msgElements[0] with its own download URL,
+// so it can be read exactly like an attachment of the current message. Keep the
+// sources on the reply reference (not on message.images/files) so local command
+// and interaction routing keeps seeing only what the user sent just now.
+function qqReplyReference(message, { fetchImpl } = {}) {
   const refMsgIdx = nonEmptyString(message?.refMsgIdx);
   if (!refMsgIdx) return null;
   const element = Array.isArray(message?.msgElements) ? message.msgElements[0] : null;
@@ -205,6 +209,7 @@ function qqReplyReference(message) {
     const name = nonEmptyString(attachment?.filename);
     return { kind: qqAttachmentKind(attachment), ...(name ? { name } : {}) };
   });
+  const media = qqQuotedMediaSources(sourceAttachments, { fetchImpl });
   const asrText = sourceAttachments
     .filter((attachment) => qqAttachmentKind(attachment) === 'audio')
     .map((attachment) => nonEmptyString(attachment?.asr_refer_text))
@@ -215,6 +220,8 @@ function qqReplyReference(message) {
     messageId: refMsgIdx,
     ...(content ? { content } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(media.images.length > 0 ? { images: media.images } : {}),
+    ...(media.files.length > 0 ? { files: media.files } : {}),
     ...(!content && attachments.length === 0 ? { unavailableReason: 'not-delivered' } : {}),
   };
 }
@@ -233,12 +240,11 @@ async function fetchQqFileBuffer(url, { fetchImpl, signal }) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-/** Convert QQ's attachment metadata into lazily downloaded image references. */
-export function qqInboundMessage(message, { fetchImpl = fetch } = {}) {
-  if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl must be a function');
+/** Convert QQ attachment metadata into lazily downloaded image and file sources. */
+function qqAttachmentSources(attachments, { fetchImpl } = {}) {
   const images = [];
   const files = [];
-  for (const attachment of message?.attachments ?? []) {
+  for (const attachment of attachments ?? []) {
     const url = nonEmptyString(attachment?.url);
     const name = nonEmptyString(attachment?.filename) ?? undefined;
     const mediaType = attachmentMediaType(attachment);
@@ -270,7 +276,37 @@ export function qqInboundMessage(message, { fetchImpl = fetch } = {}) {
       },
     });
   }
-  const replyTo = qqReplyReference(message);
+  return { images, files };
+}
+
+// Only quoted attachments that still carry a download URL can be fetched; the
+// rest stay visible by name in <dsh_im_reply_to> and never reach a download path.
+const QUOTED_MEDIA_LIMIT = 4;
+
+function qqQuotedMediaSources(attachments, { fetchImpl } = {}) {
+  const usable = (attachments ?? [])
+    .filter((attachment) => nonEmptyString(attachment?.url))
+    .slice(0, QUOTED_MEDIA_LIMIT);
+  return qqAttachmentSources(usable, { fetchImpl });
+}
+
+// A quoted file's download URL is signed for the quote snapshot, and a queued
+// turn can outlive it. Start that download when the message is accepted, the
+// same way directly attached files are prefetched.
+function prefetchQuotedMedia(message, signal) {
+  const files = message?.replyTo?.files;
+  if (!Array.isArray(files) || files.length === 0) return message;
+  return {
+    ...message,
+    replyTo: { ...message.replyTo, files: prefetchInboundFiles({ files }, signal).files },
+  };
+}
+
+/** Normalize a QQ message, turning its own and quoted attachments into lazy sources. */
+export function qqInboundMessage(message, { fetchImpl = fetch } = {}) {
+  if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl must be a function');
+  const { images, files } = qqAttachmentSources(message?.attachments, { fetchImpl });
+  const replyTo = qqReplyReference(message, { fetchImpl });
   return {
     content: safeText(message),
     images,
@@ -783,9 +819,12 @@ export class QqHarnessBridge {
     const pending = this.#recordPendingMessage(message, messageId, key);
     const addressed = isQqMessageAddressed(message);
     const preparedMessage = addressed
-      ? prefetchInboundFiles(
-          qqInboundMessage(message, { fetchImpl: this.#fetchImpl }),
-          { signal: this.#signal },
+      ? prefetchQuotedMedia(
+          prefetchInboundFiles(
+            qqInboundMessage(message, { fetchImpl: this.#fetchImpl }),
+            { signal: this.#signal },
+          ),
+          this.#signal,
         )
       : undefined;
     const previous = this.#queues.get(key) ?? Promise.resolve();

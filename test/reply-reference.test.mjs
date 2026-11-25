@@ -72,6 +72,53 @@ test('rebuilding a quoted prompt restores original files before appending quote 
   assert.strictEqual(message.files, files);
 });
 
+test('quoted images join the current message images and stay out of the reply block', async () => {
+  const fetched = [];
+  const quotedImage = {
+    name: 'quoted.png',
+    mediaType: 'image/png',
+    load: async () => {
+      fetched.push('quoted');
+      return Buffer.from('iVBORw0KGgo=', 'base64');
+    },
+  };
+  const message = {
+    content: '这张图里是什么',
+    images: [],
+    replyTo: { content: 'quoted text', images: [quotedImage] },
+  };
+
+  const output = await promptContentForInboundMessage(message, { deferImages: true });
+  // The lazy source lands on the message so askOptions.images picks it up,
+  // and deferring still means "do not download now".
+  assert.deepEqual(message.images, [quotedImage]);
+  assert.deepEqual(fetched, []);
+
+  const visible = parsedReference(output);
+  assert.equal(visible.images, undefined);
+  assert.equal(visible.files, undefined);
+  assert.equal(JSON.stringify(visible).includes('quoted.png'), false);
+});
+
+test('rebuilding a quoted prompt restores original images before appending quote images', async () => {
+  const original = { name: 'current.png' };
+  const quoted = { name: 'quoted.png', load: async () => Buffer.from('iVBORw0KGgo=', 'base64') };
+  const images = [original];
+  const message = {
+    content: 'current',
+    images,
+    replyTo: { content: 'quoted', images: [quoted] },
+  };
+
+  await promptContentForInboundMessage(message, { deferImages: true, originalImages: [...images] });
+  assert.deepEqual(message.images, [original, quoted]);
+  assert.strictEqual(message.images, images);
+
+  await promptContentForInboundMessage(message, { deferImages: true, originalImages: [original] });
+  assert.deepEqual(message.images, [original, quoted]);
+  assert.strictEqual(message.images, images);
+});
+
 test('reply metadata is a safe leading block and current content remains separate', async () => {
   const message = {
     content: '那么最终的数字是多少？',
