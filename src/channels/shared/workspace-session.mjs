@@ -3,6 +3,7 @@ import { withSessionBindingLock } from './session-binding-lock.mjs';
 import { initialSessionTitle } from './session-title.mjs';
 import { extractConnectionEvidence, messageDiagnosticError } from './connection-error.mjs';
 import { t } from './i18n.mjs';
+import { replyContentFinalAnswerOnly } from './reply-content.mjs';
 
 export const WORKSPACE_SESSION_STALE = 'workspace-session-stale';
 
@@ -219,6 +220,17 @@ export async function askInWorkspaceSession({
       const artifactOptions = typeof askOptions === 'number'
         ? { timeoutMs: askOptions }
         : { ...askOptions };
+      // One Harness-side filter serves every channel: the bot's content
+      // switches travel with the ask instead of being re-implemented per
+      // bridge. The answer itself is never switched off, but a bot that hides
+      // the process prose is asking for the text after the last tool call.
+      const replyContent = typeof harness?.currentReplyContent === 'function'
+        ? harness.currentReplyContent()
+        : null;
+      const finalAnswerOnly = replyContent !== null
+        && replyContentFinalAnswerOnly(replyContent);
+      if (replyContent !== null) artifactOptions.replyContent = replyContent;
+      if (finalAnswerOnly) artifactOptions.finalAnswerOnly = true;
       // The guidance the channel's captured settings applied, carried out of
       // band so the Host never has to read configuration out of the prompt.
       artifactOptions.sourceGuidance = sourceGuidance;
@@ -241,7 +253,14 @@ export async function askInWorkspaceSession({
         if (error?.code === 'harness-reply-timeout' && deferredDelivery) {
           try {
             const { coordinator, ...destination } = deferredDelivery();
-            await coordinator.trackTimeout(error, { ...destination, key, sessionId: binding.sessionId });
+            // The background path must deliver what this turn would have
+            // delivered: a hidden process prose keeps the answer alone there too.
+            await coordinator.trackTimeout(error, {
+              ...destination,
+              key,
+              sessionId: binding.sessionId,
+              ...(finalAnswerOnly ? { finalAnswerOnly: true } : {}),
+            });
           } catch (registrationError) {
             console.warn('[dsh-im] unable to persist deferred delivery:', registrationError.message);
           }

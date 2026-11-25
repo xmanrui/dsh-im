@@ -1,4 +1,5 @@
 import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload } from '../../../../src/channels/shared/message-mode.mjs';
+import { SET_REPLY_CONTENT_ENDPOINT, validReplyContentPayload } from './reply-content-rpc.mjs';
 import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from './bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
@@ -30,6 +31,7 @@ export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
   setBusyMessageMode: SET_MESSAGE_MODE_ENDPOINT,
+  setReplyContent: SET_REPLY_CONTENT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
   setThinkingTraces: SET_THINKING_TRACES_ENDPOINT,
@@ -92,6 +94,10 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === TOKEN_BOT_ENDPOINTS.setAgentPreset) {
     return validAgentPresetPayload(payload)
       ? null : '请选择 Agent Preset。';
+  }
+  if (endpoint === TOKEN_BOT_ENDPOINTS.setReplyContent) {
+    return validReplyContentPayload(payload)
+      ? null : '请选择要投递的回复内容。';
   }
   if (endpoint === TOKEN_BOT_ENDPOINTS.setBusyMessageMode) {
     return validMessageModePayload(payload)
@@ -206,6 +212,9 @@ export function createTokenBotRpcHandler(controller, { channel }) {
       } else if (endpoint === TOKEN_BOT_ENDPOINTS.setModel) {
         if (typeof controller.updateModel !== 'function') throw new Error('Model update is unavailable');
         value = await controller.updateModel(payload.botId, payload.model);
+      } else if (endpoint === TOKEN_BOT_ENDPOINTS.setReplyContent) {
+        if (typeof controller.updateReplyContent !== 'function') throw new Error('Reply content update is unavailable');
+        value = await controller.updateReplyContent(payload.botId, payload.replyContent);
       } else if (endpoint === TOKEN_BOT_ENDPOINTS.setBusyMessageMode) {
         if (typeof controller.updateBusyMessageMode !== 'function') throw new Error('Message mode update is unavailable');
         value = await controller.updateBusyMessageMode(payload.botId, payload.busyMessageMode);

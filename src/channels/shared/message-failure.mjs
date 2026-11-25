@@ -23,6 +23,7 @@ const PROVIDER_FAILURES = Object.freeze({
   MALFORMED_RESPONSE: 'MODEL_STREAM',
   EMPTY_RESPONSE: 'MODEL_EMPTY_REPLY',
   CONTENT_FILTER: 'MODEL_CONTENT_REJECTED',
+  CONTENT_REFUSED: 'MODEL_CONTENT_REJECTED',
   UNSUPPORTED_CONTENT: 'MODEL_CONFIG',
 });
 
@@ -114,7 +115,15 @@ function providerFailureCode(error) {
   if (error?.code !== 'harness-turn-failed') return null;
   const value = error?.providerCode ?? error?.details?.providerCode;
   if (typeof value !== 'string') return null;
-  return PROVIDER_FAILURES[value.trim().toUpperCase()] ?? null;
+  const key = value.trim().toUpperCase();
+  // DSH before 0.2.3 reports DeepSeek's content-safety `refusal` stop reason as
+  // MALFORMED_RESPONSE. Only a message that actually names the refusal becomes a
+  // content rejection; genuine stream/format failures keep MODEL_STREAM.
+  if (key === 'MALFORMED_RESPONSE') {
+    const detail = `${error?.message ?? ''} ${error?.details?.message ?? ''}`;
+    if (/stop reason refusal/i.test(detail)) return 'MODEL_CONTENT_REJECTED';
+  }
+  return PROVIDER_FAILURES[key] ?? null;
 }
 
 function failureCode(error, details) {

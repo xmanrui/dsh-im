@@ -1,4 +1,5 @@
 import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload } from '../../../../src/channels/shared/message-mode.mjs';
+import { SET_REPLY_CONTENT_ENDPOINT, validReplyContentPayload } from '../shared/reply-content-rpc.mjs';
 import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-details.mjs';
 import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
@@ -30,6 +31,7 @@ export const DINGTALK_ENDPOINTS = Object.freeze({
   setAgentPreset: SET_AGENT_PRESET_ENDPOINT,
   setContextEnhancement: SET_CONTEXT_ENHANCEMENT_ENDPOINT,
   setBusyMessageMode: SET_MESSAGE_MODE_ENDPOINT,
+  setReplyContent: SET_REPLY_CONTENT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
   approveSender: 'bot.sender.approve',
@@ -110,6 +112,10 @@ function payloadFailure(endpoint, payload) {
   if (endpoint === DINGTALK_ENDPOINTS.setAgentPreset) {
     return validAgentPresetPayload(payload)
       ? null : '请选择 Agent Preset。';
+  }
+  if (endpoint === DINGTALK_ENDPOINTS.setReplyContent) {
+    return validReplyContentPayload(payload)
+      ? null : '请选择要投递的回复内容。';
   }
   if (endpoint === DINGTALK_ENDPOINTS.setBusyMessageMode) {
     return validMessageModePayload(payload)
@@ -315,6 +321,9 @@ export function createDingtalkRpcHandler(controller, { encodeQr = qrDataUrl } = 
           await controller.updateModel(payload.botId, payload.model),
           cachedEncode,
         );
+      } else if (endpoint === DINGTALK_ENDPOINTS.setReplyContent) {
+        if (typeof controller.updateReplyContent !== 'function') throw new Error('Reply content update is unavailable');
+        value = await controller.updateReplyContent(payload.botId, payload.replyContent);
       } else if (endpoint === DINGTALK_ENDPOINTS.setBusyMessageMode) {
         if (typeof controller.updateBusyMessageMode !== 'function') throw new Error('Message mode update is unavailable');
         value = await controller.updateBusyMessageMode(

@@ -1,4 +1,5 @@
 import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload, normalizeBusyMessageMode } from '../../../../src/channels/shared/message-mode.mjs';
+import { SET_REPLY_CONTENT_ENDPOINT, validReplyContentPayload } from '../shared/reply-content-rpc.mjs';
 import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-details.mjs';
 import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { normalizeBotAlias } from '../../../../src/channels/shared/bot-alias.mjs';
@@ -48,6 +49,7 @@ import {
 export const FEISHU_ENDPOINTS = Object.freeze({
   ...FEISHU_CLIENT_ENDPOINTS,
   setBusyMessageMode: SET_MESSAGE_MODE_ENDPOINT,
+  setReplyContent: SET_REPLY_CONTENT_ENDPOINT,
   setAccessPolicy: SET_ACCESS_POLICY_ENDPOINT,
   setAlias: SET_ALIAS_ENDPOINT,
   setConversationDirectory: FEISHU_CLIENT_ENDPOINTS.setConversationDirectory,
@@ -483,6 +485,10 @@ function validPayload(endpoint, payload) {
     return validAgentPresetPayload(payload)
       ? null : '请选择 Agent Preset。';
   }
+  if (endpoint === FEISHU_ENDPOINTS.setReplyContent) {
+    return validReplyContentPayload(payload)
+      ? null : '请选择要投递的回复内容。';
+  }
   if (endpoint === FEISHU_ENDPOINTS.setBusyMessageMode) {
     return validMessageModePayload(payload)
       ? null : '请提交有效的消息处理方式。';
@@ -813,6 +819,9 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
           await controller.updateModel(payload.botId, payload.model),
           { encodeQr: cachedEncodeQr },
         );
+      } else if (endpoint === FEISHU_ENDPOINTS.setReplyContent) {
+        if (typeof controller.updateReplyContent !== 'function') throw new Error('Reply content update is unavailable');
+        value = await controller.updateReplyContent(payload.botId, payload.replyContent);
       } else if (endpoint === FEISHU_ENDPOINTS.setBusyMessageMode) {
         if (typeof controller.updateBusyMessageMode !== 'function') throw new Error('Message mode update is unavailable');
         value = await controller.updateBusyMessageMode(
