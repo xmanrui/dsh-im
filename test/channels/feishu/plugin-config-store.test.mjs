@@ -87,6 +87,25 @@ test('PluginConfigStore defaults mentionTopicReply on and only a literal false t
   await store.clear();
 });
 
+test('PluginConfigStore defaults menuOnNew on and only a literal false turns it off', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-feishu-config-menu-on-new-'));
+  const path = join(dir, 'config.json');
+  const store = await new PluginConfigStore(path).load();
+
+  await store.save({
+    appId: 'cli_menu_on_new',
+    ownerOpenId: 'ou_owner',
+    domain: 'feishu',
+    menuOnNew: 'no', // anything but a literal false keeps the default
+  });
+  assert.equal(store.get().menuOnNew, true);
+
+  await store.save({ ...store.get(), menuOnNew: false });
+  assert.equal((await new PluginConfigStore(path).load()).get().menuOnNew, false);
+
+  await store.clear();
+});
+
 test('PluginConfigStore defaults stepPush off and only persists a literal true', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-feishu-config-step-push-'));
   const path = join(dir, 'config.json');

@@ -8,6 +8,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Added / 新增
 
+- 飞书新增按机器人的「新会话后打开助手中心」开关，默认开启并保持现有行为：发送 `/new` 后仍会在文字回执之后补发「助手中心」卡片。关闭后 `/new` 只回复文字回执，与其他渠道一致；切换立即生效，无需重连。配置存于机器人设置（`menuOnNew`，RPC `bot.menu-on-new.set`）。
+  Feishu gains a per-bot **Open assistant center after a new Session** switch, on by default so `/new` keeps posting the Assistant center card after its text receipt. Turning it off makes `/new` reply with the text receipt only, like the other channels; the change applies immediately without reconnecting. The setting lives in bot configuration (`menuOnNew`, RPC `bot.menu-on-new.set`).
+
 - 新增按 bot 的「投递内容」开关：过程正文、工具步骤、思考过程三项互相独立、默认全开。关闭后该渠道不再推送对应内容，最终回答始终发送；关闭「过程正文」时最终回答也只取最后一次工具调用之后的助手正文，等价于把 QQ 专属的 `finalAnswerOnly` 开放给所有渠道。配置存于跨渠道共用的 bot 设置，仅在「机器人通用设置」一处可见，对全部 IM 渠道生效；超时补发沿用同一口径。（[#343](https://github.com/xmanrui/dsh-im/issues/343)）
   Added per-bot Reply content switches — process prose, tool steps and reasoning — independent and all on by default. A switched-off part is no longer pushed to that bot while the final answer is always delivered; hiding process prose also restricts the delivered answer to the assistant text after the last tool call, which is exactly the QQ-only `finalAnswerOnly` rule made available to every channel. The setting lives in the shared per-bot configuration and appears once under General bot settings, applying to all IM channels; deferred background delivery follows the same rule. ([#343](https://github.com/xmanrui/dsh-im/issues/343))
 

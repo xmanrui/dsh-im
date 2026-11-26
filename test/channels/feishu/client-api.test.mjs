@@ -41,6 +41,7 @@ test('client normalizes multiple independent bots and derives authoritative tota
         configured: true,
         groupResponseMode: 'all',
         mentionTopicReply: false,
+        menuOnNew: false,
         stepPush: true,
         stepPushMode: 'streaming_card',
         groupMessagePermissionGranted: true,
@@ -59,6 +60,7 @@ test('client normalizes multiple independent bots and derives authoritative tota
         connected: false,
         configured: true,
         mentionTopicReply: 'stale-falsy', // only a literal false turns topics off
+        menuOnNew: 'stale-falsy', // only a literal false turns the menu off
         stepPush: 'stale-truthy', // must normalize to false
         stepPushMode: 'stale-unknown', // must normalize to the legacy post presentation
         bot: { name: '研发助手', domain: 'lark' },
@@ -74,11 +76,13 @@ test('client normalizes multiple independent bots and derives authoritative tota
   assert.equal(snapshot.bots[0].state, 'connected');
   assert.equal(snapshot.bots[0].groupResponseMode, 'all');
   assert.equal(snapshot.bots[0].mentionTopicReply, false);
+  assert.equal(snapshot.bots[0].menuOnNew, false);
   assert.equal(snapshot.bots[0].stepPush, true);
   assert.equal(snapshot.bots[0].stepPushMode, 'streaming_card');
   assert.equal(snapshot.bots[0].groupMessagePermissionGranted, true);
   assert.equal(snapshot.bots[1].groupResponseMode, 'mention');
   assert.equal(snapshot.bots[1].mentionTopicReply, true);
+  assert.equal(snapshot.bots[1].menuOnNew, true);
   assert.equal(snapshot.bots[1].stepPush, false);
   assert.equal(snapshot.bots[1].stepPushMode, 'post');
   assert.equal(snapshot.bots[1].groupMessagePermissionGranted, false);

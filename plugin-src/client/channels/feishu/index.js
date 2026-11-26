@@ -474,6 +474,67 @@ function RemoveConfirmation({ bot, busy, onConfirm, onCancel }) {
   );
 }
 
+/** One select for whether `/new` opens the assistant-center menu afterwards. */
+function MenuOnNewEditor({ value = true, disabled = false, onSave }) {
+  const titleId = React.useId();
+  const helpId = `${titleId}-help`;
+  const current = value === true ? "on" : "off";
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  const change = async (event) => {
+    const next = event.target.value === "on";
+    if ((next ? "on" : "off") === current || saving || disabled) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave?.(next);
+    } catch (cause) {
+      setError(cause?.message ?? "新会话菜单设置保存失败，请重试。");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return h("section", {
+    className: "dim-feishuGroupControl",
+    "aria-labelledby": titleId,
+  },
+  h("div", { className: "dim-feishuGroupControlHeader" },
+    h("div", { className: "dim-presetTitle" },
+      h("h3", { id: titleId }, "新会话后打开助手中心"),
+      h("span", { className: "dim-presetHelp" },
+        h("button", {
+          type: "button",
+          className: "dim-presetHelpButton",
+          "aria-label": "查看新会话菜单说明",
+          "aria-describedby": helpId,
+        }, h("span", { "aria-hidden": "true" }, "?")),
+        h("span", {
+          id: helpId,
+          className: "dim-presetTooltip",
+          role: "tooltip",
+        }, "设置发送 /new 开启新会话后，是否紧接着弹出「助手中心」卡片"))),
+    saving
+      ? h("span", { className: "dim-feishuGroupControlStatus", role: "status" }, "保存中…")
+      : null),
+  h("select", {
+    className: "dim-feishuGroupSelect",
+    value: current,
+    disabled: disabled || saving,
+    "aria-label": "新会话后打开助手中心",
+    onChange: (event) => { void change(event); },
+  },
+  h("option", { value: "on" }, "开启（发送 /new 后打开助手中心）"),
+  h("option", { value: "off" }, "关闭（/new 只回复文字回执）")),
+  h("p", { className: "dim-feishuGroupHelp" },
+    "开启后，发送 /new 开启新会话时会紧跟着弹出「助手中心」卡片，可以直接选择会话、工作区、预设和模型；关闭后只回复一条文字回执，与其他渠道保持一致。"),
+  error ? h("p", {
+    className: "dim-feishuGroupError",
+    role: "alert",
+  }, error) : null);
+}
+
 /** One select for the step-push presentation. */
 function StepPushEditor({ value = false, mode = "post", disabled = false, onSave, onModeSave }) {
   const titleId = React.useId();
@@ -577,6 +638,7 @@ export function BotCard({
   onModelSave,
   onAgentPresetSave,
   onContextEnhancementSave,
+  onMenuOnNewSave,
   onStepPushSave,
   onStepPushModeSave,
   onRequestRemove,
@@ -675,6 +737,11 @@ export function BotCard({
         onSave: onStepPushSave,
         onModeSave: onStepPushModeSave,
       }),
+      h(MenuOnNewEditor, {
+        value: connection.menuOnNew,
+        disabled: Boolean(busy),
+        onSave: onMenuOnNewSave,
+      }),
       provisionContent
         ? h("section", {
             className: "bxf-botProvision dim-botProvision",
@@ -769,6 +836,7 @@ function BotList(props) {
           onModelSave: (model) => props.onModelSave(bot, model),
           onAgentPresetSave: (agentPreset) => props.onAgentPresetSave(bot, agentPreset),
           onContextEnhancementSave: (config) => props.onContextEnhancementSave(bot, config),
+          onMenuOnNewSave: (menuOnNew) => props.onMenuOnNewSave(bot, menuOnNew),
           onStepPushSave: (stepPush) => props.onStepPushSave(bot, stepPush),
           onStepPushModeSave: (stepPushMode) => props.onStepPushModeSave(bot, stepPushMode),
           onRequestRemove: () => props.onRequestRemove(bot),
@@ -1573,6 +1641,9 @@ export function FeishuSettingsTab({ rpcCall }) {
                   ),
                   onContextEnhancementSave: (connection, config) => saveBotSetting(
                     connection, "context-enhancement", FEISHU_ENDPOINTS.setContextEnhancement, { config },
+                  ),
+                  onMenuOnNewSave: (connection, menuOnNew) => saveBotSetting(
+                    connection, "menu-on-new", FEISHU_ENDPOINTS.setMenuOnNew, { menuOnNew },
                   ),
                   onStepPushSave: (connection, stepPush) => saveBotSetting(
                     connection, "step-push", FEISHU_ENDPOINTS.setStepPush, { stepPush },

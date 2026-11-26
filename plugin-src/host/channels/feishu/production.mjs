@@ -278,6 +278,7 @@ export async function createProductionController(ctx, config = {}, internals = {
         botOpenId: botConfig.botOpenId,
         groupResponseMode: botConfig.groupResponseMode,
         mentionTopicReply: botConfig.mentionTopicReply,
+        menuOnNew: botConfig.menuOnNew,
         stepPush: botConfig.stepPush,
         stepPushMode: botConfig.stepPushMode,
         stepCardPanels: botConfig.stepCardPanels,

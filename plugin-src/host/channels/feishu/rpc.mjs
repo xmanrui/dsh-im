@@ -324,6 +324,7 @@ function publicBotEntry(entry) {
     conversationDirectoryOverride: normalizeConversationDirectory(source.conversationDirectoryOverride),
     groupResponseMode: normalizeFeishuGroupResponseMode(source.groupResponseMode),
     mentionTopicReply: source.mentionTopicReply !== false,
+    menuOnNew: source.menuOnNew !== false,
     stepPush: source.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(source.stepPushMode),
     stepCardPanels: normalizeFeishuStepCardPanels(source.stepCardPanels),
@@ -518,6 +519,13 @@ function validPayload(endpoint, payload) {
       && typeof payload.mentionTopicReply === 'boolean'
       ? null
       : '请选择是否以话题方式回复。';
+  }
+  if (endpoint === FEISHU_ENDPOINTS.setMenuOnNew) {
+    return hasOnlyKeys(payload, new Set(['botId', 'menuOnNew']))
+      && safeOpaqueId(payload.botId)
+      && typeof payload.menuOnNew === 'boolean'
+      ? null
+      : '请选择开启新会话后是否打开助手中心。';
   }
   if (endpoint === FEISHU_ENDPOINTS.setStepPush) {
     return hasOnlyKeys(payload, new Set(['botId', 'stepPush']))
@@ -866,6 +874,14 @@ export function createFeishuRpcHandler(controller, { encodeQr = qrCodeDataUrl } 
         }
         value = await toPublicFeishuStatus(
           await controller.updateMentionTopicReply(payload.botId, payload.mentionTopicReply),
+          { encodeQr: cachedEncodeQr },
+        );
+      } else if (endpoint === FEISHU_ENDPOINTS.setMenuOnNew) {
+        if (typeof controller.updateMenuOnNew !== 'function') {
+          throw new Error('New-session menu update is unavailable');
+        }
+        value = await toPublicFeishuStatus(
+          await controller.updateMenuOnNew(payload.botId, payload.menuOnNew),
           { encodeQr: cachedEncodeQr },
         );
       } else if (endpoint === FEISHU_ENDPOINTS.setStepPush) {
