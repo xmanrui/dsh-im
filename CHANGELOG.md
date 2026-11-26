@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 修复 DSH 0.2.2-rc.4 起的宿主上全部 IM 渠道在 `startup.load` 阶段失败（QQ、微信、飞书、钉钉、企业微信等均报 `<channel>-startup-failed`，参考号查不到原因）：Cordis 4 只在宿主根上下文上登记 `Symbol.for('cordis.root')`，直接读旧的 `ctx.root` 字符串属性会抛 `cannot get property "root" without inject`，而该读取发生在渠道构造的第一步。现在统一经 `hostRoot()` 解析根上下文——先取注册符号，取不到再回退旧的 `ctx.root`（读取本身包在 try 中），两个都给不出时退回当前上下文，因此 0.2.2-rc.3 及更早的宿主行为不变。
+  Fixed every IM channel failing at `startup.load` on hosts from DSH 0.2.2-rc.4 on (QQ, WeChat, Feishu, DingTalk, WeCom and the rest all reported `<channel>-startup-failed` with no reason behind the reference id): Cordis 4 only registers the host root context under `Symbol.for('cordis.root')`, so reading the legacy `ctx.root` string property throws `cannot get property "root" without inject` — and that read was the first step of building a channel. The root context is now resolved through `hostRoot()`: the registered symbol first, then the legacy `ctx.root` inside a try, then the context itself, so hosts on 0.2.2-rc.3 and earlier keep working.
+
 ## [5.11.0] - 2026-11-26
 
 ### Added / 新增
@@ -43,6 +48,7 @@ This file records the notable changes in each dsh-im release. Its format follows
   The nine channels that assemble their own production controller and read bot state directly — DingTalk, Feishu, Matrix, QQ, Slack, WeCom, WeCom app, Weixin and WhatsApp — now announce `dsh-im/session-pre-bind` synchronously the moment a conversation binds and warm the bot state for `describeConversationSync`. Previously every Session on those channels resolved as `unknown`, so conversation-dependent rules (persona, virtual user, per-user memory, permissions) were missing on the very first turn; Telegram, Discord, email and iMessage already used the shared path and are unchanged.（[#539](https://github.com/xmanrui/dsh-im/pull/539)）
 
 ### Fixed / 修复
+
 
 - 飞书过程卡的最终答案若包含指向本地文件的 Markdown 图片（如 `![标题画面](/tmp/host_13.png)`），飞书会以 `230099 / 200570` 拒绝整张卡，卡片从此冻结在「运行中」；目标续跑轮由于没有第二条投递路径，本轮答案也会一并丢失。现在这类图片在写入卡片前降级为 caption 文本（判据是「飞书能否渲染」：只有 `http(s)` 地址与 `img_key` 保留，绝对路径、`file:`、Windows 盘符、裸相对路径如 `06-log/shot.png`、`data:` URI 都降级），目标轮封卡失败时还会用纯文本回复补投本轮答案，并记录封卡失败的日志。方案见 `docs/方案/飞书过程卡本地图片降级与封卡回退方案.md`。
   When a Feishu step card's final answer carried a Markdown image pointing at a local file (e.g. `![screenshot](/tmp/host_13.png)`), Feishu rejected the whole card update with `230099 / 200570` and the card froze at "running"; a Goal round then lost its answer too, because it has no second delivery path. Local image targets are now degraded to their caption before the text reaches the card — the rule is "can Feishu render it": only `http(s)` URLs and `img_key`s survive, while absolute paths, `file:` URLs, Windows drives, bare relative paths such as `06-log/shot.png` and `data:` URIs degrade, a Goal round whose card cannot be sealed posts its result as a plain reply, and the skipped seal is logged. See `docs/方案/飞书过程卡本地图片降级与封卡回退方案.md`. ([#518](https://github.com/xmanrui/dsh-im/pull/518))
@@ -608,7 +614,6 @@ Thanks to [@Dong09](https://github.com/Dong09) for the Matrix conversation-conte
   Panel expansion preferences apply only to Feishu live process cards. Completed, stopped, and sealed overflow cards still collapse process details; native CoT and discrete step-post modes remain unchanged.
 - 依赖声明与 DSH `0.2.0-rc.2` 兼容声明保持不变；升级后重启 Host 并刷新管理页面，以加载同版 Host 和客户端设置。
   Dependency declarations and declared DSH `0.2.0-rc.2` compatibility remain unchanged. Restart the Host and refresh the management page after upgrading so Host and client settings use the same version.
-
 
 
 ## [4.37.0] - 2026-10-07
@@ -1252,7 +1257,6 @@ Thanks to [@Dong09](https://github.com/Dong09) for the Matrix conversation-conte
 
 - 补充 #199 的复现、根因与修复验证记录；新增回归用例覆盖在途草稿、迟到进度、后续心跳、答案提交和最终消息投递。
   Recorded the reproduction, root cause, and validation for #199, and added regression coverage for in-flight drafts, late progress, subsequent heartbeats, answer submission, and final-message delivery.
-
 
 ## [4.20.1] - 2026-09-12
 
