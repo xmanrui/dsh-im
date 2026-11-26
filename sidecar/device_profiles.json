@@ -1,0 +1,471 @@
+{
+  "schemaVersion": 1,
+  "compatibilitySource": "https://raw.githubusercontent.com/idootop/mi-gpt/main/docs/compatibility.md",
+  "reviewedAt": "2026-11-22",
+  "models": {
+    "OH2P": {
+      "ttsAction": [
+        7,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-oh2p:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": [
+          2
+        ]
+      }
+    },
+    "OH2": {
+      "ttsAction": [
+        5,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-oh2:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": [
+          2
+        ]
+      }
+    },
+    "LX06": {
+      "ttsAction": [
+        5,
+        1
+      ],
+      "pauseAction": [
+        3,
+        2
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-lx06:2",
+      "preferredTransport": "miot"
+    },
+    "S12": {
+      "ttsAction": [
+        5,
+        1
+      ],
+      "pauseAction": [
+        4,
+        1
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-s12:2",
+      "preferredTransport": "miot"
+    },
+    "L15A": {
+      "ttsAction": [
+        7,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-l15a:2",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": [
+          2
+        ]
+      }
+    },
+    "LX5A": {
+      "ttsAction": [
+        5,
+        1
+      ],
+      "pauseAction": [
+        3,
+        2
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-lx5a:2",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [],
+        "paused": [
+          0
+        ]
+      }
+    },
+    "LX05": {
+      "ttsAction": [
+        5,
+        1
+      ],
+      "pauseAction": [
+        3,
+        2
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-lx05:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": []
+      }
+    },
+    "X10A": {
+      "ttsAction": [
+        7,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-x10a:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": [
+          2
+        ]
+      }
+    },
+    "L17A": {
+      "ttsAction": [
+        7,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-l17a:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": [
+          2
+        ]
+      }
+    },
+    "L06A": {
+      "ttsAction": [
+        5,
+        1
+      ],
+      "pauseAction": [
+        3,
+        2
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-l06a:2",
+      "preferredTransport": "miot"
+    },
+    "LX01": {
+      "ttsAction": [
+        5,
+        1
+      ],
+      "pauseAction": [
+        4,
+        1
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-lx01:1",
+      "preferredTransport": "mina",
+      "playing": {
+        "property": [
+          4,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": []
+      }
+    },
+    "L05B": {
+      "ttsAction": [
+        5,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-l05b:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [],
+        "paused": []
+      }
+    },
+    "L05C": {
+      "ttsAction": [
+        5,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-l05c:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [],
+        "paused": []
+      }
+    },
+    "L09A": {
+      "ttsAction": [
+        3,
+        1
+      ],
+      "pauseAction": [
+        2,
+        1
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-l09a:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          2,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [],
+        "paused": [
+          0
+        ]
+      }
+    },
+    "LX04": {
+      "ttsAction": [
+        5,
+        1
+      ],
+      "pauseAction": [
+        3,
+        2
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-lx04:2",
+      "preferredTransport": "miot"
+    },
+    "ASX4B": {
+      "ttsAction": [
+        5,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-x4b:2",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": [
+          2
+        ]
+      }
+    },
+    "X6A": {
+      "ttsAction": [
+        7,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-x6a:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": [
+          2
+        ]
+      }
+    },
+    "X08E": {
+      "ttsAction": [
+        7,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-x08e:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": [
+          2
+        ]
+      }
+    },
+    "X8F": {
+      "ttsAction": [
+        7,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-x8f:1",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": [
+          2
+        ]
+      }
+    },
+    "X4B": {
+      "ttsAction": [
+        5,
+        3
+      ],
+      "pauseAction": [
+        3,
+        3
+      ],
+      "specSource": "https://miot-spec.org/miot-spec-v2/instance?type=urn:miot-spec-v2:device:speaker:0000A015:xiaomi-x4b:2",
+      "preferredTransport": "miot",
+      "playing": {
+        "property": [
+          3,
+          1
+        ],
+        "active": [
+          1
+        ],
+        "idle": [
+          0
+        ],
+        "paused": [
+          2
+        ]
+      }
+    }
+  }
+}

@@ -49,12 +49,18 @@ export const TELEGRAM_BOT_SETTINGS_TABS = Object.freeze([
 ]);
 
 export function botSettingsTabsForChannel(channel) {
+  if (channel === 'xiaoai') return BOT_SETTINGS_TABS.filter(tab => tab.id !== 'ds-bot');
   if (channel === 'feishu') return FEISHU_BOT_SETTINGS_TABS;
   if (channel === 'telegram') return TELEGRAM_BOT_SETTINGS_TABS;
   return BOT_SETTINGS_TABS;
 }
 
 const CHANNEL_DEFINITIONS = Object.freeze({
+  xiaoai: {
+    label: '小爱音箱',
+    kinds: [{ value: 'device', label: '音箱设备' }],
+    fields: { device: [{ key: 'deviceId', label: '设备 ID', placeholder: '使用当前音箱的设备 ID' }] },
+  },
   weixin: {
     label: '微信',
     kinds: [{ value: 'user', label: '用户' }],

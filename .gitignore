@@ -1,6 +1,8 @@
 node_modules/
 .wrangler/
 coverage/
+sidecar/vendor/
+__pycache__/
 .env
 .env.*
 !.env.example

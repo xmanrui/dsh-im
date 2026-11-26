@@ -61,6 +61,23 @@ const required = [
   'src/channels/whatsapp/whatsapp-web-session.mjs',
   'src/channels/matrix/matrix-runtime.mjs',
   'src/channels/matrix/matrix-api.mjs',
+  'docs/xiaoai.md',
+  'plugin-src/client/channels/xiaoai/index.js',
+  'plugin-src/host/channels/xiaoai/index.mjs',
+  'plugin-src/host/channels/xiaoai/production.mjs',
+  'plugin-src/host/channels/xiaoai/rpc.mjs',
+  'src/channels/xiaoai/account-transport.mjs',
+  'src/channels/xiaoai/config-store.mjs',
+  'src/channels/xiaoai/constants.mjs',
+  'src/channels/xiaoai/controller.mjs',
+  'src/channels/xiaoai/runtime.mjs',
+  'src/channels/xiaoai/sidecar-client.mjs',
+  'src/channels/xiaoai/state-store.mjs',
+  'sidecar/xiaoai_sidecar.py',
+  'sidecar/speaker_adapter.py',
+  'sidecar/device_profiles.json',
+  'sidecar/requirements.lock',
+  'sidecar/requirements-windows.lock',
   'src/channels/shared/context-enhancement.mjs',
 ];
 await Promise.all(required.map((path) => access(resolve(root, path))));
@@ -186,7 +203,12 @@ if (client.includes('settings.plugins.tab') || clientSources.includes('settings.
 // preferences. Conversation-directory settings adds one
 // switch template reused for the bot override and channel default. The Delivery
 // tab adds one ordinary checkbox template mapped over its two switches (mirror
-// Web input, deliver model answers).
+// Web input, deliver model answers). XiaoAI adds one ordinary checkbox template
+// for selecting multiple speakers.
+// The counts below cover templates in the ENTIRE generated client bundle,
+// not rendered controls or one channel file. When merging UI changes, combine
+// both additions: shared reply content contributes a switch and a checkbox;
+// XiaoAI contributes another checkbox, for global totals of 4 and 10.
 const contextEditorSource = await readFile(resolve(root, 'plugin-src/client/context-enhancement.js'), 'utf8');
 const deliverySettingsSource = await readFile(resolve(root, 'plugin-src/client/delivery-settings.js'), 'utf8');
 const emailSettingsSource = await readFile(resolve(root, 'plugin-src/client/channels/email/index.js'), 'utf8');
@@ -197,6 +219,10 @@ const deliverySyncSettingsSource = await readFile(
   resolve(root, 'plugin-src/client/delivery-sync-settings.js'),
   'utf8',
 );
+const xiaoaiClientSource = await readFile(
+  resolve(root, 'plugin-src/client/channels/xiaoai/index.js'),
+  'utf8',
+);
 const otherClientSources = clientSources
   .replace(contextEditorSource, '')
   .replace(deliverySettingsSource, '')
@@ -204,7 +230,8 @@ const otherClientSources = clientSources
   .replace(thinkingTracesSource, '')
   .replace(botGeneralSettingsSource, '')
   .replace(conversationDirectorySettingsSource, '')
-  .replace(deliverySyncSettingsSource, '');
+  .replace(deliverySyncSettingsSource, '')
+  .replace(xiaoaiClientSource, '');
 if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || (deliverySettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySettingsSource)
@@ -216,9 +243,11 @@ if (/role:\s*["']switch|type:\s*["']checkbox/.test(otherClientSources)
   || (conversationDirectorySettingsSource.match(/role:\s*["']switch["']/g) ?? []).length !== 1
   || (deliverySyncSettingsSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
   || /role:\s*["']switch["']/u.test(deliverySyncSettingsSource)
+  || (xiaoaiClientSource.match(/type:\s*["']checkbox["']/g) ?? []).length !== 1
+  || /role:\s*["']switch["']/u.test(xiaoaiClientSource)
   || (client.match(/role:\s*["']switch["']/g) ?? []).length !== 4
-  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 9) {
-  throw new Error('checkable inputs must be limited to context enhancement, Session sync, email settings, Telegram thinking traces, Feishu panel settings, reply content, conversation-directory settings, and the Delivery tab');
+  || (client.match(/type:\s*["']checkbox["']/g) ?? []).length !== 10) {
+  throw new Error('checkable inputs must be limited to context enhancement, Session sync, email settings, Telegram thinking traces, Feishu panel settings, reply content, conversation-directory settings, XiaoAI multi-speaker selection, and the Delivery tab');
 }
 for (const marker of ['bot.conversation-directory.set', 'bot.conversation-directory.default.set']) {
   if (!host.includes(marker) || !client.includes(marker)) {
@@ -234,7 +263,7 @@ if (!client.includes('container-type: inline-size')
   || !client.includes('@container (max-width: 680px)')) {
   throw new Error('client bundle does not contain the narrow-panel DingTalk QR layout');
 }
-for (const marker of ['/feishu', '/weixin', '/dingtalk', '/wecom', '/qq', '/slack', '/telegram', '/discord', '/whatsapp', '/matrix']) {
+for (const marker of ['/feishu', '/weixin', '/dingtalk', '/wecom', '/qq', '/slack', '/telegram', '/discord', '/whatsapp', '/matrix', '/xiaoai']) {
   if (!host.includes(marker)) {
     throw new Error(`host bundle does not contain the internal ${marker} RPC provider`);
   }

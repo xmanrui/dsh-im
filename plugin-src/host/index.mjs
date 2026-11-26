@@ -13,6 +13,7 @@ import { apply as applyWhatsapp } from './channels/whatsapp/index.mjs';
 import { apply as applyIMessage } from './channels/imessage/index.mjs';
 import { apply as applyEmail } from './channels/email/index.mjs';
 import { apply as applyMatrix } from './channels/matrix/index.mjs';
+import { apply as applyXiaoAI } from './channels/xiaoai/index.mjs';
 import { installOutboundArtifactTool } from '../../src/channels/shared/semantic/artifact.mjs';
 import { installHostLanguage } from './host-language.mjs';
 import { installHostLanguageRpc } from './host-language-rpc.mjs';
@@ -78,6 +79,7 @@ export function createImHostPlugin(internals = {}) {
   const startIMessage = internals.applyIMessage ?? applyIMessage;
   const startEmail = internals.applyEmail ?? applyEmail;
   const startMatrix = internals.applyMatrix ?? applyMatrix;
+  const startXiaoAI = internals.applyXiaoAI ?? applyXiaoAI;
   const channels = [
     ['feishu', startFeishu],
     ['weixin', startWeixin],
@@ -92,6 +94,7 @@ export function createImHostPlugin(internals = {}) {
     ['imessage', startIMessage],
     ['email', startEmail],
     ['matrix', startMatrix],
+    ['xiaoai', startXiaoAI],
     ['office', startOffice],
   ];
   return Object.freeze({

@@ -54,3 +54,43 @@ jobs:
           test/conversation-workspace-bind-recovery.test.mjs
           test/preset-workspaces.test.mjs
           test/channels/shared/qr-encoding.test.mjs
+
+  windows-xiaoai:
+    name: XiaoAI JSONL and Python (Windows, Python ${{ matrix.python }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.13']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: x64
+          cache: pip
+          cache-dependency-path: sidecar/requirements-windows.lock
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install --require-hashes --only-binary=:all: -r sidecar/requirements-windows.lock
+
+      - name: Test real Windows child transport and Python sidecar
+        shell: pwsh
+        run: |
+          $env:XIAOAI_TEST_PYTHON = (Get-Command python).Source
+          $env:TMPDIR = $env:RUNNER_TEMP
+          node --test test/xiaoai/*.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B test/xiaoai/sidecar_test.py
+          exit $LASTEXITCODE

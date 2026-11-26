@@ -212,6 +212,7 @@ test('the composed host serves other real channels while Feishu is loading and a
     'installUpdateRpc', 'installInboundTtlRpc', 'installDeliverySyncRpc', 'installDeliveryRpc', 'installDeliveryHttp',
     'installSessionSyncCoordinator', 'installHostLanguage', 'installHostLanguageRpc',
   ].map(name => [name, () => {}]));
+  internals.applyXiaoAI = async () => {};
   const fiber = f.start(createImHostPlugin(internals).apply, config);
   try {
     // Allow Cordis to enter its activation callback; Feishu stays gated.

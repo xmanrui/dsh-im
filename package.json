@@ -56,6 +56,7 @@
     "lib",
     "locale/*.json",
     "plugin-src",
+    "sidecar",
     "scripts/telegram-menu-scopes.mjs",
     "scripts/verify-interface-language.mjs",
     "scripts/verify-injected-context.mjs",
@@ -69,6 +70,7 @@
     "PROACTIVE_DELIVERY.en.md",
     "docs/client-integration.md",
     "docs/preset-workspaces.md",
+    "docs/xiaoai.md",
     "LICENSE",
     "README.md",
     "README.en.md",
@@ -102,7 +104,7 @@
   },
   "scripts": {
     "build": "node plugin-src/client/build.mjs && node plugin-src/host/build.mjs",
-    "test": "node --test test/*.test.mjs test/channels/*/*.test.mjs",
+    "test": "node --test test/*.test.mjs test/channels/*/*.test.mjs test/xiaoai/*.test.mjs",
     "check": "npm run build && npm test && node scripts/verify-package.mjs"
   },
   "engines": {

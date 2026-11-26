@@ -13,6 +13,7 @@ const CHANNELS = new Set([
   'whatsapp',
   'imessage',
   'matrix',
+  'xiaoai',
 ]);
 
 function isRecord(value) {
@@ -99,6 +100,8 @@ function matrixSuggestion(key) {
 export function deliverySuggestionFromConversationKey(channel, key) {
   if (!CHANNELS.has(channel) || typeof key !== 'string') return null;
   switch (channel) {
+    case 'xiaoai':
+      return simpleSuggestion(key, [['direct', 'device', 'deviceId']]);
     case 'weixin':
       return simpleSuggestion(key, [['p2p', 'user', 'toUserId']]);
     case 'feishu':
@@ -161,6 +164,7 @@ export function privateDeliverySuggestionFromConversationKey(channel, key) {
     discord: 'direct',
     whatsapp: 'direct',
     imessage: 'direct',
+    xiaoai: 'direct',
     matrix: 'dm',
   }[channel];
   if (!privatePrefix || prefix !== privatePrefix) return null;

@@ -1,0 +1,28 @@
+// User-facing XiaoAI Host messages. Product names remain unchanged.
+export default Object.freeze({
+  "旧密码清理写入失败，正在自动重试；运行时不使用该密码。": "Could not remove the legacy password; retrying automatically. The runtime does not use it.",
+  "需要重新登录小米账号": "Sign in to the Xiaomi account again",
+  "小米授权已失效，请在“小米账号接入”中重新登录并选择设备。": "Xiaomi authorization has expired. Sign in again under Xiaomi account setup and select the speakers.",
+  "请输入小米账号和密码": "Enter the Xiaomi account and password",
+  "请输入有效验证码": "Enter a valid verification code",
+  "请先完成小米登录": "Complete Xiaomi sign-in first",
+  "请选择设备并填写有效触发前缀": "Select a speaker and enter a valid trigger prefix",
+  "该账号的音箱仍在处理任务，请先停止任务再重新绑定": "Speakers on this account are still processing tasks. Stop them before binding again.",
+  "设备绑定未完成，请重试。": "Speaker binding did not complete. Try again.",
+  "请先停止设备当前任务再切换会话": "Stop the speaker's current task before switching sessions",
+  "请选择当前工作区的会话": "Select a session from the current workspace",
+  "设备尚未连接": "The speaker is not connected",
+  "小米云读取失败，正在重试": "Could not read Xiaomi cloud records; retrying",
+  "小米授权已失效，请在 XiaoAI 频道重新登录": "Xiaomi authorization has expired. Sign in again in the XiaoAI channel.",
+  "请在 DSH Web 会话中查看并处理审批；补充信息可用选项序号或其他文字回答。": "Review and handle approval in the DSH Web session. For clarification, reply with an option number or text.",
+  "入站消息持久化或接入失败，未确认的消息将重试": "Could not persist or dispatch the inbound message. Unacknowledged messages will be retried.",
+  "当前任务需要审批，请在 DSH Web 会话中查看操作详情并处理。": "This task requires approval. Review the action details in the DSH Web session.",
+  "播报所需的小米授权不可用，请在小米账号接入中重新登录。": "Xiaomi speech authorization is unavailable. Sign in again under Xiaomi account setup.",
+  "小米接口暂时限制播报请求，请稍后再试；未自动重播。": "Xiaomi is temporarily limiting speech requests. Try later; speech was not replayed automatically.",
+  "小米接口拒绝了播报，请查看设备卡片的播报诊断。": "Xiaomi rejected the speech request. Check speech diagnostics on the speaker card.",
+  "播报结果不确定，未自动重播；请查看设备卡片的播报诊断。": "The speech result is uncertain; it was not replayed automatically. Check the speaker card diagnostics.",
+  "请等待当前任务结束再修改触发前缀": "Wait for the current task to finish before changing the trigger prefix",
+  "请先在频道页面登录并选择设备。": "Sign in and select a speaker on the channel page first.",
+  "操作未完成，请检查登录状态、设备和当前会话后重试。": "The operation did not complete. Check sign-in, the speaker and the current session, then try again.",
+  "小米登录会话已过期，请重新登录。": "The Xiaomi sign-in session has expired. Sign in again."
+});

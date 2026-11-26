@@ -25,6 +25,7 @@ const CHANNELS = new Set([
   'imessage',
   'email',
   'matrix',
+  'xiaoai',
 ]);
 
 export function supportsDeliveryChannel(channel) {
@@ -81,6 +82,9 @@ function oneOf(value, choices) {
 
 function normalizeRoute(channel, kind, route) {
   switch (channel) {
+    case 'xiaoai':
+      oneOf(kind, ['device']);
+      return routeWithStrings(route, ['deviceId']);
     case 'weixin':
       oneOf(kind, ['user']);
       return routeWithStrings(route, ['toUserId']);

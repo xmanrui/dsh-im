@@ -300,3 +300,31 @@ The static avatar geometry and color palette in `plugin-src/client/ds-bot-avatar
    limitations under the License.
 
 ```
+
+## XiaoAI Python sidecar dependencies and protocol references
+
+The XiaoAI channel loads [MiService 3.0.1](https://github.com/Yonsm/MiService)
+(MIT, copyright 2021-2026 Yonsm) and aiohttp 3.14.4 (Apache-2.0), together
+with their transitive dependencies. Release builders install the matching
+packages under `sidecar/vendor/`; this generated directory is excluded from
+Git. Distributed packages must retain each dependency's `*.dist-info` license
+metadata. The Linux ARM64 CPython 3.13 inputs are pinned by
+`sidecar/requirements.lock` with SHA-256 hashes.
+The Windows x64 CPython 3.11 / 3.13 wheel inputs are pinned separately in
+`sidecar/requirements-windows.lock` with SHA-256 hashes from PyPI.
+
+The conversation-history request and passToken recovery approach reference
+[XiaoGPT](https://github.com/yihong0618/xiaogpt) (MIT, copyright 2023 yihong).
+The same-origin phone-confirmation redirect handling follows
+[MiService PR #64](https://github.com/Yonsm/MiService/pull/64) and the related
+[XiaoGPT discussion #623](https://github.com/yihong0618/xiaogpt/issues/623).
+The sidecar contains no XiaoGPT model client or model configuration.
+
+Model command identifiers reference the
+[MiGPT compatibility table](https://github.com/idootop/mi-gpt/blob/main/docs/compatibility.md)
+(MIT, copyright 2024 Del Wang) and were checked against the corresponding
+public [MIoT specifications](https://miot-spec.org/miot-spec-v2/instances?status=all).
+Per-model specification URLs are retained in `sidecar/device_profiles.json`.
+MiService, XiaoGPT and MiGPT use the MIT license terms reproduced above;
+the upstream repositories retain their full license notices. No MiGPT model
+runtime is bundled.

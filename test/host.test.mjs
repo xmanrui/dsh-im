@@ -10,7 +10,8 @@ const NO_CHANNELS = Object.freeze({
   applyFeishu: async () => {}, applyWeixin: async () => {}, applyDingtalk: async () => {},
   applyWecom: async () => {}, applyWecomApp: async () => {}, applyQq: async () => {},
   applySlack: async () => {}, applyDiscord: async () => {}, applyWhatsapp: async () => {},
-  applyIMessage: async () => {}, applyOffice: async () => {},
+  applyIMessage: async () => {}, applyEmail: async () => {}, applyMatrix: async () => {},
+  applyXiaoAI: async () => {}, applyOffice: async () => {},
 });
 
 test('Host forwards its management authority to both general settings and updates', async () => {
@@ -118,6 +119,7 @@ test('Host composes IM channels and the AI Office connector inside one plugin co
     applyDiscord: async (ctx, config) => calls.push(['discord', ctx, config]),
     applyWhatsapp: async (ctx, config) => calls.push(['whatsapp', ctx, config]),
     applyIMessage: async (ctx, config) => calls.push(['imessage', ctx, config]),
+    applyXiaoAI: async (ctx, config) => calls.push(['xiaoai', ctx, config]),
     applyOffice: async (ctx, config) => calls.push(['office', ctx, config]),
   });
   const ctx = { marker: 'shared-context' };
@@ -156,6 +158,7 @@ test('Host composes IM channels and the AI Office connector inside one plugin co
     ['discord', ctx, { groupByAgentPreset: true, ...config.discord, rpcAuthority: 'trusted-host', deliveryService }],
     ['whatsapp', ctx, { groupByAgentPreset: true, ...config.whatsapp, rpcAuthority: 'trusted-host', deliveryService }],
     ['imessage', ctx, { groupByAgentPreset: true, ...config.imessage, rpcAuthority: 'trusted-host', deliveryService }],
+    ['xiaoai', ctx, { groupByAgentPreset: true, rpcAuthority: 'trusted-host', deliveryService }],
     ['office', ctx, { groupByAgentPreset: true, ...config.office, rpcAuthority: 'trusted-host' }],
   ]);
 });
@@ -392,6 +395,7 @@ const CHANNELS = [
   ['imessage', 'applyIMessage'],
   ['email', 'applyEmail'],
   ['matrix', 'applyMatrix'],
+  ['xiaoai', 'applyXiaoAI'],
   ['office', 'applyOffice'],
 ];
 
