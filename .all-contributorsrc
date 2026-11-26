@@ -881,6 +881,22 @@
           "url": "https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05"
         }
       ]
+    },
+    {
+      "login": "starskyzheng",
+      "name": "starskyzheng",
+      "avatar_url": "https://avatars.githubusercontent.com/u/12579814",
+      "profile": "https://github.com/starskyzheng",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/534"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/534"
+        }
+      ]
     }
   ]
 }
