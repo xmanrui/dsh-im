@@ -37,14 +37,30 @@ function reply(rpcId, result) {
   return Response.json({ type: 'server-response', rpcId, result: value });
 }
 
+function resolveFetchRegistry(ctx) {
+  // `ctx.connection` may be a Cordis service proxy whose `fetch` is a getter.
+  // Reading it once inside try/catch both triggers the getter and tolerates a
+  // proxy that has not resolved yet; fall back to an explicitly resolved service.
+  const candidates = [];
+  try { candidates.push(ctx?.connection); } catch { /* unresolved proxy */ }
+  try { candidates.push(ctx?.get?.('connection')); } catch { /* service not ready */ }
+  for (const connection of candidates) {
+    if (!connection) continue;
+    let registry;
+    try { registry = connection.fetch; } catch { continue; }
+    if (typeof registry?.register === 'function') return registry;
+  }
+  return null;
+}
 /** Register an IM channel through the public /api carrier shared by supported DSH releases. */
 export function registerManagementRpc(ctx, channel, handler, { authority } = {}) {
   const policy = resolveRpcAuthority(authority);
   const endpoint = rpcEndpoint(channel);
-  if (typeof ctx?.connection?.fetch?.register !== 'function') {
+  const registry = resolveFetchRegistry(ctx);
+  if (typeof registry?.register !== 'function') {
     throw new TypeError('DSH Host Connection Fetch registry is required');
   }
-  return ctx.connection.fetch.register({
+  return registry.register({
     path: `/api/${endpoint}`,
     methods: ['POST'],
     requestBody: 'buffered',
