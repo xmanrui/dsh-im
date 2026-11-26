@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import test from 'node:test';
 
 import { WecomHarnessBridge } from '../../../src/channels/wecom/wecom-bridge.mjs';
@@ -81,9 +83,12 @@ test('task buttons return their result without appending menu cards or invoking 
 
 test('switching workspace returns its result without appending menu cards', async () => {
   let workspace = process.cwd();
+  // The menu only lists Workspaces that exist, so the second entry cannot be a
+  // POSIX-only path: /tmp is not a directory on Windows.
+  const other = realpathSync.native(tmpdir());
   const f = setup({ harness: {
     currentWorkspace: () => workspace,
-    listWorkspaces: async () => [process.cwd(), '/tmp'],
+    listWorkspaces: async () => [process.cwd(), other],
     switchWorkspace: async (path) => { workspace = path; return path; },
   } });
   await f.bridge.accept(f.frame('/menu'));

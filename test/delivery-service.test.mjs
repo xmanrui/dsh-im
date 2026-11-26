@@ -253,6 +253,28 @@ test('a Session delivery follows the binding instead of a configured target', as
     sent: false,
     reason: 'unroutable',
   });
+  assert.equal(sends.length, 2, 'no legacy key reached a chat');
+  assert.deepEqual(warnings, [
+    '[dsh-im] Session text was not delivered [unbound] session=session-unbound',
+    '[dsh-im] Session text was not delivered [unroutable] session=session-unroutable'
+      + ' channel=telegram conversationKey=unroutable-key',
+    '[dsh-im] Session text was not delivered [unroutable] session=session-legacy'
+      + ' channel=telegram conversationKey=direct:777:42',
+  ]);
+  assert.doesNotMatch(warnings.join('\n'), /body that must not be logged/);
+
+  await assert.rejects(service.deliverSessionText('', 'text'), { code: 'bad-request' });
+  await assert.rejects(service.deliverSessionText('session-topic', '   '), { code: 'bad-request' });
+  await assert.rejects(service.deliverSessionText('session-topic', 'text', { format: 'html' }), {
+    code: 'bad-request',
+  });
+  const abort = new AbortController();
+  abort.abort();
+  await assert.rejects(service.deliverSessionText('session-topic', 'text', { signal: abort.signal }), {
+    code: 'cancelled',
+  });
+  assert.equal(sends.length, 2);
+});
 
 test('deliverSessionText resolves a rolled-over DS Bot session through dsBot.status()', async () => {
   const service = createDeliveryService({
@@ -282,28 +304,7 @@ test('deliverSessionText resolves a rolled-over DS Bot session through dsBot.sta
     { signal: undefined },
   ]]);
 });
-  assert.equal(sends.length, 2, 'no legacy key reached a chat');
-  assert.deepEqual(warnings, [
-    '[dsh-im] Session text was not delivered [unbound] session=session-unbound',
-    '[dsh-im] Session text was not delivered [unroutable] session=session-unroutable'
-      + ' channel=telegram conversationKey=unroutable-key',
-    '[dsh-im] Session text was not delivered [unroutable] session=session-legacy'
-      + ' channel=telegram conversationKey=direct:777:42',
-  ]);
-  assert.doesNotMatch(warnings.join('\n'), /body that must not be logged/);
 
-  await assert.rejects(service.deliverSessionText('', 'text'), { code: 'bad-request' });
-  await assert.rejects(service.deliverSessionText('session-topic', '   '), { code: 'bad-request' });
-  await assert.rejects(service.deliverSessionText('session-topic', 'text', { format: 'html' }), {
-    code: 'bad-request',
-  });
-  const abort = new AbortController();
-  abort.abort();
-  await assert.rejects(service.deliverSessionText('session-topic', 'text', { signal: abort.signal }), {
-    code: 'cancelled',
-  });
-  assert.equal(sends.length, 2);
-});
 
 test('a group Session receives mirrored text but never a synced question or approval', async () => {
   const target = {
