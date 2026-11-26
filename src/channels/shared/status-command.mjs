@@ -91,8 +91,9 @@ function settledWithin(operation, timeoutMs) {
       resolve(value ?? null);
       return true;
     };
+    // Deliberately NOT unref'd: the bound is the only thing holding this call
+    // open, so the timer must keep the loop alive until it fires.
     const timer = setTimeout(() => finish(null), timeoutMs);
-    timer.unref?.();
     (async () => operation())().then(finish, () => finish(null));
   });
 }

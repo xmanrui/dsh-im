@@ -26,8 +26,9 @@ function abortReason(signal) {
 
 function delay(ms, signal) {
   return new Promise((resolve, reject) => {
+    // Deliberately NOT unref'd: a rate-limit backoff is the only thing the caller
+    // is waiting for, so the timer must keep the loop alive until it fires.
     const timer = setTimeout(resolve, Math.min(Math.max(ms, 0), 60_000));
-    timer.unref?.();
     const rejectAbort = () => {
       clearTimeout(timer);
       reject(abortReason(signal));

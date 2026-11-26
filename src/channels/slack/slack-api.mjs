@@ -132,8 +132,9 @@ function delay(ms, signal) {
       reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
       return;
     }
+    // Deliberately NOT unref'd: a rate-limit backoff is the only thing the caller
+    // is waiting for, so the timer must keep the loop alive until it fires.
     const timer = setTimeout(resolve, ms);
-    timer?.unref?.();
     signal?.addEventListener('abort', () => {
       clearTimeout(timer);
       reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
