@@ -512,7 +512,7 @@ test('Weixin remembers any authorized private inbound as a connection-test targe
   assert.equal(connectionTestTarget(rejectedFixture.state), null);
 });
 
-test('Weixin returns a registered result file with native context after its existing text path', async (t) => {
+test('Weixin returns a registered result file with native context before the final text', async (t) => {
   const artifact = await committedArtifact(t, 'result.txt', 'weixin-result');
   const fixture = stateFixture();
   fixture.sessions.set('p2p:owner-user', 'session-artifact');
@@ -552,7 +552,7 @@ test('Weixin returns a registered result file with native context after its exis
     { run_id: 'run-artifact' },
   ));
 
-  assert.deepEqual(order, ['text:结果文件已生成。', 'file:result.txt']);
+  assert.deepEqual(order, ['file:result.txt', 'text:结果文件已生成。']);
   assert.equal(bridge.status.artifactsSent, 1);
   assert.deepEqual(receipt, {
     schemaVersion: 1,
@@ -795,6 +795,60 @@ test('Weixin explains that an upload timeout happened before the file was sent',
     outcome: 'failed',
     reason: 'artifact-upload-timeout',
   }]);
+});
+
+test('Weixin defers overflow media and a 继续 reply flushes it without a new Agent turn', async (t) => {
+  const artifacts = [];
+  for (let index = 0; index < 10; index += 1) {
+    artifacts.push(await committedArtifact(t, `overflow-${index}.png`, PNG_BYTES));
+  }
+  const fixture = stateFixture();
+  fixture.sessions.set('p2p:owner-user', 'session-overflow');
+  const sent = [];
+  let asks = 0;
+  const bridge = new WeixinHarnessBridge({
+    api: {
+      inboundImages: () => [],
+      sendText: async ({ text, contextToken }) => {
+        sent.push({ type: 'text', text, contextToken });
+        return { messageId: `overflow-text-${sent.length}` };
+      },
+      sendImage: async ({ file, contextToken }) => {
+        sent.push({ type: 'image', name: file.fileName, contextToken });
+        return { messageId: `overflow-image-${sent.length}` };
+      },
+    },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_sessionId, _text, options) => {
+        asks += 1;
+        for (const artifact of artifacts) await options.onArtifact(artifact);
+        return '十张图片';
+      },
+    },
+    state: fixture.state,
+  });
+
+  await bridge.accept(message('weixin-overflow', '生成十张图片'));
+
+  assert.equal(asks, 1);
+  assert.equal(sent.filter((entry) => entry.type === 'image').length, 9);
+  assert.equal(sent.at(-1).type, 'text');
+  assert.match(sent.at(-1).text, /还有 2 条/);
+
+  await bridge.accept(message('weixin-overflow-continue', '继续', {
+    context_token: 'context-overflow-continue',
+  }));
+
+  assert.equal(asks, 1, '继续 must only flush pending output');
+  assert.equal(sent.filter((entry) => entry.type === 'image').length, 10);
+  assert.equal(sent.at(-2).type, 'image');
+  assert.equal(sent.at(-1).type, 'text');
+  assert.equal(sent.at(-1).text, '十张图片');
+  assert.equal(sent.at(-1).contextToken, 'context-overflow-continue');
 });
 
 test('Weixin sends image-only messages to Harness as structured content', async () => {

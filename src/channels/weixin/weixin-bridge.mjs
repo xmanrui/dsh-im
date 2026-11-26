@@ -63,15 +63,26 @@ import {
   prefetchInboundFiles,
 } from '../shared/inbound-file.mjs';
 import { rememberConnectionTestTarget } from '../shared/connection-test.mjs';
-import { deliverOutboundArtifacts } from '../shared/semantic/artifact-delivery.mjs';
+import {
+  materializeOutboundArtifact,
+  releaseOutboundArtifact,
+} from '../shared/semantic/artifact.mjs';
 import {
   hasReplyReference,
   promptContentForInboundMessage,
 } from '../shared/semantic/reply-reference.mjs';
 import {
+  createArtifactFailureReceipt,
   createDeliveryReceipt,
+  mergeDeliveryReceipts,
   providerMessageIdsFor,
 } from '../shared/semantic/delivery.mjs';
+import {
+  createReplyOutbox,
+  createSendBudget,
+  isContinueReply,
+  WeixinQuotaExceededError,
+} from './reply-outbox.mjs';
 import { recoverAssistantTextByTimestamp } from '../shared/session-reply-recovery.mjs';
 import {
   messageFailureDiagnostic,
@@ -325,6 +336,8 @@ export class WeixinHarnessBridge {
   #logger;
   #replyTimeoutMs;
   #maxMessageChars;
+  #sendBudget;
+  #replyOutbox;
   #typingKeepaliveMs;
   #signal;
   #queues = new Map();
@@ -380,6 +393,15 @@ export class WeixinHarnessBridge {
     this.#logger = logger;
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#maxMessageChars = maxMessageChars;
+    this.#sendBudget = createSendBudget();
+    this.#replyOutbox = createReplyOutbox({
+      budget: this.#sendBudget,
+      maxTextChars: maxMessageChars,
+      formatNotice: (count) => t(
+        '还有 {count} 条没发出：微信每条用户消息最多回复 10 条，回复「继续」接着发。',
+        { count },
+      ),
+    });
     this.#typingKeepaliveMs = typingKeepaliveMs;
     this.#signal = signal;
     this.#deferred = createDeferredDeliveryCoordinator({ harness, state, signal, logger,
@@ -814,6 +836,18 @@ export class WeixinHarnessBridge {
       const hasImages = hasInboundImages(promptMessage);
       const hasFiles = hasInboundFiles(promptMessage);
       const hasReply = hasReplyReference(promptMessage);
+      const resumed = this.#replyOutbox.resume(sender, contextToken);
+      if (resumed) {
+        try {
+          await resumed.sending;
+        } catch (error) {
+          this.#logger.warn?.('[dsh-weixin] failed to flush the deferred reply:', error);
+        }
+        if (resumed.asked && !hasImages && !hasFiles && !hasReply && isContinueReply(text)) {
+          await this.#state.markSeen(messageId);
+          return;
+        }
+      }
       if (!text && !hasImages && !hasFiles && !hasReply) {
         await this.#send(sender, t('目前支持文字、图片、文件，以及微信已转成文字的语音消息。'), contextToken, runId);
         await this.#state.markSeen(messageId);
@@ -981,25 +1015,17 @@ export class WeixinHarnessBridge {
       const answerText = typeof answer === 'string' && answer.trim()
         ? answer
         : artifacts.length > 0 ? t('结果文件已生成。') : answer;
-      let textDeliveryError = null;
-      let textReceipt = null;
-      try {
-        textReceipt = createDeliveryReceipt({
-          deliveryId: messageId,
-          presentation: 'weixin-text',
-          providerMessageIds: await this.#send(sender, answerText, contextToken, runId),
-        });
-      } catch (error) {
-        textDeliveryError = channelDeliveryFailure(error);
-      }
-      const delivery = await this.#deliverArtifacts(
-        sender,
-        messageId,
+      const {
+        textDeliveryError,
+        delivery,
+      } = await this.#deliverReplyWithOutbox({
+        toUserId: sender,
+        deliveryId: messageId,
+        text: answerText,
         artifacts,
         contextToken,
         runId,
-        textReceipt,
-      );
+      });
       if (textDeliveryError && !delivery.userVisible) throw textDeliveryError;
       if (textDeliveryError && delivery.artifactSendErrors === 0) {
         setLastMessageFailure(
@@ -1378,13 +1404,20 @@ export class WeixinHarnessBridge {
     ).catch(() => undefined);
   }
 
-  async #send(toUserId, text, contextToken, runId, { stopTyping = true } = {}) {
+  async #send(toUserId, text, contextToken, runId, {
+    stopTyping = true,
+    countBudget = true,
+    diagnostic,
+  } = {}) {
     if (stopTyping) await this.#stopTyping();
     contextToken ??= this.#state.contextTokenFor?.(toUserId);
     const providerMessageIds = [];
     const chunks = splitWeixinText(text, this.#maxMessageChars);
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
       const chunk = chunks[chunkIndex];
+      if (countBudget && !this.#sendBudget.consume(toUserId)) {
+        throw new WeixinQuotaExceededError();
+      }
       const sentAt = Date.now();
       try {
         const result = await this.#api.sendText({
@@ -1412,10 +1445,10 @@ export class WeixinHarnessBridge {
       } catch (error) {
         throw weixinSendError(error, {
           baseUrl: this.#baseUrl,
-          text,
+          text: diagnostic?.sourceText ?? text,
           chunk,
-          chunkIndex,
-          chunkCount: chunks.length,
+          chunkIndex: diagnostic?.chunkIndex ?? chunkIndex,
+          chunkCount: diagnostic?.chunkCount ?? chunks.length,
           maxMessageChars: this.#maxMessageChars,
           contextToken,
           runId,
@@ -1583,49 +1616,202 @@ export class WeixinHarnessBridge {
     return this.#startTyping(toUserId, contextToken);
   }
 
-  async #deliverArtifacts(toUserId, replyTo, artifacts, contextToken, runId, baseReceipt) {
-    const sendArtifact = (method, file) => this.#api[method]({
-      baseUrl: this.#baseUrl,
-      token: this.#token,
-      toUserId,
-      file,
-      contextToken,
-      runId,
-      signal: this.#signal,
-    });
-    const delivery = await deliverOutboundArtifacts({
-      artifacts,
-      baseReceipt,
-      deliveryId: replyTo,
-      aggregatePresentation: baseReceipt ? 'weixin-text-and-files' : 'weixin-files',
-      channelKey: 'weixin',
-      signal: this.#signal,
-      sendImage: typeof this.#api.sendImage === 'function'
-        ? (file) => sendArtifact('sendImage', file)
-        : undefined,
-      sendFile: typeof this.#api.sendFile === 'function'
-        ? (file) => sendArtifact('sendFile', file)
-        : undefined,
-      onFailure: (artifact, error) => setLastMessageFailure(this.#status, error, {
-        userMessage: artifactFailureText(artifact?.fileName, error),
-        reason: error?.code,
-      }),
-      sendFailureNotice: (_artifact, _error, failure) => this.#send(
+  async #deliverReplyWithOutbox({
+    toUserId,
+    deliveryId,
+    text,
+    artifacts,
+    contextToken,
+    runId,
+  }) {
+    const sentFiles = [];
+    const failureEntries = [];
+    const textMessageIds = [];
+    let artifactSendErrors = 0;
+    let userVisible = false;
+
+    const notifyArtifactFailure = async (failure, token) => {
+      const ids = await this.#send(
         toUserId,
         messageFailureText(failure),
-        contextToken,
+        token,
         runId,
-      ),
-      logger: this.#logger,
-    });
-    this.#status.artifactsSent = (this.#status.artifactsSent ?? 0)
-      + delivery.artifactsSent;
+        { stopTyping: false },
+      );
+      textMessageIds.push(...ids);
+      userVisible = true;
+      return ids;
+    };
+
+    const files = [];
+    for (const artifact of artifacts) {
+      try {
+        const file = await materializeOutboundArtifact(artifact, { signal: this.#signal });
+        files.push({ artifact, file });
+      } catch (error) {
+        if (this.#signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
+          throw error;
+        }
+        artifactSendErrors += 1;
+        const failure = setLastMessageFailure(this.#status, error, {
+          userMessage: artifactFailureText(artifact?.fileName, error),
+          reason: error?.code,
+        });
+        failureEntries.push({
+          artifactId: artifact?.artifactId ?? 'unknown',
+          deliveryId: artifact?.deliveryKey ?? artifact?.artifactId ?? 'unknown',
+          error,
+          failure,
+        });
+        releaseOutboundArtifact(artifact);
+      }
+    }
+
+    const sendFile = async ({ artifact, file }) => {
+      const request = {
+        baseUrl: this.#baseUrl,
+        token: this.#token,
+        toUserId,
+        file,
+        contextToken: this.#replyOutbox.contextToken(toUserId) ?? contextToken,
+        runId,
+        signal: this.#signal,
+      };
+      let presentation = file.mediaType?.startsWith('image/') ? 'image' : 'file';
+      try {
+        let result;
+        if (presentation === 'image' && typeof this.#api.sendImage === 'function') {
+          try {
+            result = await this.#api.sendImage(request);
+          } catch (error) {
+            if (this.#signal?.aborted
+              || error?.name === 'AbortError'
+              || error?.code === 'ABORT_ERR'
+              || error?.code === 'artifact-delivery-uncertain'
+              || typeof this.#api.sendFile !== 'function') throw error;
+            presentation = 'file';
+            result = await this.#api.sendFile(request);
+          }
+        } else if (typeof this.#api.sendFile === 'function') {
+          presentation = 'file';
+          result = await this.#api.sendFile(request);
+        } else {
+          const error = new Error('Native file delivery is unavailable');
+          error.code = 'artifact-provider-unavailable';
+          throw error;
+        }
+        sentFiles.push({ file, result, presentation });
+        return result;
+      } catch (error) {
+        if (this.#signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
+          throw error;
+        }
+        artifactSendErrors += 1;
+        const failure = setLastMessageFailure(this.#status, error, {
+          userMessage: artifactFailureText(file?.fileName, error),
+          reason: error?.code,
+        });
+        failureEntries.push({
+          artifactId: file?.artifactId ?? artifact?.artifactId ?? 'unknown',
+          deliveryId: file?.deliveryKey ?? artifact?.deliveryKey ?? 'unknown',
+          error,
+          failure,
+        });
+        return undefined;
+      } finally {
+        releaseOutboundArtifact(artifact);
+      }
+    };
+
+    const api = {
+      sendText: async (value, segment) => {
+        const ids = await this.#send(
+          toUserId,
+          value,
+          this.#replyOutbox.contextToken(toUserId) ?? contextToken,
+          runId,
+          { stopTyping: false, countBudget: false, diagnostic: segment },
+        );
+        textMessageIds.push(...ids);
+        return ids;
+      },
+      sendFile,
+    };
+
+    let textDeliveryError = null;
+    try {
+      await this.#replyOutbox.send(toUserId, text, files, api);
+    } catch (error) {
+      textDeliveryError = channelDeliveryFailure(error);
+    }
+
+    const failureReceipts = [];
+    for (const entry of failureEntries) {
+      let noticeIds = [];
+      if (this.#sendBudget.remaining(toUserId) > 0) {
+        try {
+          noticeIds = await notifyArtifactFailure(
+            entry.failure,
+            this.#replyOutbox.contextToken(toUserId) ?? contextToken,
+          );
+        } catch (noticeError) {
+          this.#logger.warn?.('[dsh-weixin] unable to send the artifact failure notice:', noticeError);
+        }
+      }
+      const failureReceipt = createArtifactFailureReceipt({
+        artifactId: entry.artifactId,
+        deliveryId: entry.deliveryId,
+        error: entry.error,
+        providerMessageIds: noticeIds,
+      });
+      failureReceipts.push(failureReceipt);
+      if (noticeIds.length > 0 || failureReceipt.artifacts[0]?.outcome === 'unknown') {
+        userVisible = true;
+      }
+    }
+    if (!textDeliveryError && textMessageIds.length > 0) userVisible = true;
+    if (sentFiles.length > 0) userVisible = true;
+
+    this.#status.artifactsSent = (this.#status.artifactsSent ?? 0) + sentFiles.length;
     this.#status.artifactSendErrors = (this.#status.artifactSendErrors ?? 0)
-      + delivery.artifactSendErrors;
+      + artifactSendErrors;
+
+    const receipts = [];
+    if (textMessageIds.length > 0) {
+      receipts.push(createDeliveryReceipt({
+        deliveryId,
+        presentation: 'weixin-text',
+        providerMessageIds: [...new Set(textMessageIds)],
+      }));
+    }
+    for (const sent of sentFiles) {
+      receipts.push(createDeliveryReceipt({
+        deliveryId: sent.file.deliveryKey,
+        presentation: `weixin-${sent.presentation}`,
+        providerMessageIds: providerMessageIdsFor(sent.result),
+        artifacts: [{ artifactId: sent.file.artifactId, outcome: 'sent' }],
+      }));
+    }
+    receipts.push(...failureReceipts);
+    let receipt = null;
+    if (receipts.length === 1) {
+      [receipt] = receipts;
+    } else if (receipts.length > 1) {
+      receipt = mergeDeliveryReceipts({
+        deliveryId,
+        presentation: textMessageIds.length > 0 ? 'weixin-text-and-files' : 'weixin-files',
+        receipts,
+      });
+    }
+
     return {
-      receipt: delivery.receipt,
-      userVisible: delivery.userVisible,
-      artifactSendErrors: delivery.artifactSendErrors,
+      textDeliveryError,
+      delivery: {
+        receipt,
+        userVisible,
+        artifactSendErrors,
+      },
     };
   }
+
 }
