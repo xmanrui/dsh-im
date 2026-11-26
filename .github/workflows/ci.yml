@@ -24,8 +24,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Runs before any build: these tests read the bundles committed in the tree,
+      # so they fail when a merged change edited plugin-src/ or src/ without
+      # rebuilding lib/. npm run check builds first, which hides exactly that.
+      - name: Committed bundles must match their source
+        run: >-
+          node --test test/client-i18n-bundle.test.mjs
+          test/host-language-bundle.test.mjs
+          test/package-client-inject.test.mjs
+
       - name: Run checks
         run: npm run check
+
+      # lib/index.js rebuilds byte-identically across machines (the 5.10.0 artifact
+      # reproduces exactly), so a host-side source edit that skipped the rebuild is
+      # caught here. lib/client.js is not reproducible across build environments,
+      # which the language-bundle test above covers by content instead.
+      - name: Committed host bundle must match a fresh build
+        run: git diff --exit-code -- lib/index.js
 
   windows-workspaces:
     name: Workspace and QR regression tests (Windows)
