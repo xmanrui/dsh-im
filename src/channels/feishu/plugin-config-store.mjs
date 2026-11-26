@@ -50,6 +50,7 @@ function normalizeBot(value, { legacy = false } = {}) {
     activated: value.activated ?? null,
     groupResponseMode: normalizeFeishuGroupResponseMode(value.groupResponseMode),
     mentionTopicReply: value.mentionTopicReply !== false,
+    menuOnNew: value.menuOnNew !== false,
     stepPush: value.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(value.stepPushMode),
     stepCardPanels: normalizeFeishuStepCardPanels(value.stepCardPanels),

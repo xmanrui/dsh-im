@@ -1857,6 +1857,67 @@ test('command replies in a topic group are threaded to the triggering message', 
   );
 });
 
+test('/new opens the assistant-center menu by default and stays text-only when disabled', async () => {
+  const make = (options, replied, fx) => new FeishuHarnessBridge({
+    client: {
+      im: { v1: { message: {
+        create: async () => ({ code: 0, data: { message_id: `om_created_${replied.length}` } }),
+        reply: async (request) => {
+          replied.push({
+            type: request.data.msg_type,
+            text: request.data.msg_type === 'text'
+              ? JSON.parse(request.data.content).text
+              : null,
+          });
+          return { code: 0, data: { message_id: `om_replied_${replied.length}` } };
+        },
+      } } },
+    },
+    channel: {},
+    harness: {
+      ensureRunning: async () => true,
+      sessionExists: async () => true,
+    },
+    state: fx.state,
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    ...options,
+  });
+
+  const fx = stateFixture([['p2p:ou_user', 'session-old']]);
+  const replied = [];
+  const bridge = make({}, replied, fx);
+  await bridge.accept(event('new-menu-default', '/new'));
+  await eventually(
+    () => replied.some(({ type }) => type === 'interactive'),
+    'the assistant-center menu was not sent after /new',
+  );
+  assert.ok(
+    replied.some(({ type, text }) => type === 'text' && text?.includes('已开启全新')),
+    'the /new text receipt must still be sent',
+  );
+  assert.equal(fx.sessions.has('p2p:ou_user'), false, 'the session must be unbound');
+
+  bridge.setMenuOnNew(false);
+  const beforeLive = replied.length;
+  await bridge.accept(event('new-menu-live-off', '/new'));
+  await eventually(() => replied.length > beforeLive, 'the /new receipt was not sent');
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(
+    replied.slice(beforeLive).filter(({ type }) => type === 'interactive').length,
+    0,
+    'a live menuOnNew=false must suppress the menu card',
+  );
+
+  const fxOff = stateFixture([['p2p:ou_user', 'session-old']]);
+  const repliedOff = [];
+  const bridgeOff = make({ menuOnNew: false }, repliedOff, fxOff);
+  await bridgeOff.accept(event('new-menu-ctor-off', '/new'));
+  await eventually(() => repliedOff.length > 0, 'the /new receipt was not sent');
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(repliedOff.map(({ type }) => type), ['text']);
+});
+
 test('bind confirmations from card actions are threaded to the card message', async (t) => {
   const created = [];
   const replied = [];

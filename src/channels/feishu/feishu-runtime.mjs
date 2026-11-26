@@ -117,6 +117,7 @@ export class FeishuRuntime {
   #botOpenId;
   #groupResponseMode;
   #mentionTopicReply;
+  #menuOnNew;
   #stepPush;
   #stepPushMode;
   #stepCardPanels;
@@ -173,6 +174,7 @@ export class FeishuRuntime {
     botOpenId,
     groupResponseMode,
     mentionTopicReply = true,
+    menuOnNew = true,
     stepPush = false,
     stepPushMode = 'post',
     stepCardPanels,
@@ -218,6 +220,7 @@ export class FeishuRuntime {
     this.#botOpenId = nonEmptyString(botOpenId);
     this.#groupResponseMode = normalizeFeishuGroupResponseMode(groupResponseMode);
     this.#mentionTopicReply = mentionTopicReply !== false;
+    this.#menuOnNew = menuOnNew !== false;
     this.#stepPush = stepPush === true;
     this.#stepPushMode = normalizeFeishuStepPushMode(stepPushMode);
     this.#stepCardPanels = normalizeFeishuStepCardPanels(stepCardPanels);
@@ -264,6 +267,11 @@ export class FeishuRuntime {
   setMentionTopicReply(value) {
     this.#mentionTopicReply = value !== false;
     this.#bridge?.setMentionTopicReply(this.#mentionTopicReply);
+  }
+
+  setMenuOnNew(value) {
+    this.#menuOnNew = value !== false;
+    this.#bridge?.setMenuOnNew(this.#menuOnNew);
   }
 
   setStepPush(value) {
@@ -390,6 +398,7 @@ export class FeishuRuntime {
         botOpenId: this.#botOpenId,
         groupResponseMode: this.#groupResponseMode,
         mentionTopicReply: this.#mentionTopicReply,
+        menuOnNew: this.#menuOnNew,
         stepPush: this.#stepPush,
         stepPushMode: this.#stepPushMode,
         stepCardPanels: this.#stepCardPanels,

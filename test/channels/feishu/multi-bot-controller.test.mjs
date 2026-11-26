@@ -304,6 +304,31 @@ test('mentionTopicReply persists and reaches the live runtime without reconnecti
   await fx.controller.close();
 });
 
+test('menuOnNew persists and reaches the live runtime without reconnecting', async () => {
+  const existing = bot('bot_menu_on_new', 'menu_on_new');
+  const fx = fixture({
+    bots: [existing],
+    secrets: { [existing.secretRef]: 'stable-secret' },
+  });
+  await fx.controller.initialize();
+
+  assert.equal(fx.controller.status().bots[0].menuOnNew, true);
+  const runtime = fx.runtimes.get(existing.id)[0];
+  const flags = [];
+  runtime.setMenuOnNew = (value) => flags.push(value);
+  const updated = await fx.controller.updateMenuOnNew(existing.id, false);
+
+  assert.equal(updated.bots[0].menuOnNew, false);
+  assert.equal(fx.configStore.getBot(existing.id).menuOnNew, false);
+  assert.deepEqual(flags, [false]);
+  assert.equal(fx.runtimes.get(existing.id).length, 1);
+  await assert.rejects(
+    fx.controller.updateMenuOnNew(existing.id, 'yes'),
+    /Invalid Feishu new-session menu flag/,
+  );
+  await fx.controller.close();
+});
+
 test('stepPush persists and reaches the live runtime without reconnecting', async () => {
   const existing = bot('bot_step_push', 'step_push');
   const fx = fixture({

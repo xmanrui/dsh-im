@@ -695,6 +695,13 @@ export class FeishuHarnessBridge {
    * session and answers it in the main feed.
    */
   #mentionTopicReply = true;
+  /**
+   * When true (the default), `/new` opens the assistant-center menu after the
+   * receipt, so the fresh session can pick its session, workspace, preset and
+   * model in one place. Turning it off keeps `/new` a plain text receipt, as on
+   * the other channels.
+   */
+  #menuOnNew = true;
   /** When true, streaming turns push tool calls and interim notes as discrete messages. */
   #stepPush = false;
   /** Step push presentation: discrete posts, a CardKit card, or native live CoT. */
@@ -773,6 +780,7 @@ export class FeishuHarnessBridge {
     botOpenId,
     groupResponseMode = FEISHU_GROUP_RESPONSE_MODES.ALL,
     mentionTopicReply = true,
+    menuOnNew = true,
     stepPush = false,
     stepPushMode = FEISHU_STEP_PUSH_MODES.POST,
     stepCardPanels,
@@ -836,6 +844,7 @@ export class FeishuHarnessBridge {
     this.#botOpenId = nonEmptyString(botOpenId);
     this.#groupResponseMode = normalizeFeishuGroupResponseMode(groupResponseMode);
     this.#mentionTopicReply = mentionTopicReply !== false;
+    this.#menuOnNew = menuOnNew !== false;
     this.#stepPush = stepPush === true;
     this.#stepPushMode = normalizeFeishuStepPushMode(stepPushMode);
     this.#stepCardPanels = normalizeFeishuStepCardPanels(stepCardPanels);
@@ -971,6 +980,10 @@ export class FeishuHarnessBridge {
 
   setMentionTopicReply(value) {
     this.#mentionTopicReply = value !== false;
+  }
+
+  setMenuOnNew(value) {
+    this.#menuOnNew = value !== false;
   }
 
   setStepPush(value) {
@@ -1901,7 +1914,9 @@ export class FeishuHarnessBridge {
         state: this.#state, harness: this.#harness, key,
         title: newCommandTitle(commandText),
       }), { replyTo: event.message.message_id });
-      await this.#sendMenuCard(key, event.message.chat_id, { replyTo: event.message.message_id });
+      if (this.#menuOnNew) {
+        await this.#sendMenuCard(key, event.message.chat_id, { replyTo: event.message.message_id });
+      }
       return;
     }
     if (commandText === '/status') {

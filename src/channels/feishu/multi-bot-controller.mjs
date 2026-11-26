@@ -789,6 +789,20 @@ export class MultiBotDshFeishuController {
     }));
   }
 
+  async updateMenuOnNew(botId, menuOnNew) {
+    this.#assertOpen();
+    if (typeof menuOnNew !== 'boolean') {
+      throw new TypeError('Invalid Feishu new-session menu flag');
+    }
+    return this.#serializeConfig(() => this.#withBotTransition(botId, async () => {
+      const config = this.#requireBot(botId);
+      const saved = await this.#configStore.saveBot({ ...config, menuOnNew });
+      this.#runtimes.get(botId)?.setMenuOnNew?.(saved.menuOnNew);
+      this.#touch();
+      return this.status(botId);
+    }));
+  }
+
   async updateSlashPanel(botId, slashPanel) {
     this.#assertOpen();
     if (!isSlashPanelConfig(slashPanel)) {
@@ -930,6 +944,7 @@ export class MultiBotDshFeishuController {
         configured: true,
         groupResponseMode: normalizeFeishuGroupResponseMode(config.groupResponseMode),
         mentionTopicReply: config.mentionTopicReply !== false,
+        menuOnNew: config.menuOnNew !== false,
         stepPush: config.stepPush === true,
         stepPushMode: normalizeFeishuStepPushMode(config.stepPushMode),
         stepCardPanels: normalizeFeishuStepCardPanels(config.stepCardPanels),
