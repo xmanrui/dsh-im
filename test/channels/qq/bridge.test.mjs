@@ -22,6 +22,9 @@ import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   configuredAccessPolicy,
 } from '../access-policy-fixture.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 function deferred() {
   let resolve;

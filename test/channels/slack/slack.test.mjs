@@ -27,6 +27,9 @@ import {
   SLACK_ENDPOINTS,
   createSlackRpcHandler,
 } from '../../../plugin-src/host/channels/slack/rpc.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 const BOT_TOKEN = `xoxb-${'0'.repeat(24)}-not-a-real-token`;
 const APP_TOKEN = `xapp-${'0'.repeat(24)}-not-a-real-token`;

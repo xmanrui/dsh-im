@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { beginStatusReaction } from '../../../src/channels/shared/status-reaction.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 test('status reaction replaces processing with the successful terminal reaction in order', async () => {
   const calls = [];

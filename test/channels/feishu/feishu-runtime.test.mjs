@@ -4,6 +4,9 @@ import { FeishuRuntime } from '../../../src/channels/feishu/feishu-runtime.mjs';
 import { FeishuHarnessBridge } from '../../../src/channels/feishu/bridge.mjs';
 import { rememberConnectionTestTarget } from '../../../src/channels/shared/connection-test.mjs';
 import { createSessionSyncCoordinator } from '../../../plugin-src/host/session-sync-coordinator.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 class FakeClient {
   static instances = [];

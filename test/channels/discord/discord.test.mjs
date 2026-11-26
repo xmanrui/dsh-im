@@ -26,6 +26,9 @@ import {
   DISCORD_ENDPOINTS,
   createDiscordRpcHandler,
 } from '../../../plugin-src/host/channels/discord/rpc.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 const TOKEN = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OQ.ABCD.abcdefghijklmnopqrstuvwxyz123456';
 

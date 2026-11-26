@@ -12,6 +12,9 @@ import {
 } from '../../../src/channels/shared/harness-client.mjs';
 import { HarnessClient, HarnessReplyTracker } from '../../../src/channels/weixin/harness-client.mjs';
 import { WhatsappHarnessClient } from '../../../src/channels/whatsapp/harness-client.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 test('all legacy channel clients now use the shared Harness RPC transport', async () => {
   const channelClients = [

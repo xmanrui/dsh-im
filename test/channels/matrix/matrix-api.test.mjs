@@ -12,6 +12,9 @@ import {
   performMatrixPasswordLogin,
   validateMatrixHomeserver,
 } from '../../../src/channels/matrix/matrix-api.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 const HOME = 'https://matrix.example.org';
 

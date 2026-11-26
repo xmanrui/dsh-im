@@ -10,6 +10,9 @@ import {
   createTextBridgeStatus,
   TextHarnessBridge,
 } from '../../../src/channels/shared/text-harness-bridge.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 const SESSION_ID = 'session-abcdef1234567890';
 const WORKSPACE = '/home/wings/project';

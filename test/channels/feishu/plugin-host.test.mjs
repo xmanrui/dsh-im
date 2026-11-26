@@ -16,6 +16,9 @@ import {
   createProvisioningBackedController,
 } from '../../../plugin-src/host/channels/feishu/index.mjs';
 import { assertPathMatches, toPosixPath } from '../../support/filesystem.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 const signal = () => new AbortController().signal;
 

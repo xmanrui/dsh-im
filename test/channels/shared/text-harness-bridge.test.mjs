@@ -24,6 +24,9 @@ import { SlackHarnessBridge } from '../../../src/channels/slack/slack-bridge.mjs
 import { TelegramHarnessBridge } from '../../../src/channels/telegram/telegram-bridge.mjs';
 import { TelegramBotClient } from '../../../src/channels/telegram/telegram-runtime.mjs';
 import { WhatsappHarnessBridge } from '../../../src/channels/whatsapp/whatsapp-bridge.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 function deferred() {
   let resolve;

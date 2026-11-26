@@ -3,6 +3,9 @@ import test from 'node:test';
 
 import { DingtalkRuntime } from '../../../src/channels/dingtalk/dingtalk-runtime.mjs';
 import { rememberConnectionTestTarget } from '../../../src/channels/shared/connection-test.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 async function eventually(predicate, timeoutMs = 1_000) {
   const deadline = Date.now() + timeoutMs;

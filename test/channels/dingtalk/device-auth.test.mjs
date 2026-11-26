@@ -5,6 +5,9 @@ import {
   DingtalkDeviceAuth,
   DingtalkDeviceAuthError,
 } from '../../../src/channels/dingtalk/device-auth.mjs';
+import { keepEventLoopAlive } from '../../helpers/loop-keeper.mjs';
+
+keepEventLoopAlive();
 
 function fetchFixture(responses) {
   const calls = [];
