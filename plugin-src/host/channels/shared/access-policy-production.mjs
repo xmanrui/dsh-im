@@ -104,6 +104,15 @@ export function initialAccessPolicyFor(channel, config = {}) {
  */
 export function newBotAccessPolicyFor(channel, config = {}) {
   const key = String(channel ?? '').trim().toLowerCase();
+  // New Telegram bots must not implicitly admit every group participant.
+  // Saved policies and the legacy migration path deliberately remain unchanged.
+  if (key === 'telegram') {
+    const users = cleanIds(config.allowedUsers);
+    return createAccessPolicy({
+      direct: allowlistScope(users),
+      group: allowlistScope(users),
+    });
+  }
   if (key === 'feishu' || key === 'qq') {
     return createAccessPolicy({ direct: openScope(), group: openScope() });
   }
