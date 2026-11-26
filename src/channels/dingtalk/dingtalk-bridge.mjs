@@ -1432,6 +1432,15 @@ export class DingtalkHarnessBridge {
         cardStarted = await cardStream.start(t(CARD_INITIAL_TEXT));
         if (cardStarted) cardStartedAt = startedAt;
       }
+      try {
+        await this.#state.rememberAuthor?.(key, {
+          senderId: sender,
+          senderName: message.senderNick,
+          isBot: message.senderIsBot === true,
+        });
+      } catch (error) {
+        this.#logger.warn?.('[dsh-dingtalk] failed to remember the conversation author:', error);
+      }
       const { answer, artifacts = [] } = await askInWorkspaceSession({
         onNotice: (notice) => this.#send(sessionWebhook, notice, this.#atUsersFor(message)),
         deferredDelivery: () => ({ coordinator: this.#deferred, target: { ...cardTarget(message, sender), robotCode: this.#clientId } }),
