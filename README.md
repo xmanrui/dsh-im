@@ -584,6 +584,7 @@ dsh web --trusted-host dsh.example.com
     </tr>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/zaakirio" title="zaakirio"><img src="https://avatars.githubusercontent.com/u/90780598?s=80" width="80" alt="zaakir"/><br /><sub><b>zaakir</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05" title="Code">💻</a> <a href="https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05" title="Documentation">📖</a> <a href="https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05" title="Tests">⚠️</a> <a href="https://github.com/xmanrui/dsh-im/commit/dcd7cd64d80bd246e5e85912a7ee62a2d4572c05" title="Translation">🌍</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/starskyzheng" title="starskyzheng"><img src="https://avatars.githubusercontent.com/u/12579814?s=80" width="80" alt="starskyzheng"/><br /><sub><b>starskyzheng</b></sub></a><br /><a href="https://github.com/xmanrui/dsh-im/pull/534" title="Code">💻</a> <a href="https://github.com/xmanrui/dsh-im/pull/534" title="Tests">⚠️</a></td>
     </tr>
   </tbody>
 </table>
