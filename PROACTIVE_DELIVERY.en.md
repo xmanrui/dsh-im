@@ -2,7 +2,7 @@
 
 [简体中文](PROACTIVE_DELIVERY.md) · **English**
 
-Proactive delivery lets an application send a text message through a bot connected to DSH-IM without waiting for a new user message. The caller stores only a stable `botId + targetId` pair—never a Harness `sessionId`, chat reference, message ID, or temporary webhook.
+Proactive delivery lets an application send a text message through a bot connected to DSH-IM without waiting for a new user message. Sending a new message requires a stable `botId + targetId` pair. To update a Feishu card from the same Host, keep the signed receipt and target key returned when the card was created.
 
 All nine built-in channels support proactive delivery: Weixin, Feishu, DingTalk, WeCom, QQ, Slack, Telegram, Discord, and WhatsApp.
 
@@ -166,6 +166,20 @@ The body accepts the required `botId`, `targetId`, and `text` fields, plus optio
 The fixed endpoint is `POST /api/dsh-im/delivery/messages`. It reuses the current DSH Host WebServer and does not open another port. Port `3080` is the default for the Web profile; use the address printed by the running Host when it differs.
 
 The HTTP endpoint currently has no authentication and does not provide CORS. Use it only on the local machine or a trusted network; never expose it directly to the public internet.
+
+## Update a Feishu card from the same Host
+
+A Host plugin can create a card in a saved Feishu/Lark group or DM and update that message as new information arrives. The body displays the supplied text literally, including line breaks.
+
+```js
+const { targetKey } = await ctx.dshIm.describeCardTarget(botId, targetId, { signal });
+const { receipt } = await ctx.dshIm.deliverCard(botId, targetId, firstText, { targetKey, signal });
+await ctx.dshIm.deliverCard(botId, targetId, updatedText, { targetKey, receipt, signal });
+```
+
+Both writes confirm success with `{ sent: true, receipt }`. Keep the entire receipt with its `targetKey`. The key identifies the verified account and the saved destination. Editing the route invalidates the previous key. The receipt authenticates the exact message ID and key, and remains usable across remounts of the same loaded module. Reloading the IM module or restarting the Host rotates its in-memory signing key. An old or modified receipt fails with `error.code === 'invalid-card-receipt'`.
+
+`error.dispatched === false` means the message SDK write never started. Once it starts, a missing confirmation, timeout or cancellation raises `send-result-unknown`. Preserve the existing binding on failure. Retrying a create after an uncertain result can produce a duplicate.
 
 ## Send from a plugin in the same Host
 

@@ -417,14 +417,23 @@ export function createDeliveryAdapter({
         throw Object.assign(new Error('capability-unavailable'), { code: 'capability-unavailable' });
       return coreController.replyChecked(botId, route, text, options);
     },
-    describeAccount: (botId) => {
+    describeAccount: (botId, options) => {
       if (typeof coreController.describeDeliveryAccount !== 'function') {
         const error = new Error('Verified account capability unavailable');
         error.code = 'capability-unavailable';
         throw error;
       }
-      return coreController.describeDeliveryAccount(botId);
+      return coreController.describeDeliveryAccount(botId, options);
     },
+    ...(channel === 'feishu' && typeof coreController.deliverProactiveCard === 'function' ? {
+      // The synchronous read is repeated inside the SDK dispatch callback, after
+      // every await that could have allowed an edit to the saved target.
+      cardTargetFor(botId, targetId) {
+        const target = workspaces.deliveryTargetFor(botId, targetId);
+        return target && normalizeDeliveryTarget(channel, targetWithoutSessionSync(target));
+      },
+      sendCard: (botId, text, options) => coreController.deliverProactiveCard(botId, text, options),
+    } : {}),
     ownsBot: (botId) => workspaces.has(botId),
     listBots: () => workspaces.listBotIds(),
     listDsBotBindings: () => workspaces.listDsBotBindings().filter(({ conversationKey }) => (
