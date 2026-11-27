@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { normalizeDeliveryTarget } from './delivery-adapter.mjs';
 import { deliverySuggestionFromConversationKey } from './delivery-suggestions.mjs';
 import { COMPETITIVE_APPROVAL_CHANNELS } from '../../src/channels/shared/harness-approval.mjs';
@@ -9,6 +9,9 @@ const BOT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const TARGET_ID_PATTERN = /^[A-Za-z0-9._:@-]{1,128}$/;
 const CHANNEL_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const DRAFT_TARGET_ID = '__test__';
+const CARD_HASH = /^[a-f0-9]{64}$/;
+const CARD_MESSAGE_ID = /^[A-Za-z0-9_-]{1,512}$/;
+const cardReceiptKey = randomBytes(32);
 
 const ADAPTER_METHODS = Object.freeze([
   'ownsBot',
@@ -36,6 +39,7 @@ const DELIVERY_ERROR_CODES = new Set([
   'unknown-target',
   'target-conflict',
   'invalid-target',
+  'invalid-card-receipt',
   'bot-not-connected',
   'target-rejected',
   'delivery-failed',
@@ -690,6 +694,107 @@ export class DeliveryService {
       ...options, signal: options.signal ? AbortSignal.any([options.signal, registration.controller.signal]) : registration.controller.signal,
     }); }
     catch (error) { throw publicOperationError(error); }
+  }
+
+  async #cardRegistration(botId, signal) {
+    cancellation(signal);
+    const registration = await this.#checkedRegistrationFor(botId);
+    const { adapter } = registration;
+    if (adapter.channel !== 'feishu' || typeof adapter.sendCard !== 'function'
+      || typeof adapter.cardTargetFor !== 'function' || typeof adapter.describeAccount !== 'function') {
+      throw deliveryError('capability-unavailable');
+    }
+    return registration;
+  }
+
+  #cardTarget(registration, botId, targetId, fingerprint, signal) {
+    cancellation(signal);
+    this.#assertRegistered(registration);
+    if (typeof fingerprint !== 'string' || !CARD_HASH.test(fingerprint)) throw deliveryError('account-unverified');
+    const target = registration.adapter.cardTargetFor(botId, targetId);
+    if (!target) throw deliveryError('unknown-target');
+    if (target.targetId !== targetId) throw deliveryError('target-changed');
+    const targetKey = createHash('sha256').update(JSON.stringify([
+      'feishu-card-v1', botId, targetId, fingerprint, target.kind, target.route,
+    ])).digest('hex');
+    return { target, targetKey };
+  }
+
+  async describeCardTarget(botId, targetId, { signal } = {}) {
+    try {
+      const id = botIdOf(botId);
+      const alias = targetIdOf(targetId);
+      const registration = await this.#cardRegistration(id, signal);
+      const lifetime = registration.controller.signal;
+      const account = await registration.adapter.describeAccount(id, {
+        signal: signal ? AbortSignal.any([signal, lifetime]) : lifetime,
+      });
+      if (account?.version !== 1 || !account.capabilities?.includes('proactive-card-checked')) {
+        throw deliveryError('capability-unavailable');
+      }
+      const { targetKey } = this.#cardTarget(registration, id, alias, account.account?.fingerprint, signal);
+      return { targetKey };
+    } catch (error) {
+      const code = signal?.aborted || error?.name === 'AbortError' ? 'cancelled' : publicOperationError(error).code;
+      throw Object.assign(deliveryError(code), { dispatched: false });
+    }
+  }
+
+  #cardProof(targetKey, messageId) {
+    return createHmac('sha256', cardReceiptKey).update(JSON.stringify([targetKey, messageId])).digest('hex');
+  }
+
+  #cardMessageId(targetKey, receipt) {
+    if (receipt === undefined) return undefined;
+    // Capture primitive values once. The caller can retain and mutate the input
+    // object while account verification or the bot transition is in progress.
+    const { version, targetKey: boundKey, messageId, proof } = receipt ?? {};
+    if (!receipt || Object.keys(receipt).length !== 4
+      || !['version', 'messageId', 'targetKey', 'proof'].every((field) => Object.hasOwn(receipt, field))
+      || version !== 1 || boundKey !== targetKey || typeof messageId !== 'string' || !CARD_MESSAGE_ID.test(messageId)
+      || typeof proof !== 'string' || !CARD_HASH.test(proof)
+      || !timingSafeEqual(Buffer.from(proof, 'hex'), Buffer.from(this.#cardProof(targetKey, messageId), 'hex'))) {
+      throw deliveryError('invalid-card-receipt');
+    }
+    return messageId;
+  }
+
+  async deliverCard(botId, targetId, text, options = {}) {
+    let dispatched = false;
+    try {
+      if (!options || typeof options !== 'object' || Array.isArray(options) || !Object.hasOwn(options, 'targetKey')
+        || Object.keys(options).some((field) => !['targetKey', 'receipt', 'signal'].includes(field))) {
+        throw deliveryError('bad-request');
+      }
+      const { targetKey, receipt, signal } = options;
+      const id = botIdOf(botId);
+      const alias = targetIdOf(targetId);
+      if (typeof text !== 'string' || !text.trim() || typeof targetKey !== 'string' || !CARD_HASH.test(targetKey)) {
+        throw deliveryError('bad-request');
+      }
+      const messageId = this.#cardMessageId(targetKey, receipt);
+      const registration = await this.#cardRegistration(id, signal);
+      const lifetime = registration.controller.signal;
+      const resultId = await registration.adapter.sendCard(id, text, {
+        signal: signal ? AbortSignal.any([signal, lifetime]) : lifetime,
+        messageId,
+        resolveTarget: (fingerprint) => {
+          const current = this.#cardTarget(registration, id, alias, fingerprint, signal);
+          if (current.targetKey !== targetKey) throw deliveryError('target-changed');
+          return current.target;
+        },
+        onDispatch: () => { dispatched = true; },
+      });
+      if (!dispatched || typeof resultId !== 'string' || !CARD_MESSAGE_ID.test(resultId)
+        || (messageId !== undefined && messageId !== resultId)) throw deliveryError('send-result-unknown');
+      return { sent: true, receipt: { version: 1, targetKey, messageId: resultId, proof: this.#cardProof(targetKey, resultId) } };
+    } catch (error) {
+      // A rejection, abort, or timeout following an SDK call must never be
+      // classified as safe for a second create. Keep SDK errors and secrets private.
+      const code = dispatched && error?.code !== 'target-rejected' ? 'send-result-unknown'
+        : options?.signal?.aborted || error?.name === 'AbortError' ? 'cancelled' : publicOperationError(error).code;
+      throw Object.assign(deliveryError(code), { dispatched });
+    }
   }
 
   async sendChecked(botId, targetId, text, { expectedFingerprint, expectedTargetDigest, signal, format = 'plain', receipt = false } = {}) {

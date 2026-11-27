@@ -731,6 +731,42 @@ export class FeishuRuntime {
     }, options);
   }
 
+  async deliverProactiveCard(text, { signal, account, resolveTarget, messageId, onDispatch }) {
+    if (this.#appId !== account.appId || this.#botOpenId !== account.botOpenId || this.#domain !== account.domain) {
+      throw probeError('account-changed', 'account-changed');
+    }
+    const client = this.#client;
+    if (!this.#status.ready || !client) throw probeError('bot-not-connected', 'bot-not-connected');
+    const activeSignal = AbortSignal.any([signal, this.#abortController.signal]);
+    const content = JSON.stringify({
+      config: { update_multi: true },
+      elements: [{ tag: 'div', text: { tag: 'plain_text', content: text } }],
+    });
+    let target;
+    const response = await waitForFeishuOperation(() => {
+      target = resolveTarget();
+      if (messageId !== undefined) {
+        onDispatch();
+        return client.im.v1.message.patch({ path: { message_id: messageId }, data: { content } });
+      }
+      const group = target.kind === 'group';
+      const request = {
+        params: { receive_id_type: group ? 'chat_id' : 'open_id' },
+        data: { receive_id: group ? target.route.chatId : target.route.openId,
+          msg_type: 'interactive', content, uuid: randomUUID() },
+      };
+      onDispatch();
+      return client.im.v1.message.create(request);
+    }, { signal: activeSignal, timeoutMs: this.#requestTimeoutMs, stage: 'proactive card delivery' });
+    if (typeof response?.code !== 'number') throw probeError('send-result-unknown', 'send-result-unknown');
+    if (response.code !== 0) throw probeError('target-rejected', 'target-rejected');
+    if (messageId !== undefined) return messageId;
+    if (target.kind === 'group' && response.data?.chat_id !== target.route.chatId) {
+      throw probeError('send-result-unknown', 'send-result-unknown');
+    }
+    return response.data?.message_id;
+  }
+
   async sendProactiveText(target, text, { signal, format = 'plain', receipt = false } = {}) {
     if (!this.#status.ready || !this.#client) {
       const error = new Error('飞书机器人尚未连接');

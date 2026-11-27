@@ -151,6 +151,8 @@ export function createImHostPlugin(internals = {}) {
           describeConversationSync: (sessionId) => deliveryService.describeConversationSync(sessionId),
           describeBot: (botId) => deliveryService.describeBot(botId),
           sendChecked: (botId, targetId, text, options) => deliveryService.sendChecked(botId, targetId, text, options),
+          describeCardTarget: (botId, targetId, options) => deliveryService.describeCardTarget(botId, targetId, options),
+          deliverCard: (botId, targetId, text, options) => deliveryService.deliverCard(botId, targetId, text, options),
           send: (botId, targetId, text, options) => (
             deliveryService.send(botId, targetId, text, options)
           ),

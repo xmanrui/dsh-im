@@ -579,13 +579,17 @@ export class MultiBotDshFeishuController {
     });
   }
 
-  async #deliveryAccount(config) {
+  async #deliveryAccount(config, signal) {
     let verified;
     try {
+      signal?.throwIfAborted();
       const resolved = await this.#credentials.resolve(config.secretRef);
+      signal?.throwIfAborted();
       if (!resolved?.value) throw new Error('Account credentials unavailable');
-      verified = await this.#verifyApp({ appId: config.appId, appSecret: resolved.value, domain: config.domain });
+      verified = await this.#verifyApp({ appId: config.appId, appSecret: resolved.value, domain: config.domain,
+        ...(signal ? { signal } : {}) });
     } catch (cause) {
+      signal?.throwIfAborted();
       const error = new Error('Account credentials could not be verified', { cause });
       error.code = 'account-unverified';
       throw error;
@@ -601,16 +605,16 @@ export class MultiBotDshFeishuController {
     return { fingerprint, ...(verified.name ? { name: verified.name } : {}) };
   }
 
-  async describeDeliveryAccount(botId) {
+  async describeDeliveryAccount(botId, { signal } = {}) {
     this.#assertOpen('capability-unavailable');
     return this.#withBotTransition(botId, async () => {
       this.#assertOpen('capability-unavailable');
       const config = this.#requireBot(botId);
-      const account = await this.#deliveryAccount(config);
+      const account = await this.#deliveryAccount(config, signal);
       this.#assertOpen('capability-unavailable');
       return { version: 1, botId, channel: 'feishu', account,
         connected: isConnected(connectionStatus(this.#runtimes.get(botId))),
-        capabilities: ['proactive-text-checked', 'proactive-receipt-checked', 'exclusive-text-consumer', 'reply-text-checked', 'history-text-checked', 'thread-history-text-checked'] };
+        capabilities: ['proactive-text-checked', 'proactive-receipt-checked', 'proactive-card-checked', 'exclusive-text-consumer', 'reply-text-checked', 'history-text-checked', 'thread-history-text-checked'] };
     });
   }
 
@@ -686,6 +690,32 @@ export class MultiBotDshFeishuController {
         || typeof runtime.replyChecked !== 'function')
         throw Object.assign(new Error('capability-unavailable'), { code: 'capability-unavailable' });
       return runtime.replyChecked(route, text, { signal });
+    });
+  }
+
+  async deliverProactiveCard(botId, text, { signal, resolveTarget, messageId, onDispatch }) {
+    return this.#withBotTransition(botId, async () => {
+      this.#assertOpen('capability-unavailable');
+      signal.throwIfAborted();
+      const config = this.#requireBot(botId);
+      const account = await this.#deliveryAccount(config, signal);
+      this.#assertOpen('capability-unavailable');
+      signal.throwIfAborted();
+      const runtime = this.#runtimes.get(botId);
+      if (!isConnected(connectionStatus(runtime)) || typeof runtime.deliverProactiveCard !== 'function') {
+        throw Object.assign(new Error('bot-not-connected'), { code: 'bot-not-connected' });
+      }
+      return runtime.deliverProactiveCard(text, {
+        signal, messageId, onDispatch,
+        account: { appId: config.appId, domain: config.domain, botOpenId: config.botOpenId },
+        resolveTarget: () => {
+          this.#assertOpen('capability-unavailable');
+          if (externalAccountOwnership(this.#requireBot(botId)) !== externalAccountOwnership(config)) {
+            throw Object.assign(new Error('account-changed'), { code: 'account-changed' });
+          }
+          return resolveTarget(account.fingerprint);
+        },
+      });
     });
   }
 

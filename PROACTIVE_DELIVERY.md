@@ -2,7 +2,7 @@
 
 **简体中文** · [English](PROACTIVE_DELIVERY.en.md)
 
-主动投递让应用在没有用户新消息的情况下，通过已经接入 DSH-IM 的机器人发送文字消息。调用方只需保存一组稳定的 `botId + targetId`，不需要保存 Harness `sessionId`、聊天引用、消息 ID 或临时 Webhook。
+主动投递让应用在没有用户新消息的情况下，通过已经接入 DSH-IM 的机器人发送文字消息。发送新消息只需一组稳定的 `botId + targetId`。要在同一 Host 中更新飞书卡片，调用方还须保留创建卡片时返回的签名回执和目标键。
 
 九个内置渠道均支持主动投递：微信、飞书、钉钉、企业微信、QQ、Slack、Telegram、Discord 和 WhatsApp。
 
@@ -166,6 +166,20 @@ curl --request POST \
 接口路径固定为 `POST /api/dsh-im/delivery/messages`，复用当前 DSH Host 的 WebServer，不会另开端口。示例中的 `3080` 是 Web profile 的默认端口；实际地址以 Host 启动时显示的地址为准。
 
 当前 HTTP 接口不包含鉴权，也不提供 CORS。只应在本机或可信网络中使用，不要直接暴露到公网。
+
+## 在同一 Host 中更新飞书卡片
+
+同一 Host 的插件可以向已保存的飞书／Lark 群聊或私聊目标创建卡片，后续更新同一条消息。卡片正文按原文展示，保留换行。
+
+```js
+const { targetKey } = await ctx.dshIm.describeCardTarget(botId, targetId, { signal });
+const { receipt } = await ctx.dshIm.deliverCard(botId, targetId, firstText, { targetKey, signal });
+await ctx.dshIm.deliverCard(botId, targetId, updatedText, { targetKey, receipt, signal });
+```
+
+两种调用均以 `{ sent: true, receipt }` 确认成功。请把完整回执与 `targetKey` 一起保留。该键绑定已验证的机器人账户和保存的目标，改绑后旧键失效。回执签名绑定本条消息 ID 和目标键，同一已加载模块重新挂载后仍可使用。IM 模块重新加载或 Host 重启会轮换内存签名密钥。旧回执或被修改的回执会触发 `error.code === 'invalid-card-receipt'`。
+
+`error.dispatched === false` 表示尚未向 SDK 提交消息写入。提交后如遇取消、超时或缺少成功凭据，会得到 `send-result-unknown`。失败时保留已有绑定。创建结果未知时再次创建可能产生重复卡片。
 
 ## 在同一 Host 的插件中发送
 
