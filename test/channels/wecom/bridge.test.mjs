@@ -1,5 +1,6 @@
 import { loadDeferredImages } from '../../helpers/deferred-images.mjs';
 import assert from 'node:assert/strict';
+import { createCipheriv } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,6 +34,19 @@ const PNG_1X1 = Buffer.from(
 );
 const INITIAL_THINKING_TEXT = '正在思考中…';
 const INITIAL_THINKING_STREAM = `<think>${INITIAL_THINKING_TEXT}`;
+const MEDIA_AES_KEY = Buffer.from('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'hex');
+
+function encryptWecomMedia(plain, key = MEDIA_AES_KEY) {
+  const cipher = createCipheriv('aes-256-cbc', key, key.subarray(0, 16));
+  return Buffer.concat([cipher.update(plain), cipher.final()]);
+}
+
+function unsupportedProtocolError() {
+  return Object.assign(
+    new TypeError('Protocol "https:" not supported. Expected "http:"'),
+    { code: 'ERR_INVALID_PROTOCOL' },
+  );
+}
 
 function streamPreview(answer, thinking = INITIAL_THINKING_TEXT) {
   return `<think>${thinking}</think>\n${answer}`;
@@ -1134,6 +1148,84 @@ test('Enterprise WeChat exposes native file callbacks through the SDK downloader
     url: 'https://wecom.example/encrypted-file',
     aeskey: 'file-specific-key',
   }]);
+});
+
+test('Enterprise WeChat downloads an encrypted file through fetch when the SDK rejects the https URL', async () => {
+  const plain = Buffer.from('wecom report payload');
+  const aeskey = MEDIA_AES_KEY.toString('base64');
+  const fetched = [];
+  const message = wecomInboundMessage(frame({
+    msgtype: 'file',
+    text: undefined,
+    file: {
+      url: 'https://wecom.example/fetch-fallback',
+      aeskey,
+      filename: '企业微信报告.pdf',
+    },
+  }), {
+    downloadFile: async () => { throw unsupportedProtocolError(); },
+  }, {
+    fetchImpl: async (url) => {
+      fetched.push(String(url));
+      return new Response(encryptWecomMedia(plain), { status: 200 });
+    },
+  });
+
+  assert.equal(message.files.length, 1);
+  assert.deepEqual(await message.files[0].load({}), { data: plain });
+  assert.deepEqual(fetched, ['https://wecom.example/fetch-fallback']);
+});
+
+test('Enterprise WeChat keeps a non-protocol SDK download failure instead of retrying it over fetch', async () => {
+  let fetched = 0;
+  const message = wecomInboundMessage(frame({
+    msgtype: 'file',
+    text: undefined,
+    file: { url: 'https://wecom.example/decrypt-failure', aeskey: 'bad-key' },
+  }), {
+    downloadFile: async () => { throw new Error('decryption failed'); },
+  }, {
+    fetchImpl: async () => {
+      fetched += 1;
+      return new Response(Buffer.alloc(0), { status: 200 });
+    },
+  });
+
+  await assert.rejects(message.files[0].load({}), /decryption failed/u);
+  assert.equal(fetched, 0);
+});
+
+test('Enterprise WeChat bridge downloads images through the injected fetch after an SDK protocol failure', async () => {
+  const transport = testClient();
+  transport.client.downloadFile = async () => { throw unsupportedProtocolError(); };
+  const fetched = [];
+  let prompt;
+  const bridge = new WecomHarnessBridge({
+    client: transport.client,
+    fetchImpl: async (url) => {
+      fetched.push(String(url));
+      return new Response(encryptWecomMedia(PNG_1X1), { status: 200 });
+    },
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_sessionId, content, options) => {
+        prompt = await loadDeferredImages(content, options);
+        return '图片识别完成';
+      },
+    },
+    state: state(),
+  });
+
+  await bridge.accept(frame({
+    msgid: 'fetch-fallback-image',
+    msgtype: 'image',
+    text: undefined,
+    image: { url: 'https://wecom.example/fallback-image', aeskey: MEDIA_AES_KEY.toString('base64') },
+  }));
+
+  assert.deepEqual(fetched, ['https://wecom.example/fallback-image']);
+  const image = prompt.find((part) => part.type === 'image');
+  assert.equal(image?.mediaType, 'image/png');
 });
 
 test('Enterprise WeChat applies the unified access policy before attachments or Harness work', async () => {
