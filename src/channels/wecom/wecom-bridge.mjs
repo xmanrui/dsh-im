@@ -3,7 +3,7 @@ import { SESSION_NAV_HELP_LINES } from '../shared/command-catalog.mjs';
 import { imageInputLimits } from '../shared/image-input-policy.mjs';
 import { imageDownloadLimitMessage } from '../shared/image-prompt.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
-import { generateReqId } from '@wecom/aibot-node-sdk';
+import { decryptFile, generateReqId } from '@wecom/aibot-node-sdk';
 import { randomUUID } from 'node:crypto';
 import { wecomSendDiagnostic, wecomSendError } from './send-error.mjs';
 import {
@@ -213,17 +213,94 @@ function replyReferenceForBody(body) {
   };
 }
 
-function imageSource(client, image) {
+// The WeCom SDK downloads media through axios. On Hosts where that request ends
+// up on the Node HTTP client every https URL fails with
+// 'Protocol "https:" not supported. Expected "http:"', which loses the whole
+// inbound attachment. Keep the SDK path (it owns the AES key handling) and only
+// take over when it reports that protocol mismatch.
+const UNSUPPORTED_DOWNLOAD_PROTOCOL = /not supported\. Expected "http:"/u;
+
+function isUnsupportedDownloadProtocol(error) {
+  const seen = new Set();
+  let current = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    if (current.code === 'ERR_INVALID_PROTOCOL') return true;
+    if (typeof current.message === 'string' && UNSUPPORTED_DOWNLOAD_PROTOCOL.test(current.message)) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
+async function discardResponseBody(response) {
+  try {
+    await response?.body?.cancel?.();
+  } catch {
+    // Preserve the original download failure.
+  }
+}
+
+function contentDispositionName(header) {
+  const value = nonEmptyString(header);
+  if (!value) return undefined;
+  const raw = value.match(/filename\*=UTF-8''([^;\s]+)/iu)?.[1]
+    ?? value.match(/filename="?([^";\s]+)"?/iu)?.[1];
+  if (!raw) return undefined;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+async function fetchWecomMedia(url, { fetchImpl = fetch, signal } = {}) {
+  const target = new URL(url);
+  if (target.protocol !== 'https:') {
+    throw new Error('Enterprise WeChat media download must use HTTPS');
+  }
+  const response = await fetchImpl(target, { method: 'GET', signal, redirect: 'follow' });
+  if (!response?.ok) {
+    await discardResponseBody(response);
+    throw new Error(
+      `Enterprise WeChat media download failed with HTTP ${response?.status ?? 'unknown'}`,
+    );
+  }
+  return {
+    buffer: Buffer.from(await response.arrayBuffer()),
+    filename: contentDispositionName(response.headers?.get?.('content-disposition')),
+  };
+}
+
+async function downloadWecomMedia(client, url, aeskey, options = {}) {
+  if (typeof client?.downloadFile === 'function') {
+    try {
+      return await client.downloadFile(url, aeskey);
+    } catch (error) {
+      if (!isUnsupportedDownloadProtocol(error)) throw error;
+      options.logger?.warn?.(
+        '[wecom] SDK media download fell back to fetch:',
+        error?.message ?? error,
+      );
+    }
+  }
+  const downloaded = await fetchWecomMedia(url, options);
+  if (!aeskey) return downloaded;
+  return { ...downloaded, buffer: decryptFile(downloaded.buffer, aeskey) };
+}
+
+function imageSource(client, image, options = {}) {
   const url = nonEmptyString(image?.url);
   if (!url) return null;
   const aeskey = nonEmptyString(image?.aeskey) ?? undefined;
   return {
-    async load({ signal, maxBytes }) {
+    async load({ signal, maxBytes } = {}) {
       signal?.throwIfAborted();
-      if (typeof client?.downloadFile !== 'function') {
-        throw new Error('Enterprise WeChat image download is unavailable');
-      }
-      const result = await client.downloadFile(url, aeskey);
+      const result = await downloadWecomMedia(client, url, aeskey, {
+        ...options,
+        signal,
+      });
       signal?.throwIfAborted();
       const raw = result?.buffer;
       if (!Buffer.isBuffer(raw) && !(raw instanceof Uint8Array)) {
@@ -242,7 +319,7 @@ function imageSource(client, image) {
   };
 }
 
-function fileSource(client, file) {
+function fileSource(client, file, options = {}) {
   const url = nonEmptyString(file?.url);
   if (!url) return null;
   const aeskey = nonEmptyString(file?.aeskey) ?? undefined;
@@ -250,10 +327,10 @@ function fileSource(client, file) {
     name: nonEmptyString(file?.filename ?? file?.file_name ?? file?.name) ?? 'file',
     async load({ signal } = {}) {
       signal?.throwIfAborted();
-      if (typeof client?.downloadFile !== 'function') {
-        throw new Error('Enterprise WeChat file download is unavailable');
-      }
-      const result = await client.downloadFile(url, aeskey);
+      const result = await downloadWecomMedia(client, url, aeskey, {
+        ...options,
+        signal,
+      });
       signal?.throwIfAborted();
       const raw = result?.buffer ?? result?.data;
       if (!Buffer.isBuffer(raw) && !(raw instanceof Uint8Array)) {
@@ -267,13 +344,17 @@ function fileSource(client, file) {
   };
 }
 
-export function wecomInboundMessage(frame, client) {
+export function wecomInboundMessage(frame, client, options = {}) {
   const body = bodyOf(frame);
   const replyTo = replyReferenceForBody(body);
   return {
     content: messageText(frame),
-    images: imageContents(body).map((image) => imageSource(client, image)).filter(Boolean),
-    files: fileContents(frame).map((file) => fileSource(client, file)).filter(Boolean),
+    images: imageContents(body)
+      .map((image) => imageSource(client, image, options))
+      .filter(Boolean),
+    files: fileContents(frame)
+      .map((file) => fileSource(client, file, options))
+      .filter(Boolean),
     ...(replyTo ? { replyTo } : {}),
   };
 }
@@ -615,6 +696,7 @@ export class WecomHarnessBridge {
   #menus = new Map();
   #eventIds = new Set();
   #cardFrames = new WeakSet();
+  #fetchImpl;
 
   constructor({
     client,
@@ -630,6 +712,7 @@ export class WecomHarnessBridge {
     generateStreamId = generateReqId,
     fileUploadTimeoutMs = DEFAULT_FILE_UPLOAD_TIMEOUT_MS,
     signal,
+    fetchImpl = globalThis.fetch,
   }) {
     if (!client || typeof client.replyStream !== 'function' || typeof client.sendMessage !== 'function') {
       throw new TypeError('Enterprise WeChat client is required');
@@ -651,6 +734,7 @@ export class WecomHarnessBridge {
     this.#generateReqId = generateStreamId;
     this.#fileUploadTimeoutMs = Math.min(fileUploadTimeoutMs, DEFAULT_FILE_UPLOAD_TIMEOUT_MS);
     this.#signal = signal;
+    this.#fetchImpl = fetchImpl;
     this.#deferred = createDeferredDeliveryCoordinator({ harness, state, signal, logger,
       deliver: (entry, outcome) => this.#deliverDeferredOutcome(entry, outcome),
     });
@@ -659,6 +743,13 @@ export class WecomHarnessBridge {
 
   get status() {
     return structuredClone(this.#status);
+  }
+
+  #inboundMessage(frame) {
+    return wecomInboundMessage(frame, this.#client, {
+      fetchImpl: this.#fetchImpl,
+      logger: this.#logger,
+    });
   }
 
   async #showMain(frame) {
@@ -934,7 +1025,7 @@ export class WecomHarnessBridge {
 
     const key = conversationKey(frame);
     const pending = this.#pendingInteractions.get(key);
-    const commandMessage = wecomInboundMessage(frame, this.#client);
+    const commandMessage = this.#inboundMessage(frame);
     const commandText = nonEmptyString(commandMessage.content) ?? '';
     const conversationType = body.chattype === 'single' ? 'direct' : 'group';
     const access = evaluateInboundAccess(this.#accessPolicy, {
@@ -1125,7 +1216,7 @@ export class WecomHarnessBridge {
     // WeCom image URLs expire after five minutes, while a conversation turn
     // may legally stay queued longer. Start the authenticated SDK download as
     // soon as the validated callback is accepted, then consume it in order.
-    const inboundMessage = wecomInboundMessage(frame, this.#client);
+    const inboundMessage = this.#inboundMessage(frame);
     const directCount = inboundMessage.images.length;
     const quoteContents = isSharedLocalCommand(inboundMessage.content, {
       hasImages: hasInboundImages(inboundMessage),
@@ -1371,7 +1462,7 @@ export class WecomHarnessBridge {
       this.#status.messagesReceived += 1;
       this.#status.lastMessageAt = new Date().toISOString();
     }
-    const message = preparedMessage ?? wecomInboundMessage(frame, this.#client);
+    const message = preparedMessage ?? this.#inboundMessage(frame);
     const text = message.content;
     const hasImages = hasInboundImages(message);
     const hasFiles = hasInboundFiles(message);
