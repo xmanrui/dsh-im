@@ -376,6 +376,10 @@ Web 与机器人可同时处理同一审批，先提交的「批准一次」或�
 
 ## 其它功能
 
+### 精选插件入口
+
+插件在官方插件页注册「精选插件」标签页（社区精选目录集成，零运行时依赖）。未安装完整版时点击即可一键安装 [dsh-featured](https://www.npmjs.com/package/dsh-featured)；已安装则自动让位，不会出现重复入口。接入仅提供入口，插件是否进入精选列表由 [skillpie.cn](https://skillpie.cn) 收录流程决定。详见 [AI-INTEGRATION.md](https://github.com/skillpie/dsh-plugins/blob/main/dsh-featured/AI-INTEGRATION.md)。
+
 ### 按 Agent Preset 自动分组
 
 在插件 Host 配置中设置 `groupByAgentPreset: true`（默认关闭），也可在某个渠道配置中单独启用或关闭。选择明确的 Agent Preset 后，在默认 IM 目录下创建或复用 `presets/<preset-id>` 工作区，标题使用 Preset 名称；后续新会话进入该分组。已有聊天保留原历史和位置，手动目录、会话级目录和飞书目录隔离优先。详见 [配置和行为](docs/preset-workspaces.md)。
