@@ -200,6 +200,22 @@ npx -y github:xmanrui/dsh-im install
 
 A GitHub-source installation fetches and builds a Git dependency directly. With pnpm 10 or newer, the profile may first need an `allowBuilds` entry in `pnpm-workspace.yaml`. Most users should prefer the stable npm release.
 
+> **On a “different pnpm major” error** (the one suggesting `run the pnpm major that built this node_modules`, or a localized note that this profile's `node_modules` was built by another pnpm major): the profile's `node_modules` was created by a different pnpm major (say 10.x) than the one performing this install (say 11.x). pnpm refuses cross-major `node_modules`, and it appends its own version directory under any `storeDir`, so overriding `storeDir` cannot fix it and the automatic rollback fails the same way. Pick one remedy and retry:
+>
+> 1. **Rebuild from scratch (recommended; the only option for plugin-market UI installs)**: quit DSH, delete the profile's `node_modules`, and install again. Previously installed plugins are restored from the profile's `package.json`; every package is downloaded once more:
+>
+>    ```sh
+>    rm -rf ~/.dsh/profiles/web/node_modules   # adjust the profile name
+>    ```
+>
+> 2. **Run the CLI install with the pnpm major that built this `node_modules`**: put that pnpm first on `PATH` (on macOS with Homebrew it lives in `/opt/homebrew/bin`):
+>
+>    ```sh
+>    PATH="/opt/homebrew/bin:$PATH" dsh plugin --profile web add --save-exact @xmanrui/dsh-im
+>    ```
+>
+> `npx -y github:xmanrui/dsh-im install` detects this mismatch before invoking pnpm and prints the same guidance.
+
 After installation, follow the built-in instructions on each channel page to scan a QR code or enter credentials. Secrets and Tokens are sent only to the local Harness Host and stored through its protected credential provider; status responses and bot lists never return them.
 
 If this machine must use a forward proxy to reach Feishu, set `HTTPS_PROXY` to a full HTTP proxy URL before starting `dsh web` (for example, `http://proxy:8080`; lowercase `https_proxy` is also supported, with `HTTP_PROXY` accepted as a fallback), then restart the Host after changing it. Feishu registration and credential verification reuse the SDK's proxy-aware HTTP client, while the message WebSocket explicitly uses that proxy; the WebSocket path does not currently read `ALL_PROXY` or `NO_PROXY`.

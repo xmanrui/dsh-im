@@ -59,6 +59,44 @@ async function directProfilePackages(profile) {
   }
 }
 
+/** Major version of the pnpm first on PATH; null when it cannot be determined. */
+function currentPnpmMajor() {
+  const result = spawnSync('pnpm', ['--version'], { encoding: 'utf8', shell: false });
+  if (result.error || result.status !== 0 || typeof result.stdout !== 'string') return null;
+  const match = result.stdout.trim().match(/^(\d+)\./);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Refuse to run when the profile's node_modules was built by another pnpm major: pnpm rejects
+ * cross-major node_modules, and it appends its own version directory under any storeDir, so a
+ * storeDir override cannot fix it and the automatic rollback fails the same way. Skips silently
+ * when the check cannot decide (no node_modules yet, unparseable marker, or no pnpm on PATH —
+ * the dsh command reports that itself), so it never blocks a healthy install.
+ */
+async function assertCompatiblePnpmModules(profile, remedy) {
+  const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh');
+  const modulesDir = join(dshHome, 'profiles', profile, 'node_modules');
+  let modules;
+  try {
+    modules = await readFile(join(modulesDir, '.modules.yaml'), 'utf8');
+  } catch {
+    return;
+  }
+  const built = modules.match(/^packageManager:\s*pnpm@(\d+)\./m);
+  const running = currentPnpmMajor();
+  if (!built || !running || Number(built[1]) === running) return;
+  const builtMajor = Number(built[1]);
+  throw new Error([
+    `profile ${profile} 的 node_modules 由 pnpm ${builtMajor}.x 建成，而当前 PATH 上的 pnpm 是 ${running}.x，本次安装不会成功：pnpm 拒绝跨大版本复用 node_modules，且它会在任何 storeDir 下再拼自己的版本目录，所以调整 storeDir 修不好，失败后的自动回滚也会以同样方式失败。`,
+    '任选其一修复后重跑本命令：',
+    `  1) 清空 node_modules 让当前 pnpm 重建（插件市场的 UI 安装只能走这条；已装插件会按 package.json 自动恢复，包会重新下载一次）：`,
+    `     rm -rf "${modulesDir}"`,
+    `  2) 改用 pnpm ${builtMajor}.x 执行同一命令（把该版本的 pnpm 提到 PATH 最前，路径按本机安装位置调整；macOS Homebrew 安装在 /opt/homebrew/bin）：`,
+    `     PATH="/opt/homebrew/bin:$PATH" ${remedy}`,
+  ].join('\n'));
+}
+
 const args = process.argv.slice(2);
 const command = args.shift();
 
@@ -77,6 +115,8 @@ try {
       : (isAbsolute(requested) ? requested : requested);
     if (args.length > 0) throw new Error(`无法识别的参数：${args.join(' ')}`);
 
+    await assertCompatiblePnpmModules(profile, `dsh plugin --profile ${profile} add --save-exact ${source}`);
+
     const legacy = await directProfilePackages(profile);
     runDsh(['plugin', '--profile', profile, 'add', '--save-exact', source]);
     for (const packageName of legacy) {
@@ -88,6 +128,7 @@ try {
     }
   } else if (command === 'uninstall') {
     if (args.length > 0) throw new Error(`无法识别的参数：${args.join(' ')}`);
+    await assertCompatiblePnpmModules(profile, `dsh plugin --profile ${profile} remove ${PACKAGE_NAME}`);
     runDsh(['plugin', '--profile', profile, 'remove', PACKAGE_NAME]);
     console.log('\nIM 机器人插件已卸载。请重启 dsh web。');
   } else {
